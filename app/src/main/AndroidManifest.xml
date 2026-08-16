@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
     <application
+        android:name=".AppApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -16,6 +17,15 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+
+        <!-- v107：火山引擎增长分析配置（到火山控制台创建应用后替换为你的 app_id；占位符则不启用统计） -->
+        <meta-data
+            android:name="APP_ID"
+            android:value="YOUR_VOLCENGINE_APP_ID" />
+        <meta-data
+            android:name="APP_CHANNEL"
+            android:value="default" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

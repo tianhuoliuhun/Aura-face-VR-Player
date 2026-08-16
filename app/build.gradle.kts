@@ -146,6 +146,9 @@ dependencies {
   implementation("com.alphacephei:vosk-android:0.3.75")
   // SMB client for LAN playback
   implementation("eu.agno3.jcifs:jcifs-ng:2.1.8")
+  // v107：用户统计（隐私合规：用户同意后才采集，见 AnalyticsManager）
+  // 火山引擎增长分析 DataFinder：SDK 依赖与仓库见 VOLCANO_ANALYTICS.md
+  // （SDK 未引入时统计自动禁用，不影响构建运行；app_id 在 AndroidManifest 配置）
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
