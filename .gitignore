@@ -21,3 +21,6 @@ debug.keystore
 my-upload-key.jks
 keystore.properties
 *.jks
+
+# v107：Firebase 配置（含项目标识，勿提交公开仓库；放置后构建自动启用统计）
+google-services.json

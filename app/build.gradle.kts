@@ -4,6 +4,8 @@ plugins {
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
+  // v107：Firebase Analytics（google-services 插件；无 google-services.json 时不启用，见下方条件 apply）
+  id("com.google.gms.google-services") version "4.4.2" apply false
 }
 
 android {
@@ -67,6 +69,14 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+}
+
+// v107：Firebase Analytics 条件启用。
+// 在 Firebase 控制台创建应用（包名 com.aistudio.vrplayer.vrmjpy）并下载
+// google-services.json 放入 app/ 目录后自动生效；未配置时跳过，不影响构建。
+// （firebase-analytics 依赖无条件引入：无 json 时 FirebaseApp 无默认实例，统计自动禁用）
+if (file("google-services.json").exists()) {
+  apply(plugin = "com.google.gms.google-services")
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -147,8 +157,8 @@ dependencies {
   // SMB client for LAN playback
   implementation("eu.agno3.jcifs:jcifs-ng:2.1.8")
   // v107：用户统计（隐私合规：用户同意后才采集，见 AnalyticsManager）
-  // 火山引擎增长分析 DataFinder：SDK 依赖与仓库见 VOLCANO_ANALYTICS.md
-  // （SDK 未引入时统计自动禁用，不影响构建运行；app_id 在 AndroidManifest 配置）
+  // Firebase Analytics（免费）：google-services.json 未配置时自动禁用，不影响构建运行
+  implementation("com.google.firebase:firebase-analytics")
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

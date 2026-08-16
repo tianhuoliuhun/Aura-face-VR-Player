@@ -18,13 +18,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
 
-        <!-- v107：火山引擎增长分析配置（到火山控制台创建应用后替换为你的 app_id；占位符则不启用统计） -->
-        <meta-data
-            android:name="APP_ID"
-            android:value="YOUR_VOLCENGINE_APP_ID" />
-        <meta-data
-            android:name="APP_CHANNEL"
-            android:value="default" />
+        <!-- v107：统计由 Firebase Analytics 提供（google-services.json 配置，见 FIREBASE_ANALYTICS.md） -->
 
         <activity
             android:name=".MainActivity"

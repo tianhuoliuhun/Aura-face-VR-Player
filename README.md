@@ -152,6 +152,16 @@ python scripts/gen_licenses.py
 
 ---
 
+## 🔒 隐私与数据统计 / Privacy & Analytics
+
+- **本地优先**：视频播放、美颜、LUT、离线语音转写均在设备本地完成
+- **可选匿名统计（Firebase Analytics，免费）**：仅在你**首次启动明确同意后**才采集设备型号/系统版本/启动与活跃次数；拒绝或随时关闭后不再采集
+- **云端数据（可选）**：字幕翻译（用户自配 API Key）、Vosk 语音模型下载、Firebase 统计
+- **不采集**：任何个人身份信息（姓名/账号/联系方式）、视频内容、字幕内容
+- 接入说明见 [FIREBASE_ANALYTICS.md](FIREBASE_ANALYTICS.md)
+
+---
+
 ## 📦 依赖与开源许可 / Dependencies & Licenses
 
 本项目基于 Google AI Studio 生成的项目骨架，核心功能均为自研实现。主要开源依赖：
@@ -304,6 +314,18 @@ Copyright © 2026 tianhuoliuhun。
 2. **Gyroscope drift** — view drifts slowly during long sessions; periodic manual recenter needed.
 3. **Multi-line ASR subtitle timing may mismatch** — auto-generated subtitle timestamps may not perfectly align with the video.
 4. **Bing free endpoint risk** — the Bing translator uses an unofficial web endpoint that can break anytime; LLM API keys are recommended.
+
+---
+
+## 🔒 Privacy & Analytics
+
+- **Local-first**: playback, beauty, LUT and offline ASR all run on-device.
+- **Optional anonymous analytics (Firebase Analytics, free)**: collects device model / OS version /
+  launches & active counts **only after you explicitly agree** on first launch; can be disabled anytime.
+- **Optional cloud data**: subtitle translation (user-provided API keys), Vosk model download,
+  Firebase analytics.
+- **Never collected**: personal identity, video content, subtitle content.
+- Integration guide: [FIREBASE_ANALYTICS.md](FIREBASE_ANALYTICS.md)
 
 ---
 
