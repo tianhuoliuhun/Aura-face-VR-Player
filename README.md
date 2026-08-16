@@ -6,7 +6,7 @@
 > A professional mobile VR player with real-time AI beauty filters, 3D LUT color grading,
 > offline ASR subtitles, multi-engine online translation and LAN (SMB) playback.
 
-![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-lightgrey)
+![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
 ---
 
@@ -206,10 +206,12 @@ python scripts/gen_licenses.py
 
 ## 📄 许可声明 / License Notice
 
-本项目源代码**保留所有权利（All Rights Reserved）**，未授予任何开源许可证。
-本仓库公开仅供学习交流参考；任何形式的复制、修改、再分发或商业使用需获得作者明确许可。
-本项目依赖的第三方开源组件遵循其各自许可证（见上文清单）。
-*All rights reserved. This repository is published for reference/learning only; any reuse requires explicit permission from the author. Third-party components remain under their own licenses.*
+本项目采用 **Apache License 2.0** 开源（见 [LICENSE](LICENSE)），
+Copyright © 2026 tianhuoliuhun。
+可自由使用、修改、商用与再分发（保留版权与许可声明即可）。
+注意：内置字体（MiSans/OPPO Sans）遵循其各自授权条款（免费商用但禁止修改），
+第三方依赖遵循其各自许可证（见上文清单与 `app/src/main/assets/licenses.json`）。
+*Licensed under the Apache License, Version 2.0 (see [LICENSE](LICENSE)).*
 
 ---
 
@@ -310,7 +312,10 @@ Full 141-item license list: in-app “Settings → Open-Source Licenses” or `a
 
 ## 📄 License Notice
 
-**All rights reserved.** No open-source license is granted for this project's source code.
-This repository is published for reference/learning only; copying, modification, redistribution
-or commercial use requires explicit written permission from the author.
-Third-party open-source components remain under their respective licenses (see the list above).
+Licensed under the **Apache License, Version 2.0** (see [LICENSE](LICENSE)).
+Copyright © 2026 tianhuoliuhun.
+You may use, modify, distribute and commercially use the code freely, provided that
+the copyright and license notices are retained. Note that the bundled fonts
+(MiSans / OPPO Sans) are subject to their own terms (free for commercial use but
+modification prohibited); third-party dependencies remain under their respective
+licenses (see the list above and `app/src/main/assets/licenses.json`).
