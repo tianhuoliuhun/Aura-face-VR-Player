@@ -105,6 +105,27 @@ GfaceVRplayer/
 
 ---
 
+## 📱 兼容性 / Compatibility
+
+**平台**：本应用为 **Android 手机/平板应用**（非 iOS / 桌面 / Web）。
+
+**支持安卓版本**：
+- **minSdk 24（Android 7.0 Nougat）** —— 最低支持 Android 7.0
+- **targetSdk 36（Android 16）** —— 针对最新系统适配
+- 推荐 Android 10+ 以获得最佳性能
+
+**芯片架构（ABI）**：
+
+| ABI | 支持度 | 说明 |
+|---|---|---|
+| **arm64-v8a** | ✅ 完整 | 主流真机（推荐），含 MediaPipe 人脸关键点美颜 |
+| **armeabi-v7a** | ✅ 完整 | 旧款 32 位设备 |
+| **x86_64 / x86** | ⚠️ 部分 | 模拟器可运行；MediaPipe 人脸关键点不可用（官方库未提供 x86_64 版本），其余功能正常 |
+
+> 说明：APK 内含 7 种 ABI 的本地库，安装时 Android 会自动选择匹配当前设备的架构。
+
+---
+
 ## 🔧 构建 / Build
 
 ### 环境要求 / Requirements
@@ -253,6 +274,27 @@ Copyright © 2026 tianhuoliuhun。
 ### 📁 LAN Playback
 - SMB (jcifs-ng) browsing & direct playback from NAS/PC
 - Local files and stream URLs
+
+---
+
+## 📱 Compatibility
+
+**Platform**: Android **smartphone/tablet** app (not iOS / desktop / web).
+
+**Android versions**:
+- **minSdk 24 (Android 7.0 Nougat)** — minimum supported OS
+- **targetSdk 36 (Android 16)** — adapted to the latest system
+- Android 10+ recommended for best performance
+
+**Chip architectures (ABI)**:
+
+| ABI | Support | Notes |
+|---|---|---|
+| **arm64-v8a** | ✅ Full | Mainstream devices (recommended); includes MediaPipe face-landmark beauty |
+| **armeabi-v7a** | ✅ Full | Older 32-bit devices |
+| **x86_64 / x86** | ⚠️ Partial | Runs on emulators; MediaPipe face landmarks unavailable (official lib lacks x86_64), everything else works |
+
+> The APK bundles native libraries for 7 ABIs; Android picks the matching one at install time.
 
 ---
 
