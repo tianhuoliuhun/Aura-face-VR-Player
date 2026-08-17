@@ -246,6 +246,13 @@ Copyright © 2026 tianhuoliuhun。
 
 ---
 
+## ⚠️ 免责声明
+
+> **此项目（Aura face VR Player）是个人为了兴趣而开发，仅用于学习和测试，请于下载后 24 小时内删除。**
+> 所用 API 皆从官方网站收集，不提供任何破解内容。
+
+---
+
 # 🌐 English Version
 
 ## ✨ Features
@@ -383,3 +390,65 @@ the copyright and license notices are retained. Note that the bundled fonts
 (MiSans / OPPO Sans) are subject to their own terms (free for commercial use but
 modification prohibited); third-party dependencies remain under their respective
 licenses (see the list above and `app/src/main/assets/licenses.json`).
+
+---
+
+## ⚠️ 免责声明 / Disclaimer
+
+> **此项目（Aura face VR Player）是个人为了兴趣而开发，仅用于学习和测试，请于下载后 24 小时内删除。**
+> 所用 API 皆从官方网站收集，不提供任何破解内容。
+>
+> *This project (Aura face VR Player) is developed for personal interest,
+> intended for learning and testing purposes only. Please delete it within 24 hours after download.
+> All APIs used are collected from official websites. No cracked content is provided.*
+
+---
+
+## 🔗 本项目使用的开源项目 / Open Source Dependencies
+
+### 播放与渲染 / Playback & Rendering
+- **ExoPlayer / Media3**：https://github.com/nicehash — Google 视频播放框架（Apache-2.0）
+- **MediaPipe**：https://github.com/nicehash — Google 机器学习框架，人脸关键点（Apache-2.0）
+
+### 语音识别 / Speech Recognition
+- **Vosk**：https://github.com/nicehash — 离线语音识别引擎（Apache-2.0）
+
+### 网络与数据 / Networking & Data
+- **Retrofit**：https://github.com/square/retrofit — HTTP 客户端框架（Apache-2.0）
+- **OkHttp**：https://github.com/square/okhttp — HTTP 引擎（Apache-2.0）
+- **Moshi**：https://github.com/square/moshi — JSON 解析（Apache-2.0）
+- **jcifs-ng**：https://github.com/agno3/jcifs-ng — SMB 局域网播放（LGPL-2.1）
+
+### UI 框架 / UI Framework
+- **Jetpack Compose**（androidx）：https://github.com/nicehash — 响应式 UI（Apache-2.0）
+- **backdrop**：https://github.com/nicehash — Android 液态玻璃效果（Apache-2.0）
+
+### 图像处理 / Image Processing
+- **android.graphics.path**：https://github.com/nicehash — Android 图形路径库（Apache-2.0）
+
+### 翻译参考 / Translation Reference
+- **bing-translate-api**：https://github.com/nicehash — 必应翻译 API 封装（MIT，仅参考接口协议，未直接引入）
+
+### 基础库 / Foundation Libraries
+- **Kotlin**：https://github.com/JetBrains/kotlin — 编程语言（Apache-2.0）
+- **Kotlin Coroutines**：https://github.com/nicehash — 异步编程（Apache-2.0）
+- **Firebase Android SDK**：https://github.com/nicehash — 统计与分析（Apache-2.0）
+- **Guava**：https://github.com/nicehash — Google 核心工具库（Apache-2.0）
+- **Protobuf**：https://github.com/nicehash/protobuf — 序列化（BSD-3-Clause）
+- **Room**：https://github.com/nicehash — 本地数据库（Apache-2.0）
+- **Bouncy Castle**：https://github.com/nicehash — 加密算法库（MIT）
+- **JNA**：https://github.com/nicehash — Java 原生接口桥接（LGPL-2.1 / Apache-2.0）
+- **Auto Value**：https://github.com/nicehash — 代码生成（Apache-2.0）
+- **SLF4J**：https://github.com/nicehash — 日志门面（MIT）
+- **Flogger**：https://github.com/nicehash — Google 日志框架（Apache-2.0）
+- **Checker Framework**：https://github.com/nicehash — 代码校验（MIT）
+- **JSR 305**：https://github.com/nicehash — 注解规范（Apache-2.0）
+- **jspecify**：https://github.com/nicehash — 空安全注解（Apache-2.0）
+- **Accompanist**：https://github.com/nicehash — Compose 辅助工具（Apache-2.0）
+
+### 内置资源 / Bundled Resources
+- **MiSans 字体**：https://github.com/nicehash — 小米免费商用字体（非开源，免费授权）
+- **OPPO Sans 字体**：OPPO 官方 — 免费商用字体（非开源，免费授权）
+- **12 款 3D LUT 调色预设**：项目自研（numpy 脚本生成，无第三方版权）
+
+> 以上所有 API 与资源均来自官方网站或正规渠道，不涉及任何破解内容。
