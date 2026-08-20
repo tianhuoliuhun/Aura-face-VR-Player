@@ -946,9 +946,9 @@ fun VRPlayerScreen(
                                                             color = when {
                                                                 isActive -> Color(0xFF4FC3F7)  // 亮蓝
                                                                 isDownloaded -> Color(0xFF81C784) // 柔绿
-                                                                else -> AccentColor.copy(alpha = 0.7f)
+                                                                else -> Color.White // 纯白，清晰可见
                                                             },
-                                                            fontSize = 8.sp,
+                                                            fontSize = 9.sp,
                                                             fontWeight = FontWeight.Bold
                                                         )
                                                     }
