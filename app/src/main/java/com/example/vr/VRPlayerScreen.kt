@@ -883,7 +883,7 @@ fun VRPlayerScreen(
                                             }
                                         }
 
-                                        // ===== 模型大小选择（v87：小模型快 / 大模型准）=====
+                                        // ===== 模型大小选择（v108：支持下载进度、重试、取消）=====
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically,
@@ -893,25 +893,91 @@ fun VRPlayerScreen(
                                             VoskModelSize.entries.forEach { size ->
                                                 val sel = asrManager.config.modelSize == size
                                                 val opt = VoskModels.firstOrNull { it.language == asrManager.config.language && it.size == size }
+                                                val modelOpt = opt
+                                                val isDownloaded = modelOpt?.let { 
+                                    File(context.filesDir, "vosk_models/${it.modelName}/.ready").exists()
+                                } ?: false
+                                                val isDownloading = asrManager.isModelDownloading && asrManager.config.modelSize == size
+                                                val progress = if (asrManager.config.modelSize == size) asrManager.modelDownloadProgress else 0f
+                                                val statusText = when {
+                                                    !isDownloaded -> "未下载"
+                                                    asrManager.isModelDownloading -> "下载中 ${(asrManager.modelDownloadProgress * 100).toInt()}%"
+                                                    else -> "已就绪"
+                                                }
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .clip(RoundedCornerShape(6.dp))
                                                         .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                        .clickable(enabled = !isBatchTranscribing) {
-                                                            asrManager.config = asrManager.config.copy(modelSize = size)
-                                                            if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
-                                                            keepUiAlight()
+                                                        .clickable(enabled = !isBatchTranscribing && !asrManager.isModelDownloading) {
+                                                            if (!isDownloaded) {
+                                                                asrManager.config = asrManager.config.copy(modelSize = size)
+                                                                if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
+                                                                // 触发下载
+                                                                val modelOpt = VoskModels.firstOrNull { it.language == asrManager.config.language && it.size == size }
+                                                                modelOpt?.let { asrManager.startModelDownload(it) }
+                                                                keepUiAlight()
+                                                            }
                                                         }
                                                         .padding(vertical = 4.dp),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    Text(
-                                                        text = if (opt != null) "${size.label} ${opt.sizeMb}MB" else size.label,
-                                                        color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.8f),
-                                                        fontSize = 9.sp,
-                                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
-                                                    )
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(vertical = 4.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                    ) {
+                                                        Text(
+                                                            text = if (modelOpt != null) "${size.label} ${modelOpt.sizeMb}MB" else size.label,
+                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.8f),
+                                                            fontSize = 9.sp,
+                                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
+                                                        )
+                                                        // 下载进度条
+                                                        if (asrManager.isModelDownloading && asrManager.config.modelSize == size) {
+                                                            Column(modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                                                                LinearProgressIndicator(
+                                                                    progress = asrManager.modelDownloadProgress,
+                                                                    color = AccentColor,
+                                                                    trackColor = Color.White.copy(alpha = 0.2f),
+                                                                    modifier = Modifier.fillMaxWidth().height(3.dp)
+                                                                )
+                                                                Text(
+                                                    text = "下载中 ${(asrManager.modelDownloadProgress * 100).toInt()}%  ${asrManager.downloadStatus}",
+                                                    color = AccentColor,
+                                                    fontSize = 8.sp
+                                                )
+                                                            }
+                                                        }
+                                                        // 未下载时显示下载按钮
+                                                        if (!isDownloaded && !asrManager.isModelDownloading) {
+                                                            Text(
+                                                                text = "点击下载 (${modelOpt?.sizeMb ?: 0}MB)",
+                                                                color = AccentColor,
+                                                                fontSize = 8.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                        // 取消按钮
+                                                        if (asrManager.isModelDownloading && asrManager.config.modelSize == size) {
+                                                            Text(
+                                                                text = "取消",
+                                                                color = Color.Red,
+                                                                fontSize = 8.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth()
+                                                                    .padding(top = 2.dp)
+                                                                    .fillMaxWidth()
+                                                                    .clickable {
+                                                                        asrManager.cancelDownload()
+                                                                    }
+                                                                    .padding(top = 2.dp)
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
