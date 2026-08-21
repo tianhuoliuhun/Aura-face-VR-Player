@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 110
-    versionName = "1.0.110"
+    versionCode = 111
+    versionName = "1.0.111"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -69,6 +69,15 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+
+  // v111：按 ABI 分包（arm64/x86_64/armv7/x86 各一个 APK，减小体积）
+  splits {
+    abi {
+      isEnable = true
+      reset()
+      include(*listOf("arm64-v8a", "x86_64", "armeabi-v7a", "x86").toTypedArray())
+    }
+  }
 }
 
 // v107：Firebase Analytics 条件启用。
