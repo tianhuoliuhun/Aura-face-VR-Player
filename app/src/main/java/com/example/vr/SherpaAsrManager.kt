@@ -114,36 +114,58 @@ object SherpaAsrManager {
         var retries = 3
         while (retries > 0) {
             withContextMain {
-                modelDownloadProgress = 0f
                 downloadStatus = if (retries < 3) "第 ${4 - retries} 次重试..." else "连接中..."
             }
 
             try {
-                // 下载 .tar.bz2
-                val req = Request.Builder().url(MODEL_URL).build()
+                // 断点续传：检查已下载部分，用 Range 头继续
+                val existingSize = if (archiveFile.exists()) archiveFile.length() else 0L
+                val reqBuilder = Request.Builder().url(MODEL_URL)
+                if (existingSize > 0) {
+                    reqBuilder.addHeader("Range", "bytes=$existingSize-")
+                    Log.i(TAG, "Resume download from byte $existingSize")
+                }
+                val req = reqBuilder.build()
+                var totalBytes = existingSize  // 最终文件预期总大小
+
                 val downloadedOk = httpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) {
+                    // HTTP 206 = 断点续传成功，200 = 服务器不支持续传（从头下载）
+                    if (resp.code != 200 && resp.code != 206) {
                         Log.e(TAG, "HTTP ${resp.code}")
+                        if (existingSize > 0) archiveFile.delete()  // 损坏的缓存文件清掉
                         return@use false
                     }
                     val body = resp.body ?: return@use false
-                    val total = body.contentLength()
-                    if (total <= 0) return@use false
-                    var downloaded = 0L
+                    val contentLength = body.contentLength()
+
+                    if (resp.code == 206) {
+                        // 断点续传模式：追加写入
+                        totalBytes = existingSize + contentLength
+                    } else {
+                        // 不支持续传：从头写
+                        totalBytes = contentLength
+                    }
+
+                    if (contentLength <= 0) return@use false
+
+                    var downloaded = if (resp.code == 206) existingSize else 0L
                     body.byteStream().use { input ->
-                        FileOutputStream(archiveFile).use { out ->
+                        FileOutputStream(archiveFile, resp.code == 206).use { out ->  // append=true for 206
                             val buf = ByteArray(256 * 1024)
                             while (true) {
-                                if (Thread.interrupted()) { archiveFile.delete(); return@use false }
+                                if (Thread.interrupted()) return@use false  // 保留已下载部分，下次续传
                                 val n = input.read(buf)
                                 if (n <= 0) break
                                 out.write(buf, 0, n)
                                 downloaded += n
-                                if (total > 0) {
-                                    val p = downloaded.toFloat() / total
+                                if (totalBytes > 0) {
+                                    val p = downloaded.toFloat() / totalBytes
                                     withContextMain {
                                         modelDownloadProgress = p
-                                        downloadStatus = "下载 ${(p * 100).toInt()}% (${downloaded / (1024 * 1024)}/${total / (1024 * 1024)}MB)"
+                                        val downloadedMB = downloaded / (1024 * 1024)
+                                        val totalMB = totalBytes / (1024 * 1024)
+                                        downloadStatus = "下载 ${(p * 100).toInt()}% ($downloadedMB/${totalMB}MB)"
+                                            .let { if (resp.code == 206) "续传 $it" else it }
                                     }
                                 }
                             }
@@ -154,8 +176,10 @@ object SherpaAsrManager {
 
                 if (!downloadedOk) {
                     retries--
+                    // 中断时保留已下载部分，下次续传
                     if (retries > 0) {
-                        withContextMain { downloadStatus = "下载失败，2秒后重试..." }
+                        val partialMB = if (archiveFile.exists()) archiveFile.length() / (1024 * 1024) else 0
+                        withContextMain { downloadStatus = if (partialMB > 0) "中断（已缓存 ${partialMB}MB），2秒后续传..." else "下载失败，2秒后重试..." }
                         delay(2000)
                         continue
                     } else {

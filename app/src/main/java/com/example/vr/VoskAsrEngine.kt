@@ -189,39 +189,43 @@ class RealtimeAsrManager(private val context: Context) {
             try {
                 targetDir.mkdirs()
                 val tmp = File(context.cacheDir, "vosk_download_${model.modelName}.zip")
-                val request = Request.Builder().url(model.downloadUrl).build()
+                // 断点续传：检查已下载部分，用 Range 头继续
+                val existingSize = if (tmp.exists()) tmp.length() else 0L
+                val reqBuilder = Request.Builder().url(model.downloadUrl)
+                if (existingSize > 0) {
+                    reqBuilder.addHeader("Range", "bytes=$existingSize-")
+                    Log.i("VoskAsr", "Resume from $existingSize bytes")
+                }
+                val request = reqBuilder.build()
 
                 val downloadedOk = httpClient.newCall(request).execute().use { resp ->
-                    if (!resp.isSuccessful) {
-                        Log.e("VoskAsr", "Model download HTTP ${resp.code}")
+                    if (resp.code != 200 && resp.code != 206) {
+                        Log.e("VoskAsr", "HTTP ${resp.code}")
+                        if (existingSize > 0) tmp.delete()
                         return@use false
                     }
                     val body = resp.body ?: return@use false
-                    val total = body.contentLength()
-                    if (total <= 0) {
-                        Log.e("VoskAsr", "Content-Length missing")
-                        return@use false
-                    }
-                    var downloaded = 0L
+                    val contentLength = body.contentLength()
+                    val totalBytes = if (resp.code == 206) existingSize + contentLength else contentLength
+                    if (contentLength <= 0) return@use false
+                    var downloaded = if (resp.code == 206) existingSize else 0L
                     body.byteStream().use { input ->
-                        FileOutputStream(tmp).use { out ->
+                        FileOutputStream(tmp, resp.code == 206).use { out ->
                             val buf = ByteArray(128 * 1024)
                             while (true) {
-                                if (Thread.currentThread().isInterrupted) {
-                                    tmp.delete()
-                                    return@use false
-                                }
+                                if (Thread.currentThread().isInterrupted) return@use false
                                 val n = input.read(buf)
                                 if (n <= 0) break
                                 out.write(buf, 0, n)
                                 downloaded += n
-                                if (total > 0) {
-                                    val p = downloaded.toFloat() / total
+                                if (totalBytes > 0) {
+                                    val p = downloaded.toFloat() / totalBytes
                                     withContextMain {
                                         modelDownloadProgress = p
-                                        downloadStatus = "下载中 ${(p * 100).toInt()}% (${
-                                            downloaded / (1024 * 1024)
-                                        }MB/${total / (1024 * 1024)}MB)"
+                                        val mb = downloaded / (1024 * 1024)
+                                        val totalMB = totalBytes / (1024 * 1024)
+                                        downloadStatus = "下载中 ${(p * 100).toInt()}% ($mb/${totalMB}MB)"
+                                            .let { if (resp.code == 206) "续传 $it" else it }
                                     }
                                 }
                             }
@@ -232,17 +236,16 @@ class RealtimeAsrManager(private val context: Context) {
 
                 if (!downloadedOk) {
                     retries--
+                    val partialMB = if (tmp.exists()) tmp.length() / (1024 * 1024) else 0
                     if (retries > 0) {
-                        Log.w("VoskAsr", "Download failed, retries left: $retries")
+                        Log.w("VoskAsr", "Download failed, retries=$retries cached=${partialMB}MB")
                         withContextMain {
-                            downloadStatus = "下载失败，2 秒后重试（剩余 $retries 次）..."
+                            downloadStatus = if (partialMB > 0) "中断（已缓存 ${partialMB}MB），2秒后续传..." else "下载失败，2秒后重试..."
                         }
                         kotlinx.coroutines.delay(2000)
                         continue
                     } else {
-                        withContextMain {
-                            downloadStatus = "下载失败，请检查网络后重试"
-                        }
+                        withContextMain { downloadStatus = "下载失败，请检查网络后重试" }
                         return@withContext null
                     }
                 }
