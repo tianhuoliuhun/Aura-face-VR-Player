@@ -71,6 +71,7 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 
   // v111：按 ABI 分包（arm64/x86_64/armv7/x86 各一个 APK，减小体积）
+  // 全架构通用包请注释掉 splits 块后重新构建
   splits {
     abi {
       isEnable = true
