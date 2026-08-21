@@ -491,7 +491,7 @@ fun VRPlayerScreen(
     val subtitleTranslator = remember { SubtitleTranslator(context) }
     // 后台批处理转写（v85）：提取视频音频生成 SRT
     val batchTranscriber = remember { AsrBatchTranscriber(context) }
-    // v110：ASR 引擎类型选择（Vosk / Qwen3-ASR via sherpa-onnx）
+    // v110：ASR 引擎类型选择（Vosk / Qwen3-ASR / SenseVoice QNN）
     var asrEngineType by remember { mutableStateOf(AsrEngineType.VOSK) }
     // v111：sherpa 引擎语言选择（中/英/日/韩/自动）
     var sherpaLangCode by remember { mutableStateOf("auto") }
