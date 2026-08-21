@@ -11,6 +11,8 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
+import com.k2fsa.sherpa.onnx.QnnConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,32 +31,37 @@ import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
- * v110：sherpa-onnx Qwen3-ASR 离线语音识别引擎管理。
+ * v111：sherpa-onnx 多引擎离线语音识别管理器。
  *
- * 与 Vosk 并行，供用户选择作为 AI 字幕生成引擎。
- * Qwen3-ASR 0.6B INT8 支持 29 种语言 + 20 种中文方言，准确率高。
+ * 支持两种引擎（由 AsrEngineType 控制）：
+ *  - Qwen3-ASR 0.6B INT8：29 语言 + 20 种方言，CPU 推理，~940MB 模型
+ *  - SenseVoice QNN：中英日韩粤 5 语言，高通 NPU 加速（SM8850 专属），~241MB 模型
  *
- * 模型下载：GitHub Releases（.tar.bz2，838MB 压缩包，解压后 ~940MB）
- * 推荐首次下载后缓存到内部存储，后续离线使用。
+ * 模型均为首次使用时下载缓存，支持断点续传。
  */
 object SherpaAsrManager {
 
     private const val TAG = "SherpaAsr"
 
-    // Qwen3-ASR 0.6B INT8 模型配置
-    private const val MODEL_ARCHIVE = "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2"
-    private const val MODEL_DIR_NAME = "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25"
-    private const val MODEL_URL =
-        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$MODEL_ARCHIVE"
-    private const val MODEL_SIZE_MB = 838
+    // ===== Qwen3-ASR 配置 =====
+    private const val QWEN3_ARCHIVE = "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2"
+    private const val QWEN3_DIR_NAME = "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25"
+    private const val QWEN3_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$QWEN3_ARCHIVE"
+    private const val QWEN3_SIZE_MB = 838
+    private const val QWEN3_CONV_FRONTEND = "conv_frontend.onnx"
+    private const val QWEN3_ENCODER = "encoder.int8.onnx"
+    private const val QWEN3_DECODER = "decoder.int8.onnx"
+    private const val QWEN3_TOKENIZER = "tokenizer"
 
-    // 模型文件名
-    private const val CONV_FRONTEND = "conv_frontend.onnx"       // 42MB
-    private const val ENCODER = "encoder.int8.onnx"              // 174MB
-    private const val DECODER = "decoder.int8.onnx"              // 721MB
-    private const val TOKENIZER_DIR = "tokenizer"                // vocab + merges
+    // ===== SenseVoice QNN SM8850 配置 =====
+    private const val SV_ARCHIVE = "sherpa-onnx-qnn-SM8850-binary-5-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8.tar.bz2"
+    private const val SV_DIR_NAME = "sherpa-onnx-qnn-SM8850-binary-5-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8"
+    private const val SV_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models-qnn-binary/$SV_ARCHIVE"
+    private const val SV_SIZE_MB = 161
+    private const val SV_MODEL_BIN = "model.bin"
+    private const val SV_TOKENS = "tokens.txt"
 
-    // 状态（Compose mutableState 供 UI 订阅）
+    // ===== 共享状态 =====
     var isModelDownloading by mutableStateOf(false)
     var modelDownloadProgress by mutableFloatStateOf(0f)
     var downloadStatus by mutableStateOf("就绪")
@@ -67,23 +74,35 @@ object SherpaAsrManager {
 
     // ===== 模型路径 =====
 
-    private fun modelDir(context: Context): File =
-        File(context.filesDir, "sherpa_models/$MODEL_DIR_NAME")
+    private fun qwen3Dir(context: Context) = File(context.filesDir, "sherpa_models/$QWEN3_DIR_NAME")
+    private fun svDir(context: Context) = File(context.filesDir, "sherpa_models/$SV_DIR_NAME")
 
-    fun isModelReady(context: Context): Boolean {
-        val dir = modelDir(context)
-        return dir.resolve(CONV_FRONTEND).exists() &&
-            dir.resolve(ENCODER).exists() &&
-            dir.resolve(DECODER).exists() &&
-            dir.resolve(TOKENIZER_DIR).resolve("vocab.json").exists()
+    /** 检查指定引擎的模型是否就绪 */
+    fun isModelReady(context: Context, engine: AsrEngineType): Boolean = when (engine) {
+        AsrEngineType.QWEN3 -> {
+            val dir = qwen3Dir(context)
+            dir.resolve(QWEN3_CONV_FRONTEND).exists() &&
+                dir.resolve(QWEN3_ENCODER).exists() &&
+                dir.resolve(QWEN3_DECODER).exists() &&
+                dir.resolve(QWEN3_TOKENIZER).resolve("vocab.json").exists()
+        }
+        AsrEngineType.SENSEVOICE_QNN -> {
+            val dir = svDir(context)
+            dir.resolve(SV_MODEL_BIN).exists() && dir.resolve(SV_TOKENS).exists()
+        }
+        else -> false
     }
 
     // ===== 下载管理 =====
 
-    fun startModelDownload(context: Context) {
+    fun startModelDownload(context: Context, engine: AsrEngineType) {
         if (isModelDownloading) return
         downloadJob = CoroutineScope(Dispatchers.IO).launch {
-            downloadAndExtract(context)
+            when (engine) {
+                AsrEngineType.QWEN3 -> downloadQwen3(context)
+                AsrEngineType.SENSEVOICE_QNN -> downloadSenseVoice(context)
+                else -> {}
+            }
         }
     }
 
@@ -95,76 +114,84 @@ object SherpaAsrManager {
         downloadStatus = "已取消"
     }
 
-    private suspend fun downloadAndExtract(context: Context): File? = withContext(Dispatchers.IO) {
-        if (isModelReady(context)) {
-            Log.i(TAG, "Model cached: ${modelDir(context)}")
-            return@withContext modelDir(context)
-        }
+    // ===== Qwen3-ASR 下载 =====
 
-        val targetDir = modelDir(context)
+    private suspend fun downloadQwen3(context: Context): File? = withContext(Dispatchers.IO) {
+        if (isModelReady(context, AsrEngineType.QWEN3)) {
+            Log.i(TAG, "Qwen3 cached: ${qwen3Dir(context)}")
+            return@withContext qwen3Dir(context)
+        }
+        val targetDir = qwen3Dir(context)
         targetDir.mkdirs()
-        val archiveFile = File(context.cacheDir, MODEL_ARCHIVE)
+        val archive = File(context.cacheDir, QWEN3_ARCHIVE)
+        downloadAndExtract(archive, QWEN3_URL, QWEN3_SIZE_MB, targetDir) ?: return@withContext null
+        // 修复目录嵌套
+        val inner = File(targetDir, QWEN3_DIR_NAME)
+        if (inner.exists()) { inner.listFiles()?.forEach { it.renameTo(File(targetDir, it.name)) }; inner.delete() }
+        targetDir
+    }
 
-        withContextMain {
-            isModelDownloading = true
-            modelDownloadProgress = 0f
-            downloadStatus = "连接 GitHub Releases..."
+    // ===== SenseVoice QNN 下载 =====
+
+    private suspend fun downloadSenseVoice(context: Context): File? = withContext(Dispatchers.IO) {
+        if (isModelReady(context, AsrEngineType.SENSEVOICE_QNN)) {
+            Log.i(TAG, "SenseVoice QNN cached: ${svDir(context)}")
+            return@withContext svDir(context)
         }
+        val targetDir = svDir(context)
+        targetDir.mkdirs()
+        val archive = File(context.cacheDir, SV_ARCHIVE)
+        downloadAndExtract(archive, SV_URL, SV_SIZE_MB, targetDir) ?: return@withContext null
+        // 修复目录嵌套
+        val inner = File(targetDir, SV_DIR_NAME)
+        if (inner.exists()) { inner.listFiles()?.forEach { it.renameTo(File(targetDir, it.name)) }; inner.delete() }
+        targetDir
+    }
+
+    // ===== 通用下载+解压（断点续传）=====
+
+    private suspend fun downloadAndExtract(archive: File, url: String, sizeMB: Int, destDir: File): File? {
+        withContextMain { isModelDownloading = true; modelDownloadProgress = 0f; downloadStatus = "连接服务器..." }
 
         var retries = 3
         while (retries > 0) {
             withContextMain {
+                modelDownloadProgress = 0f
                 downloadStatus = if (retries < 3) "第 ${4 - retries} 次重试..." else "连接中..."
             }
-
             try {
-                // 断点续传：检查已下载部分，用 Range 头继续
-                val existingSize = if (archiveFile.exists()) archiveFile.length() else 0L
-                val reqBuilder = Request.Builder().url(MODEL_URL)
-                if (existingSize > 0) {
-                    reqBuilder.addHeader("Range", "bytes=$existingSize-")
-                    Log.i(TAG, "Resume download from byte $existingSize")
-                }
+                // 断点续传
+                val existingSize = if (archive.exists()) archive.length() else 0L
+                val reqBuilder = Request.Builder().url(url)
+                if (existingSize > 0) reqBuilder.addHeader("Range", "bytes=$existingSize-")
                 val req = reqBuilder.build()
-                var totalBytes = existingSize  // 最终文件预期总大小
 
-                val downloadedOk = httpClient.newCall(req).execute().use { resp ->
-                    // HTTP 206 = 断点续传成功，200 = 服务器不支持续传（从头下载）
+                val ok = httpClient.newCall(req).execute().use { resp ->
                     if (resp.code != 200 && resp.code != 206) {
                         Log.e(TAG, "HTTP ${resp.code}")
-                        if (existingSize > 0) archiveFile.delete()  // 损坏的缓存文件清掉
+                        if (existingSize > 0) archive.delete()
                         return@use false
                     }
                     val body = resp.body ?: return@use false
-                    val contentLength = body.contentLength()
-
-                    if (resp.code == 206) {
-                        // 断点续传模式：追加写入
-                        totalBytes = existingSize + contentLength
-                    } else {
-                        // 不支持续传：从头写
-                        totalBytes = contentLength
-                    }
-
-                    if (contentLength <= 0) return@use false
-
+                    val contentLen = body.contentLength()
+                    val total = if (resp.code == 206) existingSize + contentLen else contentLen
+                    if (contentLen <= 0) return@use false
                     var downloaded = if (resp.code == 206) existingSize else 0L
                     body.byteStream().use { input ->
-                        FileOutputStream(archiveFile, resp.code == 206).use { out ->  // append=true for 206
+                        FileOutputStream(archive, resp.code == 206).use { out ->
                             val buf = ByteArray(256 * 1024)
                             while (true) {
-                                if (Thread.interrupted()) return@use false  // 保留已下载部分，下次续传
+                                if (Thread.interrupted()) return@use false
                                 val n = input.read(buf)
                                 if (n <= 0) break
                                 out.write(buf, 0, n)
                                 downloaded += n
-                                if (totalBytes > 0) {
-                                    val p = downloaded.toFloat() / totalBytes
+                                if (total > 0) {
+                                    val p = downloaded.toFloat() / total
                                     withContextMain {
                                         modelDownloadProgress = p
-                                        val downloadedMB = downloaded / (1024 * 1024)
-                                        val totalMB = totalBytes / (1024 * 1024)
-                                        downloadStatus = "下载 ${(p * 100).toInt()}% ($downloadedMB/${totalMB}MB)"
+                                        val dmb = downloaded / (1024 * 1024); val tmb = total / (1024 * 1024)
+                                        downloadStatus = "下载 ${(p * 100).toInt()}% ($dmb/${tmb}MB)"
                                             .let { if (resp.code == 206) "续传 $it" else it }
                                     }
                                 }
@@ -174,89 +201,55 @@ object SherpaAsrManager {
                     true
                 }
 
-                if (!downloadedOk) {
+                if (!ok) {
                     retries--
-                    // 中断时保留已下载部分，下次续传
+                    val partialMB = if (archive.exists()) archive.length() / (1024 * 1024) else 0
                     if (retries > 0) {
-                        val partialMB = if (archiveFile.exists()) archiveFile.length() / (1024 * 1024) else 0
                         withContextMain { downloadStatus = if (partialMB > 0) "中断（已缓存 ${partialMB}MB），2秒后续传..." else "下载失败，2秒后重试..." }
-                        delay(2000)
-                        continue
+                        delay(2000); continue
                     } else {
                         withContextMain { downloadStatus = "下载失败，请检查网络" }
-                        return@withContext null
+                        return null
                     }
                 }
 
-                // 解压 tar.bz2（优先用系统 tar，fallback 到 commons-compress）
-                withContextMain { downloadStatus = "解压模型中（${MODEL_SIZE_MB}MB，首次较慢）..." }
-                extractTarBz2(context, archiveFile, targetDir)
-                archiveFile.delete()
-
-                // 修复目录嵌套：tar 包内含顶级目录 sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/，
-                // 解压到 targetDir 后变成 targetDir/sherpa-onnx-.../sherpa-onnx-...，
-                // 需要把内容上提一层。
-                val innerDir = File(targetDir, MODEL_DIR_NAME)
-                if (innerDir.exists() && innerDir.isDirectory) {
-                    innerDir.listFiles()?.forEach { it.renameTo(File(targetDir, it.name)) }
-                    innerDir.delete()
-                }
-
-                if (!isModelReady(context)) {
-                    withContextMain { downloadStatus = "解压失败，文件不完整" }
-                    return@withContext null
-                }
-
-                withContextMain {
-                    isModelDownloading = false
-                    modelDownloadProgress = 1f
-                    downloadStatus = "Qwen3-ASR 模型就绪"
-                }
-                Log.i(TAG, "Model ready: ${targetDir.absolutePath}")
-                return@withContext targetDir
+                // 解压
+                withContextMain { downloadStatus = "解压模型中（${sizeMB}MB）..." }
+                extractTarBz2(archive, destDir)
+                archive.delete()
+                return destDir
 
             } catch (e: CancellationException) {
                 withContextMain { isModelDownloading = false; downloadStatus = "已取消" }
                 throw e
             } catch (e: Exception) {
                 retries--
-                Log.e(TAG, "Error (retries=$retries): ${e.message}", e)
                 if (retries > 0) {
                     withContextMain { downloadStatus = "出错，2秒后重试..." }
                     delay(2000)
                 } else {
                     withContextMain { isModelDownloading = false; downloadStatus = "失败: ${e.message}" }
+                    return null
                 }
             }
         }
-        withContextMain { isModelDownloading = false; downloadStatus = "下载失败，请检查网络" }
-        null
+        withContextMain { isModelDownloading = false; downloadStatus = "下载失败" }
+        return null
     }
 
     // ===== tar.bz2 解压 =====
 
-    private fun extractTarBz2(context: Context, archive: File, destDir: File) {
+    private fun extractTarBz2(archive: File, destDir: File) {
         // 方案1：系统 tar（toybox，Android 自带，支持 bzip2）
-        // 模拟器和真机都有 toybox tar，最稳定可靠
         try {
-            val pb = ProcessBuilder(
-                "tar", "xjf", archive.absolutePath,
-                "-C", destDir.absolutePath
-            )
+            val pb = ProcessBuilder("tar", "xjf", archive.absolutePath, "-C", destDir.absolutePath)
             pb.redirectErrorStream(true)
-            val proc = pb.start()
-            val output = proc.inputStream.bufferedReader().readText()
-            val exit = proc.waitFor()
-            if (exit == 0) {
-                Log.i(TAG, "Extracted via system tar ($exit)")
-                return
-            }
-            Log.w(TAG, "system tar failed (exit $exit): ${output.take(500)}")
-        } catch (e: Exception) {
-            Log.w(TAG, "system tar not available: ${e.message}")
-        }
+            val proc = pb.start(); val out = proc.inputStream.bufferedReader().readText(); val exit = proc.waitFor()
+            if (exit == 0) { Log.i(TAG, "Extracted via system tar"); return }
+            Log.w(TAG, "system tar failed (exit $exit): ${out.take(500)}")
+        } catch (e: Exception) { Log.w(TAG, "system tar unavailable: ${e.message}") }
 
-        // 方案2：commons-compress（纯 Java，不需要 native tar）
+        // 方案2：commons-compress
         try {
             FileInputStream(archive).use { fis ->
                 BufferedInputStream(fis).use { bis ->
@@ -265,17 +258,11 @@ object SherpaAsrManager {
                             var entry = tar.nextEntry
                             while (entry != null) {
                                 val name = entry.name.replace("\\", "/")
-                                val safeName = name.split("/").filter {
-                                    it.isNotBlank() && it != ".."
-                                }.joinToString("/")
+                                val safeName = name.split("/").filter { it.isNotBlank() && it != ".." }.joinToString("/")
                                 if (safeName.isNotEmpty()) {
                                     val outFile = File(destDir, safeName)
-                                    if (entry.isDirectory) {
-                                        outFile.mkdirs()
-                                    } else {
-                                        outFile.parentFile?.mkdirs()
-                                        FileOutputStream(outFile).use { out -> tar.copyTo(out) }
-                                    }
+                                    if (entry.isDirectory) outFile.mkdirs()
+                                    else { outFile.parentFile?.mkdirs(); FileOutputStream(outFile).use { out -> tar.copyTo(out) } }
                                 }
                                 entry = tar.nextEntry
                             }
@@ -283,37 +270,43 @@ object SherpaAsrManager {
                     }
                 }
             }
-            Log.i(TAG, "Extracted via commons-compress")
-        } catch (e: Exception) {
-            Log.e(TAG, "commons-compress extraction failed: ${e.message}", e)
-            throw e
-        }
+        } catch (e: Exception) { Log.e(TAG, "Extract failed", e); throw e }
     }
 
     // ===== 识别器创建（供 AsrBatchTranscriber 调用）=====
 
-    /**
-     * 创建 OfflineRecognizer（调用方负责 release）。
-     * 仅在模型已下载就绪时返回非 null。
-     */
-    fun createRecognizer(context: Context): OfflineRecognizer? {
-        val dir = modelDir(context)
-        if (!isModelReady(context)) {
-            Log.w(TAG, "Model not ready")
-            return null
-        }
+    fun createRecognizer(context: Context, engine: AsrEngineType, language: String = ""): OfflineRecognizer? = when (engine) {
+        AsrEngineType.QWEN3 -> createQwen3Recognizer(context, language)
+        AsrEngineType.SENSEVOICE_QNN -> createSenseVoiceQnnRecognizer(context, language)
+        else -> null
+    }
+
+    /** 支持的语言（中/英/日/韩 + 自动检测） */
+    val sherpaLanguages = listOf(
+        "auto" to "自动",
+        "zh" to "中文",
+        "en" to "英文",
+        "ja" to "日文",
+        "ko" to "韩文"
+    )
+
+    private fun createQwen3Recognizer(context: Context, language: String = ""): OfflineRecognizer? {
+        val dir = qwen3Dir(context)
+        if (!isModelReady(context, AsrEngineType.QWEN3)) { Log.w(TAG, "Qwen3 model not ready"); return null }
+        val langCode = if (language == "auto") "" else language  // Qwen3: 空字符串=自动
         return try {
             val config = OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                 modelConfig = OfflineModelConfig(
                     qwen3Asr = OfflineQwen3AsrModelConfig(
-                        convFrontend = dir.resolve(CONV_FRONTEND).absolutePath,
-                        encoder = dir.resolve(ENCODER).absolutePath,
-                        decoder = dir.resolve(DECODER).absolutePath,
-                        tokenizer = dir.resolve(TOKENIZER_DIR).absolutePath,
+                        convFrontend = dir.resolve(QWEN3_CONV_FRONTEND).absolutePath,
+                        encoder = dir.resolve(QWEN3_ENCODER).absolutePath,
+                        decoder = dir.resolve(QWEN3_DECODER).absolutePath,
+                        tokenizer = dir.resolve(QWEN3_TOKENIZER).absolutePath,
+                        // Qwen3 通过 tokenizer 自动检测语言，无需 language 参数
                     ),
-                    tokens = "",        // Qwen3 用 tokenizer 目录，tokens.txt 为空
-                    numThreads = 3,     // 官方推荐
+                    tokens = "",
+                    numThreads = 3,
                     debug = false,
                     provider = "cpu",
                 ),
@@ -321,17 +314,42 @@ object SherpaAsrManager {
                 maxActivePaths = 4,
                 blankPenalty = 0.0f,
             )
-            OfflineRecognizer(null, config).also { Log.i(TAG, "Recognizer created (Qwen3-ASR 0.6B INT8)") }
-        } catch (e: Exception) {
-            Log.e(TAG, "createRecognizer failed: ${e.message}", e)
-            null
-        }
+            OfflineRecognizer(null, config).also { Log.i(TAG, "Qwen3-ASR recognizer created (lang=$langCode)") }
+        } catch (e: Exception) { Log.e(TAG, "Qwen3 init failed: ${e.message}", e); null }
     }
 
-    /**
-     * 识别单段 PCM16 float 采样（[-1,1] 归一化，16kHz 单声道）。
-     * @return 识别文本，失败返回空字符串
-     */
+    private fun createSenseVoiceQnnRecognizer(context: Context, language: String = "auto"): OfflineRecognizer? {
+        val dir = svDir(context)
+        if (!isModelReady(context, AsrEngineType.SENSEVOICE_QNN)) { Log.w(TAG, "SenseVoice QNN model not ready"); return null }
+        val qnnHtpPath = File(context.applicationInfo.nativeLibraryDir, "libQnnHtp.so").absolutePath
+        val qnnSysPath = File(context.applicationInfo.nativeLibraryDir, "libQnnSystem.so").absolutePath
+        val contextBinPath = dir.resolve(SV_MODEL_BIN).absolutePath
+        val tokensPath = dir.resolve(SV_TOKENS).absolutePath
+        Log.i(TAG, "SenseVoice QNN: htp=$qnnHtpPath ctx=$contextBinPath lang=$language")
+        return try {
+            val config = OfflineRecognizerConfig(
+                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                modelConfig = OfflineModelConfig(
+                    senseVoice = OfflineSenseVoiceModelConfig(
+                        language = language,
+                        qnnConfig = QnnConfig(
+                            backendLib = qnnHtpPath,
+                            systemLib = qnnSysPath,
+                            contextBinary = contextBinPath,
+                        ),
+                    ),
+                    tokens = tokensPath,
+                    numThreads = 1,
+                    debug = false,
+                    provider = "qnn",
+                ),
+                decodingMethod = "greedy_search",
+            )
+            OfflineRecognizer(null, config).also { Log.i(TAG, "SenseVoice QNN recognizer created (lang=$language)") }
+        } catch (e: Exception) { Log.e(TAG, "SenseVoice QNN init failed: ${e.message}", e); null }
+    }
+
+    /** 识别单段 PCM16 float 采样（[-1,1] 归一化，16kHz 单声道） */
     fun recognizeSegment(recognizer: OfflineRecognizer, samples: FloatArray): String {
         return try {
             val stream = recognizer.createStream()
@@ -340,16 +358,10 @@ object SherpaAsrManager {
             val text = recognizer.getResult(stream).text.trim()
             stream.release()
             text
-        } catch (e: Exception) {
-            Log.e(TAG, "recognizeSegment failed: ${e.message}", e)
-            ""
-        }
+        } catch (e: Exception) { Log.e(TAG, "recognizeSegment failed: ${e.message}", e); "" }
     }
-
-    // ===== 工具函数 =====
 
     fun shutdown() { cancelDownload() }
 
-    private suspend fun withContextMain(block: () -> Unit) =
-        withContext(Dispatchers.Main) { block() }
+    private suspend fun withContextMain(block: () -> Unit) = withContext(Dispatchers.Main) { block() }
 }

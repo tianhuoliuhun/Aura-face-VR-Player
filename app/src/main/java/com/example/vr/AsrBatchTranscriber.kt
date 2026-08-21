@@ -65,28 +65,35 @@ class AsrBatchTranscriber(private val context: Context) {
         }
     }
 
-    // ===== 主入口（Qwen3-ASR / sherpa-onnx 引擎）=====
+    // ===== 主入口（sherpa-onnx 引擎：Qwen3-ASR / SenseVoice QNN）=====
     suspend fun transcribeToSrtSherpa(
         mediaUri: Uri,
         videoTitle: String?,
+        engine: AsrEngineType = AsrEngineType.QWEN3,
+        language: String = "auto",
         onStatus: (String) -> Unit = {},
         onProgress: (Float) -> Unit = {}
     ): File? = withContext(Dispatchers.IO) {
         isRunning = true
         progress = 0f
+        val engineLabel = when (engine) {
+            AsrEngineType.QWEN3 -> "Qwen3-ASR"
+            AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN"
+            else -> "Sherpa"
+        }
         try {
-            statusMessage = "初始化 Qwen3-ASR 引擎..."
+            statusMessage = "初始化 $engineLabel 引擎..."
             onStatus(statusMessage)
-            val recognizer = SherpaAsrManager.createRecognizer(context)
+            val recognizer = SherpaAsrManager.createRecognizer(context, engine, language)
             if (recognizer == null) {
-                statusMessage = "Qwen3-ASR 模型不可用，请先下载"
+                statusMessage = "$engineLabel 模型不可用，请先下载"
                 onStatus(statusMessage)
                 return@withContext null
             }
 
-            statusMessage = "正在提取音轨并识别（Qwen3-ASR）..."
+            statusMessage = "正在提取音轨并识别（$engineLabel，语言=$language）..."
             onStatus(statusMessage)
-            Log.i("AsrBatch", "transcribe start: uri=$mediaUri engine=Qwen3-ASR")
+            Log.i("AsrBatch", "transcribe start: uri=$mediaUri engine=$engineLabel lang=$language")
             val cues = extractAndRecognizeSherpa(mediaUri, recognizer, onProgress)
             recognizer.release()
             finishTranscribe(cues, mediaUri, videoTitle, onStatus, onProgress)
