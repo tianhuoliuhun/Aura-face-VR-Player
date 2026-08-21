@@ -159,6 +159,11 @@ dependencies {
   // v107：用户统计（隐私合规：用户同意后才采集，见 AnalyticsManager）
   // Firebase Analytics（免费）：google-services.json 未配置时自动禁用，不影响构建运行
   implementation("com.google.firebase:firebase-analytics")
+
+  // v110：sherpa-onnx 离线 ASR（Qwen3-ASR 等，29 语言 + 20 种中文方言）
+  implementation(files("libs/sherpa-onnx-1.13.6.aar"))
+  // tar.bz2 模型解压支持（sherpa-onnx 模型打包格式）
+  implementation("org.apache.commons:commons-compress:1.27.1")
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
