@@ -164,10 +164,19 @@ object SherpaAsrManager {
                     }
                 }
 
-                // 解压 tar.bz2（commons-compress）
-                withContextMain { downloadStatus = "解压模型中（~${MODEL_SIZE_MB}MB，首次较慢）..." }
-                extractTarBz2(archiveFile, targetDir)
+                // 解压 tar.bz2（优先用系统 tar，fallback 到 commons-compress）
+                withContextMain { downloadStatus = "解压模型中（${MODEL_SIZE_MB}MB，首次较慢）..." }
+                extractTarBz2(context, archiveFile, targetDir)
                 archiveFile.delete()
+
+                // 修复目录嵌套：tar 包内含顶级目录 sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/，
+                // 解压到 targetDir 后变成 targetDir/sherpa-onnx-.../sherpa-onnx-...，
+                // 需要把内容上提一层。
+                val innerDir = File(targetDir, MODEL_DIR_NAME)
+                if (innerDir.exists() && innerDir.isDirectory) {
+                    innerDir.listFiles()?.forEach { it.renameTo(File(targetDir, it.name)) }
+                    innerDir.delete()
+                }
 
                 if (!isModelReady(context)) {
                     withContextMain { downloadStatus = "解压失败，文件不完整" }
@@ -200,39 +209,60 @@ object SherpaAsrManager {
         null
     }
 
-    // ===== tar.bz2 解压（commons-compress 纯 Java）=====
+    // ===== tar.bz2 解压 =====
 
-    private fun extractTarBz2(archive: File, destDir: File) {
-        FileInputStream(archive).use { fis ->
-            BufferedInputStream(fis).use { bis ->
-                BZip2CompressorInputStream(bis).use { bz2 ->
-                    TarArchiveInputStream(bz2).use { tar ->
-                        var entry = tar.nextEntry
-                        while (entry != null) {
-                            if (Thread.interrupted()) throw InterruptedException("解压被取消")
-                            val name = entry.name.replace("\\", "/")
-                            // 安全路径（防目录遍历）
-                            val safeName = name.split("/").filter {
-                                it.isNotBlank() && it != ".."
-                            }.joinToString("/")
-                            if (safeName.isEmpty()) {
-                                entry = tar.nextEntry
-                                continue
-                            }
-                            val outFile = File(destDir, safeName)
-                            if (entry.isDirectory) {
-                                outFile.mkdirs()
-                            } else {
-                                outFile.parentFile?.mkdirs()
-                                FileOutputStream(outFile).use { out ->
-                                    tar.copyTo(out)
+    private fun extractTarBz2(context: Context, archive: File, destDir: File) {
+        // 方案1：系统 tar（toybox，Android 自带，支持 bzip2）
+        // 模拟器和真机都有 toybox tar，最稳定可靠
+        try {
+            val pb = ProcessBuilder(
+                "tar", "xjf", archive.absolutePath,
+                "-C", destDir.absolutePath
+            )
+            pb.redirectErrorStream(true)
+            val proc = pb.start()
+            val output = proc.inputStream.bufferedReader().readText()
+            val exit = proc.waitFor()
+            if (exit == 0) {
+                Log.i(TAG, "Extracted via system tar ($exit)")
+                return
+            }
+            Log.w(TAG, "system tar failed (exit $exit): ${output.take(500)}")
+        } catch (e: Exception) {
+            Log.w(TAG, "system tar not available: ${e.message}")
+        }
+
+        // 方案2：commons-compress（纯 Java，不需要 native tar）
+        try {
+            FileInputStream(archive).use { fis ->
+                BufferedInputStream(fis).use { bis ->
+                    BZip2CompressorInputStream(bis).use { bz2 ->
+                        TarArchiveInputStream(bz2).use { tar ->
+                            var entry = tar.nextEntry
+                            while (entry != null) {
+                                val name = entry.name.replace("\\", "/")
+                                val safeName = name.split("/").filter {
+                                    it.isNotBlank() && it != ".."
+                                }.joinToString("/")
+                                if (safeName.isNotEmpty()) {
+                                    val outFile = File(destDir, safeName)
+                                    if (entry.isDirectory) {
+                                        outFile.mkdirs()
+                                    } else {
+                                        outFile.parentFile?.mkdirs()
+                                        FileOutputStream(outFile).use { out -> tar.copyTo(out) }
+                                    }
                                 }
+                                entry = tar.nextEntry
                             }
-                            entry = tar.nextEntry
                         }
                     }
                 }
             }
+            Log.i(TAG, "Extracted via commons-compress")
+        } catch (e: Exception) {
+            Log.e(TAG, "commons-compress extraction failed: ${e.message}", e)
+            throw e
         }
     }
 

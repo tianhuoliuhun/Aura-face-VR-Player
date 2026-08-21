@@ -4122,6 +4122,150 @@ fun VRPlayerScreen(
                                 @Composable
                                 fun SettingsSectionSubtitle() {
 
+                                // ===== ASR 引擎选择（v110：Vosk / Qwen3-ASR）=====
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.White.copy(alpha = 0.04f))
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "AI 字幕引擎",
+                                        color = AccentColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        AsrEngineType.entries.forEach { engine ->
+                                            val sel = asrEngineType == engine
+                                            val label = when (engine) {
+                                                AsrEngineType.VOSK -> "Vosk（轻量）"
+                                                AsrEngineType.QWEN3 -> "Qwen3（精准）"
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
+                                                    .clickable { asrEngineType = engine; keepUiAlight() }
+                                                    .padding(vertical = 6.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+                                    }
+                                    // Vosk 引擎说明
+                                    if (asrEngineType == AsrEngineType.VOSK) {
+                                        Text(
+                                            text = "离线识别（中/英/日），模型 40~1100MB，首次使用需下载",
+                                            color = Color.White.copy(alpha = 0.45f),
+                                            fontSize = 8.sp,
+                                            lineHeight = 11.sp
+                                        )
+                                    }
+                                    // Qwen3-ASR 引擎：模型状态 + 下载
+                                    if (asrEngineType == AsrEngineType.QWEN3) {
+                                        val qwenReady = remember { mutableStateOf(SherpaAsrManager.isModelReady(context)) }
+                                        LaunchedEffect(SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
+                                            qwenReady.value = SherpaAsrManager.isModelReady(context)
+                                        }
+                                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                            // 模型信息
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "Qwen3-ASR 0.6B INT8",
+                                                        color = Color.White.copy(alpha = 0.85f),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                    Text(
+                                                        text = "29语言 + 20方言 · ~838MB 下载 · ~940MB 解压",
+                                                        color = Color.White.copy(alpha = 0.4f),
+                                                        fontSize = 8.sp
+                                                    )
+                                                }
+                                                Text(
+                                                    text = when {
+                                                        SherpaAsrManager.isModelDownloading -> "⬇ 下载中"
+                                                        qwenReady.value -> "✓ 已就绪"
+                                                        else -> "未下载"
+                                                    },
+                                                    color = when {
+                                                        SherpaAsrManager.isModelDownloading -> Color(0xFF4FC3F7)
+                                                        qwenReady.value -> Color(0xFF81C784)
+                                                        else -> Color.White
+                                                    },
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            // 下载进度
+                                            if (SherpaAsrManager.isModelDownloading) {
+                                                LinearProgressIndicator(
+                                                    progress = SherpaAsrManager.modelDownloadProgress,
+                                                    color = AccentColor,
+                                                    trackColor = Color.White.copy(alpha = 0.15f),
+                                                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
+                                                )
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("下载 ${(SherpaAsrManager.modelDownloadProgress * 100).toInt()}%", color = Color(0xFF4FC3F7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                    Text(SherpaAsrManager.downloadStatus, color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                }
+                                                Text(
+                                                    text = "取消下载",
+                                                    color = Color(0xFFEF5350),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.align(Alignment.End)
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(Color(0xFFEF5350).copy(alpha = 0.15f))
+                                                        .clickable { SherpaAsrManager.cancelDownload() }
+                                                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                            // 下载按钮
+                                            if (!qwenReady.value && !SherpaAsrManager.isModelDownloading) {
+                                                Text(
+                                                    text = "点击下载 Qwen3-ASR 模型（838MB）",
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    textAlign = TextAlign.Center,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(AccentColor.copy(alpha = 0.85f))
+                                                        .clickable { SherpaAsrManager.startModelDownload(context) }
+                                                        .padding(vertical = 7.dp)
+                                                )
+                                            }
+                                            if (qwenReady.value) {
+                                                Text(
+                                                    text = "Qwen3-ASR 已就绪，可直接生成 AI 字幕",
+                                                    color = Color(0xFF81C784),
+                                                    fontSize = 8.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
                                 SubtitleSettingsPanel(
                                     isSubtitleEnabled = isSubtitleEnabled,
                                     onSubtitleEnabledChange = { isSubtitleEnabled = it },
