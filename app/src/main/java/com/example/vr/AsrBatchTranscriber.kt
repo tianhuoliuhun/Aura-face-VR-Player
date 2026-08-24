@@ -230,24 +230,35 @@ class AsrBatchTranscriber(private val context: Context) {
             extractor.selectTrack(audioTrack)
             Log.i("AsrBatch", "audio track: mime=$mime durationUs=$durationUs")
 
-            // v116：硬件解码器不支持 audio/mpeg（MPEG-L2）时，自动查找软件解码器
+            // v116+：硬件解码器缺失时自动回退软件解码器（优先 c2.android.*）
+            // 兜底策略：audio/mpeg（MPEG-L2）在骁龙8 Elite 等新平台无硬件解码，
+            // 但 OMX.google.mp3.decoder / c2.android.mp3.decoder 作为软件实现始终可用
             codec = try {
                 MediaCodec.createDecoderByType(mime)
             } catch (e: Exception) {
-                Log.w("AsrBatch", "Hardware decoder failed for $mime, trying software fallback...")
-                // 遍历所有解码器，找支持该 MIME 的（优先 c2.android.* 软件实现）
+                Log.w("AsrBatch", "Hardware decoder failed for $mime (${e.message}), searching software decoder...")
+                // 遍历所有解码器，优先选 c2.android.*（最新软实现）或 OMX.google.*
                 val swName = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
                     .codecInfos
                     .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
-                    .sortedBy { if (it.name.startsWith("c2.android.") || it.name.startsWith("OMX.google.")) 0 else 1 }
+                    .sortedBy { info ->
+                        when {
+                            info.name.startsWith("c2.android.") -> 0  // 最优先
+                            info.name.startsWith("OMX.google.") -> 1
+                            else -> 2
+                        }
+                    }
                     .firstOrNull()?.name
-                    ?: throw Exception("No decoder for $mime on this device")
-                Log.i("AsrBatch", "Using software decoder: $swName for $mime")
-                android.media.MediaCodec.createByCodecName(swName)
+                if (swName != null) {
+                    Log.i("AsrBatch", "Using software decoder: $swName for $mime")
+                    android.media.MediaCodec.createByCodecName(swName)
+                } else {
+                    throw Exception("No decoder found for $mime on this device")
+                }
             }
             codec.configure(extractor.getTrackFormat(audioTrack), null, null, 0)
             codec.start()
-            Log.i("AsrBatch", "codec started: $mime")
+            Log.i("AsrBatch", "codec started: $mime (name=${codec.name})")
 
             val bufferInfo = MediaCodec.BufferInfo()
             var inputDone = false
