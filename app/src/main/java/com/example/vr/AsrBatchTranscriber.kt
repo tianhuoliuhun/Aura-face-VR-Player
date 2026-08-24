@@ -230,7 +230,21 @@ class AsrBatchTranscriber(private val context: Context) {
             extractor.selectTrack(audioTrack)
             Log.i("AsrBatch", "audio track: mime=$mime durationUs=$durationUs")
 
-            codec = MediaCodec.createDecoderByType(mime)
+            // v116：硬件解码器不支持 audio/mpeg（MPEG-L2）时，自动查找软件解码器
+            codec = try {
+                MediaCodec.createDecoderByType(mime)
+            } catch (e: Exception) {
+                Log.w("AsrBatch", "Hardware decoder failed for $mime, trying software fallback...")
+                // 遍历所有解码器，找支持该 MIME 的（优先 c2.android.* 软件实现）
+                val swName = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
+                    .codecInfos
+                    .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
+                    .sortedBy { if (it.name.startsWith("c2.android.") || it.name.startsWith("OMX.google.")) 0 else 1 }
+                    .firstOrNull()?.name
+                    ?: throw Exception("No decoder for $mime on this device")
+                Log.i("AsrBatch", "Using software decoder: $swName for $mime")
+                android.media.MediaCodec.createByCodecName(swName)
+            }
             codec.configure(extractor.getTrackFormat(audioTrack), null, null, 0)
             codec.start()
             Log.i("AsrBatch", "codec started: $mime")
