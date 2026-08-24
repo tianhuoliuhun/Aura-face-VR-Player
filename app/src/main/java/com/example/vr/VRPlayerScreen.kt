@@ -935,13 +935,13 @@ fun VRPlayerScreen(
                                                 ) {
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(
-                                                            text = "Qwen3-ASR 0.6B INT8",
+                                                            text = modelName,
                                                             color = Color.White.copy(alpha = 0.9f),
                                                             fontSize = 10.sp,
                                                             fontWeight = FontWeight.SemiBold
                                                         )
                                                         Text(
-                                                            text = "29语言 + 20方言 · 模型 ~838MB · 解压后 ~940MB",
+                                                            text = modelDesc,
                                                             color = Color.White.copy(alpha = 0.4f),
                                                             fontSize = 8.sp
                                                         )
@@ -1009,13 +1009,8 @@ fun VRPlayerScreen(
 
                                                 // 下载按钮（未下载且未在下载时）
                                                 if (!sherpaReady.value && !SherpaAsrManager.isModelDownloading) {
-                                                    val dlLabel = when (asrEngineType) {
-                                                        AsrEngineType.QWEN3 -> "点击下载 Qwen3-ASR 模型（838MB）"
-                                                        AsrEngineType.SENSEVOICE_QNN -> "点击下载 SenseVoice QNN 模型（161MB）"
-                                                        else -> "下载模型"
-                                                    }
                                                     Text(
-                                                        text = dlLabel,
+                                                        text = "点击下载 $modelName（${modelSize}MB）",
                                                         color = Color.White,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold,
