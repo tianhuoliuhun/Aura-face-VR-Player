@@ -196,8 +196,9 @@ class AsrBatchTranscriber(private val context: Context) {
     )
 
     /**
-     * 通用音频提取框架：解码视频音频为 PCM，按 100ms 分块，VAD 过滤后喂入 recognizer 回调。
-     * @param recognizeBlock 接收 [0,1] 归一化 float 采样，返回识别结果
+     * 通用音频提取 + 分块喂入框架：用 MediaExtractor + MediaCodec 解码音频，
+     * 按 100ms 分块，VAD 过滤后喂入 recognizeBlock。
+     * @param recognizeBlock 接收 [0,1] 归一化 16kHz 单声道 PCM float 采样，返回识别结果
      */
     private fun extractAndRecognizeGeneric(
         mediaUri: Uri,
@@ -208,6 +209,8 @@ class AsrBatchTranscriber(private val context: Context) {
         var codec: MediaCodec? = null
         try {
             extractor.setDataSource(context, mediaUri, null)
+
+            // 选择音频轨
             var audioTrack = -1
             var mime = ""
             var durationUs = 0L
@@ -220,144 +223,137 @@ class AsrBatchTranscriber(private val context: Context) {
                     break
                 }
             }
-            if (audioTrack < 0) return emptyList()
-            extractor.selectTrack(audioTrack)
-            val audioFormat = extractor.getTrackFormat(audioTrack)
-
-            // 修复：优先用软件解码器（hardware codecs 可能不支持某些格式如 MPEG-L2）
-            codec = try {
-                MediaCodec.createDecoderByType(mime)
-            } catch (e: Exception) {
-                Log.w("AsrBatch", "Hardware decoder failed for $mime: ${e.message}, trying software fallback")
-                // 查找所有解码器，优先选软件解码器（c2.android.* 或 OMX.google.*）
-                val codecName = try {
-                    val mcl = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
-                    var found: String? = null
-                    for (info in mcl.codecInfos) {
-                        if (info.isEncoder) continue
-                        if (info.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) }) {
-                            found = info.name
-                            // 优先软件解码器（c2.android.* / OMX.google.*）
-                            if (info.name.startsWith("c2.android.") || info.name.startsWith("OMX.google.")) break
-                        }
-                    }
-                    found
-                } catch (_: Throwable) { null }
-
-                if (codecName != null) {
-                    Log.i("AsrBatch", "Using software codec: $codecName for $mime")
-                    android.media.MediaCodec.createByCodecName(codecName)
-                } else {
-                    // 最后尝试 OMX.google.* 格式命名（音频解码兜底）
-                    try {
-                        android.media.MediaCodec.createByCodecName("OMX.google.mp3.decoder")
-                    } catch (_: Exception) {
-                        throw Exception("No decoder found for $mime on this device. The video's audio format is not supported.")
-                    }
-                }
+            if (audioTrack < 0) {
+                Log.e("AsrBatch", "no audio track found")
+                return emptyList()
             }
-            codec.configure(audioFormat, null, null, 0)
+            extractor.selectTrack(audioTrack)
+            Log.i("AsrBatch", "audio track: mime=$mime durationUs=$durationUs")
+
+            codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(extractor.getTrackFormat(audioTrack), null, null, 0)
             codec.start()
+            Log.i("AsrBatch", "codec started: $mime")
 
             val bufferInfo = MediaCodec.BufferInfo()
-            var inputDone = false; var outputDone = false
+            var inputDone = false
+            var outputDone = false
+
             val cues = mutableListOf<SubtitleCue>()
             var monoBuf = FloatArray(0)
-            var chunkStartUs = 0L; var sentenceStartUs = 0L; var lastEndUs = 0L
-            var outputRate = 16000; var outputChannels = 1
-            var silentRunMs = 0L; var fedSilenceReset = false
+            var chunkStartUs = 0L
+            var sentenceStartUs = 0L
+            var lastEndUs = 0L
+            var outputRate = 16000
+            var outputChannels = 1
+            var silentRunMs = 0L
+            var fedSilenceReset = false
 
             while (!outputDone) {
+                // 输入：喂数据给解码器
                 if (!inputDone) {
                     val inIdx = codec.dequeueInputBuffer(10_000)
                     if (inIdx >= 0) {
                         val inBuf = codec.getInputBuffer(inIdx) ?: continue
-                        val sz = extractor.readSampleData(inBuf, 0)
-                        if (sz < 0) {
-                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inputDone = true
+                        val sampleSize = extractor.readSampleData(inBuf, 0)
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
                         } else {
-                            codec.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0); extractor.advance()
+                            codec.queueInputBuffer(inIdx, 0, sampleSize, extractor.sampleTime, 0)
+                            extractor.advance()
                         }
                     }
                 }
-                // 修复：超时增大到 1000ms（软件解码器需要更多时间），
-                // 并正确处理 INFO_* 返回值（格式变化/缓冲区不足，非真实错误）
-                val outIdx = codec.dequeueOutputBuffer(bufferInfo, 1000)
-                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED ||
-                    outIdx == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    // 格式/缓冲变化，继续等下一次输出
-                    continue
-                }
-                if (outIdx >= 0) {
-                    val outBuf = codec.getOutputBuffer(outIdx) ?: continue
-                    val ptsUs = bufferInfo.presentationTimeUs
+
+                // 输出：取解码后的 PCM 数据
+                val outIdx = codec.dequeueOutputBuffer(bufferInfo, 500)
+                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val fmt = codec.outputFormat
                     if (fmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) outputRate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                     if (fmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) outputChannels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                    val bytes = ByteArray(bufferInfo.size)
-                    outBuf.get(bytes)
-                    codec.releaseOutputBuffer(outIdx, false)
+                    Log.i("AsrBatch", "output format: rate=$outputRate channels=$outputChannels")
+                    continue
+                }
+                if (outIdx == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                    continue
+                }
+                if (outIdx < 0) continue  // INFO_TRY_AGANCE_LATER 等，正常
 
-                    val frames = bytes.size / (2 * outputChannels.coerceAtLeast(1))
-                    val mono = FloatArray(frames)
-                    for (f in 0 until frames) {
-                        var sum = 0
-                        for (ch in 0 until outputChannels.coerceAtLeast(1)) {
-                            val off = (f * outputChannels + ch) * 2
-                            sum += ((bytes[off].toInt() and 0xff) or (bytes[off + 1].toInt() shl 8)).toShort().toInt()
-                        }
-                        mono[f] = sum / outputChannels.coerceAtLeast(1).toFloat() / 32768f
+                // 正常输出缓冲
+                val outBuf = codec.getOutputBuffer(outIdx) ?: continue
+                val ptsUs = bufferInfo.presentationTimeUs
+                val bytes = ByteArray(bufferInfo.size)
+                outBuf.get(bytes)
+                codec.releaseOutputBuffer(outIdx, true)  // true = 渲染到 AudioTrack（让解码器正确推进）
+
+                // PCM16 交错 → mono float
+                val frames = bytes.size / (2 * outputChannels.coerceAtLeast(1))
+                val mono = FloatArray(frames)
+                for (f in 0 until frames) {
+                    var sum = 0
+                    for (ch in 0 until outputChannels.coerceAtLeast(1)) {
+                        val off = (f * outputChannels + ch) * 2
+                        sum += ((bytes[off].toInt() and 0xff) or (bytes[off + 1].toInt() shl 8)).toShort().toInt()
                     }
-                    val combined = FloatArray(monoBuf.size + mono.size)
-                    System.arraycopy(monoBuf, 0, combined, 0, monoBuf.size)
-                    System.arraycopy(mono, 0, combined, monoBuf.size, mono.size)
-                    monoBuf = combined
+                    mono[f] = sum / outputChannels.coerceAtLeast(1).toFloat() / 32768f
+                }
 
-                    val chunkLen = (outputRate / 10).coerceAtLeast(160)
-                    while (monoBuf.size >= chunkLen) {
-                        val chunk = monoBuf.copyOfRange(0, chunkLen)
-                        monoBuf = monoBuf.copyOfRange(chunkLen, monoBuf.size)
-                        if (chunkStartUs == 0L) chunkStartUs = ptsUs.coerceAtLeast(0L)
-                        if (sentenceStartUs == 0L) sentenceStartUs = chunkStartUs
+                // 累积并喂识别器（每 100ms 一块）
+                val combined = FloatArray(monoBuf.size + mono.size)
+                System.arraycopy(monoBuf, 0, combined, 0, monoBuf.size)
+                System.arraycopy(mono, 0, combined, monoBuf.size, mono.size)
+                monoBuf = combined
 
-                        var rms = 0f; for (s in chunk) rms += s * s; rms = kotlin.math.sqrt(rms / chunk.size)
-                        val isSilent = rms < VAD_THRESHOLD
-                        val shouldFeed = if (isSilent) {
-                            silentRunMs += 100L
-                            if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false
-                        } else { silentRunMs = 0L; fedSilenceReset = false; true }
+                val chunkLen = (outputRate / 10).coerceAtLeast(160)
+                while (monoBuf.size >= chunkLen) {
+                    val chunk = monoBuf.copyOfRange(0, chunkLen)
+                    monoBuf = monoBuf.copyOfRange(chunkLen, monoBuf.size)
+                    if (chunkStartUs == 0L) chunkStartUs = ptsUs.coerceAtLeast(0L)
+                    if (sentenceStartUs == 0L) sentenceStartUs = chunkStartUs
 
-                        if (shouldFeed) {
-                            val resampled = resampleLinear(chunk, outputRate, 16000)
-                            val result = recognizeBlock(resampled)
-                            if (result.text.isNotBlank()) {
-                                if (result.isFinal) {
-                                    val endUs = chunkStartUs + 100_000L
-                                    cues.add(SubtitleCue(cues.size + 1,
-                                        (sentenceStartUs / 1000).coerceAtLeast(0L),
-                                        (endUs / 1000).coerceAtLeast(sentenceStartUs / 1000 + 500),
-                                        result.text))
-                                    lastEndUs = endUs; sentenceStartUs = 0L
-                                } else if (sentenceStartUs > 0 && result.needsReset) {
-                                    // Vosk 超时/标点断句
-                                    val endUs = chunkStartUs + 100_000L
-                                    cues.add(SubtitleCue(cues.size + 1,
-                                        (sentenceStartUs / 1000).coerceAtLeast(0L),
-                                        (endUs / 1000).coerceAtLeast(sentenceStartUs / 1000 + 500),
-                                        result.text))
-                                    lastEndUs = endUs; sentenceStartUs = 0L
-                                    sentenceElapsedMs = 0L  // 重置 Vosk 计时
-                                }
+                    var rms = 0f; for (s in chunk) rms += s * s; rms = kotlin.math.sqrt(rms / chunk.size)
+                    val isSilent = rms < VAD_THRESHOLD
+                    val shouldFeed = if (isSilent) {
+                        silentRunMs += 100L
+                        if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false
+                    } else { silentRunMs = 0L; fedSilenceReset = false; true }
+
+                    if (shouldFeed) {
+                        val resampled = resampleLinear(chunk, outputRate, 16000)
+                        val result = recognizeBlock(resampled)
+                        if (result.text.isNotBlank()) {
+                            if (result.isFinal) {
+                                val endUs = chunkStartUs + 100_000L
+                                cues.add(SubtitleCue(cues.size + 1, (sentenceStartUs / 1000).coerceAtLeast(0L), (endUs / 1000).coerceAtLeast(sentenceStartUs / 1000 + 500), result.text))
+                                lastEndUs = endUs; sentenceStartUs = 0L
+                            } else if (sentenceStartUs > 0 && result.needsReset) {
+                                val endUs = chunkStartUs + 100_000L
+                                cues.add(SubtitleCue(cues.size + 1, (sentenceStartUs / 1000).coerceAtLeast(0L), (endUs / 1000).coerceAtLeast(sentenceStartUs / 1000 + 500), result.text))
+                                lastEndUs = endUs; sentenceStartUs = 0L
+                                sentenceElapsedMs = 0L
                             }
                         }
-                        chunkStartUs += 100_000L
                     }
-                    if (durationUs > 0) {
-                        val p = (ptsUs.toFloat() / durationUs).coerceIn(0f, 1f)
-                        progress = p; onProgress(p)
-                        if (cues.size % 100 == 0 && cues.size > 0) Log.i("AsrBatch", "progress=${(p * 100).toInt()}% cues=${cues.size}")
-                    }
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
+                    chunkStartUs += 100_000L
+                }
+
+                if (durationUs > 0) {
+                    val p = (ptsUs.toFloat() / durationUs).coerceIn(0f, 1f)
+                    progress = p; onProgress(p)
+                }
+                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                    outputDone = true
+                }
+            }
+
+            // 收尾：处理剩余缓冲
+            val endUs = chunkStartUs + 100_000L
+            if (monoBuf.isNotEmpty()) {
+                val resampled = resampleLinear(monoBuf, outputRate, 16000)
+                val result = recognizeBlock(resampled)
+                if (result.text.isNotBlank()) {
+                    cues.add(SubtitleCue(cues.size + 1, sentenceStartUs.coerceAtLeast(0L) / 1000, endUs.coerceAtLeast(sentenceStartUs / 1000 + 500), result.text))
                 }
             }
             progress = 1f; onProgress(1f)
