@@ -70,13 +70,14 @@ android {
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
 
-  // v111：按 ABI 分包（arm64/x86_64/armv7/x86 各一个 APK，减小体积）
-  // 全架构通用包请注释掉 splits 块后重新构建
+  // v111：按 ABI 分包（arm64-v8a 专用包，减小体积；universal 包通过注释 splits 构建）
+  // 注意：QNN so 库仅存在于 arm64-v8a，故保留该专用包；其余架构用户请使用全架构包
+  // 注释掉 splits 块后构建 assembleRelease 即可得到全架构 universal APK（约 391MB）
   splits {
     abi {
       isEnable = true
       reset()
-      include(*listOf("arm64-v8a", "x86_64", "armeabi-v7a", "x86").toTypedArray())
+      include(*listOf("arm64-v8a").toTypedArray())
     }
   }
 }
