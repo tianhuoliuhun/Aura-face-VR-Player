@@ -1026,7 +1026,7 @@ fun VRPlayerScreen(
                                             }
                                         }
 
-                                        // ===== 识别语言选择（v87，仅 Vosk 引擎时显示）=====
+                                        // ===== 识别语言选择（v87/v111）=====
                                         if (asrEngineType == AsrEngineType.VOSK) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -1055,6 +1055,37 @@ fun VRPlayerScreen(
                                                         fontSize = 10.sp,
                                                         fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
                                                     )
+                                                }
+                                            }
+                                        }
+
+                                        // ===== sherpa 引擎语言选择（v111：快捷面板同步）=====
+                                        if (asrEngineType == AsrEngineType.QWEN3 || asrEngineType == AsrEngineType.SENSEVOICE_QNN) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text("语言", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                                                SherpaAsrManager.sherpaLanguages.forEach { (code, label) ->
+                                                    val sel = sherpaLangCode == code
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
+                                                            .clickable { sherpaLangCode = code; keepUiAlight() }
+                                                            .padding(vertical = 4.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = label,
+                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
+                                                            fontSize = 9.sp,
+                                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }

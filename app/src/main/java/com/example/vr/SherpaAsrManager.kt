@@ -217,6 +217,23 @@ object SherpaAsrManager {
                 withContextMain { downloadStatus = "解压模型中（${sizeMB}MB）..." }
                 extractTarBz2(archive, destDir)
                 archive.delete()
+
+                // 修复目录嵌套：tar 包内含顶级目录，解压后变成 destDir/model-dir/file
+                // 需要把内容上提一层到 destDir/file
+                val expectedEntries = destDir.listFiles()?.filter { it.isDirectory }?.flatMap { it.listFiles()?.toList() ?: emptyList() } ?: emptyList()
+                if (expectedEntries.any { it.name.endsWith(".onnx") || it.name.endsWith(".bin") || it.name == "tokens.txt" }) {
+                    // 有嵌套目录，上提内容
+                    destDir.listFiles()?.filter { it.isDirectory }?.forEach { subDir ->
+                        subDir.listFiles()?.forEach { it.renameTo(File(destDir, it.name)) }
+                        subDir.delete()
+                    }
+                }
+
+                withContextMain {
+                    isModelDownloading = false
+                    modelDownloadProgress = 1f
+                    downloadStatus = "模型下载完成"
+                }
                 return destDir
 
             } catch (e: CancellationException) {
