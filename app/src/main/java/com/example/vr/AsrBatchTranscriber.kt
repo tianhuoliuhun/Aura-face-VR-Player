@@ -222,8 +222,39 @@ class AsrBatchTranscriber(private val context: Context) {
             }
             if (audioTrack < 0) return emptyList()
             extractor.selectTrack(audioTrack)
-            codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(extractor.getTrackFormat(audioTrack), null, null, 0)
+            val audioFormat = extractor.getTrackFormat(audioTrack)
+
+            // 修复：优先用软件解码器（hardware codecs 可能不支持某些格式如 MPEG-L2）
+            codec = try {
+                MediaCodec.createDecoderByType(mime)
+            } catch (e: Exception) {
+                Log.w("AsrBatch", "Hardware decoder failed for $mime: ${e.message}, trying software fallback")
+                // 查找所有解码器，优先选软件解码器（c2.android.* 或 OMX.google.*）
+                val codecName = try {
+                    android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
+                        .decoderInfos
+                        .filter { it.isEncoder.not() && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
+                        .sortedWith(compareBy<android.media.MediaCodecInfo> { if (it.name.startsWith("OMX.google.") || it.name.startsWith("c2.android.")) 0 else 1 })
+                        .firstOrNull()?.name
+                } catch (_: Throwable) { null }
+
+                if (codecName != null) {
+                    Log.i("AsrBatch", "Using software codec: $codecName for $mime")
+                    android.media.MediaCodec.createByCodecName(codecName)
+                } else {
+                    // 最后尝试 OMX.google.* 格式命名
+                    try {
+                        android.media.MediaCodec.createByCodecName("OMX.google.mp3.decoder")
+                    } catch (_: Exception) {
+                        throw android.media.MediaCodec.CodecException(
+                            "No decoder found for $mime on this device",
+                            android.media.MediaCodecInfo.CodecCapabilities.ERROR_UNSUPPORTED,
+                            0
+                        )
+                    }
+                }
+            }
+            codec.configure(audioFormat, null, null, 0)
             codec.start()
 
             val bufferInfo = MediaCodec.BufferInfo()
