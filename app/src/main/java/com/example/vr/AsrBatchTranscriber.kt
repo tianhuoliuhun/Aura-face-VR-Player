@@ -280,7 +280,14 @@ class AsrBatchTranscriber(private val context: Context) {
                         }
                     }
                 }
-                val outIdx = codec.dequeueOutputBuffer(bufferInfo, 10_000)
+                // 修复：超时增大到 1000ms（软件解码器需要更多时间），
+                // 并正确处理 INFO_* 返回值（格式变化/缓冲区不足，非真实错误）
+                val outIdx = codec.dequeueOutputBuffer(bufferInfo, 1000)
+                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED ||
+                    outIdx == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                    // 格式/缓冲变化，继续等下一次输出
+                    continue
+                }
                 if (outIdx >= 0) {
                     val outBuf = codec.getOutputBuffer(outIdx) ?: continue
                     val ptsUs = bufferInfo.presentationTimeUs
