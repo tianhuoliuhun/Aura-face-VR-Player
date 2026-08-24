@@ -55,8 +55,8 @@ val VoskModels: List<VoskModelOption> = listOf(
     ),
     VoskModelOption(
         VoskLanguage.ZH, VoskModelSize.LARGE, "中文 · 大模型",
-        "vosk-model-cn-0.3",
-        "https://alphacephei.com/vosk/models/vosk-model-cn-0.3.zip", 300
+        "vosk-model-cn-0.22",
+        "https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip", 1300
     ),
     VoskModelOption(
         VoskLanguage.EN, VoskModelSize.SMALL, "英文 · 小模型",
