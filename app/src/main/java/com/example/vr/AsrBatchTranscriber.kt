@@ -231,26 +231,28 @@ class AsrBatchTranscriber(private val context: Context) {
                 Log.w("AsrBatch", "Hardware decoder failed for $mime: ${e.message}, trying software fallback")
                 // 查找所有解码器，优先选软件解码器（c2.android.* 或 OMX.google.*）
                 val codecName = try {
-                    android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
-                        .decoderInfos
-                        .filter { it.isEncoder.not() && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
-                        .sortedWith(compareBy<android.media.MediaCodecInfo> { if (it.name.startsWith("OMX.google.") || it.name.startsWith("c2.android.")) 0 else 1 })
-                        .firstOrNull()?.name
+                    val mcl = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
+                    var found: String? = null
+                    for (info in mcl.codecInfos) {
+                        if (info.isEncoder) continue
+                        if (info.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) }) {
+                            found = info.name
+                            // 优先软件解码器（c2.android.* / OMX.google.*）
+                            if (info.name.startsWith("c2.android.") || info.name.startsWith("OMX.google.")) break
+                        }
+                    }
+                    found
                 } catch (_: Throwable) { null }
 
                 if (codecName != null) {
                     Log.i("AsrBatch", "Using software codec: $codecName for $mime")
                     android.media.MediaCodec.createByCodecName(codecName)
                 } else {
-                    // 最后尝试 OMX.google.* 格式命名
+                    // 最后尝试 OMX.google.* 格式命名（音频解码兜底）
                     try {
                         android.media.MediaCodec.createByCodecName("OMX.google.mp3.decoder")
                     } catch (_: Exception) {
-                        throw android.media.MediaCodec.CodecException(
-                            "No decoder found for $mime on this device",
-                            android.media.MediaCodecInfo.CodecCapabilities.ERROR_UNSUPPORTED,
-                            0
-                        )
+                        throw Exception("No decoder found for $mime on this device. The video's audio format is not supported.")
                     }
                 }
             }
