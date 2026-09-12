@@ -16,10 +16,21 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 117
-    versionName = "1.0.117"
+    versionCode = 118
+    versionName = "1.0.118"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+  }
+
+  // v118：QNN（高通 NPU）运行库必须以真实文件形式落在 nativeLibraryDir。
+  // targetSdk>=30 时 AGP 默认 extractNativeLibs=false：.so 以未压缩形式留在 APK 内、
+  // 不展开到 lib/<abi>/（实测安装后 /data/app/.../lib/arm64/ 为空）。
+  // 而 QnnConfig.backendLib/systemLib 要的是可 dlopen 的文件路径，且 ADSP_LIBRARY_PATH
+  // 也要指向能找到 libQnnHtpV*Skel.so 的真实目录 —— 故改回 legacy 打包让 .so 落盘。
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
   }
 
   signingConfigs {

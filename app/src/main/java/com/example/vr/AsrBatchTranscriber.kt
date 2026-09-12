@@ -91,7 +91,10 @@ class AsrBatchTranscriber(private val context: Context) {
             onStatus(statusMessage)
             val recognizer = SherpaAsrManager.createRecognizer(context, engine, language)
             if (recognizer == null) {
-                statusMessage = "$engineLabel 模型不可用，请先下载"
+                // v118：区分"没下载"与"初始化失败"——后者此前被误报成"请先下载"，误导排查方向
+                val reason = SherpaAsrManager.lastInitError
+                statusMessage = if (reason != null) "$engineLabel 不可用：$reason"
+                    else "$engineLabel 模型不可用，请先下载"
                 onStatus(statusMessage)
                 return@withContext null
             }

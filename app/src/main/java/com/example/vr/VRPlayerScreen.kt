@@ -916,7 +916,7 @@ fun VRPlayerScreen(
                                                 sherpaReady.value = SherpaAsrManager.isModelReady(context, asrEngineType)
                                             }
                                             val modelName = when (asrEngineType) { AsrEngineType.QWEN3 -> "Qwen3-ASR 0.6B"; AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN"; else -> "" }
-                                            val modelDesc = when (asrEngineType) { AsrEngineType.QWEN3 -> "29语言+20方言 · ~838MB"; AsrEngineType.SENSEVOICE_QNN -> "中英日韩粤 · SM8850专属 · ~161MB"; else -> "" }
+                                            val modelDesc = when (asrEngineType) { AsrEngineType.QWEN3 -> "29语言+20方言 · ~838MB"; AsrEngineType.SENSEVOICE_QNN -> "中英日韩粤 · 高通 NPU · ~161MB"; else -> "" }
                                             val modelSize = when (asrEngineType) { AsrEngineType.QWEN3 -> 838; AsrEngineType.SENSEVOICE_QNN -> 161; else -> 0 }
                                             Column(
                                                 modifier = Modifier
@@ -1009,16 +1009,23 @@ fun VRPlayerScreen(
 
                                                 // 下载按钮（未下载且未在下载时）
                                                 if (!sherpaReady.value && !SherpaAsrManager.isModelDownloading) {
+                                                    // v118：QNN 模型与 SoC 绑定，设备无对应模型时不该让用户白等下载
+                                                    val qnnSocOk = asrEngineType != AsrEngineType.SENSEVOICE_QNN ||
+                                                        SherpaAsrManager.senseVoiceModelDirName(context) != null
                                                     Text(
-                                                        text = "点击下载 $modelName（${modelSize}MB）",
-                                                        color = Color.White,
+                                                        text = if (qnnSocOk) "点击下载 $modelName（${modelSize}MB）"
+                                                        else "当前设备（${SherpaAsrManager.deviceSocName()}）无官方 QNN 模型，请改用 Qwen3-ASR",
+                                                        color = if (qnnSocOk) Color.White else Color(0xFFEF9A9A),
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .clip(RoundedCornerShape(6.dp))
-                                                            .background(AccentColor.copy(alpha = 0.85f))
-                                                            .clickable { SherpaAsrManager.startModelDownload(context, asrEngineType) }
+                                                            .background(
+                                                                if (qnnSocOk) AccentColor.copy(alpha = 0.85f)
+                                                                else Color.White.copy(alpha = 0.08f)
+                                                            )
+                                                            .clickable(enabled = qnnSocOk) { SherpaAsrManager.startModelDownload(context, asrEngineType) }
                                                             .padding(vertical = 8.dp),
                                                         textAlign = TextAlign.Center
                                                     )
@@ -4313,7 +4320,7 @@ fun VRPlayerScreen(
                                         text = when (asrEngineType) {
                                             AsrEngineType.VOSK -> "Vosk：离线识别（中/英/日），模型 40~1100MB，首次需下载"
                                             AsrEngineType.QWEN3 -> "Qwen3-ASR：29语言+20方言，CPU 推理，模型 ~940MB（首次需下载）"
-                                            AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN：中英日韩粤5语言，高通骁龙 NPU 加速（SM8850 专属），~241MB"
+                                            AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN：中英日韩粤5语言，高通骁龙 NPU 加速（按设备 SoC 自动匹配模型），~241MB"
                                         },
                                         color = Color.White.copy(alpha = 0.45f),
                                         fontSize = 8.sp,
@@ -4357,12 +4364,12 @@ fun VRPlayerScreen(
                                         }
                                         val modelName = when (asrEngineType) {
                                             AsrEngineType.QWEN3 -> "Qwen3-ASR 0.6B INT8"
-                                            AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN SM8850"
+                                            AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN ${SherpaAsrManager.deviceSocName()}"
                                             else -> ""
                                         }
                                         val modelDesc = when (asrEngineType) {
                                             AsrEngineType.QWEN3 -> "29语言 + 20方言 · ~838MB 下载 · ~940MB 解压"
-                                            AsrEngineType.SENSEVOICE_QNN -> "中英日韩粤 · SM8850 专属 · ~161MB 下载 · ~241MB 解压"
+                                            AsrEngineType.SENSEVOICE_QNN -> "中英日韩粤 · 高通 NPU · ~161MB 下载 · ~241MB 解压"
                                             else -> ""
                                         }
                                         val modelSizeMB = when (asrEngineType) {
@@ -4431,16 +4438,22 @@ fun VRPlayerScreen(
                                             }
                                             // 下载按钮
                                             if (!sherpaReady.value && !SherpaAsrManager.isModelDownloading) {
+                                                val qnnSocOk = asrEngineType != AsrEngineType.SENSEVOICE_QNN ||
+                                                    SherpaAsrManager.senseVoiceModelDirName(context) != null
                                                 Text(
-                                                    text = "点击下载 $modelName（${modelSizeMB}MB）",
-                                                    color = Color.White,
+                                                    text = if (qnnSocOk) "点击下载 $modelName（${modelSizeMB}MB）"
+                                                    else "当前设备（${SherpaAsrManager.deviceSocName()}）无官方 QNN 模型，请改用 Qwen3-ASR",
+                                                    color = if (qnnSocOk) Color.White else Color(0xFFEF9A9A),
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     textAlign = TextAlign.Center,
                                                     modifier = Modifier.fillMaxWidth()
                                                         .clip(RoundedCornerShape(6.dp))
-                                                        .background(AccentColor.copy(alpha = 0.85f))
-                                                        .clickable { SherpaAsrManager.startModelDownload(context, asrEngineType) }
+                                                        .background(
+                                                            if (qnnSocOk) AccentColor.copy(alpha = 0.85f)
+                                                            else Color.White.copy(alpha = 0.08f)
+                                                        )
+                                                        .clickable(enabled = qnnSocOk) { SherpaAsrManager.startModelDownload(context, asrEngineType) }
                                                         .padding(vertical = 7.dp)
                                                 )
                                             }
