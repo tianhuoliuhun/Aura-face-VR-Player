@@ -24,6 +24,10 @@ FALLBACK = {
     "com.squareup.*": "Apache-2.0",
     "io.github.kyant0:backdrop": "Apache-2.0",
     "com.alphacephei:vosk-android": "Apache-2.0",
+    "com.googlecode.soundlibs:jlayer": "LGPL-2.1",
+    "commons-codec:commons-codec": "Apache-2.0",
+    "commons-io:commons-io": "Apache-2.0",
+    "org.apache.commons:*": "Apache-2.0",
     "eu.agno3.jcifs:jcifs-ng": "LGPL-2.1-or-later",
     "net.java.dev.jna:jna": "LGPL-2.1-or-later OR Apache-2.0",
     "org.bouncycastle:*": "MIT",
@@ -55,9 +59,12 @@ EXTRA = [
 ]
 
 def glob_fallback(group, name):
-    """按通配前缀查兜底映射"""
+    """按精确坐标 / 通配前缀查兜底映射"""
     gid = f"{group}:{name}"
     for pat, lic in FALLBACK.items():
+        # 精确坐标（如 com.googlecode.soundlibs:jlayer）
+        if pat == gid:
+            return lic
         if pat.endswith(":*"):
             if glob.fnmatch.fnmatch(group, pat[:-2] + "*"):
                 return lic

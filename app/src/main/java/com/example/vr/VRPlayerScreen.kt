@@ -2185,19 +2185,14 @@ fun VRPlayerScreen(
         }
     }
 
-    // Effect that triggers when the media selection changes or decoder settings change
-    LaunchedEffect(selectedMediaItem, photoReloadTrigger, isSoftwareDecoding, decoderEngine) {
-        keepUiAlight()
-        val view = currentGlSurfaceView ?: return@LaunchedEffect
-
-        // Standard clean transition
+    // v117 修复(#6)：把“当前媒体 → 渲染器/播放器”的绑定抽成局部函数。
+    // 原先这段绑定逻辑与“打开视频时的默认视角初始化”挤在同一个 effect 里，而该 effect 的
+    // key 混入了 isSoftwareDecoding / decoderEngine / photoReloadTrigger —— 于是用户只要切换
+    // “硬解/软解”或更换解码器引擎，正在看的投影模式（180°/360°/平面）、手动选的立体模式、
+    // 已开启的陀螺仪都会被无声重置。现在绑定与视角初始化彻底分离。
+    suspend fun rebindCurrentMediaToRenderer() {
+        val view = currentGlSurfaceView ?: return
         if (selectedMediaItem.isVideo) {
-            // Default to 180° Dome, Left visual eye perspective, SBS 3D, and disable gyroscope when video opened
-            projectionMode = ProjectionMode.VR_180
-            domeHalfSelect = 1
-            isGyroEnabled = false
-            stereoMode = StereoMode.SBS
-
             // Video active
             view.renderer.isVideoActive = true
             // If it is a video, VRGLRenderer onVideoSurfaceCreated callback will trigger video player binding!
@@ -2226,6 +2221,38 @@ fun VRPlayerScreen(
                 }
             }
             view.updateImage(bmp)
+        }
+    }
+
+    // Effect A：只在“换媒体”时触发 —— 应用一次打开视频的默认视角，再绑定新媒体。
+    LaunchedEffect(selectedMediaItem) {
+        keepUiAlight()
+        if (currentGlSurfaceView == null) return@LaunchedEffect
+
+        if (selectedMediaItem.isVideo) {
+            // Default to 180° Dome, Left visual eye perspective, SBS 3D, and disable gyroscope when video opened
+            projectionMode = ProjectionMode.VR_180
+            domeHalfSelect = 1
+            isGyroEnabled = false
+            stereoMode = StereoMode.SBS
+        }
+        rebindCurrentMediaToRenderer()
+    }
+
+    // Effect B：解码设置 / 容器修复变更时触发 —— 只重建播放器，**不再改动视角设置**，
+    // 并接着原播放位置继续，避免切换解码方式后从头播放。
+    var decoderRebindSeen by remember { mutableStateOf(false) }
+    LaunchedEffect(isSoftwareDecoding, decoderEngine, photoReloadTrigger) {
+        if (!decoderRebindSeen) {
+            // 首次组合时上面的 Effect A 已经完成绑定，这里跳过，避免重复创建播放器
+            decoderRebindSeen = true
+            return@LaunchedEffect
+        }
+        keepUiAlight()
+        val resumeAt = playerInstance?.currentPosition ?: 0L
+        rebindCurrentMediaToRenderer()
+        if (resumeAt > 0L) {
+            playerInstance?.seekTo(resumeAt)
         }
     }
 
@@ -2270,15 +2297,6 @@ fun VRPlayerScreen(
         }
     }
 
-    // Release ExoPlayer when screen disappears
-    DisposableEffect(Unit) {
-        onDispose {
-            playerInstance?.release()
-            playerInstance = null
-            currentGlSurfaceView?.release()
-        }
-    }
-
     // Progress updates tracking
     LaunchedEffect(isVideoPlaying) {
         while (isVideoPlaying) {
@@ -2305,11 +2323,50 @@ fun VRPlayerScreen(
         currentGlSurfaceView?.let { view -> VRSensorManager(context, view.renderer) }
     }
 
+    // 陀螺仪朝向模式：手持横屏举着看 / 放进 VR 眼镜平放看。
+    // 两种握持下"屏幕上方"对应的设备轴完全不同，用错会导致低头时画面左右转等错乱。
+    var gyroOrientationMode by remember { mutableStateOf(VRSensorManager.OrientationMode.HANDHELD) }
+
+    LaunchedEffect(gyroOrientationMode, sensorManager) {
+        sensorManager?.setOrientationMode(gyroOrientationMode)
+    }
+
+    // 双击重置视角用的信号量。
+    // 不直接在 onDoubleTap 里调 sensorManager.recenter() 的原因：AndroidView 的 factory
+    // 只在首次组合时执行一次，其内部闭包会永久捕获那一刻的 sensorManager（此时还是 null，
+    // 因为 currentGlSurfaceView 尚未被赋值），调用会静默失效。
+    // 而 MutableState 是 remember 出来的同一实例，闭包读取永远拿到最新值。
+    var recenterViewSignal by remember { mutableStateOf(0) }
+
+    LaunchedEffect(recenterViewSignal) {
+        if (recenterViewSignal > 0) sensorManager?.recenter()
+    }
+
     LaunchedEffect(isGyroEnabled, sensorManager) {
         if (isGyroEnabled) {
             sensorManager?.start()
         } else {
             sensorManager?.stop()
+        }
+    }
+
+    // 传感器注销：key 必须带上 sensorManager。
+    // 若写成 DisposableEffect(Unit)，onDispose 会一直持有首次组合时的闭包快照
+    // （那时 currentGlSurfaceView 还是 null、sensorManager 也是 null），stop() 永不会执行。
+    DisposableEffect(sensorManager) {
+        onDispose {
+            // registerListener 会让 SensorEventListener 长期持有 Activity 与 renderer 的
+            // 强引用，页面销毁时不注销会持续后台耗电并泄漏整个页面。
+            sensorManager?.stop()
+        }
+    }
+
+    // Release ExoPlayer when screen disappears
+    DisposableEffect(Unit) {
+        onDispose {
+            playerInstance?.release()
+            playerInstance = null
+            currentGlSurfaceView?.release()
         }
     }
 
@@ -2360,6 +2417,9 @@ fun VRPlayerScreen(
                                 manualYaw = 0f
                                 manualPitch = 0f
                             }
+                            // 陀螺仪开启时，重置视角还必须重新对齐姿态基准：
+                            // 传感器给的是绝对姿态，只清 manualYaw/Pitch 无法消除朝向偏移。
+                            if (isGyroEnabled) recenterViewSignal++
                         }
                     }
                     currentGlSurfaceView = this
@@ -3634,6 +3694,49 @@ fun VRPlayerScreen(
                                     }
                                 }
 
+                                // 陀螺仪朝向模式：决定"头部转动"如何映射为画面视角。
+                                // 手持横屏与 VR 眼镜平放时正确的轴向完全不同，选错会导致方向错乱。
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("陀螺仪朝向模式", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        listOf(
+                                            VRSensorManager.OrientationMode.HANDHELD to "手持横屏",
+                                            VRSensorManager.OrientationMode.VR_BOX to "VR眼镜平放"
+                                        ).forEach { (mode, label) ->
+                                            val isSelected = gyroOrientationMode == mode
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(32.dp)
+                                                    .background(
+                                                        if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .clickable {
+                                                        gyroOrientationMode = mode
+                                                        keepUiAlight()
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelected) AccentOnColor else Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = "手持横屏举着看选「手持」；手机放进 VR 眼镜透过屏幕看选「平放」。切换时自动以当前朝向为视角原点，双击画面可随时重置视角。仅 360°/180°/盒子模式生效",
+                                        color = Color.White.copy(alpha = 0.4f),
+                                        fontSize = 8.sp
+                                    )
+                                }
+
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("音频声道镜像", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
@@ -4392,6 +4495,38 @@ fun VRPlayerScreen(
                                         prefs.edit().putString("subtitle_search_api_key", it).apply()
                                     },
                                     defaultSearchQuery = selectedMediaItem.title,
+                                    // v117 修复：此前未接线，落到 SubtitleSettingsPanel 里的空实现默认值，
+                                    // 于是"已下载并加载"只是文案 —— 文件从未被解析，字幕永远不显示。
+                                    onSubtitleFileLoaded = { file ->
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val content = file.readText()
+                                                val cues = SubtitleParser.parseSrtOrVtt(content)
+                                                withContext(Dispatchers.Main) {
+                                                    loadedSubtitleCues = cues
+                                                    loadedSubtitleFileName = file.name
+                                                    isSubtitleEnabled = true
+                                                    Toast.makeText(
+                                                        context,
+                                                        "在线字幕已加载 ${cues.size} 条",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                    if (subtitleTranslator.config.isEnabled) {
+                                                        subtitleTranslator.translateCuesBatch(cues)
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("VRPlayerScreen", "在线字幕解析失败", e)
+                                                withContext(Dispatchers.Main) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "字幕解析失败: ${e.message}",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
+                                        }
+                                    },
                                     translator = subtitleTranslator,
                                     onTranslateFileRequested = { subtitleTranslator.translateCuesBatch(loadedSubtitleCues) },
                                     accentColor = AccentColor,

@@ -52,16 +52,20 @@ object LutUtils {
             if (t.isEmpty() || t.startsWith("#")) continue
             val lower = t.lowercase()
             if (lower.startsWith("title")) continue
+            // v117 修复：.cube 的标准写法是大写（LUT_3D_SIZE / DOMAIN_MIN / DOMAIN_MAX），
+            // 这里必须用已小写化的 lower 去截取。原先用原始行 t 截取时，因 "LUT_3D_SIZE 33"
+            // 里找不到小写分隔符，substringAfter 会返回整行本身，随后 toInt() 抛
+            // NumberFormatException —— 导致内置 12 个 LUT 与 Adobe 标准写法导入的 cube 全部失效。
             if (lower.startsWith("lut_3d_size")) {
-                size = t.substringAfter("lut_3d_size").trim().toInt()
+                size = lower.substringAfter("lut_3d_size").trim().toIntOrNull() ?: size
                 continue
             }
             if (lower.startsWith("domain_min")) {
-                domainMin = parseVec3(t.substringAfter("domain_min"))
+                domainMin = parseVec3(lower.substringAfter("domain_min"))
                 continue
             }
             if (lower.startsWith("domain_max")) {
-                domainMax = parseVec3(t.substringAfter("domain_max"))
+                domainMax = parseVec3(lower.substringAfter("domain_max"))
                 continue
             }
             val parts = t.split(Regex("\\s+"))

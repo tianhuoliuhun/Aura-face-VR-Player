@@ -6,10 +6,15 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import android.util.Log
+import javazoom.jl.decoder.Bitstream
+import javazoom.jl.decoder.Decoder
+import javazoom.jl.decoder.SampleBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
+import java.nio.ByteBuffer
 
 /**
  * v110：后台批处理转写（双引擎：Vosk / Qwen3-ASR via sherpa-onnx）
@@ -196,11 +201,36 @@ class AsrBatchTranscriber(private val context: Context) {
     )
 
     /**
-     * 通用音频提取 + 分块喂入框架：用 MediaExtractor + MediaCodec 解码音频，
-     * 按 100ms 分块，VAD 过滤后喂入 recognizeBlock。
+     * 通用音频提取 + 分块喂入框架。
+     * 先尝试 MediaExtractor + MediaCodec（最快），失败则回退到 ExoPlayer（支持所有音频格式）。
      * @param recognizeBlock 接收 [0,1] 归一化 16kHz 单声道 PCM float 采样，返回识别结果
      */
     private fun extractAndRecognizeGeneric(
+        mediaUri: Uri,
+        onProgress: (Float) -> Unit,
+        recognizeBlock: (FloatArray) -> AsrSegmentResult
+    ): List<SubtitleCue> {
+        // 尝试 MediaExtractor + MediaCodec（快速路径）
+        return try {
+            extractWithMediaCodec(mediaUri, onProgress, recognizeBlock)
+        } catch (e: Exception) {
+            // 兜底：纯 Java 软件解码（JLayer）。
+            // 典型场景是 MPEG-1 Audio Layer II（Android 里 MIME 为 audio/mpeg-L2）：
+            // 它在 Android 上属"可选支持"格式，不少机型（实测骁龙8 Elite / SM8850）
+            // 虽声明了对应解码器，却会在 configure 阶段失败，报
+            // "Failed to initialize audio/mpeg-L2, error 0x..."。
+            // 这种情况 ExoPlayer 也救不了（它内部同样走 MediaCodec），只有自带解码器才行。
+            Log.w("AsrBatch", "MediaCodec 解码失败（${e.message}），回退到软件解码器...")
+            statusMessage = "系统解码器不可用，正在用软件解码器解码（速度较慢）..."
+            extractWithSoftwareMpegDecoder(mediaUri, onProgress, recognizeBlock)
+        }
+    }
+
+    /**
+     * 快速路径：直接用 MediaExtractor + MediaCodec 解码。
+     * 正常格式（AAC/MP3/OGG/WAV 等）都能走这条路。
+     */
+    private fun extractWithMediaCodec(
         mediaUri: Uri,
         onProgress: (Float) -> Unit,
         recognizeBlock: (FloatArray) -> AsrSegmentResult
@@ -230,20 +260,16 @@ class AsrBatchTranscriber(private val context: Context) {
             extractor.selectTrack(audioTrack)
             Log.i("AsrBatch", "audio track: mime=$mime durationUs=$durationUs")
 
-            // v116+：硬件解码器缺失时自动回退软件解码器（优先 c2.android.*）
-            // 兜底策略：audio/mpeg（MPEG-L2）在骁龙8 Elite 等新平台无硬件解码，
-            // 但 OMX.google.mp3.decoder / c2.android.mp3.decoder 作为软件实现始终可用
             codec = try {
                 MediaCodec.createDecoderByType(mime)
             } catch (e: Exception) {
                 Log.w("AsrBatch", "Hardware decoder failed for $mime (${e.message}), searching software decoder...")
-                // 遍历所有解码器，优先选 c2.android.*（最新软实现）或 OMX.google.*
                 val swName = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
                     .codecInfos
                     .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
                     .sortedBy { info ->
                         when {
-                            info.name.startsWith("c2.android.") -> 0  // 最优先
+                            info.name.startsWith("c2.android.") -> 0
                             info.name.startsWith("OMX.google.") -> 1
                             else -> 2
                         }
@@ -263,56 +289,41 @@ class AsrBatchTranscriber(private val context: Context) {
             val bufferInfo = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false
-
             val cues = mutableListOf<SubtitleCue>()
             var monoBuf = FloatArray(0)
-            var chunkStartUs = 0L
-            var sentenceStartUs = 0L
-            var lastEndUs = 0L
-            var outputRate = 16000
-            var outputChannels = 1
-            var silentRunMs = 0L
-            var fedSilenceReset = false
+            var chunkStartUs = 0L; var sentenceStartUs = 0L; var lastEndUs = 0L
+            var outputRate = 16000; var outputChannels = 1
+            var silentRunMs = 0L; var fedSilenceReset = false
 
             while (!outputDone) {
-                // 输入：喂数据给解码器
                 if (!inputDone) {
                     val inIdx = codec.dequeueInputBuffer(10_000)
                     if (inIdx >= 0) {
                         val inBuf = codec.getInputBuffer(inIdx) ?: continue
-                        val sampleSize = extractor.readSampleData(inBuf, 0)
-                        if (sampleSize < 0) {
-                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputDone = true
+                        val sz = extractor.readSampleData(inBuf, 0)
+                        if (sz < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); inputDone = true
                         } else {
-                            codec.queueInputBuffer(inIdx, 0, sampleSize, extractor.sampleTime, 0)
-                            extractor.advance()
+                            codec.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0); extractor.advance()
                         }
                     }
                 }
-
-                // 输出：取解码后的 PCM 数据
                 val outIdx = codec.dequeueOutputBuffer(bufferInfo, 500)
                 if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val fmt = codec.outputFormat
                     if (fmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) outputRate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                     if (fmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) outputChannels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                    Log.i("AsrBatch", "output format: rate=$outputRate channels=$outputChannels")
                     continue
                 }
-                if (outIdx == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                    continue
-                }
-                if (outIdx < 0) continue  // INFO_TRY_AGANCE_LATER 等，正常
+                if (outIdx == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) { continue }
+                if (outIdx < 0) { continue }
 
-                // 正常输出缓冲
                 val outBuf = codec.getOutputBuffer(outIdx) ?: continue
                 val ptsUs = bufferInfo.presentationTimeUs
                 val bytes = ByteArray(bufferInfo.size)
                 outBuf.get(bytes)
-                codec.releaseOutputBuffer(outIdx, true)  // true = 渲染到 AudioTrack（让解码器正确推进）
+                codec.releaseOutputBuffer(outIdx, true)
 
-                // PCM16 交错 → mono float
                 val frames = bytes.size / (2 * outputChannels.coerceAtLeast(1))
                 val mono = FloatArray(frames)
                 for (f in 0 until frames) {
@@ -324,7 +335,6 @@ class AsrBatchTranscriber(private val context: Context) {
                     mono[f] = sum / outputChannels.coerceAtLeast(1).toFloat() / 32768f
                 }
 
-                // 累积并喂识别器（每 100ms 一块）
                 val combined = FloatArray(monoBuf.size + mono.size)
                 System.arraycopy(monoBuf, 0, combined, 0, monoBuf.size)
                 System.arraycopy(mono, 0, combined, monoBuf.size, mono.size)
@@ -336,14 +346,9 @@ class AsrBatchTranscriber(private val context: Context) {
                     monoBuf = monoBuf.copyOfRange(chunkLen, monoBuf.size)
                     if (chunkStartUs == 0L) chunkStartUs = ptsUs.coerceAtLeast(0L)
                     if (sentenceStartUs == 0L) sentenceStartUs = chunkStartUs
-
                     var rms = 0f; for (s in chunk) rms += s * s; rms = kotlin.math.sqrt(rms / chunk.size)
                     val isSilent = rms < VAD_THRESHOLD
-                    val shouldFeed = if (isSilent) {
-                        silentRunMs += 100L
-                        if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false
-                    } else { silentRunMs = 0L; fedSilenceReset = false; true }
-
+                    val shouldFeed = if (isSilent) { silentRunMs += 100L; if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false } else { silentRunMs = 0L; fedSilenceReset = false; true }
                     if (shouldFeed) {
                         val resampled = resampleLinear(chunk, outputRate, 16000)
                         val result = recognizeBlock(resampled)
@@ -355,39 +360,214 @@ class AsrBatchTranscriber(private val context: Context) {
                             } else if (sentenceStartUs > 0 && result.needsReset) {
                                 val endUs = chunkStartUs + 100_000L
                                 cues.add(SubtitleCue(cues.size + 1, (sentenceStartUs / 1000).coerceAtLeast(0L), (endUs / 1000).coerceAtLeast(sentenceStartUs / 1000 + 500), result.text))
-                                lastEndUs = endUs; sentenceStartUs = 0L
-                                sentenceElapsedMs = 0L
+                                lastEndUs = endUs; sentenceStartUs = 0L; sentenceElapsedMs = 0L
                             }
                         }
                     }
                     chunkStartUs += 100_000L
                 }
-
-                if (durationUs > 0) {
-                    val p = (ptsUs.toFloat() / durationUs).coerceIn(0f, 1f)
-                    progress = p; onProgress(p)
-                }
-                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                    outputDone = true
-                }
+                if (durationUs > 0) { val p = (ptsUs.toFloat() / durationUs).coerceIn(0f, 1f); progress = p; onProgress(p) }
+                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
             }
-
-            // 收尾：处理剩余缓冲
             val endUs = chunkStartUs + 100_000L
             if (monoBuf.isNotEmpty()) {
                 val resampled = resampleLinear(monoBuf, outputRate, 16000)
                 val result = recognizeBlock(resampled)
-                if (result.text.isNotBlank()) {
-                    cues.add(SubtitleCue(cues.size + 1, sentenceStartUs.coerceAtLeast(0L) / 1000, endUs.coerceAtLeast(sentenceStartUs / 1000 + 500), result.text))
-                }
+                if (result.text.isNotBlank()) cues.add(SubtitleCue(cues.size + 1, sentenceStartUs.coerceAtLeast(0L) / 1000, endUs.coerceAtLeast(sentenceStartUs / 1000 + 500), result.text))
             }
             progress = 1f; onProgress(1f)
-            Log.i("AsrBatch", "decode done: ${cues.size} cues")
+            Log.i("AsrBatch", "MediaCodec done: ${cues.size} cues")
             return cues
         } finally {
             try { codec?.stop() } catch (_: Exception) {}
             try { codec?.release() } catch (_: Exception) {}
             try { extractor.release() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 兜底路径：纯 Java 软件解码（JLayer，支持 MPEG-1/2/2.5 的 Layer I/II/III）。
+     *
+     * 为什么需要它：MediaCodec 只能解"设备自带解码器"的格式。MPEG-1 Audio Layer II
+     * （Android 里的 MIME 是 audio/mpeg-L2）在 Android 上属于可选支持格式，很多机型
+     * 虽声明了对应解码器却在 configure 阶段失败（Failed to initialize audio/mpeg-L2）。
+     * 这类问题 ExoPlayer 同样无解——它内部还是走 MediaCodec，只有自带解码器才行。
+     *
+     * 实现：MediaExtractor 只负责"拆容器"取出原始 MPEG 音频帧流，真正的解码交给 JLayer。
+     */
+    private fun extractWithSoftwareMpegDecoder(
+        mediaUri: Uri,
+        onProgress: (Float) -> Unit,
+        recognizeBlock: (FloatArray) -> AsrSegmentResult
+    ): List<SubtitleCue> {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, mediaUri, null)
+
+            // 选择音频轨（顺带记下时长，用于估算进度）
+            var audioTrack = -1
+            var mime = ""
+            var durationUs = 0L
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                val m = f.getString(MediaFormat.KEY_MIME) ?: continue
+                if (m.startsWith("audio/")) {
+                    audioTrack = i; mime = m
+                    durationUs = if (f.containsKey(MediaFormat.KEY_DURATION)) f.getLong(MediaFormat.KEY_DURATION) else 0L
+                    break
+                }
+            }
+            if (audioTrack < 0) {
+                Log.e("AsrBatch", "software decode: no audio track")
+                return emptyList()
+            }
+            extractor.selectTrack(audioTrack)
+            Log.i("AsrBatch", "software decode start: mime=$mime durationUs=$durationUs")
+
+            val bitstream = Bitstream(ExtractorInputStream(extractor))
+            val decoder = Decoder()
+
+            val cues = mutableListOf<SubtitleCue>()
+            var monoBuf = FloatArray(0)
+            var chunkStartMs = 0L; var sentenceStartMs = 0L
+            var silentRunMs = 0L; var fedSilenceReset = false
+            var sampleRate = 16000
+            var frameCount = 0
+            var decodedSamplesPerChannel = 0L
+
+            while (true) {
+                // 逐帧读取 MPEG 音频帧。流结束或数据损坏都会让 readFrame 返回 null / 抛异常，
+                // 两种都按"解码结束"处理（已解出的部分仍然保留）。
+                val header = try {
+                    bitstream.readFrame()
+                } catch (e: javazoom.jl.decoder.BitstreamException) {
+                    Log.w("AsrBatch", "software decode: bitstream ended (${e.message})")
+                    null
+                } ?: break
+
+                val output = try {
+                    decoder.decodeFrame(header, bitstream) as? SampleBuffer
+                } catch (e: Exception) {
+                    Log.w("AsrBatch", "software decode: frame decode failed (${e.message})")
+                    null
+                } finally {
+                    try { bitstream.closeFrame() } catch (_: Exception) {}
+                }
+                if (output == null) continue
+
+                sampleRate = output.sampleFrequency
+                val channels = output.channelCount.coerceAtLeast(1)
+                val pcm = output.buffer
+                val frames = output.bufferLength / channels
+                decodedSamplesPerChannel += frames
+
+                // 降混单声道并归一化到 [-1,1]
+                val mono = FloatArray(frames)
+                for (f in 0 until frames) {
+                    var sum = 0
+                    for (c in 0 until channels) {
+                        val idx = f * channels + c
+                        if (idx < pcm.size) sum += pcm[idx].toInt()
+                    }
+                    mono[f] = sum / channels.toFloat() / 32768f
+                }
+
+                val combined = FloatArray(monoBuf.size + mono.size)
+                System.arraycopy(monoBuf, 0, combined, 0, monoBuf.size)
+                System.arraycopy(mono, 0, combined, monoBuf.size, mono.size)
+                monoBuf = combined
+
+                // 与 MediaCodec 路径保持一致：按 100ms 分块 + VAD 过滤后喂入识别器
+                val chunkLen = (sampleRate / 10).coerceAtLeast(160)
+                while (monoBuf.size >= chunkLen) {
+                    val chunk = monoBuf.copyOfRange(0, chunkLen)
+                    monoBuf = monoBuf.copyOfRange(chunkLen, monoBuf.size)
+                    if (sentenceStartMs == 0L) sentenceStartMs = chunkStartMs
+
+                    var rms = 0f; for (s in chunk) rms += s * s; rms = kotlin.math.sqrt(rms / chunk.size)
+                    val isSilent = rms < VAD_THRESHOLD
+                    val shouldFeed = if (isSilent) { silentRunMs += 100L; if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false } else { silentRunMs = 0L; fedSilenceReset = false; true }
+                    if (shouldFeed) {
+                        val resampled = resampleLinear(chunk, sampleRate, 16000)
+                        val result = recognizeBlock(resampled)
+                        if (result.text.isNotBlank()) {
+                            if (result.isFinal) {
+                                val endMs = chunkStartMs + 100
+                                cues.add(SubtitleCue(cues.size + 1, sentenceStartMs.coerceAtLeast(0L), endMs.coerceAtLeast(sentenceStartMs + 500), result.text))
+                                sentenceStartMs = 0L
+                            } else if (sentenceStartMs > 0 && result.needsReset) {
+                                val endMs = chunkStartMs + 100
+                                cues.add(SubtitleCue(cues.size + 1, sentenceStartMs.coerceAtLeast(0L), endMs.coerceAtLeast(sentenceStartMs + 500), result.text))
+                                sentenceStartMs = 0L; sentenceElapsedMs = 0L
+                            }
+                        }
+                    }
+                    chunkStartMs += 100
+                }
+
+                // 软件解码比 MediaCodec 慢，进度不必每帧刷新（每 16 帧约 0.4 秒一次）
+                frameCount++
+                if (durationUs > 0 && frameCount % 16 == 0) {
+                    val decodedUs = decodedSamplesPerChannel * 1_000_000L / sampleRate.coerceAtLeast(1)
+                    val p = (decodedUs.toFloat() / durationUs).coerceIn(0f, 1f)
+                    progress = p; onProgress(p)
+                }
+            }
+
+            // 收尾：剩余不足一块的采样也送一次识别
+            if (monoBuf.isNotEmpty()) {
+                val resampled = resampleLinear(monoBuf, sampleRate, 16000)
+                val result = recognizeBlock(resampled)
+                if (result.text.isNotBlank()) {
+                    cues.add(SubtitleCue(cues.size + 1, sentenceStartMs.coerceAtLeast(0L), (chunkStartMs + 500).coerceAtLeast(sentenceStartMs + 500), result.text))
+                }
+            }
+
+            progress = 1f; onProgress(1f)
+            Log.i("AsrBatch", "software decode done: frames=$frameCount cues=${cues.size}")
+            return cues
+        } finally {
+            try { extractor.release() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 把 MediaExtractor 的采样数据包装成顺序 InputStream，供 JLayer 逐帧读取。
+     * JLayer 只做顺序读取（不需要 seek），因此这里维护一个滑动缓冲：
+     * 缓冲耗尽时向 MediaExtractor 要下一个采样。
+     */
+    private class ExtractorInputStream(private val extractor: MediaExtractor) : InputStream() {
+        private val buffer = ByteBuffer.allocate(256 * 1024)
+        private var pos = 0
+        private var limit = 0
+        private var eos = false
+
+        override fun read(): Int {
+            if (!fill()) return -1
+            return buffer.get(pos++).toInt() and 0xFF
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
+            if (!fill()) return -1
+            val n = minOf(len, limit - pos)
+            buffer.position(pos)
+            buffer.get(b, off, n)
+            pos += n
+            return n
+        }
+
+        /** 缓冲空了就取下一个采样；返回 false 表示流已结束 */
+        private fun fill(): Boolean {
+            if (pos < limit) return true
+            if (eos) return false
+            buffer.clear()
+            val size = extractor.readSampleData(buffer, 0)
+            if (size <= 0) { eos = true; return false }
+            extractor.advance()
+            pos = 0
+            limit = size
+            return true
         }
     }
 

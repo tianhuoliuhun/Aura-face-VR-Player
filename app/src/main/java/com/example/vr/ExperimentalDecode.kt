@@ -37,7 +37,8 @@ object ExperimentalDecode {
             try {
                 val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
                 for (info in list.codecInfos) {
-                    if (info.isEncoder || !info.isHardwareAccelerated) continue
+                    // v117：改用兼容 API 24 的判断，避免 Android 7/8/9 上 isHardwareAccelerated() 抛 NoSuchMethodError
+                    if (info.isEncoder || !DecoderCapabilities.isHardwareAccelerated(info)) continue
                     if (!info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) }) continue
                     try {
                         val caps = info.getCapabilitiesForType(mimeType)

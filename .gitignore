@@ -24,3 +24,13 @@ keystore.properties
 
 # v107：Firebase 配置（含项目标识，勿提交公开仓库；放置后构建自动启用统计）
 google-services.json
+
+# v117：Android 构建产物。注意 `/build` 只匹配根目录，app/build 可达数 GB，
+# 必须单独忽略，否则首次提交会把整个构建目录（含 400MB+ APK）塞进仓库。
+/app/build
+
+# v117：本项目约定「改动前留备份」(.bak)，备份属本地安全网，不入仓
+*.bak*
+
+# v117：WorkBuddy 本地工作数据（含本机绝对路径与个人记忆），不入仓
+.workbuddy/

@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 116
-    versionName = "1.0.116"
+    versionCode = 117
+    versionName = "1.0.117"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -70,16 +70,15 @@ android {
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
 
-  // v111：按 ABI 分包（arm64-v8a 专用包，减小体积；universal 包通过注释 splits 构建）
-  // 注意：QNN so 库仅存在于 arm64-v8a，故保留该专用包；其余架构用户请使用全架构包
-  // 注释掉 splits 块后构建 assembleRelease 即可得到全架构 universal APK（约 391MB）
-  splits {
-    abi {
-      isEnable = true
-      reset()
-      include(*listOf("arm64-v8a").toTypedArray())
-    }
-  }
+  // v111：ABI 分包（当前注释掉 = 构建全架构 universal 包，约 391MB）
+  // 若要出 arm64 专用包，取消注释下面几行：
+  // splits {
+  //   abi {
+  //     isEnable = true
+  //     reset()
+  //     include(*listOf("arm64-v8a").toTypedArray())
+  //   }
+  // }
 }
 
 // v107：Firebase Analytics 条件启用。
@@ -165,6 +164,11 @@ dependencies {
   implementation("androidx.media3:media3-effect:1.4.1")
   // Real Vosk offline speech recognition (Kaldi based, on-device ASR)
   implementation("com.alphacephei:vosk-android:0.3.75")
+  // v117：纯 Java MPEG 音频软件解码兜底（JLayer，LGPL-2.1）
+  // 背景：MPEG-1 Audio Layer II（Android 里的 MIME 是 audio/mpeg-L2）在 Android 上属可选格式，
+  // 部分机型（实测骁龙8 Elite / SM8850）没有可用解码器，导致字幕生成的音轨解码失败；
+  // JLayer 支持 MPEG-1/2/2.5 的 Layer I/II/III 解码，作为 MediaCodec 失败后的兜底。
+  implementation("com.googlecode.soundlibs:jlayer:1.0.1.4")
   // SMB client for LAN playback
   implementation("eu.agno3.jcifs:jcifs-ng:2.1.8")
   // v107：用户统计（隐私合规：用户同意后才采集，见 AnalyticsManager）

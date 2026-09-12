@@ -1,6 +1,8 @@
 package com.example.vr
 
+import android.media.MediaCodecInfo
 import android.media.MediaCodecList
+import android.os.Build
 import android.util.Log
 
 /**
@@ -19,6 +21,25 @@ object DecoderCapabilities {
     )
 
     /**
+     * v117 修复：判断编解码器是否为硬件实现。
+     *
+     * `MediaCodecInfo.isHardwareAccelerated()` 是 **API 29（Android 10）** 才引入的方法，
+     * 而本应用 `minSdk = 24`。在 Android 7/8/9 上直接调用会抛 `NoSuchMethodError` ——
+     * 它是 `Error` 而非 `Exception`，外层 `catch (e: Exception)` 完全拦不住，直接崩溃。
+     * 因此低版本改用编解码器名称的启发式判断（AOSP 与各厂商的软件解码器均有固定命名特征）。
+     */
+    fun isHardwareAccelerated(info: MediaCodecInfo): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return info.isHardwareAccelerated
+        }
+        val name = info.name.lowercase()
+        return !(name.startsWith("omx.google.") ||
+            name.startsWith("c2.android.") ||
+            name.contains(".sw.") ||
+            name.contains("software"))
+    }
+
+    /**
      * Returns the largest resolution supported by any hardware decoder for the
      * given mime type, or null when no hardware decoder exists.
      */
@@ -26,7 +47,7 @@ object DecoderCapabilities {
         val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
         var best: DecoderCap? = null
         for (info in list.codecInfos) {
-            if (info.isEncoder || !info.isHardwareAccelerated) continue
+            if (info.isEncoder || !isHardwareAccelerated(info)) continue
             val supported = info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) }
             if (!supported) continue
             try {

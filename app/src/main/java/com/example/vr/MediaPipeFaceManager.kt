@@ -138,7 +138,10 @@ class MediaPipeFaceManager(private val context: Context) {
                         mouthX = mouthX,
                         mouthY = mouthY,
                         chinX = chin.x(),
-                        chinY = chin.y()
+                        chinY = chin.y(),
+                        // v117 修复：此前漏传该字段（默认 false），于是 shader 里 uHasDetailed 恒为 0，
+                        // MediaPipe 算出的眼/嘴/下巴精细点位全部被丢弃，只能退回粗略中心锚点。
+                        hasDetailedLandmarks = true
                     )
                 }
             }
