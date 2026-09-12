@@ -1,0 +1,8 @@
+{
+  "name": "美颜VR播放器2.0",
+  "description": "支持多种格式影像内容（360°/180°全景、标准及鱼眼镜头，兼容3D SBS/立体）的专业智能手机美颜VR播放器，内置实时肤色瑕疵平滑美颜、体感陀螺仪操控、触屏捏合缩放及UI误操作两秒自动隐藏，为您带来极致沉浸的视听盛宴。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
