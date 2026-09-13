@@ -19,6 +19,10 @@
   - 3D stereo: Side-by-Side and Top-and-Bottom formats
 - 体感操控：陀螺仪视角跟随，支持手动偏移、重置视角中心
   - Gyro control: head-tracking view, manual offset, recenter
+- 陀螺仪朝向模式：**手持横屏** / **VR 眼镜平放**两种轴向映射；另提供「反转陀螺仪转向」开关适配个别机型（v125）
+  - Gyro orientation: handheld landscape / VR-box modes, plus a direction-inversion toggle (v125)
+- 8K 硬解实验（默认关闭，设置内按需开启）：SPS level 适配、强制硬解选择器、分辨率头欺骗、缩小输出缓冲、补充解码参数注入、硬解失败自动切软解
+  - Experimental 8K decoding (off by default): SPS level patch, forced hardware selector, resolution spoofing, downscaled output, codec param injection, auto software fallback
 - 触控交互：单指拖曳查看、双指缩放、捏合旋转，UI 误操作 2 秒自动隐藏
   - Touch: drag to look around, pinch to zoom, UI auto-hides after 2s idle
 - 曲面沉浸：圆柱面曲率可调，双中心变形（Warp Dual Center）优化
@@ -35,11 +39,14 @@
   - Pure shader pipeline since v102 (GPUPixel removed) — low power, zero extra libs
 
 ### 🎨 3D LUT 电影调色 / LUT Color Grading
-> ⚠️ **开发中，尚未实现 / Under development, NOT yet implemented**
-- 12 款内置 LUT（经典青橙、电影暗调、柔和胶片、日系清新、暖阳日落、冷蓝夜色、复古胶片、赛博朋克、黑白电影、强烈青橙、柔和青绿、高对比）——LUT 资源已内置，但滤镜应用链路尚未实现/未生效
-  - 12 bundled LUTs (assets included, but filter pipeline NOT yet implemented / NOT working)
-- 手机自选 LUT（导入任意 `.cube` 文件）——**未实现** / Import custom .cube — **not implemented**
-- 强度调节——**未实现** / Intensity control — **not implemented**
+> ✅ **v1.0.117 起已生效**（修复 `.cube` 关键字解析后链路打通）
+> Working since v1.0.117 — earlier versions parsed `LUT_3D_SIZE` incorrectly and failed silently.
+- 12 款内置 LUT：经典青橙、电影暗调、柔和胶片、日系清新、暖阳日落、冷蓝夜色、复古胶片、赛博朋克、黑白电影、强烈青橙、柔和青绿、高对比
+  - 12 bundled LUTs: Classic Teal-Orange, Cinematic Dark, Soft Film, JP Fresh, Warm Sunset, Cool Blue Night, Retro Film, Cyberpunk, B&W, Strong Teal-Orange, Soft Teal-Green, High Contrast
+- 手机自选 LUT：可导入任意 `.cube` 文件（系统会弹出文件选择器）
+  - Import any custom `.cube` file from your phone
+- 强度调节：0–100% 混合强度滑杆，实时预览
+  - Intensity slider (0–100%) with live preview
 - 全部 LUT 由项目自研脚本（numpy）程序化生成，无第三方版权
   - All LUTs are self-generated via numpy scripts (no third-party copyright)
 
@@ -51,6 +58,10 @@
   - Offline speech recognition: multi-engine — Vosk (Kaldi), Qwen3-ASR (sherpa-onnx, CPU), SenseVoice QNN (Qualcomm NPU, SM8850)
 - 整片转写：后台生成带时间轴的 SRT 字幕（静音断句 + 标点断句 + 14 字智能换行）
   - Full-video transcription to timed SRT (silence/punctuation segmentation, 14-char line wrap)
+- 转写策略按引擎区分（v122/v123 优化）：Vosk 走流式 400ms 喂入；Qwen3-ASR / SenseVoice 为离线模型，按**语音段整段识别**（静音 >700ms 或满 25s 断句），推理次数较逐块方式下降约 99.6%
+  - Engine-aware strategy: Vosk streams 400ms chunks; Qwen3-ASR / SenseVoice are offline models and decode whole speech segments (~99.6% fewer inference passes)
+- 长句自动切分：识别结果超过 40 字或 8 秒时按标点拆成多条，按字数比例分配时间（无标点时按字数等分）
+  - Long results are split by punctuation (>40 chars / >8s) with proportional timing
 - ASR 语言选择：自动 / 中文 / 英文 / 日文 / 韩文
   - ASR language: Auto / Chinese / English / Japanese / Korean
 - 模型下载进度提示、断点续传、3 次重试
@@ -80,6 +91,8 @@
 ┌─────────────────────────────────────────────────────┐
 │  UI 层（Jetpack Compose + Material3）               │
 │  VRPlayerScreen（播放器主界面/设置面板/快捷面板）     │
+│  ＋ AsrBatchSection / PlayerControlBar /            │
+│    BeautySettingsSections（v120–v121 按功能拆出）    │
 ├─────────────────────────────────────────────────────┤
 │  渲染层（GLSurfaceView + 自定义 GLES 着色器管线）     │
 │  VRGLRenderer：投影变形/立体映射/美颜/LUT/字幕叠加     │
@@ -99,11 +112,15 @@
 
 | 模块 | 技术 | 说明 |
 |---|---|---|
-| `VRGLRenderer.kt` | OpenGL ES 2.0 Shader | 核心渲染：投影、变形、美颜、LUT、合成（1495 行） |
-| `VRPlayerScreen.kt` | Compose | 播放器主界面 + 设置面板（5000+ 行） |
+| `VRGLRenderer.kt` | OpenGL ES 2.0 Shader | 核心渲染：投影、变形、美颜、LUT、合成（1513 行） |
+| `VRPlayerScreen.kt` | Compose | 播放器主界面 + 设置面板（4834 行，v120/v121 已按功能拆分） |
+| `AsrBatchSection.kt` | Compose | 后台转写区块（设置面板与字幕快捷面板复用，v121 拆出，~500 行） |
+| `PlayerControlBar.kt` | Compose | 播放控制栏三组按钮 + 宽窄屏自适应布局（v121 拆出） |
+| `BeautySettingsSections.kt` | Compose | 美颜/模式提示/对比原图/预设等设置区块（v120–v121 拆出） |
+| `VRPlayerComponents.kt` | Compose | 通用组件：`TooltipIconButton` / `BeautySliderItem` / `ExperimentalSwitchRow` |
+| `AsrBatchTranscriber.kt` | 多引擎 | 批量字幕转写（Vosk 流式 / Qwen3、SenseVoice 按语音段整段识别） |
 | `MediaPipeFaceManager.kt` | MediaPipe Tasks | 468 点人脸关键点检测（arm64 真机） |
 | `SherpaAsrManager.kt` | sherpa-onnx | Qwen3-ASR / SenseVoice QNN 离线识别引擎管理 |
-| `AsrBatchTranscriber.kt` | 多引擎 | 批量字幕转写（Vosk / Qwen3 / SenseVoice 三引擎路由） |
 | `LutUtils.kt` | 自研 | .cube 解析 + 三线性重采样 + 512×512 网格打包 |
 | `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（6 种引擎可切换） |
 
@@ -120,7 +137,7 @@ Aura-face-VR-Player/
 │   └── src/main/
 │       ├── java/com/example/vr/   # Kotlin 源码
 │       ├── assets/
-│       │   ├── luts/              # 12 款内置 3D LUT（.cube，未启用）
+│       │   ├── luts/              # 12 款内置 3D LUT（.cube，v117 起生效，支持自选 .cube）
 │       │   ├── face_landmarker.task  # MediaPipe 人脸模型
 │       │   └── licenses.json      # 开源许可清单（自动生成）
 │       ├── jniLibs/arm64-v8a/     # QNN 加速库（15 个 .so，SM8850 专属）
@@ -145,17 +162,17 @@ Aura-face-VR-Player/
 - **targetSdk 36（Android 16）** — 针对最新系统适配
 - 推荐 Android 10+ / Android 10+ recommended
 
-**ABI 分包发布 / Split APKs**：
+**发布包形态 / Release artifact**：
 
-| ABI | 大小 / Size | 说明 / Notes |
-|---|---|---|
-| **arm64-v8a** | ~243 MB | 主流真机（推荐），含 QNN 加速库 / Mainstream devices, includes QNN libs |
-| **armeabi-v7a** | ~93 MB | 旧款 32 位设备 / Older 32-bit devices |
-| **x86_64** | ~99 MB | PC 模拟器 / PC emulators |
-| **x86** | ~121 MB | 旧模拟器 / Legacy emulators |
+| 项目 | 说明 / Notes |
+|---|---|
+| 产物 | **单个全架构 APK**（`app-release.apk`，约 183MB）/ Single universal APK (~183MB) |
+| 包含 ABI | `arm64-v8a` + `armeabi-v7a` + `x86_64` + `x86` 全包含 / All ABIs in one package |
+| 安装 | 系统自动选取匹配 ABI 的原生库，无需挑选 / The OS picks the matching native libs |
 
-> 请根据设备选择对应 ABI 的 APK 下载。真机用户请选择 arm64-v8a 版本。
-> Choose the APK matching your device ABI. Device users: choose arm64-v8a.
+> 说明：早期版本曾按 ABI 拆分为 4 个包发布，v116 起改为**单包全架构**发布，
+> 省去用户判断设备 ABI 的麻烦（体积换易用性）。
+> Note: early releases shipped 4 ABI-split APKs; since v116 we ship a single universal APK.
 
 ---
 
@@ -173,7 +190,7 @@ Aura-face-VR-Player/
 gradlew.bat assembleDebug
 
 # Release 包（正式分发，必须！见 RELEASE_SIGNING.md）
-# 生成 4 个分包 APK（arm64/armv7/x86_64/x86）
+# 产物：app\build\outputs\apk\release\app-release.apk（单包全架构，约 183MB）
 gradlew.bat assembleRelease
 
 # 依赖许可证清单导出
@@ -230,10 +247,11 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 
 | # | 中文 | English |
 |---|---|---|
-| 1 | **LUT 视频滤镜尚未实现**——LUT 资源已内置，但滤镜应用链路未实现/未生效 | **LUT filter NOT implemented** — assets bundled, filter pipeline not working yet |
-| 2 | **陀螺仪漂移**——长时间观看后视角缓慢漂移，需手动重置 | **Gyroscope drift** — view drifts slowly over long sessions; manual recenter needed |
-| 3 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timing mismatch** — auto-generated timestamps may not perfectly align |
-| 4 | **必应免费翻译端点风险**——非官方网页端点，随时可能失效 | **Bing free endpoint risk** — unofficial web endpoint may break anytime; LLM API keys recommended |
+| 1 | **8K 硬解为实验功能**——默认关闭，需在「设置 → 8K 硬解实验」中按需开启，可能花屏或失败 | **8K decoding is experimental** — off by default; enable under Settings → 8K experiments; artifacts possible |
+| 2 | **ASR 模型需先下载**——Vosk 小模型 40MB / 中文大模型 1.3GB，Qwen3-ASR 838MB；首次转写前需联网下载 | **ASR models need download** — Vosk small 40MB / ZH large 1.3GB, Qwen3-ASR 838MB; downloaded on first use |
+| 3 | **陀螺仪漂移**——长时间观看后水平朝向缓慢漂移，双击画面重置视角即可（原理性，GAME_ROTATION_VECTOR 无绝对北向基准） | **Gyroscope drift** — yaw drifts slowly over long sessions; double-tap to recenter (inherent to game rotation vector) |
+| 4 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timing mismatch** — auto-generated timestamps may not perfectly align |
+| 5 | **必应免费翻译端点风险**——非官方网页端点，随时可能失效 | **Bing free endpoint risk** — unofficial web endpoint may break anytime; LLM API keys recommended |
 
 ---
 
@@ -276,14 +294,15 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 
 ## 🗺️ 未来规划 / Roadmap
 
-- [ ] **实现并验证 LUT 滤镜链路**（UI → 纹理 → 着色器采样）/ Implement & validate LUT filter pipeline
-- [ ] 修复陀螺仪漂移 / Fix gyro drift (sensor-fusion attitude estimation)
+- [x] ~~**实现并验证 LUT 滤镜链路**（UI → 纹理 → 着色器采样）~~ ✅ v117 已完成 / Done in v117
+- [ ] 修复陀螺仪漂移（方向问题已在 v125 修正，剩余为长时间 yaw 漂移）/ Fix gyro drift (direction fixed in v125; residual slow yaw drift)
 - [ ] 字幕时间轴对齐优化 / Subtitle timing alignment (VAD/endpoint calibration)
 - [ ] 人脸关键点 x86_64 支持 / x86_64 face-landmark support (emulator beauty)
 - [ ] 更多投影模式（CAVE / 半球）/ More projection modes (CAVE / hemisphere)
 - [ ] 字幕样式模板 / Subtitle style templates
 - [ ] 播放列表与历史记录同步 / Playlist & history sync
 - [ ] 国际语言包 / i18n language packs
+- [ ] 8K 硬解实验转正（当前为实验功能，默认关闭）/ Graduate experimental 8K decoding
 
 ---
 

@@ -1,6 +1,13 @@
-# Firebase Analytics 接入指南（v107）
+# Firebase Analytics 接入指南
 
 > 用户量统计组件：**Firebase Analytics**（Google 免费服务，Android/Google Play 生态首选）。
+
+## 当前状态 / Current status
+
+✅ **已接入**：`app/google-services.json` 已就位，构建时自动生效。
+数据上报仍遵循下方"默认不采集"原则——用户未同意前不会初始化。
+
+> 本指南最初为 v107 编写；配置落地后按现状维护，版本号不再写在标题里。
 
 ## 原理与隐私合规
 

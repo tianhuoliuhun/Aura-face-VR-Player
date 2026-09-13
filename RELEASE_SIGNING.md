@@ -52,13 +52,21 @@ apksigner.bat verify --print-certs app\build\outputs\apk\release\app-release.apk
 
 1. 构建 `assembleRelease`（不是 `assembleDebug`）
 2. 验证签名证书为你的 upload 别名
-3. 创建 GitHub Release 并上传 APK：
+3. 创建 GitHub Release 并上传 APK（**一步到位**，create 时直接带上文件）：
    ```powershell
-   gh release create v<版本> --title "<版本标题>" --notes "<更新说明>"
-   gh release upload v<版本> app\build\outputs\apk\release\app-release.apk
+   gh release create v<版本> app\build\outputs\apk\release\app-release.apk `
+     --title "v<版本>" --notes "<更新说明>"
    ```
 4. 上架应用商店（如 Google Play）：使用 Play App Signing（上传密钥 + Play 签名密钥），
    用 PEPK 工具导出上传密钥并妥善保管。
+
+> ⚠️ **只上传 release 包，绝不上传 debug 包**
+>
+> 发版时**默认就创建 Release 并附上 `app-release.apk`**（无需额外确认）。
+> `app-debug.apk` 使用公开的 Android debug key（密码 `android`），
+> 任何人都能重签伪装成更新，只允许用于本地/模拟器自测（`adb install -r -d`），
+> **禁止**作为 Release 附件或对外分发。
+> 若历史 Release 中误传过 debug 包，先删除再发布：`gh release delete-asset <tag> app-debug.apk -y`
 
 ## 五、分发前 Checklist
 
@@ -67,4 +75,5 @@ apksigner.bat verify --print-certs app\build\outputs\apk\release\app-release.apk
 - [ ] 密钥库与密码已私密备份（离线/私密云盘）
 - [ ] `keystore.properties` 未被 git 跟踪（`git check-ignore keystore.properties`）
 - [ ] 版本号 `versionCode` / `versionName` 已递增
+- [ ] Release 附件**只有** `app-release.apk`（确认无 `app-debug.apk`）
 - [ ] 源码中无任何本地路径、用户名、密钥、token（`git grep -n "C:\\Users\\\|D:\\\|sk-\|ghp_\|AKIA"`）
