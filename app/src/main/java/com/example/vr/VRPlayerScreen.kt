@@ -816,448 +816,6 @@ fun VRPlayerScreen(
 
     // 切换 UI 可见性（经典播放器行为：点击视频区域切换控制栏显示/隐藏）
     // v91: 鍚庡彴杞啓鍖哄潡锛堣缃潰鏉夸笌涓荤晫闈㈠瓧骞曞揩鎹烽潰鏉垮叡鐢級
-    @Composable
-    fun BatchTranscribeSection() {
-                                // ===== 后台生成全片字幕（v85）=====
-                                Surface(
-                                    color = Color.White.copy(alpha = 0.06f),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                                Text(
-                                                    "后台生成全片字幕 (SRT)",
-                                                    color = Color.White,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                                Text(
-                                                    text = if (isBatchTranscribing)
-                                                        "转写中：${(batchTranscribeProgress * 100).toInt()}%　${batchTranscribeStatus}"
-                                                    else
-                                                        "识别语言：${asrManager.config.language.label} · ${asrManager.config.modelOption.label}（${asrManager.config.modelOption.sizeMb}MB）",
-                                                    color = Color.White.copy(alpha = 0.55f),
-                                                    fontSize = 9.sp,
-                                                    lineHeight = 12.sp
-                                                )
-                                            }
-                                            Button(
-                                                onClick = { startBatchTranscribe() },
-                                                enabled = !isBatchTranscribing,
-                                                colors = ButtonDefaults.buttonColors(containerColor = AccentColor),
-                                                shape = RoundedCornerShape(10.dp),
-                                                modifier = Modifier.height(30.dp)
-                                            ) {
-                                                Text(
-                                                    if (isBatchTranscribing) "转写中…" else "开始",
-                                                    color = AccentOnColor,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-
-                                        // ===== ASR 引擎选择（v111：Vosk / Qwen3-ASR / SenseVoice QNN）=====
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text("引擎", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                                            AsrEngineType.entries.forEach { engine ->
-                                                val sel = asrEngineType == engine
-                                                val label = when (engine) {
-                                                    AsrEngineType.VOSK -> "Vosk"
-                                                    AsrEngineType.QWEN3 -> "Qwen3"
-                                                    AsrEngineType.SENSEVOICE_QNN -> "SV QNN"
-                                                }
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(
-                                                            if (sel) AccentColor.copy(alpha = 0.8f)
-                                                            else Color.White.copy(alpha = 0.08f)
-                                                        )
-                                                        .clickable(enabled = !isBatchTranscribing) {
-                                                            asrEngineType = engine
-                                                            keepUiAlight()
-                                                        }
-                                                        .padding(vertical = 5.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
-                                                        fontSize = 9.sp,
-                                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                                        textAlign = TextAlign.Center
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // ===== sherpa-onnx 模型状态（v111：Qwen3/SenseVoice）=====
-                                        if (asrEngineType == AsrEngineType.QWEN3 || asrEngineType == AsrEngineType.SENSEVOICE_QNN) {
-                                            val sherpaReady = remember { mutableStateOf(SherpaAsrManager.isModelReady(context, asrEngineType)) }
-                                            LaunchedEffect(asrEngineType, SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
-                                                sherpaReady.value = SherpaAsrManager.isModelReady(context, asrEngineType)
-                                            }
-                                            val modelName = when (asrEngineType) { AsrEngineType.QWEN3 -> "Qwen3-ASR 0.6B"; AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN"; else -> "" }
-                                            val modelDesc = when (asrEngineType) { AsrEngineType.QWEN3 -> "29语言+20方言 · ~838MB"; AsrEngineType.SENSEVOICE_QNN -> "中英日韩粤 · 高通 NPU · ~161MB"; else -> "" }
-                                            val modelSize = when (asrEngineType) { AsrEngineType.QWEN3 -> 838; AsrEngineType.SENSEVOICE_QNN -> 161; else -> 0 }
-                                            Column(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color.Black.copy(alpha = 0.25f))
-                                                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                                                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                                                verticalArrangement = Arrangement.spacedBy(5.dp)
-                                            ) {
-                                                // 模型信息
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = modelName,
-                                                            color = Color.White.copy(alpha = 0.9f),
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.SemiBold
-                                                        )
-                                                        Text(
-                                                            text = modelDesc,
-                                                            color = Color.White.copy(alpha = 0.4f),
-                                                            fontSize = 8.sp
-                                                        )
-                                                    }
-                                                    // 状态标签
-                                                    Text(
-                                                        text = when {
-                                                            SherpaAsrManager.isModelDownloading -> "⬇ 下载中"
-                                                            sherpaReady.value -> "✓ 已就绪"
-                                                            else -> "未下载"
-                                                        },
-                                                        color = when {
-                                                            SherpaAsrManager.isModelDownloading -> Color(0xFF4FC3F7)
-                                                            sherpaReady.value -> Color(0xFF81C784)
-                                                            else -> Color.White
-                                                        },
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-
-                                                // 下载进度条（仅下载中显示）
-                                                if (SherpaAsrManager.isModelDownloading) {
-                                                    LinearProgressIndicator(
-                                                        progress = SherpaAsrManager.modelDownloadProgress,
-                                                        color = AccentColor,
-                                                        trackColor = Color.White.copy(alpha = 0.15f),
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .height(6.dp)
-                                                            .clip(RoundedCornerShape(3.dp))
-                                                    )
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.SpaceBetween
-                                                    ) {
-                                                        Text(
-                                                            text = "下载 ${(SherpaAsrManager.modelDownloadProgress * 100).toInt()}%",
-                                                            color = Color(0xFF4FC3F7),
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                        Text(
-                                                            text = SherpaAsrManager.downloadStatus,
-                                                            color = Color.White.copy(alpha = 0.5f),
-                                                            fontSize = 8.sp,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                    // 取消
-                                                    Text(
-                                                        text = "取消下载",
-                                                        color = Color(0xFFEF5350),
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier
-                                                            .align(Alignment.End)
-                                                            .clip(RoundedCornerShape(4.dp))
-                                                            .background(Color(0xFFEF5350).copy(alpha = 0.15f))
-                                                            .clickable { SherpaAsrManager.cancelDownload() }
-                                                            .padding(horizontal = 10.dp, vertical = 3.dp)
-                                                    )
-                                                }
-
-                                                // 下载按钮（未下载且未在下载时）
-                                                if (!sherpaReady.value && !SherpaAsrManager.isModelDownloading) {
-                                                    // v118：QNN 模型与 SoC 绑定，设备无对应模型时不该让用户白等下载
-                                                    val qnnSocOk = asrEngineType != AsrEngineType.SENSEVOICE_QNN ||
-                                                        SherpaAsrManager.senseVoiceModelDirName(context) != null
-                                                    Text(
-                                                        text = if (qnnSocOk) "点击下载 $modelName（${modelSize}MB）"
-                                                        else "当前设备（${SherpaAsrManager.deviceSocName()}）无官方 QNN 模型，请改用 Qwen3-ASR",
-                                                        color = if (qnnSocOk) Color.White else Color(0xFFEF9A9A),
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .background(
-                                                                if (qnnSocOk) AccentColor.copy(alpha = 0.85f)
-                                                                else Color.White.copy(alpha = 0.08f)
-                                                            )
-                                                            .clickable(enabled = qnnSocOk) { SherpaAsrManager.startModelDownload(context, asrEngineType) }
-                                                            .padding(vertical = 8.dp),
-                                                        textAlign = TextAlign.Center
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // ===== 识别语言选择（v87/v111）=====
-                                        if (asrEngineType == AsrEngineType.VOSK) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text("语言", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                                            VoskLanguage.entries.forEach { lang ->
-                                                val sel = asrManager.config.language == lang
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                        .clickable(enabled = !isBatchTranscribing) {
-                                                            asrManager.config = asrManager.config.copy(language = lang)
-                                                            if (isMemoryModeEnabled) prefs.edit().putInt("asr_language_id", lang.id).apply()
-                                                            keepUiAlight()
-                                                        }
-                                                        .padding(vertical = 4.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        lang.label,
-                                                        color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.8f),
-                                                        fontSize = 10.sp,
-                                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // ===== sherpa 引擎语言选择（v111：快捷面板同步）=====
-                                        if (asrEngineType == AsrEngineType.QWEN3 || asrEngineType == AsrEngineType.SENSEVOICE_QNN) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Text("语言", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                                                SherpaAsrManager.sherpaLanguages.forEach { (code, label) ->
-                                                    val sel = sherpaLangCode == code
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .weight(1f)
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                            .clickable { sherpaLangCode = code; keepUiAlight() }
-                                                            .padding(vertical = 4.dp),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = label,
-                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
-                                                            fontSize = 9.sp,
-                                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                                            textAlign = TextAlign.Center
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // ===== 模型大小选择（v108：支持下载进度、重试、取消）=====
-                                        // 模型选择区：干净的选项卡片
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text("模型", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                                            VoskModelSize.entries.forEach { size ->
-                                                val sel = asrManager.config.modelSize == size
-                                                val opt = VoskModels.firstOrNull { it.language == asrManager.config.language && it.size == size }
-                                                val isDownloaded = opt?.let {
-                                                    File(context.filesDir, "vosk_models/${it.modelName}/.ready").exists()
-                                                } ?: false
-                                                val isActive = asrManager.isModelDownloading && asrManager.config.modelSize == size
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(
-                                                            when {
-                                                                isActive -> AccentColor.copy(alpha = 0.25f)
-                                                                sel -> AccentColor
-                                                                else -> Color.White.copy(alpha = 0.08f)
-                                                            }
-                                                        )
-                                                        .clickable(enabled = !isBatchTranscribing && !asrManager.isModelDownloading) {
-                                                            if (!isDownloaded) {
-                                                                asrManager.config = asrManager.config.copy(modelSize = size)
-                                                                if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
-                                                                opt?.let { asrManager.startModelDownload(it) }
-                                                                keepUiAlight()
-                                                            } else {
-                                                                asrManager.config = asrManager.config.copy(modelSize = size)
-                                                                if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
-                                                                keepUiAlight()
-                                                            }
-                                                        }
-                                                        .padding(vertical = 6.dp, horizontal = 4.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Column(
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = if (opt != null) "${size.label}\n${opt.sizeMb}MB" else size.label,
-                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
-                                                            fontSize = 9.sp,
-                                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                                            textAlign = TextAlign.Center,
-                                                            lineHeight = 11.sp
-                                                        )
-                                                        // 状态指示小圆点
-                                                        Text(
-                                                            text = when {
-                                                                isActive -> "⬇下载中"
-                                                                isDownloaded -> "✓ 就绪"
-                                                                else -> "点击下载"
-                                                            },
-                                                            color = when {
-                                                                isActive -> Color(0xFF4FC3F7)  // 亮蓝
-                                                                isDownloaded -> Color(0xFF81C784) // 柔绿
-                                                                else -> Color.White // 纯白，清晰可见
-                                                            },
-                                                            fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        } // end if (asrEngineType == VOSK)
-
-                                        // ===== 下载进度区（Vosk 独立卡片）=====
-                                        if (asrManager.isModelDownloading) {
-                                            val downloadingModel = VoskModels.firstOrNull {
-                                                it.language == asrManager.config.language && it.size == asrManager.config.modelSize
-                                            }
-                                            Column(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color.Black.copy(alpha = 0.3f))
-                                                    .border(
-                                                        width = 1.dp,
-                                                        color = AccentColor.copy(alpha = 0.3f),
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    )
-                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                                verticalArrangement = Arrangement.spacedBy(5.dp)
-                                            ) {
-                                                // 模型名称 + 大小
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Text(
-                                                        text = "正在下载 ${downloadingModel?.label ?: ""}",
-                                                        color = Color.White.copy(alpha = 0.9f),
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                    Text(
-                                                        text = downloadingModel?.let { "${it.sizeMb}MB" } ?: "",
-                                                        color = Color.White.copy(alpha = 0.5f),
-                                                        fontSize = 9.sp
-                                                    )
-                                                }
-                                                // 进度条
-                                                LinearProgressIndicator(
-                                                    progress = asrManager.modelDownloadProgress,
-                                                    color = AccentColor,
-                                                    trackColor = Color.White.copy(alpha = 0.15f),
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .height(6.dp)
-                                                        .clip(RoundedCornerShape(3.dp))
-                                                )
-                                                // 百分比 + 详细状态
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Text(
-                                                        text = "下载中 ${(asrManager.modelDownloadProgress * 100).toInt()}%",
-                                                        color = Color(0xFF4FC3F7), // 亮蓝，与进度条呼应
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Text(
-                                                        text = asrManager.downloadStatus,
-                                                        color = Color.White.copy(alpha = 0.6f),
-                                                        fontSize = 9.sp,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                                // 取消按钮
-                                                Text(
-                                                    text = "取消下载",
-                                                    color = Color(0xFFEF5350), // 柔红
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier
-                                                        .align(Alignment.End)
-                                                        .clip(RoundedCornerShape(4.dp))
-                                                        .background(Color(0xFFEF5350).copy(alpha = 0.15f))
-                                                        .clickable { asrManager.cancelDownload() }
-                                                        .padding(horizontal = 10.dp, vertical = 3.dp)
-                                                )
-                                            }
-                                        }
-                                        if (isBatchTranscribing) {
-                                            LinearProgressIndicator(
-                                                progress = { batchTranscribeProgress },
-                                                color = AccentColor,
-                                                trackColor = Color.White.copy(alpha = 0.12f),
-                                                modifier = Modifier.fillMaxWidth().height(4.dp)
-                                            )
-                                        }
-                                    }
-                                }
-    }
     fun toggleUiVisibility() {
         isUiVisible = !isUiVisible
         if (isUiVisible) {
@@ -2532,35 +2090,31 @@ fun VRPlayerScreen(
 
         // 2.5 Dual-Eye & Flat Mode Universal Subtitle Overlay
 
-                                // ===== v84 UI recomposition isolation: subtitle layer =====
-                                @Composable
-                                fun SubtitleLayer() {
-        SubtitleOverlay(
-            currentPositionMs = currentPositionMs,
-            subtitleCues = loadedSubtitleCues,
-            translator = subtitleTranslator,
-            isSubtitleEnabled = isSubtitleEnabled,
-            subtitleFont = subtitleFont,
-            fontSizeSp = subtitleFontSizeSp,
-            fontWeightVal = subtitleFontWeightVal,
-            isItalic = isSubtitleItalic,
-            textColor = subtitleColorOpt.color,
-            textAlpha = subtitleTextAlpha,
-            strokeOption = subtitleStrokeOpt,
-            bgOption = subtitleBgOpt,
-            offsetYRatio = subtitleOffsetYRatio,
-            offsetXRatio = subtitleOffsetXRatio,
-            subtitleDelayMs = subtitleDelayMs,
-            textAlign = subtitleTextAlignOpt.textAlign,
-            maxLines = subtitleMaxLines,
-            isSplitScreenVR = isSplitScreenVR,
-            vrIpdOffsetRatio = vrIpdOffsetRatio,
-            exoCueText = exoCueText,
-            modifier = Modifier.fillMaxSize()
-        )
-                                }
-
-                                SubtitleLayer()
+                                // v120：字幕层直接调用 SubtitleOverlay（已独立为 SubtitleOverlay.kt）。
+                                // 原先这里多包了一层内嵌 SubtitleLayer()，并无额外重组隔离收益。
+                                SubtitleOverlay(
+                                    currentPositionMs = currentPositionMs,
+                                    subtitleCues = loadedSubtitleCues,
+                                    translator = subtitleTranslator,
+                                    isSubtitleEnabled = isSubtitleEnabled,
+                                    subtitleFont = subtitleFont,
+                                    fontSizeSp = subtitleFontSizeSp,
+                                    fontWeightVal = subtitleFontWeightVal,
+                                    isItalic = isSubtitleItalic,
+                                    textColor = subtitleColorOpt.color,
+                                    textAlpha = subtitleTextAlpha,
+                                    strokeOption = subtitleStrokeOpt,
+                                    bgOption = subtitleBgOpt,
+                                    offsetYRatio = subtitleOffsetYRatio,
+                                    offsetXRatio = subtitleOffsetXRatio,
+                                    subtitleDelayMs = subtitleDelayMs,
+                                    textAlign = subtitleTextAlignOpt.textAlign,
+                                    maxLines = subtitleMaxLines,
+                                    isSplitScreenVR = isSplitScreenVR,
+                                    vrIpdOffsetRatio = vrIpdOffsetRatio,
+                                    exoCueText = exoCueText,
+                                    modifier = Modifier.fillMaxSize()
+                                )
         AnimatedVisibility(
             visible = showResolutionTip,
             enter = fadeIn() + expandVertically(),
@@ -3047,192 +2601,65 @@ fun VRPlayerScreen(
                                 }
                             }
 
-                            // Playback controls row with modern arrangement（播控组绝对居中）
+                            // v120 拆分：播放控制栏（左/中/右三组 + 自适应布局）→ PlayerControlBar.kt
+                            PlayerControlButtons(
+                                accentColor = AccentColor,
+                                accentOnColor = AccentOnColor,
+                                isVideo = selectedMediaItem.isVideo,
+                                isVideoPlaying = isVideoPlaying,
+                                isGyroEnabled = isGyroEnabled,
+                                onToggleGyro = { isGyroEnabled = !isGyroEnabled },
+                                isViewLocked = isViewLocked,
+                                onToggleViewLock = { isViewLocked = !isViewLocked },
+                                isLandscape = isLandscape,
+                                onToggleOrientation = { isLandscape = !isLandscape },
+                                isSplitScreenVR = isSplitScreenVR,
+                                onToggleSplitScreen = { isSplitScreenVR = !isSplitScreenVR },
+                                isSubtitlePanelOpen = isSubtitleQuickPanelOpen,
+                                onToggleSubtitlePanel = { isSubtitleQuickPanelOpen = !isSubtitleQuickPanelOpen },
+                                isSettingsOpen = isSettingsDialogOpen,
+                                onToggleSettings = { isSettingsDialogOpen = !isSettingsDialogOpen },
+                                onPrev = {
+                                    val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
+                                    if (currentIndex >= 0) {
+                                        val prevIndex = if (currentIndex > 0) currentIndex - 1 else DemoMediaProvider.demoMediaList.size - 1
+                                        customBitmap = null
+                                        selectedMediaItem = DemoMediaProvider.demoMediaList[prevIndex]
+                                    }
+                                },
+                                onNext = {
+                                    val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
+                                    if (currentIndex >= 0) {
+                                        val nextIndex = if (currentIndex < DemoMediaProvider.demoMediaList.size - 1) currentIndex + 1 else 0
+                                        customBitmap = null
+                                        selectedMediaItem = DemoMediaProvider.demoMediaList[nextIndex]
+                                    }
+                                },
+                                onTogglePlayPause = {
+                                    if (selectedMediaItem.isVideo) {
+                                        playerInstance?.let { mp ->
+                                            if (mp.isPlaying) {
+                                                mp.pause()
+                                                isVideoPlaying = false
+                                            } else {
+                                                mp.play()
+                                                isVideoPlaying = true
+                                            }
+                                        }
+                                    }
+                                },
+                                onResetViewCenter = {
+                                    currentGlSurfaceView?.renderer?.run { manualYaw = 0f; manualPitch = 0f }
+                                },
+                                onUserInteraction = { keepUiAlight() }
+                            )
+
+
+                            // 悬浮球所在作用域：需要 BoxWithConstraints 提供容器尺寸，
+                            // 并用 BoxScope.align 定位（与控制栏原本共享同一个作用域）
                             BoxWithConstraints(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                            @Composable
-                            fun LeftControls() {
-                                // Left Controls Group
-                                Row(
-                                    modifier = Modifier.align(Alignment.CenterStart),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // 陀螺仪开关（Explore 图标）
-                                    TooltipIconButton(
-                                        tooltip = if (isGyroEnabled) "陀螺仪已开启" else "陀螺仪已关闭",
-                                        onClick = { isGyroEnabled = !isGyroEnabled; keepUiAlight() },
-                                        icon = Icons.Default.Explore,
-                                        isActive = isGyroEnabled
-                                    )
-
-                                    // 视角锁定（Lock/LockOpen 图标，区别于屏幕旋转）
-                                    TooltipIconButton(
-                                        tooltip = if (isViewLocked) "视角已锁定" else "视角自由",
-                                        onClick = { isViewLocked = !isViewLocked; keepUiAlight() },
-                                        icon = if (isViewLocked) Icons.Default.Lock else Icons.Default.LockOpen,
-                                        isActive = isViewLocked
-                                    )
-
-                                    // 屏幕旋转（ScreenRotation 图标）
-                                    TooltipIconButton(
-                                        tooltip = if (!isLandscape) "已锁定竖屏" else "点击锁定竖屏",
-                                        onClick = { isLandscape = !isLandscape; keepUiAlight() },
-                                        icon = Icons.Default.ScreenRotation,
-                                        isActive = !isLandscape
-                                    )
-                                }
-                            }
-
-                            @Composable
-                            fun CenterControls() {
-                                // Center Controls Group: Prev, Play/Pause, Next（绝对居中）
-                                Row(
-                                    modifier = Modifier.align(Alignment.Center),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            keepUiAlight()
-                                            val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
-                                            if (currentIndex >= 0) {
-                                                val prevIndex = if (currentIndex > 0) currentIndex - 1 else DemoMediaProvider.demoMediaList.size - 1
-                                                customBitmap = null
-                                                selectedMediaItem = DemoMediaProvider.demoMediaList[prevIndex]
-                                            }
-                                        },
-                                        modifier = Modifier.size(40.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.SkipPrevious,
-                                            contentDescription = "上一首",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .size(54.dp)
-                                            .clip(RoundedCornerShape(50))
-                                            .background(AccentColor)
-                                            .clickable {
-                                                keepUiAlight()
-                                                if (selectedMediaItem.isVideo) {
-                                                    playerInstance?.let { mp ->
-                                                        if (mp.isPlaying) {
-                                                            mp.pause()
-                                                            isVideoPlaying = false
-                                                        } else {
-                                                            mp.play()
-                                                            isVideoPlaying = true
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            .testTag("video_play_pause_button"),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = if (selectedMediaItem.isVideo && isVideoPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                            contentDescription = "播放暂停",
-                                            tint = AccentOnColor,
-                                            modifier = Modifier.size(30.dp)
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            keepUiAlight()
-                                            val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
-                                            if (currentIndex >= 0) {
-                                                val nextIndex = if (currentIndex < DemoMediaProvider.demoMediaList.size - 1) currentIndex + 1 else 0
-                                                customBitmap = null
-                                                selectedMediaItem = DemoMediaProvider.demoMediaList[nextIndex]
-                                            }
-                                        },
-                                        modifier = Modifier.size(40.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.SkipNext,
-                                            contentDescription = "下一首",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            @Composable
-                            fun RightControls() {
-                                // Right Controls Group: 4 个核心按钮（局域网/视频信息/音轨选择已移入设置面板）
-                                Row(
-                                    modifier = Modifier.align(Alignment.CenterEnd),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // 重置视角中心
-                                    TooltipIconButton(
-                                        tooltip = "重置视角中心",
-                                        onClick = {
-                                            keepUiAlight()
-                                            currentGlSurfaceView?.renderer?.run { manualYaw = 0f; manualPitch = 0f }
-                                        },
-                                        icon = Icons.Default.MyLocation,
-                                        iconSize = 18.dp
-                                    )
-
-                                    // VR 分屏模式
-                                    TooltipIconButton(
-                                        tooltip = if (isSplitScreenVR) "退出 VR 分屏" else "VR 分屏模式",
-                                        onClick = { isSplitScreenVR = !isSplitScreenVR; keepUiAlight() },
-                                        icon = Icons.Default.ViewInAr,
-                                        isActive = isSplitScreenVR
-                                    )
-
-                                    // 字幕快捷入口
-                                    TooltipIconButton(
-                                        tooltip = "字幕与转写",
-                                        onClick = { isSubtitleQuickPanelOpen = !isSubtitleQuickPanelOpen; keepUiAlight() },
-                                        icon = Icons.Default.Subtitles,
-                                        isActive = isSubtitleQuickPanelOpen
-                                    )
-
-                                    // 设置面板
-                                    TooltipIconButton(
-                                        tooltip = "播放参数与美颜",
-                                        onClick = { isSettingsDialogOpen = !isSettingsDialogOpen; keepUiAlight() },
-                                        icon = Icons.Default.Settings,
-                                        isActive = isSettingsDialogOpen
-                                    )
-                                }
-                            }
-                            if ((3 * 40 + 2 * 8 + 40 + 54 + 40 + 2 * 12 + 6 * 40 + 5 * 8 + 32).dp > maxWidth) {
-                                // ????????????+?????
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    CenterControls()
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        LeftControls()
-                                        RightControls()
-                                    }
-                                }
-                            } else {
-                                // ????/?/?????
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    Box(modifier = Modifier.align(Alignment.CenterStart)) { LeftControls() }
-                                    Box(modifier = Modifier.align(Alignment.Center)) { CenterControls() }
-                                    Box(modifier = Modifier.align(Alignment.CenterEnd)) { RightControls() }
-                                }
-                            }
                         }
                     }
                 }
@@ -3338,7 +2765,33 @@ fun VRPlayerScreen(
                         }
 
                         // 后台生成全片字幕（含语言/模型选择/进度）
-                        BatchTranscribeSection()
+BatchTranscribeSection(
+                                                    accentColor = AccentColor,
+                                                    accentOnColor = AccentOnColor,
+                                                    asrManager = asrManager,
+                                                    asrEngineType = asrEngineType,
+                                                    onAsrEngineTypeChange = { asrEngineType = it },
+                                                    sherpaLangCode = sherpaLangCode,
+                                                    onSherpaLangCodeChange = { sherpaLangCode = it },
+                                                    isBatchTranscribing = isBatchTranscribing,
+                                                    batchTranscribeProgress = batchTranscribeProgress,
+                                                    batchTranscribeStatus = batchTranscribeStatus,
+                                                    onStartBatchTranscribe = { startBatchTranscribe() },
+                                                    onSelectVoskLanguage = { lang ->
+                                                        asrManager.config = asrManager.config.copy(language = lang)
+                                                        if (isMemoryModeEnabled) prefs.edit().putInt("asr_language_id", lang.id).apply()
+                                                    },
+                                                    onSelectVoskModelSize = { size ->
+                                                        asrManager.config = asrManager.config.copy(modelSize = size)
+                                                        if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
+                                                        val opt = VoskModels.firstOrNull { it.language == asrManager.config.language && it.size == size }
+                                                        val isDownloaded = opt?.let {
+                                                            File(context.filesDir, "vosk_models/${it.modelName}/.ready").exists()
+                                                        } ?: false
+                                                        if (!isDownloaded) opt?.let { asrManager.startModelDownload(it) }
+                                                    },
+                                                    onUserInteraction = { keepUiAlight() }
+                                                )
 
                         // 打开完整字幕设置（设置面板并展开字幕分组）
                         TextButton(
@@ -4583,7 +4036,33 @@ fun VRPlayerScreen(
                                 )
 
                                 // ===== 鍚庡彴鐢熸垚鍏ㄧ墖瀛楀箷锛坴91 鎻愬彇澶嶇敤锛?====
-                                BatchTranscribeSection()
+BatchTranscribeSection(
+                                                            accentColor = AccentColor,
+                                                            accentOnColor = AccentOnColor,
+                                                            asrManager = asrManager,
+                                                            asrEngineType = asrEngineType,
+                                                            onAsrEngineTypeChange = { asrEngineType = it },
+                                                            sherpaLangCode = sherpaLangCode,
+                                                            onSherpaLangCodeChange = { sherpaLangCode = it },
+                                                            isBatchTranscribing = isBatchTranscribing,
+                                                            batchTranscribeProgress = batchTranscribeProgress,
+                                                            batchTranscribeStatus = batchTranscribeStatus,
+                                                            onStartBatchTranscribe = { startBatchTranscribe() },
+                                                            onSelectVoskLanguage = { lang ->
+                                                                asrManager.config = asrManager.config.copy(language = lang)
+                                                                if (isMemoryModeEnabled) prefs.edit().putInt("asr_language_id", lang.id).apply()
+                                                            },
+                                                            onSelectVoskModelSize = { size ->
+                                                                asrManager.config = asrManager.config.copy(modelSize = size)
+                                                                if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
+                                                                val opt = VoskModels.firstOrNull { it.language == asrManager.config.language && it.size == size }
+                                                                val isDownloaded = opt?.let {
+                                                                    File(context.filesDir, "vosk_models/${it.modelName}/.ready").exists()
+                                                                } ?: false
+                                                                if (!isDownloaded) opt?.let { asrManager.startModelDownload(it) }
+                                                            },
+                                                            onUserInteraction = { keepUiAlight() }
+                                                        )
                                 }
                                 /** 区块 6：美颜设置（Shader 实时磨皮美白 + 预设方案 + 对比原图 + 2D 人像精修） */
                                 @Composable
@@ -4610,73 +4089,25 @@ fun VRPlayerScreen(
                                     fontWeight = FontWeight.Bold
                                 )
 
-                                // ===== 2D/3D 模式提示条 =====
+                                // 2D 模式判定（人像精修仅在 2D 生效，多处复用）
                                 val is2DBeautyMode = projectionMode == ProjectionMode.STANDARD ||
                                     projectionMode == ProjectionMode.FISHEYE
-                                Surface(
-                                    color = if (is2DBeautyMode) Color(0xFF1B4D2E) else Color(0xFF4D331B),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = if (is2DBeautyMode)
-                                            "当前 2D 模式（${projectionMode.displayName}）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸"
-                                        else
-                                            "当前 3D 模式（${projectionMode.displayName}）：仅磨皮/美白等通用效果生效；瘦脸/大眼/口红等 2D 人像精修已停用，切换 2D 模式后自动恢复",
-                                        color = Color.White.copy(alpha = 0.92f),
-                                        fontSize = 9.sp,
-                                        lineHeight = 12.sp,
-                                        modifier = Modifier.padding(8.dp)
-                                    )
-                                }
 
-                                // ===== 对比原图开关 =====
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text("对比原图", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                        Text("开启后临时关闭全部美颜，直观对比效果", color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
-                                    }
-                                    Switch(
-                                        checked = beautyCompareEnabled,
-                                        onCheckedChange = { beautyCompareEnabled = it; keepUiAlight() },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = AccentOnColor,
-                                            checkedTrackColor = AccentColor,
-                                            uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                                            uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
-                                        ),
-                                        modifier = Modifier.height(26.dp)
-                                    )
-                                }
+                                // v120 拆分：模式提示条 / 对比原图 / 美颜预设 → BeautySettingsSections.kt
+                                BeautyModeHintBar(is2DMode = is2DBeautyMode, modeName = projectionMode.displayName)
 
-                                // ===== 美颜预设 =====
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    listOf("自然", "淡妆", "浓妆", "自定义").forEach { p ->
-                                        Surface(
-                                            color = if (beautyPreset == p) AccentColor else Color.White.copy(alpha = 0.10f),
-                                            shape = RoundedCornerShape(14.dp),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable { applyBeautyPreset(p) }
-                                        ) {
-                                            Text(
-                                                text = p,
-                                                textAlign = TextAlign.Center,
-                                                color = if (beautyPreset == p) Color(0xFF1A1A2E) else Color.White.copy(alpha = 0.85f),
-                                                fontSize = 10.sp,
-                                                fontWeight = if (beautyPreset == p) FontWeight.Bold else FontWeight.Normal,
-                                                modifier = Modifier.padding(vertical = 5.dp).fillMaxWidth()
-                                            )
-                                        }
-                                    }
-                                }
+                                BeautyCompareSwitch(
+                                    checked = beautyCompareEnabled,
+                                    onCheckedChange = { beautyCompareEnabled = it; keepUiAlight() },
+                                    accentColor = AccentColor,
+                                    accentOnColor = AccentOnColor
+                                )
+
+                                BeautyPresetRow(
+                                    preset = beautyPreset,
+                                    onPresetChange = { applyBeautyPreset(it) },
+                                    accentColor = AccentColor
+                                )
 
                                 // v119 拆分：美颜设置三大区块已抽到 BeautySettingsSections.kt
                                 GeneralBeautySection(

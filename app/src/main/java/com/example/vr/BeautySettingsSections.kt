@@ -24,6 +24,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -347,4 +349,101 @@ internal fun SectionTitle(text: String, accentColor: Color) {
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold
     )
+}
+
+// ===================== 模式提示 / 对比原图 / 美颜预设 =====================
+
+/**
+ * 2D/3D 模式提示条：告诉用户当前模式下哪些美颜可用。
+ *
+ * 只传 [is2DMode] 与 [modeName] 而不传 ProjectionMode，避免这个通用组件反向依赖播放器的投影枚举。
+ */
+@Composable
+fun BeautyModeHintBar(
+    is2DMode: Boolean,
+    modeName: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = if (is2DMode) Color(0xFF1B4D2E) else Color(0xFF4D331B),
+        shape = RoundedCornerShape(6.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = if (is2DMode)
+                "当前 2D 模式（$modeName）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸"
+            else
+                "当前 3D 模式（$modeName）：仅磨皮/美白等通用效果生效；瘦脸/大眼/口红等 2D 人像精修已停用，切换 2D 模式后自动恢复",
+            color = Color.White.copy(alpha = 0.92f),
+            fontSize = 9.sp,
+            lineHeight = 12.sp,
+            modifier = Modifier.padding(8.dp)
+        )
+    }
+}
+
+/** 对比原图开关：开启后临时关闭全部美颜 */
+@Composable
+fun BeautyCompareSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    accentColor: Color,
+    accentOnColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("对比原图", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("开启后临时关闭全部美颜，直观对比效果", color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = accentOnColor,
+                checkedTrackColor = accentColor,
+                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
+                uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
+            ),
+            modifier = Modifier.height(26.dp)
+        )
+    }
+}
+
+/** 美颜预设：自然 / 淡妆 / 浓妆 / 自定义 */
+@Composable
+fun BeautyPresetRow(
+    preset: String,
+    onPresetChange: (String) -> Unit,
+    accentColor: Color,
+    presets: List<String> = listOf("自然", "淡妆", "浓妆", "自定义"),
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        presets.forEach { p ->
+            Surface(
+                color = if (preset == p) accentColor else Color.White.copy(alpha = 0.10f),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onPresetChange(p) }
+            ) {
+                Text(
+                    text = p,
+                    textAlign = TextAlign.Center,
+                    color = if (preset == p) Color(0xFF1A1A2E) else Color.White.copy(alpha = 0.85f),
+                    fontSize = 10.sp,
+                    fontWeight = if (preset == p) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.padding(vertical = 5.dp).fillMaxWidth()
+                )
+            }
+        }
+    }
 }
