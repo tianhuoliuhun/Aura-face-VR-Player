@@ -100,6 +100,50 @@ private val CustomEaseOutBack = Easing { fraction ->
 /** v110：ASR 引擎类型枚举 */
 enum class AsrEngineType { VOSK, QWEN3, SENSEVOICE_QNN }
 
+/**
+ * v119 修复(#7)：按媒体 URI 持久化播放位置。
+ *
+ * 旧实现用单个 `restorePositionMs` 变量，存在两个致命问题：
+ * 1) 语义名不副实 —— 它被 150ms 的轮询写成"当前播放位置"，只是 currentPosition 的镜像，
+ *    并不是"上次看到哪儿"；
+ * 2) 跨媒体共享 —— 切到新视频时该值仍是上一个视频的位置，唯一的"保护"是边界判断
+ *    `restorePositionMs < playerInstance?.duration`，而此处读的是**已 release 的旧播放器**
+ *    （新 exo 尚未赋给 playerInstance），其 duration 在 release 后为 C.TIME_UNSET（负数），
+ *    条件恒假。也就是说 seek 之所以没出错，纯属依赖了未声明的行为，ExoPlayer 一旦改变
+ *    release 后 getDuration() 的返回，就会立刻变成"新视频跳到上个视频的位置"。
+ *
+ * 现在改为：位置按 URI 存 SharedPreferences，恢复时边界判断用**新建且已 READY 的播放器**
+ * 自身的 duration；播放到结尾自动清除记录，下次从头开始。
+ */
+private object PlaybackPositions {
+    private const val KEY_PREFIX = "playback_pos_v1_"
+    private const val END_TOLERANCE_MS = 1_000L // 距结尾 1s 内视为已看完
+
+    private fun key(uri: String) = KEY_PREFIX + uri
+
+    fun load(prefs: android.content.SharedPreferences, uri: String?): Long {
+        if (uri.isNullOrBlank()) return 0L
+        return prefs.getLong(key(uri), 0L).coerceAtLeast(0L)
+    }
+
+    fun save(prefs: android.content.SharedPreferences, uri: String?, positionMs: Long) {
+        if (uri.isNullOrBlank() || positionMs <= 0L) return
+        prefs.edit().putLong(key(uri), positionMs).apply()
+    }
+
+    fun clear(prefs: android.content.SharedPreferences, uri: String?) {
+        if (uri.isNullOrBlank()) return
+        prefs.edit().remove(key(uri)).apply()
+    }
+
+    /** 是否值得恢复：既要有记录，又不能已经播到结尾 */
+    fun shouldResume(savedMs: Long, durationMs: Long): Boolean {
+        if (savedMs <= 0L) return false
+        if (durationMs <= 0L) return true // duration 尚未就绪时不拦，交给播放器自行 clamp
+        return savedMs < durationMs - END_TOLERANCE_MS
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VRPlayerScreen(
@@ -1519,8 +1563,8 @@ fun VRPlayerScreen(
     var trackDialogOpen by remember { mutableStateOf(false) }
     var selectedAudioTrack by remember { mutableIntStateOf(-1) }
     var selectedTextTrack by remember { mutableIntStateOf(-1) }
-    // 播放位置恢复（8/1 功能）
-    var restorePositionMs by remember { mutableLongStateOf(0L) }
+    // 播放位置恢复：v119 起改由 PlaybackPositions 按媒体 URI 持久化，
+    // 不再使用跨媒体共享的 restorePositionMs 变量（详见该 object 注释 #7）
 
     // Media3 Transformer downscaling function
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -1943,6 +1987,10 @@ fun VRPlayerScreen(
             isVideoPlaying = false
 
             val decodedUri = Uri.parse(videoUriStr)
+
+            // v119 修复(#7)：按当前媒体 URI 读取上次播放位置（不再跨媒体共享同一个变量）
+            var resumeMs = PlaybackPositions.load(prefs, videoUriStr)
+            var resumeApplied = resumeMs <= 0L
             
             // Default dimensions prior to ExoPlayer onVideoSizeChanged callback
             var videoWidth = 1920
@@ -2150,6 +2198,28 @@ fun VRPlayerScreen(
                             isVideoPlaying = playWhenReady
                         }
                     }
+
+                    // v119 修复(#7) 补充：位置恢复改在 onEvents 中执行 —— 该回调会把 player
+                    // 实例作为参数传入，避免在 object 表达式里捕获尚未初始化完成的 exo 变量。
+                    override fun onEvents(player: Player, events: Player.Events) {
+                        if (!events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED)) return
+                        when (player.playbackState) {
+                            Player.STATE_READY -> {
+                                if (!resumeApplied) {
+                                    resumeApplied = true
+                                    val dur = player.duration
+                                    if (PlaybackPositions.shouldResume(resumeMs, dur)) {
+                                        player.seekTo(resumeMs)
+                                        Log.i("VRPlayerScreen", "恢复上次播放位置 ${resumeMs}ms / 总长 ${dur}ms")
+                                    }
+                                }
+                            }
+                            Player.STATE_ENDED -> {
+                                PlaybackPositions.clear(prefs, videoUriStr)
+                                resumeMs = 0L
+                            }
+                        }
+                    }
                     
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         Log.e("VRPlayerScreen", "ExoPlayer playback error", error)
@@ -2166,10 +2236,8 @@ fun VRPlayerScreen(
                 })
                 
                 prepare()
-                // 恢复上次播放位置（8/1 功能）
-                if (restorePositionMs > 0L && restorePositionMs < (playerInstance?.duration ?: Long.MAX_VALUE)) {
-                    seekTo(restorePositionMs)
-                }
+                // 注：位置恢复已移到 onPlaybackStateChanged(STATE_READY)，
+                // 那里 duration 才真正就绪（见 #7 修复说明）
                 playWhenReady = true
                 isVideoPlaying = true
             }
@@ -2180,12 +2248,19 @@ fun VRPlayerScreen(
     }
 
     // Continuously sync playback position for subtitle timing + 记录播放位置用于恢复（8/1 功能）
-    LaunchedEffect(playerInstance, isVideoPlaying) {
+    // v119 修复(#7)：位置按**当前媒体 URI** 持久化（每 2s 落盘一次以免频繁 IO），
+    // 不再写一个跨媒体共享、语义混乱的 restorePositionMs 镜像变量。
+    LaunchedEffect(playerInstance, selectedMediaItem.uri, isVideoPlaying) {
+        var lastSavedAt = 0L
         while (true) {
             playerInstance?.let { player ->
                 currentPositionMs = player.currentPosition
-                if (player.isPlaying && player.currentPosition > 0) {
-                    restorePositionMs = player.currentPosition
+                if (player.isPlaying && player.currentPosition > 0L) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSavedAt >= 2_000L) {
+                        lastSavedAt = now
+                        PlaybackPositions.save(prefs, selectedMediaItem.uri, player.currentPosition)
+                    }
                 }
             }
             delay(150L)
@@ -2270,6 +2345,13 @@ fun VRPlayerScreen(
         // 先清空旧字幕，避免上一个视频的字幕残留
         loadedSubtitleCues = emptyList()
         loadedSubtitleFileName = ""
+
+        // v119 修复(#8)：内嵌字幕（ExoPlayer Cue）同样要清。
+        // exoCueText 只在 onCues 回调里赋值/清空，切到图片时播放器被 release()
+        // 不会再触发 onCues(empty)；切到无内嵌字幕轨的新视频同理。
+        // 于是上一媒体最后一句内嵌字幕会一直贴在屏幕上
+        // （SubtitleOverlay 在 loadedSubtitleCues 为空时用 exoCueText 兜底显示）。
+        exoCueText = null
 
         val uri = selectedMediaItem.uri ?: return@LaunchedEffect
         // 多重匹配：优先用 title，再用 URI 文件名
