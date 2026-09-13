@@ -257,6 +257,20 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | v109 | 下载进度 UI 优化 / Download progress UI improvements |
 | v110 | 新增 Qwen3-ASR 引擎（sherpa-onnx）+ 引擎选择 UI / New Qwen3-ASR engine (sherpa-onnx) + engine selector UI |
 | v111 | SenseVoice QNN 引擎 + ASR 语言选择（中英日韩）+ ABI 分包发布 / SenseVoice QNN engine + ASR language selector + ABI split APKs |
+| v112 | 快捷面板语言同步 + 模型解压目录嵌套修复 + 中文大模型更新 / Quick-panel language sync, unzip path fix, larger ZH model |
+| v113 | MPEG-L2 软件解码回退（兼容 K80 Pro 等机型）/ Software decode fallback for MPEG-L2 |
+| v114 | 输出缓冲队列修复 / Output buffer queue fix |
+| v115 | 音频提取重写为标准 MediaCodec / Audio extraction rewritten on MediaCodec |
+| v116 | MPEG-L2 软件解码器回退策略完善 / Refined MPEG-L2 fallback (c2.android → OMX.google) |
+| v117 | 修复 4 条 P0；切换解码设置不再重置视角 / 4 P0 fixes; decode setting no longer resets view |
+| v118 | SenseVoice QNN 修复（ADSP 路径 + 运行库落盘 + SoC 自动匹配）/ SenseVoice QNN fixes |
+| v119 | 修复 #7 播放位置恢复语义混乱 + #8 内嵌字幕跨媒体残留 / Playback-position restore + stale embedded subtitle fixes |
+| v120 | VRPlayerScreen.kt 按功能拆分（5765 → 5372 行，纯重构）/ VRPlayerScreen split by feature (pure refactor) |
+| v121 | 第二轮拆分：ASR 区块 / 控制栏 / 美颜小组件外置（累计 -963 行）/ Second split pass (cumulative −963 lines) |
+| v122 | Qwen3-ASR 优化：离线模型改为按语音段整段识别，推理次数 -99.6% / Qwen3-ASR: segment-level inference (~99.6% fewer passes) |
+| v123 | Vosk 转写优化（断句 reset / 400ms 喂入 / 模型缓存）+ 修复「模型不可用」死锁 / Vosk optimization + “model unavailable” deadlock fix |
+| v124 | 修复 8K 输入缓冲被拒后退回 1MB（一帧都放不下）/ Fix 8K input buffer rejected → fallback to 1MB |
+| v125 | 修复陀螺仪方向上下左右全部反向（另附转向反转开关）/ Fix inverted gyroscope direction (+ inversion toggle) |
 
 ---
 

@@ -73,6 +73,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val gyroRotationMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
     private val gyroSyncLock = Any()
 
+    /**
+     * v125：陀螺仪转向反转开关，供个别机型/VR 眼镜模式兜底。
+     *
+     * 默认 false —— 即直接使用传感器给出的相对姿态矩阵。旧实现固定做一次转置，
+     * 实测导致上下左右全部反向；若换到某台设备后仍相反，把这里打开即可（改回转置）。
+     */
+    @Volatile
+    var gyroInverted: Boolean = false
+
     fun updateGyroRotationMatrix(matrix: FloatArray) {
         synchronized(gyroSyncLock) {
             System.arraycopy(matrix, 0, gyroRotationMatrix, 0, 16)
@@ -1176,23 +1185,32 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             projectionMode == ProjectionMode.BOX
         val gyroActive = isPanorama && gyroEnabled
         if (gyroActive) {
-            // The sensor matrix describes the device attitude in world space. The camera
-            // must rotate by its inverse (the transpose of a rotation matrix), otherwise
-            // yaw/pitch come out mirrored.
             val currentGyro = FloatArray(16)
             synchronized(gyroSyncLock) {
                 System.arraycopy(gyroRotationMatrix, 0, currentGyro, 0, 16)
             }
-            val gyroInv = FloatArray(16)
-            Matrix.transposeM(gyroInv, 0, currentGyro, 0)
 
-            // model = gyroInv * manualOffset * scale
+            // v125：这里旋转的是**全景球模型**，不是相机，因此直接用传感器给出的
+            // 相对姿态矩阵（R_当前 × R_基准ᵀ）即可。
+            //
+            // 旧实现多做了一次转置（用逆矩阵），实测在多数机型上表现为
+            // 上下左右全部反向——头往上抬画面往下跑、头往左转画面往右跑。
+            // 现在默认直接使用；少数机型若仍相反，可用 [gyroInverted] 开关切回转置。
+            val gyroMat = if (gyroInverted) {
+                val inv = FloatArray(16)
+                Matrix.transposeM(inv, 0, currentGyro, 0)
+                inv
+            } else {
+                currentGyro
+            }
+
+            // model = gyro * manualOffset * scale
             val manualMat = FloatArray(16)
             Matrix.setIdentityM(manualMat, 0)
             Matrix.rotateM(manualMat, 0, manualPitch, 1.0f, 0.0f, 0.0f)
             Matrix.rotateM(manualMat, 0, manualYaw, 0.0f, 1.0f, 0.0f)
             Matrix.multiplyMM(modelMatrix, 0, manualMat, 0, modelMatrix, 0)
-            Matrix.multiplyMM(modelMatrix, 0, gyroInv, 0, modelMatrix, 0)
+            Matrix.multiplyMM(modelMatrix, 0, gyroMat, 0, modelMatrix, 0)
         } else if (projectionMode != ProjectionMode.STANDARD) {
             // Apply touch swipes manual rotational overrides for all projection modes except standard 2D
             Matrix.rotateM(modelMatrix, 0, manualPitch, 1.0f, 0.0f, 0.0f)

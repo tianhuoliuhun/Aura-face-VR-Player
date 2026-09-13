@@ -242,6 +242,12 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("is_gyro_enabled", false) else false
         )
     }
+    // v125：陀螺仪转向反转（个别机型/VR 眼镜模式下上下左右仍相反时打开）
+    var gyroInverted by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("gyro_inverted", false) else false
+        )
+    }
     var isSettingsDialogOpen by remember { mutableStateOf(false) }
     // v106：开源许可对话框开关（设置面板 → 关于与开源许可）
     var showLicensesDialog by remember { mutableStateOf(false) }
@@ -620,6 +626,7 @@ fun VRPlayerScreen(
         beautySmallHead,
         isSplitScreenVR,
         isGyroEnabled,
+        gyroInverted,
         fovDeg,
         isVideoMirrored,
         domeHalfSelect,
@@ -680,6 +687,7 @@ fun VRPlayerScreen(
                 putFloat("beauty_small_head", beautySmallHead)
                 putBoolean("is_split_screen_vr", isSplitScreenVR)
                 putBoolean("is_gyro_enabled", isGyroEnabled)
+                putBoolean("gyro_inverted", gyroInverted)
                 putFloat("fov_deg", fovDeg)
                 putBoolean("is_video_mirrored", isVideoMirrored)
                 putInt("dome_half_select", domeHalfSelect)
@@ -2060,6 +2068,7 @@ fun VRPlayerScreen(
                 view.renderer.beautySmallHead = beautySmallHead
                 view.renderer.isSplitScreenVR = isSplitScreenVR
                 view.renderer.gyroEnabled = isGyroEnabled && !isViewLocked
+                view.renderer.gyroInverted = gyroInverted
                 view.renderer.isMirrored = isVideoMirrored
                 view.renderer.warpMode = warpMode
                 view.renderer.cylinderCurvature = videoCurvature
@@ -3242,6 +3251,17 @@ BatchTranscribeSection(
                                         fontSize = 8.sp
                                     )
                                 }
+
+                                // v125：陀螺仪转向反转。默认关闭（v125 起已修正为正确方向），
+                                // 个别机型或 VR 眼镜模式下若仍上下/左右相反，打开此项即可。
+                                ExperimentalSwitchRow(
+                                    title = "反转陀螺仪转向",
+                                    desc = "若画面上下/左右仍与头部动作相反，打开此项",
+                                    checked = gyroInverted,
+                                    onChanged = { gyroInverted = it; keepUiAlight() },
+                                    accentColor = AccentColor,
+                                    accentOnColor = AccentOnColor
+                                )
 
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("音频声道镜像", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
