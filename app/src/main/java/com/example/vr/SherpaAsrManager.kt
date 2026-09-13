@@ -422,7 +422,10 @@ object SherpaAsrManager {
             lastInitError = "模型未下载或文件不完整"
             return null
         }
-        val langCode = if (language == "auto") "" else language  // Qwen3: 空字符串=自动
+        // v122：线程数按设备核心数取（0.6B 模型的 ONNX 推理是主要瓶颈，多核收益明显），
+        // 上限 4 —— 再多会挤占解码/渲染线程，且移动端大核通常不超过 4 个。
+        val numThreads = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        Log.i(TAG, "Qwen3-ASR: numThreads=$numThreads（CPU 核心 ${Runtime.getRuntime().availableProcessors()}）")
         return try {
             val config = OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
@@ -435,7 +438,7 @@ object SherpaAsrManager {
                         // Qwen3 通过 tokenizer 自动检测语言，无需 language 参数
                     ),
                     tokens = "",
-                    numThreads = 3,
+                    numThreads = numThreads,
                     debug = false,
                     provider = "cpu",
                 ),
@@ -443,7 +446,7 @@ object SherpaAsrManager {
                 maxActivePaths = 4,
                 blankPenalty = 0.0f,
             )
-            OfflineRecognizer(null, config).also { Log.i(TAG, "Qwen3-ASR recognizer created (lang=$langCode)") }
+            OfflineRecognizer(null, config).also { Log.i(TAG, "Qwen3-ASR recognizer created") }
         } catch (e: Throwable) {
             Log.e(TAG, "Qwen3 init failed: ${e.message}", e)
             lastInitError = "初始化失败：${e.message ?: e.javaClass.simpleName}"

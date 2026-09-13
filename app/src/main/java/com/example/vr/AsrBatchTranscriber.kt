@@ -32,6 +32,23 @@ class AsrBatchTranscriber(private val context: Context) {
     companion object {
         private const val VAD_THRESHOLD = 0.008f
         private const val VAD_RESET_MS = 300L
+        private const val SAMPLE_RATE = 16000
+
+        // v122：离线引擎（Qwen3-ASR / SenseVoice）的语音段切分参数。
+        // 这两个模型都是**整段离线推理**（非流式），若沿用流式引擎的 100ms 喂入方式，
+        // 10 分钟视频会触发约 6000 次 0.6B 前向推理，慢到不可用，且相邻块独立识别
+        // 会产生大量重复、割裂的短字幕。改为「按语音段整段送入」：
+        // - 静音持续超过 SPLIT_SILENCE_MS 视为一句话结束
+        // - 单段最长 MAX_SEGMENT_SEC，防止长音频导致显存/耗时爆炸
+        private const val SPLIT_SILENCE_MS = 700L
+        private const val MAX_SEGMENT_SEC = 25
+        private const val MIN_SEGMENT_MS = 300L   // 短于此的残段直接丢弃（多为爆音/噪声）
+
+        // 长句切分阈值：单条字幕超过 40 字或 8 秒就按标点拆开
+        private const val MAX_CUE_CHARS = 40
+        private const val MAX_CUE_MS = 8000L
+        private const val MIN_SPLIT_CHARS = 12
+        private const val MIN_PIECE_MS = 900L
     }
 
     // ===== 主入口（Vosk 引擎）=====
@@ -144,7 +161,7 @@ class AsrBatchTranscriber(private val context: Context) {
         val model = org.vosk.Model(modelDir.absolutePath)
         val recognizer = org.vosk.Recognizer(model, 16000f)
         return try {
-            extractAndRecognizeGeneric(mediaUri, onProgress) { samples ->
+            extractAndRecognizeGeneric(mediaUri, onProgress, feedAll = false) { samples, _ ->
                 val pcm = floatToPcm16(samples)
                 val accepted = recognizer.acceptWaveForm(pcm, pcm.size)
                 val text = if (accepted) parseText(recognizer.result) else parseText(recognizer.partialResult)
@@ -180,20 +197,155 @@ class AsrBatchTranscriber(private val context: Context) {
     }
 
     // ===== Qwen3-ASR / sherpa-onnx 识别 =====
+    /**
+     * 把过长的识别结果按标点切成多条字幕，时间按字数比例分配。
+     *
+     * 离线模型一次识别的是整段语音（可达 25 秒），输出常是一整段话；
+     * 直接生成一条字幕会长时间铺满屏幕。这里按句末/句中标点切分，
+     * 每条至少 [MIN_PIECE_MS]，避免过短的碎片。
+     */
+    private data class TextPiece(val text: String, val startMs: Long, val endMs: Long)
+
+    private fun splitLongSentence(text: String, startMs: Long, endMs: Long): List<TextPiece> {
+        val total = endMs - startMs
+        if (text.length <= MAX_CUE_CHARS && total <= MAX_CUE_MS) {
+            return listOf(TextPiece(text, startMs, endMs))
+        }
+        // 按标点切句（保留标点）
+        val parts = mutableListOf<String>()
+        var buf = StringBuilder()
+        for (ch in text) {
+            buf.append(ch)
+            if (ch in "。！？；!?;" || (ch in "，,、" && buf.length >= MIN_SPLIT_CHARS)) {
+                parts.add(buf.toString()); buf = StringBuilder()
+            }
+        }
+        if (buf.isNotBlank()) parts.add(buf.toString())
+        var usable = parts.filter { it.isNotBlank() }
+        if (usable.isEmpty()) return listOf(TextPiece(text, startMs, endMs))
+
+        // v122 兜底：整段没有标点（模型常输出不带标点的长句）时，按字数强制等分，
+        // 否则一条 30 秒、几十字的字幕会一直糊在屏幕上。
+        if (usable.size == 1 && usable[0].length > MAX_CUE_CHARS) {
+            val whole = usable[0]
+            val chunks = mutableListOf<String>()
+            var i = 0
+            while (i < whole.length) {
+                chunks.add(whole.substring(i, minOf(i + MAX_CUE_CHARS, whole.length)))
+                i += MAX_CUE_CHARS
+            }
+            usable = chunks
+        }
+
+        val totalChars = usable.sumOf { it.length }.coerceAtLeast(1)
+        val out = mutableListOf<TextPiece>()
+        var cursor = startMs
+        usable.forEachIndexed { i, part ->
+            val share = if (i == usable.lastIndex) endMs - cursor
+            else (total * part.length / totalChars.toFloat()).toLong()
+            val segEnd = if (i == usable.lastIndex) endMs
+            else (cursor + share).coerceAtLeast(cursor + MIN_PIECE_MS).coerceAtMost(endMs)
+            out.add(TextPiece(part.trim(), cursor, segEnd))
+            cursor = segEnd
+        }
+        return out
+    }
+
+    /**
+     * v122 优化：离线引擎改为**按语音段整段识别**。
+     *
+     * 原实现对每个 100ms 音频块都 `createStream → acceptWaveform → decode`，
+     * 即每 100ms 跑一次完整的 0.6B 模型前向推理：
+     * - 性能：10 分钟视频约 6000 次推理，实测慢到不可用；
+     * - 质量：每块独立识别、互不感知上下文，相邻块重复输出同一句话，字幕碎片化。
+     *
+     * 现在用能量 VAD 把连续语音累积成段，遇到静音 >700ms 或段长达到 25s 才送一次识别，
+     * 推理次数通常下降一到两个数量级，且每段都有完整上下文。
+     */
     private fun extractAndRecognizeSherpa(
         mediaUri: Uri,
         recognizer: com.k2fsa.sherpa.onnx.OfflineRecognizer,
         onProgress: (Float) -> Unit
     ): List<SubtitleCue> {
-        return extractAndRecognizeGeneric(mediaUri, onProgress) { samples ->
-            val stream = recognizer.createStream()
-            stream.acceptWaveform(samples, 16000)
-            recognizer.decode(stream)
-            val text = recognizer.getResult(stream).text.trim()
-            stream.release()
-            // Qwen3 是离线模型（整段识别），每次送入的 chunk 都可视为最终结果
-            AsrSegmentResult(text = text, isFinal = true, needsReset = false)
+        val pending = ArrayList<Float>(SAMPLE_RATE * MAX_SEGMENT_SEC)
+        val out = ArrayList<SubtitleCue>()
+        var segStartMs = 0L
+        var segEndMs = 0L
+        var silenceRunMs = 0L
+        var segmentCount = 0
+
+        /** 把已累积的采样整段送入识别器，产出一个字幕条目 */
+        fun flush(endMs: Long) {
+            if (pending.isEmpty()) return
+            val samples = pending.toFloatArray()
+            pending.clear()
+            val segMs = samples.size * 1000L / SAMPLE_RATE
+            if (segMs < MIN_SEGMENT_MS) return
+
+            segmentCount++
+            statusMessage = "正在识别第 $segmentCount 段语音…"
+            val t0 = System.currentTimeMillis()
+            val text = try {
+                val stream = recognizer.createStream()
+                try {
+                    stream.acceptWaveform(samples, SAMPLE_RATE)
+                    recognizer.decode(stream)
+                    recognizer.getResult(stream).text.trim()
+                } finally {
+                    stream.release()
+                }
+            } catch (e: Exception) {
+                Log.w("AsrBatch", "sherpa segment #$segmentCount failed: ${e.message}")
+                ""
+            }
+            val cost = System.currentTimeMillis() - t0
+            if (text.isNotBlank()) {
+                val start = segStartMs.coerceAtLeast(0L)
+                val end = endMs.coerceAtLeast(start + 500)
+                // v122：整段识别常返回一长句，直接做一条字幕会糊满屏幕。
+                // 按标点切成多条，并按**字数比例**分配时间轴（近似但远好于整句一屏）。
+                for (piece in splitLongSentence(text, start, end)) {
+                    out.add(SubtitleCue(out.size + 1, piece.startMs, piece.endMs, piece.text))
+                }
+                Log.i("AsrBatch", "sherpa segment #$segmentCount: ${segMs}ms -> ${text.length}字/${out.size}条, 耗时 ${cost}ms")
+            } else {
+                Log.i("AsrBatch", "sherpa segment #$segmentCount: ${segMs}ms -> 空, 耗时 ${cost}ms")
+            }
         }
+
+        // feedAll=true：离线引擎需要看到**每一个**块（含静音）才能自行判断语音段边界，
+        // 不能让通用框架把静音块过滤掉（那是为 Vosk 这类流式引擎设计的）。
+        extractAndRecognizeGeneric(mediaUri, onProgress, feedAll = true) { samples, chunkStartMs ->
+            var rms = 0f
+            for (s in samples) rms += s * s
+            rms = kotlin.math.sqrt(rms / samples.size)
+            val chunkMs = (samples.size * 1000L / SAMPLE_RATE).coerceAtLeast(1L)
+
+            if (rms >= VAD_THRESHOLD) {
+                if (pending.isEmpty()) segStartMs = chunkStartMs
+                for (s in samples) pending.add(s)
+                silenceRunMs = 0L
+                segEndMs = chunkStartMs + chunkMs
+                // 超长保护：整段过长时强制切分，避免单次推理耗时/内存不可控
+                if (pending.size >= SAMPLE_RATE * MAX_SEGMENT_SEC) flush(segEndMs)
+            } else if (pending.isNotEmpty()) {
+                silenceRunMs += chunkMs
+                if (silenceRunMs >= SPLIT_SILENCE_MS) {
+                    flush(chunkStartMs)
+                    silenceRunMs = 0L
+                } else {
+                    // 短静音（<700ms）保留在段内，避免把一句话从词中间切断
+                    for (s in samples) pending.add(s)
+                    segEndMs = chunkStartMs + chunkMs
+                }
+            }
+            // 字幕由 flush() 内部产出，这里不返回文本
+            AsrSegmentResult(text = "", isFinal = false, needsReset = false)
+        }
+
+        flush(segEndMs)  // 收尾：最后一段
+        Log.i("AsrBatch", "sherpa done: $segmentCount 段 -> ${out.size} 条字幕")
+        return out
     }
 
     // ===== 通用音频提取 + 分块喂入框架 =====
@@ -205,17 +357,21 @@ class AsrBatchTranscriber(private val context: Context) {
 
     /**
      * 通用音频提取 + 分块喂入框架。
-     * 先尝试 MediaExtractor + MediaCodec（最快），失败则回退到 ExoPlayer（支持所有音频格式）。
-     * @param recognizeBlock 接收 [0,1] 归一化 16kHz 单声道 PCM float 采样，返回识别结果
+     * 先尝试 MediaExtractor + MediaCodec（最快），失败则回退到软件解码（支持 MPEG Layer II 等）。
+     *
+     * @param feedAll true = 每一个 100ms 块都会回调（含静音），供离线引擎自行切分语音段；
+     *                false = 按 Vosk 习惯过滤掉连续静音块（流式引擎用）
+     * @param recognizeBlock 接收 [0,1] 归一化 16kHz 单声道 PCM float 采样与该块起始毫秒，返回识别结果
      */
     private fun extractAndRecognizeGeneric(
         mediaUri: Uri,
         onProgress: (Float) -> Unit,
-        recognizeBlock: (FloatArray) -> AsrSegmentResult
+        feedAll: Boolean = false,
+        recognizeBlock: (FloatArray, Long) -> AsrSegmentResult
     ): List<SubtitleCue> {
         // 尝试 MediaExtractor + MediaCodec（快速路径）
         return try {
-            extractWithMediaCodec(mediaUri, onProgress, recognizeBlock)
+            extractWithMediaCodec(mediaUri, onProgress, feedAll, recognizeBlock)
         } catch (e: Exception) {
             // 兜底：纯 Java 软件解码（JLayer）。
             // 典型场景是 MPEG-1 Audio Layer II（Android 里 MIME 为 audio/mpeg-L2）：
@@ -225,7 +381,7 @@ class AsrBatchTranscriber(private val context: Context) {
             // 这种情况 ExoPlayer 也救不了（它内部同样走 MediaCodec），只有自带解码器才行。
             Log.w("AsrBatch", "MediaCodec 解码失败（${e.message}），回退到软件解码器...")
             statusMessage = "系统解码器不可用，正在用软件解码器解码（速度较慢）..."
-            extractWithSoftwareMpegDecoder(mediaUri, onProgress, recognizeBlock)
+            extractWithSoftwareMpegDecoder(mediaUri, onProgress, feedAll, recognizeBlock)
         }
     }
 
@@ -236,7 +392,8 @@ class AsrBatchTranscriber(private val context: Context) {
     private fun extractWithMediaCodec(
         mediaUri: Uri,
         onProgress: (Float) -> Unit,
-        recognizeBlock: (FloatArray) -> AsrSegmentResult
+        feedAll: Boolean = false,
+        recognizeBlock: (FloatArray, Long) -> AsrSegmentResult
     ): List<SubtitleCue> {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -351,10 +508,13 @@ class AsrBatchTranscriber(private val context: Context) {
                     if (sentenceStartUs == 0L) sentenceStartUs = chunkStartUs
                     var rms = 0f; for (s in chunk) rms += s * s; rms = kotlin.math.sqrt(rms / chunk.size)
                     val isSilent = rms < VAD_THRESHOLD
-                    val shouldFeed = if (isSilent) { silentRunMs += 100L; if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false } else { silentRunMs = 0L; fedSilenceReset = false; true }
+                    // v122：feedAll=true 时不过滤静音块（离线引擎需要自己看静音来断句）
+                    val shouldFeed = if (feedAll) true
+                        else if (isSilent) { silentRunMs += 100L; if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false }
+                        else { silentRunMs = 0L; fedSilenceReset = false; true }
                     if (shouldFeed) {
                         val resampled = resampleLinear(chunk, outputRate, 16000)
-                        val result = recognizeBlock(resampled)
+                        val result = recognizeBlock(resampled, chunkStartUs / 1000L)
                         if (result.text.isNotBlank()) {
                             if (result.isFinal) {
                                 val endUs = chunkStartUs + 100_000L
@@ -375,7 +535,7 @@ class AsrBatchTranscriber(private val context: Context) {
             val endUs = chunkStartUs + 100_000L
             if (monoBuf.isNotEmpty()) {
                 val resampled = resampleLinear(monoBuf, outputRate, 16000)
-                val result = recognizeBlock(resampled)
+                val result = recognizeBlock(resampled, chunkStartUs / 1000L)
                 if (result.text.isNotBlank()) cues.add(SubtitleCue(cues.size + 1, sentenceStartUs.coerceAtLeast(0L) / 1000, endUs.coerceAtLeast(sentenceStartUs / 1000 + 500), result.text))
             }
             progress = 1f; onProgress(1f)
@@ -401,7 +561,8 @@ class AsrBatchTranscriber(private val context: Context) {
     private fun extractWithSoftwareMpegDecoder(
         mediaUri: Uri,
         onProgress: (Float) -> Unit,
-        recognizeBlock: (FloatArray) -> AsrSegmentResult
+        feedAll: Boolean = false,
+        recognizeBlock: (FloatArray, Long) -> AsrSegmentResult
     ): List<SubtitleCue> {
         val extractor = MediaExtractor()
         try {
@@ -489,10 +650,12 @@ class AsrBatchTranscriber(private val context: Context) {
 
                     var rms = 0f; for (s in chunk) rms += s * s; rms = kotlin.math.sqrt(rms / chunk.size)
                     val isSilent = rms < VAD_THRESHOLD
-                    val shouldFeed = if (isSilent) { silentRunMs += 100L; if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false } else { silentRunMs = 0L; fedSilenceReset = false; true }
+                    val shouldFeed = if (feedAll) true
+                        else if (isSilent) { silentRunMs += 100L; if (silentRunMs >= VAD_RESET_MS && !fedSilenceReset) { fedSilenceReset = true; true } else false }
+                        else { silentRunMs = 0L; fedSilenceReset = false; true }
                     if (shouldFeed) {
                         val resampled = resampleLinear(chunk, sampleRate, 16000)
-                        val result = recognizeBlock(resampled)
+                        val result = recognizeBlock(resampled, chunkStartMs)
                         if (result.text.isNotBlank()) {
                             if (result.isFinal) {
                                 val endMs = chunkStartMs + 100
@@ -520,7 +683,7 @@ class AsrBatchTranscriber(private val context: Context) {
             // 收尾：剩余不足一块的采样也送一次识别
             if (monoBuf.isNotEmpty()) {
                 val resampled = resampleLinear(monoBuf, sampleRate, 16000)
-                val result = recognizeBlock(resampled)
+                val result = recognizeBlock(resampled, chunkStartMs)
                 if (result.text.isNotBlank()) {
                     cues.add(SubtitleCue(cues.size + 1, sentenceStartMs.coerceAtLeast(0L), (chunkStartMs + 500).coerceAtLeast(sentenceStartMs + 500), result.text))
                 }
