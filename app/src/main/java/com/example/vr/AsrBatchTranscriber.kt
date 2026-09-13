@@ -49,6 +49,38 @@ class AsrBatchTranscriber(private val context: Context) {
         private const val MAX_CUE_MS = 8000L
         private const val MIN_SPLIT_CHARS = 12
         private const val MIN_PIECE_MS = 900L
+
+        // v123（Vosk）：喂入单元 400ms。Vosk 虽是流式引擎，但每 100ms 一次 JNI 调用
+        // + 一次 JSON 解析的开销很明显；400ms 仍在可接受的流式延迟内，调用量降为 1/4。
+        private const val VOSK_FEED_MS = 400
+
+        // v123：Vosk 模型加载很贵（小模型数秒、大模型数十秒），
+        // 同一路径的 Model 复用；切换模型时自动释放旧的。
+        @Volatile private var cachedModel: org.vosk.Model? = null
+        @Volatile private var cachedModelPath: String? = null
+
+        @Synchronized
+        private fun obtainVoskModel(path: String): org.vosk.Model {
+            val c = cachedModel
+            if (c != null && cachedModelPath == path) {
+                Log.i("AsrBatch", "Vosk 模型复用缓存: $path")
+                return c
+            }
+            try { cachedModel?.close() } catch (_: Exception) {}
+            val m = org.vosk.Model(path)
+            cachedModel = m
+            cachedModelPath = path
+            return m
+        }
+
+        /** 释放缓存的 Vosk 模型 native 内存（退出界面或切换模型时调用） */
+        @Synchronized
+        fun releaseVoskModel() {
+            try { cachedModel?.close() } catch (_: Exception) {}
+            cachedModel = null
+            cachedModelPath = null
+            Log.i("AsrBatch", "Vosk 模型缓存已释放")
+        }
     }
 
     // ===== 主入口（Vosk 引擎）=====
@@ -67,8 +99,14 @@ class AsrBatchTranscriber(private val context: Context) {
             onStatus(statusMessage)
             val modelDir = modelProvider(modelOption)
             if (modelDir == null) {
-                statusMessage = "模型不可用，请检查网络后重试"
+                // v123：旧提示一律是"请检查网络后重试"，但模型下载失败、解压失败、
+                // 本地缓存损坏都会走到这里，用户无从判断。带上模型名与本地缓存状态，
+                // 便于区分"没网/下载失败"与"本地文件坏了"。
+                val cacheDir = File(context.filesDir, "vosk_models/${modelOption.modelName}")
+                val hint = if (cacheDir.exists()) "本地缓存存在但不可用（可尝试重新下载）" else "尚未下载（需联网下载 ${modelOption.sizeMb}MB）"
+                statusMessage = "模型不可用：${modelOption.label}——$hint"
                 onStatus(statusMessage)
+                Log.w("AsrBatch", "model unavailable: ${modelOption.modelName}, $hint")
                 return@withContext null
             }
 
@@ -153,25 +191,57 @@ class AsrBatchTranscriber(private val context: Context) {
     }
 
     // ===== Vosk 识别 =====
+    /**
+     * v123 优化：
+     * 1) 断句后调用 recognizer.reset() —— 此前从不 reset，Vosk 内部上下文无限累积，
+     *    既拖慢识别又让后续文本越来越不准，"断句"其实只切了字幕没切解码状态；
+     * 2) 每次转写前归零 sentenceElapsedMs —— 它是实例级状态，此前跨次累积，
+     *    导致第二次转写刚开始就被判定"超时"而立刻断句；
+     * 3) 直接喂 float[]（Vosk 支持），省掉每块一次的 floatToPcm16 转换；
+     * 4) 以 400ms 为一个喂入单元，JNI 调用与 JSON 解析量降为原来的 1/4；
+     * 5) Model 按路径缓存复用，连续转写省去重复加载（数十秒）。
+     */
     private fun extractAndRecognizeVosk(
         mediaUri: Uri,
         modelDir: File,
         onProgress: (Float) -> Unit
     ): List<SubtitleCue> {
-        val model = org.vosk.Model(modelDir.absolutePath)
+        sentenceElapsedMs = 0L
+        val model = obtainVoskModel(modelDir.absolutePath)
         val recognizer = org.vosk.Recognizer(model, 16000f)
+        val feedSamples = SAMPLE_RATE * VOSK_FEED_MS / 1000   // 6400
+        var acc = FloatArray(0)
+        var feedCount = 0
+        val t0 = System.currentTimeMillis()
         return try {
             extractAndRecognizeGeneric(mediaUri, onProgress, feedAll = false) { samples, _ ->
-                val pcm = floatToPcm16(samples)
-                val accepted = recognizer.acceptWaveForm(pcm, pcm.size)
-                val text = if (accepted) parseText(recognizer.result) else parseText(recognizer.partialResult)
-                AsrSegmentResult(
-                    text = text,
-                    isFinal = accepted,
-                    needsReset = !accepted && shouldResetVosk(text, samples.size, 16000)
-                )
+                acc = appendFloat(acc, samples)
+                if (acc.size < feedSamples) {
+                    // 攒够 400ms 再喂
+                    AsrSegmentResult(text = "", isFinal = false, needsReset = false)
+                } else {
+                    val buf = acc
+                    acc = FloatArray(0)
+                    feedCount++
+                    val accepted = recognizer.acceptWaveForm(buf, buf.size)
+                    val text = if (accepted) parseText(recognizer.result) else parseText(recognizer.partialResult)
+                    val needsReset = !accepted && shouldResetVosk(text, buf.size, SAMPLE_RATE)
+                    when {
+                        accepted -> sentenceElapsedMs = 0L
+                        needsReset -> {
+                            // 主动断句：重置解码状态，避免上下文无限累积
+                            recognizer.reset()
+                            sentenceElapsedMs = 0L
+                        }
+                    }
+                    AsrSegmentResult(text = text, isFinal = accepted, needsReset = needsReset)
+                }
             }.let { cues ->
-                // Vosk finalResult 收尾
+                // 收尾：不足一个喂入单元的残余采样也要送进去，否则尾部语音会丢
+                if (acc.isNotEmpty()) {
+                    recognizer.acceptWaveForm(acc, acc.size)
+                    acc = FloatArray(0)
+                }
                 val finalText = parseText(recognizer.finalResult)
                 if (finalText.isNotBlank() && cues.isEmpty()) {
                     cues + SubtitleCue(cues.size + 1, 0L, 500L, finalText)
@@ -181,9 +251,21 @@ class AsrBatchTranscriber(private val context: Context) {
                 } else cues
             }
         } finally {
+            Log.i(
+                "AsrBatch",
+                "Vosk done: 喂入 ${feedCount + 1} 次（${VOSK_FEED_MS}ms/次，优化前约 ${(feedCount + 1) * (VOSK_FEED_MS / 100)} 次）, " +
+                    "耗时 ${System.currentTimeMillis() - t0}ms"
+            )
             try { recognizer.close() } catch (_: Exception) {}
-            try { model.close() } catch (_: Exception) {}
+            // Model 由缓存持有，不在此关闭（换模型或退出界面时才释放）
         }
+    }
+
+    private fun appendFloat(a: FloatArray, b: FloatArray): FloatArray {
+        val out = FloatArray(a.size + b.size)
+        System.arraycopy(a, 0, out, 0, a.size)
+        System.arraycopy(b, 0, out, a.size, b.size)
+        return out
     }
 
     // Vosk 断句逻辑：超时 6 秒或句末标点
@@ -395,10 +477,9 @@ class AsrBatchTranscriber(private val context: Context) {
         feedAll: Boolean = false,
         recognizeBlock: (FloatArray, Long) -> AsrSegmentResult
     ): List<SubtitleCue> {
-        val extractor = MediaExtractor()
+        val (extractor, src) = prepareExtractor(mediaUri)
         var codec: MediaCodec? = null
         try {
-            extractor.setDataSource(context, mediaUri, null)
 
             // 选择音频轨
             var audioTrack = -1
@@ -545,7 +626,89 @@ class AsrBatchTranscriber(private val context: Context) {
             try { codec?.stop() } catch (_: Exception) {}
             try { codec?.release() } catch (_: Exception) {}
             try { extractor.release() } catch (_: Exception) {}
+            src.close()
         }
+    }
+
+    /** 打开的媒体源句柄，用完统一释放（fd 关闭 / 临时文件删除） */
+    private class DataSourceHolder {
+        var pfd: android.os.ParcelFileDescriptor? = null
+        var tmpFile: File? = null
+        fun close() {
+            try { pfd?.close() } catch (_: Exception) {}
+            try { tmpFile?.delete() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * v123：为 MediaExtractor 准备数据源，三级回退。
+     *
+     * 背景：`setDataSource(context, uri, null)` 对系统相册（photo picker）返回的
+     * URI 会抛 "Failed to instantiate extractor"；改用 fd 后**部分机型依然失败**
+     * （picker 给的 fd 不一定可 seek，而 MediaExtractor 必须能随机访问）。
+     * 因此最后兜底复制到临时文件再打开——多一次磁盘 IO，但保证能转写。
+     */
+    private fun prepareExtractor(uri: Uri): Pair<MediaExtractor, DataSourceHolder> {
+        val h = DataSourceHolder()
+        // 每次尝试都新建 MediaExtractor —— 实测失败过的实例会永久处于坏状态，
+        // 复用它会导致后续（即使是可用数据源）一律再失败。
+        // 1) 文件描述符
+        try {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            if (pfd != null) {
+                try {
+                    val ex = MediaExtractor()
+                    ex.setDataSource(pfd.fileDescriptor)
+                    h.pfd = pfd
+                    return ex to h
+                } catch (e: Exception) {
+                    Log.w("AsrBatch", "fd 方式失败：${e.message}，尝试带 offset 打开")
+                }
+                // 2) 带 offset/length
+                try {
+                    val afd = context.contentResolver.openAssetFileDescriptor(uri, "r")
+                    if (afd != null) {
+                        val ex = MediaExtractor()
+                        ex.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                        afd.close()
+                        h.pfd = pfd
+                        return ex to h
+                    }
+                } catch (e2: Exception) {
+                    Log.w("AsrBatch", "afd 方式失败：${e2.message}")
+                }
+                pfd.close()
+            }
+        } catch (e: Exception) {
+            Log.w("AsrBatch", "打开 fd 失败：${e.message}")
+        }
+
+        // 3) 兜底：把媒体内容写到临时文件（本地路径一定可 seek）。
+        // 注意别用 contentResolver.openInputStream(uri)——实测对 photo picker 的 URI
+        // 它只返回一张缩略图（本次源 1062353 字节，复制出来只有 22600 字节），
+        // 必须直接读文件描述符的字节流。
+        Log.i("AsrBatch", "回退：复制媒体到临时文件后再解码")
+        val tmp = File(context.cacheDir, "asr_src_${System.currentTimeMillis()}.tmp")
+        val pfd2 = context.contentResolver.openFileDescriptor(uri, "r")
+            ?: throw Exception("无法读取媒体源：$uri")
+        try {
+            // 体积保护：不要把超大文件搬到内部存储（可能撑爆空间），
+            // 超过 1.5GB 直接放弃并给出可理解的提示
+            val size = pfd2.statSize
+            if (size > 1_500_000_000L) {
+                throw Exception("视频过大（${size / 1_048_576}MB），无法复制到内部存储处理")
+            }
+            java.io.FileInputStream(pfd2.fileDescriptor).use { input ->
+                tmp.outputStream().use { output -> input.copyTo(output, 1 shl 20) }
+            }
+        } finally {
+            pfd2.close()
+        }
+        Log.i("AsrBatch", "临时文件已就绪: ${tmp.absolutePath}, size=${tmp.length()} bytes")
+        val ex = MediaExtractor()
+        ex.setDataSource(tmp.absolutePath)
+        h.tmpFile = tmp
+        return ex to h
     }
 
     /**
@@ -564,10 +727,8 @@ class AsrBatchTranscriber(private val context: Context) {
         feedAll: Boolean = false,
         recognizeBlock: (FloatArray, Long) -> AsrSegmentResult
     ): List<SubtitleCue> {
-        val extractor = MediaExtractor()
+        val (extractor, src) = prepareExtractor(mediaUri)
         try {
-            extractor.setDataSource(context, mediaUri, null)
-
             // 选择音频轨（顺带记下时长，用于估算进度）
             var audioTrack = -1
             var mime = ""
@@ -694,6 +855,7 @@ class AsrBatchTranscriber(private val context: Context) {
             return cues
         } finally {
             try { extractor.release() } catch (_: Exception) {}
+            src.close()
         }
     }
 

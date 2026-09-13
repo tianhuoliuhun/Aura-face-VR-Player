@@ -488,6 +488,10 @@ fun VRPlayerScreen(
     val subtitleTranslator = remember { SubtitleTranslator(context) }
     // 后台批处理转写（v85）：提取视频音频生成 SRT
     val batchTranscriber = remember { AsrBatchTranscriber(context) }
+    // v123：Vosk 模型按路径缓存复用（省去重复加载），退出页面时释放 native 内存
+    DisposableEffect(Unit) {
+        onDispose { AsrBatchTranscriber.releaseVoskModel() }
+    }
     // v110：ASR 引擎类型选择（Vosk / Qwen3-ASR / SenseVoice QNN）
     var asrEngineType by remember { mutableStateOf(AsrEngineType.VOSK) }
     // v111：sherpa 引擎语言选择（中/英/日/韩/自动）
@@ -531,6 +535,13 @@ fun VRPlayerScreen(
     fun startBatchTranscribe() {
         val uriStr = selectedMediaItem.uri ?: return
         if (isBatchTranscribing) return
+        // v123：图片没有音轨，此前直接开跑会在解码阶段才失败（提示"音轨解码失败"，
+        // 用户无从判断）。这里提前拦下并给明确说明。
+        if (!selectedMediaItem.isVideo) {
+            batchTranscribeStatus = "当前是图片，没有音轨可识别（请打开视频后再生成字幕）"
+            Toast.makeText(context, batchTranscribeStatus, Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch {
             isBatchTranscribing = true
             batchTranscribeProgress = 0f

@@ -164,10 +164,19 @@ class RealtimeAsrManager(private val context: Context) {
             val cachedDir = if (storedDir.isNotBlank() && File(storedDir).exists()) {
                 File(storedDir)
             } else {
-                findModelDir(targetDir) ?: return@withContext null
+                findModelDir(targetDir)
             }
-            Log.i("VoskAsr", "Model cached at: ${cachedDir.absolutePath}")
-            return@withContext cachedDir
+            if (cachedDir != null) {
+                Log.i("VoskAsr", "Model cached at: ${cachedDir.absolutePath}")
+                return@withContext cachedDir
+            }
+            // v123：marker 存在但模型实际不可用（内容为空、指向的目录被删、
+            // 或目录结构不对）。旧逻辑在这里直接 return null —— 结果是用户永远
+            // 卡在"模型不可用，请连接网络后重试"，而且再点下载也没用，
+            // 因为 marker.exists() 会一直短路掉下载分支。
+            // 这里清除失效标记，回退到下面的重新下载流程。
+            Log.w("VoskAsr", "模型标记存在但目录无效（$targetDir），清除后重新下载")
+            marker.delete()
         }
 
         Log.i("VoskAsr", "Model not cached, downloading from ${model.downloadUrl}")
@@ -320,7 +329,14 @@ class RealtimeAsrManager(private val context: Context) {
         null
     }
 
+    /**
+     * 在 [dir] 下寻找可用的 Vosk 模型目录（含 am/ 与 conf/）。
+     *
+     * v123：先判断 [dir] 自身 —— 模型也可能被直接解压到目标目录里
+     * （而不是解压出一个子目录），旧实现只查子目录，会误判为"模型不存在"。
+     */
     private fun findModelDir(dir: File): File? {
+        if (File(dir, "am").exists() && File(dir, "conf").exists()) return dir
         val children = dir.listFiles() ?: return null
         for (f in children) {
             if (f.isDirectory && File(f, "am").exists() && File(f, "conf").exists()) {
