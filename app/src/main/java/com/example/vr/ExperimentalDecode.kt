@@ -137,8 +137,33 @@ object ExperimentalDecode {
                     val mf = MediaFormat(configuration.mediaFormat)
                     val w = if (mf.containsKey(MediaFormat.KEY_WIDTH)) mf.getInteger(MediaFormat.KEY_WIDTH) else 1920
                     val h = if (mf.containsKey(MediaFormat.KEY_HEIGHT)) mf.getInteger(MediaFormat.KEY_HEIGHT) else 1080
-                    // Generous input buffer so 8K I-frames are never rejected
-                    mf.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, (w * h * 4L).coerceAtLeast(16L * 1024 * 1024).toInt())
+                    // v124：按分辨率分级设置输入缓冲。
+                    //
+                    // 旧写法是 `(w * h * 4L).coerceAtLeast(16MB)`：8K 会算出 **132MB**。
+                    // 这个值远超解码器愿意接受的规模，实际结果是请求被直接忽略、
+                    // 退回框架默认输入缓冲（通常只有 **1MB**，连一帧 8K I 帧都装不下），
+                    // 于是 8K 视频在解码第一帧就失败/花屏——正是"帧缓存只有一帧 1MB"的现象。
+                    // 另外 `w * h` 是 Int 乘法，超高分辨率下还可能溢出成负数。
+                    //
+                    // 现在用 Long 全程计算，按档位给出解码器肯接受、且足够放下最大帧的值，
+                    // 并 clamp 到 [4MB, 64MB]。
+                    val target = when {
+                        w >= 7680 || h >= 4320 -> 64L * 1024 * 1024   // 8K：I 帧可达数十 MB
+                        w >= 3840 || h >= 2160 -> 24L * 1024 * 1024   // 4K
+                        w >= 1920 || h >= 1080 -> 8L * 1024 * 1024    // 1080p
+                        else -> 4L * 1024 * 1024
+                    }
+                    val maxInputSize = target
+                        .coerceIn(4L * 1024 * 1024, 64L * 1024 * 1024)
+                        .coerceAtMost(Int.MAX_VALUE.toLong())
+                        .toInt()
+                    val frameBytes = w.toLong() * h.toLong() * 3L / 2L   // NV12 一帧
+                    mf.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, maxInputSize)
+                    Log.i(
+                        TAG,
+                        "注入 max-input-size=${maxInputSize / 1024 / 1024}MB (${w}x${h}, " +
+                            "一帧约 ${frameBytes / 1024 / 1024}MB)"
+                    )
                     val cfg = MediaCodecAdapter.Configuration.createForVideoDecoding(
                         configuration.codecInfo,
                         mf,
