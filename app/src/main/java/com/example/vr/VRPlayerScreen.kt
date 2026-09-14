@@ -499,7 +499,13 @@ fun VRPlayerScreen(
     // v127：只剩 SenseVoice 一条路线（Vosk / Qwen3 / QNN 已移除）
     val asrEngineType = AsrEngineType.SENSEVOICE
     // v111：sherpa 引擎语言选择（中/英/日/韩/自动）
-    var sherpaLangCode by remember { mutableStateOf("auto") }
+    // v127f：识别语言持久化。此前只存内存状态，重启应用就回到「自动」，
+    // 用户会觉得"语言选了没用"。
+    var sherpaLangCode by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getString("sherpa_lang_code", "auto") ?: "auto" else "auto"
+        )
+    }
     // v127e：SenseVoice 推理线程数（1~10，推荐 4~6）
     var asrThreads by remember {
         mutableIntStateOf(
@@ -540,6 +546,25 @@ fun VRPlayerScreen(
                 }
             }
         }
+    }
+
+    /**
+     * v127f：切换识别语言。
+     *
+     * 语言是创建识别器时的参数，改了必须重建引擎才生效，而重建要重新加载
+     * 238MB 模型（约 5 秒）。这里统一处理：写 prefs → 给出明确反馈 →
+     * 由 LaunchedEffect(sherpaLangCode) 负责重启引擎。
+     */
+    fun changeAsrLanguage(code: String) {
+        if (code == sherpaLangCode) return
+        sherpaLangCode = code
+        if (isMemoryModeEnabled) prefs.edit().putString("sherpa_lang_code", code).apply()
+        val label = SherpaAsrManager.sherpaLanguages.firstOrNull { it.first == code }?.second ?: code
+        Toast.makeText(
+            context,
+            if (isRealtimeSubtitleEnabled) "识别语言：$label（重新加载模型，约 5 秒）" else "识别语言：$label",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     /**
@@ -1985,7 +2010,13 @@ fun VRPlayerScreen(
     // 开启后后台滚动预读：独立解码音频 → VAD 分段 → ASR → 内存缓存；
     // 播放头只需查缓存即可显示，不再等整片转写完成。
     LaunchedEffect(isRealtimeSubtitleEnabled, selectedMediaItem.uri, asrEngineType, sherpaLangCode) {
+        // v127f：切语言/切媒体/开关都会重跑本 effect，必须把**全部**相关状态清干净，
+        // 否则屏上会残留上一轮的字幕或进度（会让用户以为"改了语言没反应"）。
         realtimeCues = emptyList()
+        realtimeDone = false
+        realtimeGeneratedMs = 0L
+        realtimeTotalMs = 0L
+        realtimeSubtitleStatus = ""
         if (!isRealtimeSubtitleEnabled) {
             realtimeSubtitleEngine.stop()
             realtimeSubtitleStatus = ""
@@ -2895,7 +2926,7 @@ fun VRPlayerScreen(
                             accentColor = AccentColor,
                             accentOnColor = AccentOnColor,
                             sherpaLangCode = sherpaLangCode,
-                            onSherpaLangCodeChange = { sherpaLangCode = it },
+                            onSherpaLangCodeChange = { changeAsrLanguage(it) },
                             onUserInteraction = { keepUiAlight() }
                         )
 
@@ -4055,7 +4086,10 @@ fun VRPlayerScreen(
                                                         .weight(1f)
                                                         .clip(RoundedCornerShape(6.dp))
                                                         .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                        .clickable { sherpaLangCode = code; keepUiAlight() }
+                                                        .clickable {
+                                                            keepUiAlight()
+                                                            changeAsrLanguage(code)
+                                                        }
                                                         .padding(vertical = 5.dp),
                                                     contentAlignment = Alignment.Center
                                                 ) {
@@ -4249,7 +4283,7 @@ BatchTranscribeSection(
                                                             accentColor = AccentColor,
                                                             accentOnColor = AccentOnColor,
                                                             sherpaLangCode = sherpaLangCode,
-                                                            onSherpaLangCodeChange = { sherpaLangCode = it },
+                                                            onSherpaLangCodeChange = { changeAsrLanguage(it) },
                                                             onUserInteraction = { keepUiAlight() }
                                                         )
                                 }
