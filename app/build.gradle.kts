@@ -22,11 +22,9 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
-  // v118：QNN（高通 NPU）运行库必须以真实文件形式落在 nativeLibraryDir。
-  // targetSdk>=30 时 AGP 默认 extractNativeLibs=false：.so 以未压缩形式留在 APK 内、
-  // 不展开到 lib/<abi>/（实测安装后 /data/app/.../lib/arm64/ 为空）。
-  // 而 QnnConfig.backendLib/systemLib 要的是可 dlopen 的文件路径，且 ADSP_LIBRARY_PATH
-  // 也要指向能找到 libQnnHtpV*Skel.so 的真实目录 —— 故改回 legacy 打包让 .so 落盘。
+  // v127：QNN（高通 NPU）引擎及其 136MB 运行库已移除，原先"必须让 .so 落盘"的
+  // 理由不再成立。但这里**保留** useLegacyPackaging = true：它会让 native 库以
+  // 压缩形式打包，APK 明显更小（实测移除后反而涨了约 24MB）。
   packaging {
     jniLibs {
       useLegacyPackaging = true
@@ -174,7 +172,6 @@ dependencies {
   implementation("androidx.media3:media3-transformer:1.4.1")
   implementation("androidx.media3:media3-effect:1.4.1")
   // Real Vosk offline speech recognition (Kaldi based, on-device ASR)
-  implementation("com.alphacephei:vosk-android:0.3.75")
   // v117：纯 Java MPEG 音频软件解码兜底（JLayer，LGPL-2.1）
   // 背景：MPEG-1 Audio Layer II（Android 里的 MIME 是 audio/mpeg-L2）在 Android 上属可选格式，
   // 部分机型（实测骁龙8 Elite / SM8850）没有可用解码器，导致字幕生成的音轨解码失败；

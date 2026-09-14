@@ -5,10 +5,12 @@ import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -117,6 +119,89 @@ class SubtitleTranslator(private val context: Context) {
     // Translation cache: key = "$targetLangCode:$sourceText" -> translated text
     private val translationCache = ConcurrentHashMap<String, String>()
 
+    // v127：翻译结果磁盘缓存。原先只有内存缓存，换个视频或重启应用就要把同样的
+    // 句子重翻一遍——既费流量/API 额度，也拖慢首屏。这里按 TSV 落盘：
+    // 每行 "key<TAB>译文"，key 已含目标语言前缀，因此换语言不会串味。
+    // 放 filesDir（而非 cacheDir）是因为系统可能清理 cache，而翻译结果值得留存。
+    private val diskCacheFile by lazy { java.io.File(context.filesDir, "translation_cache.tsv") }
+    private val diskWriteLock = Any()
+
+    /** 磁盘缓存在 scope 就绪后异步加载（scope 声明在下方，故此处不做前向引用） */
+    private fun startDiskCacheLoad() {
+        scope.launch { loadDiskCache() }
+    }
+
+    private fun loadDiskCache() {
+        try {
+            if (!diskCacheFile.exists()) return
+            var loaded = 0
+            diskCacheFile.forEachLine { line ->
+                val tab = line.indexOf('\t')
+                if (tab <= 0) return@forEachLine
+                val key = line.substring(0, tab)
+                val value = unescapeCache(line.substring(tab + 1))
+                if (key.isNotBlank() && value.isNotBlank()) {
+                    translationCache[key] = value
+                    loaded++
+                }
+            }
+            Log.i("SubtitleTranslator", "翻译缓存加载完成：$loaded 条")
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "翻译缓存加载失败：${e.message}")
+        }
+    }
+
+    /** 追加一条到磁盘缓存（TSV；译文里的换行/制表符转义后写入） */
+    private fun appendDiskCache(key: String, value: String) {
+        try {
+            synchronized(diskWriteLock) {
+                // 体积保护：超过 4MB 就整体重写（去重后的最新内容）
+                if (diskCacheFile.exists() && diskCacheFile.length() > 4L * 1024 * 1024) {
+                    rewriteDiskCache()
+                    return
+                }
+                diskCacheFile.appendText("$key\t${escapeCache(value)}\n", Charsets.UTF_8)
+            }
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "翻译缓存写入失败：${e.message}")
+        }
+    }
+
+    private fun rewriteDiskCache() {
+        try {
+            val sb = StringBuilder()
+            for ((k, v) in translationCache) {
+                if (k.isBlank() || v.isBlank()) continue
+                sb.append(k).append('\t').append(escapeCache(v)).append('\n')
+            }
+            diskCacheFile.writeText(sb.toString(), Charsets.UTF_8)
+            Log.i("SubtitleTranslator", "翻译缓存已重写（${translationCache.size} 条）")
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "翻译缓存重写失败：${e.message}")
+        }
+    }
+
+    private fun escapeCache(s: String) = s.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
+
+    private fun unescapeCache(s: String): String {
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == '\\' && i + 1 < s.length) {
+                when (s[i + 1]) {
+                    'n' -> { sb.append('\n'); i += 2 }
+                    't' -> { sb.append('\t'); i += 2 }
+                    '\\' -> { sb.append('\\'); i += 2 }
+                    else -> { sb.append(c); i++ }
+                }
+            } else {
+                sb.append(c); i++
+            }
+        }
+        return sb.toString()
+    }
+
     // In-flight request deduplication: key = "$targetLangCode:$sourceText" -> listeners.
     // Multiple calls for the same text while a request is in flight share a single HTTP request.
     private val pendingTranslations = ConcurrentHashMap<String, MutableList<(String) -> Unit>>()
@@ -133,6 +218,14 @@ class SubtitleTranslator(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.IO)
     private var batchTranslationJob: Job? = null
+
+    /** v127：预读翻译任务（游标移动时取消重建） */
+    private var prefetchTranslationJob: Job? = null
+
+    init {
+        // scope 已就绪，异步加载磁盘缓存（文件可能上千行，不能阻塞构造）
+        startDiskCacheLoad()
+    }
 
     fun getActiveBaseUrl(): String {
         return if (config.baseUrl.isNotBlank()) config.baseUrl else config.engine.defaultBaseUrl
@@ -296,6 +389,59 @@ class SubtitleTranslator(private val context: Context) {
     /**
      * Batch translate file cues in background
      */
+    /**
+     * v127：**预读翻译** —— 提前把播放游标前方即将显示的字幕翻好。
+     *
+     * 与实时字幕同样的思路：字幕是边播边生成的，若等"该显示这一条了"才去翻译，
+     * 网络往返（几百毫秒~数秒）会让译文明显迟于原文出现。
+     * 这里在播放游标前方 [lookaheadMs] 的窗口内提前翻译，显示时直接命中
+     * [translationCache]，表现为译本与原文同时出现。
+     *
+     * 与 [translateCuesBatch] 的区别：
+     * - batch 是"整片从头翻到尾"，适合导出；预读只翻游标附近，避免做无用功
+     * - 游标大幅移动（seek）会取消上一轮预读并重建，不会把旧位置翻完
+     * - 已缓存（含显示路径刚翻过的）条目不重复请求
+     *
+     * @param maxItems 单轮最多翻译条数，防止瞬间打出上百个请求
+     */
+    fun pretranslateAhead(
+        cues: List<SubtitleCue>,
+        cursorMs: Long,
+        lookaheadMs: Long = 90_000L,
+        maxItems: Int = 40
+    ) {
+        if (!config.isEnabled || cues.isEmpty()) return
+        val targetLang = config.targetLanguage.code
+
+        // 只取游标前方窗口内、且尚未翻译的文本（去重后保持时间顺序）
+        val todo = cues.asSequence()
+            .filter { it.startTimeMs >= cursorMs - 5_000L && it.startTimeMs <= cursorMs + lookaheadMs }
+            .map { it.text.trim() }
+            .filter { it.isNotBlank() && !translationCache.containsKey("$targetLang:$it") }
+            .distinct()
+            .take(maxItems)
+            .toList()
+
+        if (todo.isEmpty()) return
+
+        prefetchTranslationJob?.cancel()
+        prefetchTranslationJob = scope.launch {
+            for (text in todo) {
+                val key = "$targetLang:$text"
+                if (translationCache.containsKey(key)) continue
+                try {
+                    val translated = fetchTranslation(text, targetLang)
+                    if (translated.isNotBlank()) translationCache[key] = translated
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("SubtitleTranslator", "预读翻译失败：${e.message}")
+                }
+                if (!isActive) break
+            }
+        }
+    }
+
     fun translateCuesBatch(cues: List<SubtitleCue>, onProgress: (Int, Int) -> Unit = { _, _ -> }) {
         if (!config.isEnabled || cues.isEmpty()) return
 
@@ -358,7 +504,7 @@ class SubtitleTranslator(private val context: Context) {
      * Requests are serialized by a mutex to stay within free-tier rate limits.
      */
     private suspend fun fetchTranslation(text: String, targetLangCode: String): String {
-        return translationSemaphore.withPermit {
+        val result = translationSemaphore.withPermit {
             try {
                 if (config.engine == TranslationEngine.BING) {
                     translateViaBing(text, targetLangCode)
@@ -370,6 +516,14 @@ class SubtitleTranslator(private val context: Context) {
                 ""
             }
         }
+        // v127：所有翻译路径的统一出口——内存缓存 + 磁盘缓存都在这里落一次，
+        // 调用方不必各自处理（display 路径、预读路径、批量路径共用）。
+        if (result.isNotBlank()) {
+            val key = "$targetLangCode:$text"
+            translationCache[key] = result
+            appendDiskCache(key, result)
+        }
+        return result
     }
 
     // Cached Bing web-endpoint config (IG, IID, key, token) fetched from the

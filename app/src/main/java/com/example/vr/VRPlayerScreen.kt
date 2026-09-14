@@ -478,28 +478,26 @@ fun VRPlayerScreen(
     var subtitleMaxLines by remember {
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("subtitle_max_lines", 2) else 2)
     }
-    // v86：移除实时 AI 字幕，保留模型管理（供后台批处理转写使用）
-    val asrManager = remember {
-        RealtimeAsrManager(context).apply {
-            if (isMemoryModeEnabled) {
-                config = VoskAsrConfig(
-                    language = VoskLanguage.entries.find { it.id == prefs.getInt("asr_language_id", 0) }
-                        ?: VoskLanguage.ZH,
-                    modelSize = VoskModelSize.entries.find { it.id == prefs.getInt("asr_model_size", 0) }
-                        ?: VoskModelSize.SMALL
-                )
-            }
-        }
-    }
     val subtitleTranslator = remember { SubtitleTranslator(context) }
-    // 后台批处理转写（v85）：提取视频音频生成 SRT
-    val batchTranscriber = remember { AsrBatchTranscriber(context) }
-    // v123：Vosk 模型按路径缓存复用（省去重复加载），退出页面时释放 native 内存
-    DisposableEffect(Unit) {
-        onDispose { AsrBatchTranscriber.releaseVoskModel() }
+    // v126：实时 AI 字幕引擎（方案文档「边播边生成」，不写 SRT 文件）
+    val realtimeSubtitleEngine = remember { RealtimeSubtitleEngine(context) }
+    var isRealtimeSubtitleEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("realtime_subtitle_enabled", false) else false
+        )
     }
-    // v110：ASR 引擎类型选择（Vosk / Qwen3-ASR / SenseVoice QNN）
-    var asrEngineType by remember { mutableStateOf(AsrEngineType.VOSK) }
+    var realtimeCues by remember { mutableStateOf<List<SubtitleCue>>(emptyList()) }
+    var realtimeSubtitleStatus by remember { mutableStateOf("") }
+    // v127b：实时字幕生成进度（供进度条与"完成"提示）
+    var realtimeTotalMs by remember { mutableLongStateOf(0L) }
+    var realtimeGeneratedMs by remember { mutableLongStateOf(0L) }
+    var realtimeDone by remember { mutableStateOf(false) }
+    // v127：退出页面时停止实时字幕引擎（native 资源由引擎协程自行释放）
+    DisposableEffect(Unit) {
+        onDispose { realtimeSubtitleEngine.stop() }
+    }
+    // v127：只剩 SenseVoice 一条路线（Vosk / Qwen3 / QNN 已移除）
+    val asrEngineType = AsrEngineType.SENSEVOICE
     // v111：sherpa 引擎语言选择（中/英/日/韩/自动）
     var sherpaLangCode by remember { mutableStateOf("auto") }
     var isBatchTranscribing by remember { mutableStateOf(false) }
@@ -539,6 +537,9 @@ fun VRPlayerScreen(
 
     // 后台生成全片 SRT 字幕（v110）：支持双引擎 Vosk / Qwen3-ASR
     fun startBatchTranscribe() {
+        // v127：整片转写（生成 _asr.srt）已停用，改为边播边生成的实时字幕
+        // （RealtimeSubtitleEngine）。原实现保留于此以便回退，不再参与交互。
+        /*
         val uriStr = selectedMediaItem.uri ?: return
         if (isBatchTranscribing) return
         // v123：图片没有音轨，此前直接开跑会在解码阶段才失败（提示"音轨解码失败"，
@@ -552,7 +553,7 @@ fun VRPlayerScreen(
             isBatchTranscribing = true
             batchTranscribeProgress = 0f
             batchTranscribeStatus = if (asrEngineType != AsrEngineType.VOSK) "准备 $asrEngineType 引擎..." else "准备 Vosk 识别模型..."
-            val file = if (asrEngineType != AsrEngineType.VOSK) {
+            val file = run {
                 batchTranscriber.transcribeToSrtSherpa(
                     mediaUri = Uri.parse(uriStr),
                     videoTitle = selectedMediaItem.title,
@@ -585,6 +586,7 @@ fun VRPlayerScreen(
                 Toast.makeText(context, "字幕生成失败：${batchTranscriber.statusMessage}", Toast.LENGTH_LONG).show()
             }
         }
+        */
     }
 
 
@@ -662,8 +664,7 @@ fun VRPlayerScreen(
         spoofResolutionEnabled,
         downscaleOutputEnabled,
         addCodecParamsEnabled,
-        autoFallbackSoftEnabled,
-        asrManager.config
+        autoFallbackSoftEnabled
     ) {
         prefs.edit().apply {
             putBoolean("is_memory_mode_enabled", isMemoryModeEnabled)
@@ -724,8 +725,6 @@ fun VRPlayerScreen(
                 putBoolean("downscale_output_enabled", downscaleOutputEnabled)
                 putBoolean("add_codec_params_enabled", addCodecParamsEnabled)
                 putBoolean("auto_fallback_soft_enabled", autoFallbackSoftEnabled)
-                putInt("asr_language_id", asrManager.config.language.id)
-                putInt("asr_model_size", asrManager.config.modelSize.id)
             } else {
                 remove("projection_mode")
                 remove("stereo_mode")
@@ -1782,9 +1781,30 @@ fun VRPlayerScreen(
     // 不再写一个跨媒体共享、语义混乱的 restorePositionMs 镜像变量。
     LaunchedEffect(playerInstance, selectedMediaItem.uri, isVideoPlaying) {
         var lastSavedAt = 0L
+        var lastPosForRealtime = 0L
         while (true) {
             playerInstance?.let { player ->
                 currentPositionMs = player.currentPosition
+                // v126：实时字幕跟随播放头。
+                // 位置突跳（>2 秒）视为 seek —— 这样不必逐个改各 seek 调用点，
+                // 进度条拖动、章节跳转、双击重置等入口都能被统一捕获。
+                if (isRealtimeSubtitleEnabled) {
+                    val pos = player.currentPosition
+                    if (kotlin.math.abs(pos - lastPosForRealtime) > 2_000L) {
+                        realtimeSubtitleEngine.onSeek(pos)
+                        // v127：跳转后重新预读翻译新位置前方的字幕
+                        if (subtitleTranslator.config.isEnabled && realtimeCues.isNotEmpty()) {
+                            subtitleTranslator.pretranslateAhead(realtimeCues, pos)
+                        }
+                    } else {
+                        realtimeSubtitleEngine.updateCursor(pos)
+                    }
+                    lastPosForRealtime = pos
+                    // v127b：同步生成进度，供进度条与"完成"状态显示
+                    realtimeTotalMs = realtimeSubtitleEngine.durationMs
+                    realtimeGeneratedMs = realtimeSubtitleEngine.generatedMs
+                    realtimeDone = realtimeSubtitleEngine.isFullyGenerated
+                }
                 if (player.isPlaying && player.currentPosition > 0L) {
                     val now = System.currentTimeMillis()
                     if (now - lastSavedAt >= 2_000L) {
@@ -1914,6 +1934,46 @@ fun VRPlayerScreen(
                 Log.w("VRPlayerScreen", "Auto-load generated subtitle failed: ${e.message}")
             }
         }
+    }
+
+    // v126：实时 AI 字幕（方案文档「边播边生成」）
+    // 开启后后台滚动预读：独立解码音频 → VAD 分段 → ASR → 内存缓存；
+    // 播放头只需查缓存即可显示，不再等整片转写完成。
+    LaunchedEffect(isRealtimeSubtitleEnabled, selectedMediaItem.uri, asrEngineType, sherpaLangCode) {
+        realtimeCues = emptyList()
+        if (!isRealtimeSubtitleEnabled) {
+            realtimeSubtitleEngine.stop()
+            realtimeSubtitleStatus = ""
+            return@LaunchedEffect
+        }
+        if (!selectedMediaItem.isVideo) {
+            realtimeSubtitleStatus = "当前是图片，没有音轨可用于实时字幕"
+            return@LaunchedEffect
+        }
+        val uriStr = selectedMediaItem.uri ?: return@LaunchedEffect
+        realtimeSubtitleEngine.refreshLookahead()
+        realtimeSubtitleEngine.start(
+            mediaUri = Uri.parse(uriStr),
+            factory = {
+                // v127：只剩 SenseVoice 一条路线
+                SherpaAsrManager
+                    .createRecognizer(context, sherpaLangCode)
+                    ?.let { SherpaSegmentRecognizer(it) }
+            },
+            listener = object : RealtimeSubtitleEngine.Listener {
+                override fun onCuesUpdated(cues: List<SubtitleCue>) {
+                    scope.launch { realtimeCues = cues }
+                    // v127：字幕一有新增就预读翻译游标前方的部分，
+                    // 显示时直接命中缓存，译文与原文同时出现（而不是等显示才开始翻）
+                    if (subtitleTranslator.config.isEnabled) {
+                        subtitleTranslator.pretranslateAhead(cues, currentPositionMs)
+                    }
+                }
+                override fun onStatus(message: String) {
+                    scope.launch { realtimeSubtitleStatus = message }
+                }
+            }
+        )
     }
 
     // Progress updates tracking
@@ -2114,7 +2174,8 @@ fun VRPlayerScreen(
                                 // 原先这里多包了一层内嵌 SubtitleLayer()，并无额外重组隔离收益。
                                 SubtitleOverlay(
                                     currentPositionMs = currentPositionMs,
-                                    subtitleCues = loadedSubtitleCues,
+                                    // v126：实时字幕开启时用实时缓存，否则用已加载的整片字幕
+                                    subtitleCues = if (isRealtimeSubtitleEnabled) realtimeCues else loadedSubtitleCues,
                                     translator = subtitleTranslator,
                                     isSubtitleEnabled = isSubtitleEnabled,
                                     subtitleFont = subtitleFont,
@@ -2784,34 +2845,51 @@ fun VRPlayerScreen(
                             )
                         }
 
-                        // 后台生成全片字幕（含语言/模型选择/进度）
-BatchTranscribeSection(
-                                                    accentColor = AccentColor,
-                                                    accentOnColor = AccentOnColor,
-                                                    asrManager = asrManager,
-                                                    asrEngineType = asrEngineType,
-                                                    onAsrEngineTypeChange = { asrEngineType = it },
-                                                    sherpaLangCode = sherpaLangCode,
-                                                    onSherpaLangCodeChange = { sherpaLangCode = it },
-                                                    isBatchTranscribing = isBatchTranscribing,
-                                                    batchTranscribeProgress = batchTranscribeProgress,
-                                                    batchTranscribeStatus = batchTranscribeStatus,
-                                                    onStartBatchTranscribe = { startBatchTranscribe() },
-                                                    onSelectVoskLanguage = { lang ->
-                                                        asrManager.config = asrManager.config.copy(language = lang)
-                                                        if (isMemoryModeEnabled) prefs.edit().putInt("asr_language_id", lang.id).apply()
-                                                    },
-                                                    onSelectVoskModelSize = { size ->
-                                                        asrManager.config = asrManager.config.copy(modelSize = size)
-                                                        if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
-                                                        val opt = VoskModels.firstOrNull { it.language == asrManager.config.language && it.size == size }
-                                                        val isDownloaded = opt?.let {
-                                                            File(context.filesDir, "vosk_models/${it.modelName}/.ready").exists()
-                                                        } ?: false
-                                                        if (!isDownloaded) opt?.let { asrManager.startModelDownload(it) }
-                                                    },
-                                                    onUserInteraction = { keepUiAlight() }
-                                                )
+                        // v127：实时字幕的引擎与模型（引擎已固定为 SenseVoice）
+                        BatchTranscribeSection(
+                            accentColor = AccentColor,
+                            accentOnColor = AccentOnColor,
+                            sherpaLangCode = sherpaLangCode,
+                            onSherpaLangCodeChange = { sherpaLangCode = it },
+                            onUserInteraction = { keepUiAlight() }
+                        )
+
+                        // v126：实时 AI 字幕开关（边播边生成，不写 SRT、不改动原视频）
+                        ExperimentalSwitchRow(
+                            title = "实时 AI 字幕",
+                            desc = "边播边生成字幕：后台滚动预读，拖动进度条可即时回看",
+                            checked = isRealtimeSubtitleEnabled,
+                            onChanged = {
+                                isRealtimeSubtitleEnabled = it
+                                if (isMemoryModeEnabled) {
+                                    prefs.edit().putBoolean("realtime_subtitle_enabled", it).apply()
+                                }
+                                keepUiAlight()
+                            },
+                            accentColor = AccentColor,
+                            accentOnColor = AccentOnColor
+                        )
+                        if (isRealtimeSubtitleEnabled && realtimeSubtitleStatus.isNotBlank()) {
+                            Text(
+                                text = realtimeSubtitleStatus,
+                                color = if (realtimeDone) AccentColor else Color.White.copy(alpha = 0.6f),
+                                fontSize = 9.sp,
+                                lineHeight = 12.sp,
+                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                            )
+                        }
+                        // v127b：实时字幕生成进度条（全片生成完则不再显示）
+                        if (isRealtimeSubtitleEnabled && !realtimeDone && realtimeTotalMs > 0L) {
+                            LinearProgressIndicator(
+                                progress = { (realtimeGeneratedMs.toFloat() / realtimeTotalMs).coerceIn(0f, 1f) },
+                                color = AccentColor,
+                                trackColor = Color.White.copy(alpha = 0.12f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(3.dp)
+                                    .padding(start = 4.dp, end = 4.dp)
+                            )
+                        }
 
                         // 打开完整字幕设置（设置面板并展开字幕分组）
                         TextButton(
@@ -3808,45 +3886,17 @@ BatchTranscribeSection(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        AsrEngineType.entries.forEach { engine ->
-                                            val sel = asrEngineType == engine
-                                            val label = when (engine) {
-                                                AsrEngineType.VOSK -> "Vosk\n轻量"
-                                                AsrEngineType.QWEN3 -> "Qwen3\n精准"
-                                                AsrEngineType.SENSEVOICE_QNN -> "SenseVoice\n高通加速"
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                    .clickable { asrEngineType = engine; keepUiAlight() }
-                                                    .padding(vertical = 6.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = label,
-                                                    color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
-                                                    fontSize = 10.sp,
-                                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                                    textAlign = TextAlign.Center
-                                                )
-                                            }
-                                        }
+                                        // v127：引擎固定为 SenseVoice，不再提供切换按钮
                                     }
                                     // 引擎说明
                                     Text(
-                                        text = when (asrEngineType) {
-                                            AsrEngineType.VOSK -> "Vosk：离线识别（中/英/日），模型 40~1100MB，首次需下载"
-                                            AsrEngineType.QWEN3 -> "Qwen3-ASR：29语言+20方言，CPU 推理，模型 ~940MB（首次需下载）"
-                                            AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN：中英日韩粤5语言，高通骁龙 NPU 加速（按设备 SoC 自动匹配模型），~241MB"
-                                        },
+                                        text = "SenseVoice-Small：中英日韩粤 5 语言，CPU 推理自带标点，模型 ~229MB（首次需下载）",
                                         color = Color.White.copy(alpha = 0.45f),
                                         fontSize = 8.sp,
                                         lineHeight = 11.sp
                                     )
-                                    // sherpa-onnx 引擎语言选择（v111）
-                                    if (asrEngineType == AsrEngineType.QWEN3 || asrEngineType == AsrEngineType.SENSEVOICE_QNN) {
+                                    // sherpa-onnx 引擎语言选择（v111；v127 含 SenseVoice CPU）
+                                    run {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically,
@@ -3876,26 +3926,14 @@ BatchTranscribeSection(
                                         }
                                     }
                                     // sherpa-onnx 引擎：模型状态 + 下载
-                                    if (asrEngineType == AsrEngineType.QWEN3 || asrEngineType == AsrEngineType.SENSEVOICE_QNN) {
-                                        val sherpaReady = remember { mutableStateOf(SherpaAsrManager.isModelReady(context, asrEngineType)) }
+                                    run {
+                                        val sherpaReady = remember { mutableStateOf(SherpaAsrManager.isModelReady(context)) }
                                         LaunchedEffect(asrEngineType, SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
-                                            sherpaReady.value = SherpaAsrManager.isModelReady(context, asrEngineType)
+                                            sherpaReady.value = SherpaAsrManager.isModelReady(context)
                                         }
-                                        val modelName = when (asrEngineType) {
-                                            AsrEngineType.QWEN3 -> "Qwen3-ASR 0.6B INT8"
-                                            AsrEngineType.SENSEVOICE_QNN -> "SenseVoice QNN ${SherpaAsrManager.deviceSocName()}"
-                                            else -> ""
-                                        }
-                                        val modelDesc = when (asrEngineType) {
-                                            AsrEngineType.QWEN3 -> "29语言 + 20方言 · ~838MB 下载 · ~940MB 解压"
-                                            AsrEngineType.SENSEVOICE_QNN -> "中英日韩粤 · 高通 NPU · ~161MB 下载 · ~241MB 解压"
-                                            else -> ""
-                                        }
-                                        val modelSizeMB = when (asrEngineType) {
-                                            AsrEngineType.QWEN3 -> 838
-                                            AsrEngineType.SENSEVOICE_QNN -> 161
-                                            else -> 0
-                                        }
+                                        val modelName = "SenseVoice-Small INT8"
+                                        val modelDesc = "中英日韩粤 · CPU 推理 · ~229MB 下载"
+                                        val modelSizeMB = 229
                                         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                             // 模型信息
                                             Row(
@@ -3957,28 +3995,22 @@ BatchTranscribeSection(
                                             }
                                             // 下载按钮
                                             if (!sherpaReady.value && !SherpaAsrManager.isModelDownloading) {
-                                                val qnnSocOk = asrEngineType != AsrEngineType.SENSEVOICE_QNN ||
-                                                    SherpaAsrManager.senseVoiceModelDirName(context) != null
                                                 Text(
-                                                    text = if (qnnSocOk) "点击下载 $modelName（${modelSizeMB}MB）"
-                                                    else "当前设备（${SherpaAsrManager.deviceSocName()}）无官方 QNN 模型，请改用 Qwen3-ASR",
-                                                    color = if (qnnSocOk) Color.White else Color(0xFFEF9A9A),
+                                                    text = "点击下载 " + modelName + "（" + modelSizeMB + "MB）",
+                                                    color = Color.White,
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     textAlign = TextAlign.Center,
                                                     modifier = Modifier.fillMaxWidth()
                                                         .clip(RoundedCornerShape(6.dp))
-                                                        .background(
-                                                            if (qnnSocOk) AccentColor.copy(alpha = 0.85f)
-                                                            else Color.White.copy(alpha = 0.08f)
-                                                        )
-                                                        .clickable(enabled = qnnSocOk) { SherpaAsrManager.startModelDownload(context, asrEngineType) }
+                                                        .background(AccentColor.copy(alpha = 0.85f))
+                                                        .clickable { SherpaAsrManager.startModelDownload(context) }
                                                         .padding(vertical = 7.dp)
                                                 )
                                             }
                                             if (sherpaReady.value) {
                                                 Text(
-                                                    text = "$modelName 已就绪，可直接生成 AI 字幕",
+                                                    text = "$modelName 已就绪，实时字幕可直接使用",
                                                     color = Color(0xFF81C784),
                                                     fontSize = 8.sp
                                                 )
@@ -4070,28 +4102,8 @@ BatchTranscribeSection(
 BatchTranscribeSection(
                                                             accentColor = AccentColor,
                                                             accentOnColor = AccentOnColor,
-                                                            asrManager = asrManager,
-                                                            asrEngineType = asrEngineType,
-                                                            onAsrEngineTypeChange = { asrEngineType = it },
                                                             sherpaLangCode = sherpaLangCode,
                                                             onSherpaLangCodeChange = { sherpaLangCode = it },
-                                                            isBatchTranscribing = isBatchTranscribing,
-                                                            batchTranscribeProgress = batchTranscribeProgress,
-                                                            batchTranscribeStatus = batchTranscribeStatus,
-                                                            onStartBatchTranscribe = { startBatchTranscribe() },
-                                                            onSelectVoskLanguage = { lang ->
-                                                                asrManager.config = asrManager.config.copy(language = lang)
-                                                                if (isMemoryModeEnabled) prefs.edit().putInt("asr_language_id", lang.id).apply()
-                                                            },
-                                                            onSelectVoskModelSize = { size ->
-                                                                asrManager.config = asrManager.config.copy(modelSize = size)
-                                                                if (isMemoryModeEnabled) prefs.edit().putInt("asr_model_size", size.id).apply()
-                                                                val opt = VoskModels.firstOrNull { it.language == asrManager.config.language && it.size == size }
-                                                                val isDownloaded = opt?.let {
-                                                                    File(context.filesDir, "vosk_models/${it.modelName}/.ready").exists()
-                                                                } ?: false
-                                                                if (!isDownloaded) opt?.let { asrManager.startModelDownload(it) }
-                                                            },
                                                             onUserInteraction = { keepUiAlight() }
                                                         )
                                 }
