@@ -112,6 +112,15 @@ data class TranslationConfig(
 
 class SubtitleTranslator(private val context: Context) {
 
+    companion object {
+        /** 单次播放会话最多翻译多少条（超出后不再发起新请求，已翻译的照常显示） */
+        const val MAX_SESSION_TRANSLATIONS = 600
+
+        /** 预读翻译的前瞻窗口（秒）与单轮条数上限 */
+        private const val PREFETCH_LOOKAHEAD_MS = 60_000L
+        private const val PREFETCH_MAX_ITEMS = 20
+    }
+
     var config by mutableStateOf(TranslationConfig())
     var statusMessage by mutableStateOf("字幕翻译就绪")
     var isTranslating by mutableStateOf(false)
@@ -221,6 +230,24 @@ class SubtitleTranslator(private val context: Context) {
 
     /** v127：预读翻译任务（游标移动时取消重建） */
     private var prefetchTranslationJob: Job? = null
+
+    /**
+     * v127e：翻译用量控制，防止把免费端点/API 额度一次性用光。
+     *
+     * 现实问题是两条路一起放大用量：整片批量翻译（一条不落）+ 预读翻译（每 90 秒
+     * 窗口再来一轮）。这里做三层约束：
+     *  1. [MAX_SESSION_TRANSLATIONS]：单次播放会话的翻译总条数上限，达到即停止新增请求；
+     *  2. 预读窗口收敛为 [PREFETCH_LOOKAHEAD_MS]，单轮条数上限 [PREFETCH_MAX_ITEMS]；
+     *  3. 命中内存/磁盘缓存的条目不计入用量，也不会发请求。
+     */
+    private val sessionTranslated = java.util.concurrent.atomic.AtomicInteger(0)
+    private val maxSessionTranslations = MAX_SESSION_TRANSLATIONS
+
+    /** 已翻译条数（供 UI 展示用量） */
+    val sessionUsage: Int get() = sessionTranslated.get()
+
+    /** 是否已触及本次会话的翻译上限 */
+    val isSessionLimitReached: Boolean get() = sessionTranslated.get() >= maxSessionTranslations
 
     init {
         // scope 已就绪，异步加载磁盘缓存（文件可能上千行，不能阻塞构造）
@@ -407,10 +434,11 @@ class SubtitleTranslator(private val context: Context) {
     fun pretranslateAhead(
         cues: List<SubtitleCue>,
         cursorMs: Long,
-        lookaheadMs: Long = 90_000L,
-        maxItems: Int = 40
+        lookaheadMs: Long = PREFETCH_LOOKAHEAD_MS,
+        maxItems: Int = PREFETCH_MAX_ITEMS
     ) {
         if (!config.isEnabled || cues.isEmpty()) return
+        if (isSessionLimitReached) return   // 用量已达上限：只显示已有译文
         val targetLang = config.targetLanguage.code
 
         // 只取游标前方窗口内、且尚未翻译的文本（去重后保持时间顺序）
@@ -462,6 +490,13 @@ class SubtitleTranslator(private val context: Context) {
                 if (text.isBlank()) continue
 
                 val cacheKey = "$targetLang:$text"
+                if (isSessionLimitReached) {
+                    withContext(Dispatchers.Main) {
+                        isTranslating = false
+                        statusMessage = "已达到本次会话翻译上限（$maxSessionTranslations 条），已停止翻译"
+                    }
+                    return@launch
+                }
                 if (!translationCache.containsKey(cacheKey)) {
                     val translated = fetchTranslation(text, targetLang)
                     if (translated.isNotBlank()) {
@@ -522,6 +557,7 @@ class SubtitleTranslator(private val context: Context) {
             val key = "$targetLangCode:$text"
             translationCache[key] = result
             appendDiskCache(key, result)
+            sessionTranslated.incrementAndGet()
         }
         return result
     }

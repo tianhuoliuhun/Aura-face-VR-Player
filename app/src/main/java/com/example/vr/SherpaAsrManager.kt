@@ -58,6 +58,12 @@ object SherpaAsrManager {
     private const val SVC_TOKENS_URL =
         "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt"
 
+    /** v127e：推理线程数可选范围与推荐值（推荐 4–6，兼顾速度与播放流畅度） */
+    const val MIN_THREADS = 1
+    const val MAX_THREADS = 10
+    const val DEFAULT_THREADS = 4
+    val RECOMMENDED_THREADS = 4..6
+
     // ===== 共享状态 =====
     var isModelDownloading by mutableStateOf(false)
     var modelDownloadProgress by mutableFloatStateOf(0f)
@@ -234,11 +240,16 @@ object SherpaAsrManager {
     /**
      * 创建 SenseVoice 识别器。
      *
-     * 线程数按可用核心取（上限 4）：RTF 0.026 是在多线程 CPU 推理下取得的，
-     * 单线程会明显变慢，而实时字幕必须持续跟上播放速度；
-     * 上限 4 是为了不把核心全占满，留给播放解码与渲染。
+     * [threads] 为推理线程数（1~10）；传 0 或越界时按设备核心数自动取
+     * `min(核数, 4)`。推荐值 4–6：
+     * - 太少：RTF 变差，实时字幕跟不上播放速度
+     * - 太多：把核心吃满，挤压视频解码与渲染，反而卡顿
      */
-    fun createRecognizer(context: Context, language: String = "auto"): OfflineRecognizer? {
+    fun createRecognizer(
+        context: Context,
+        language: String = "auto",
+        threads: Int = 0
+    ): OfflineRecognizer? {
         lastInitError = null
         if (!isModelReady(context)) {
             Log.w(TAG, "SenseVoice model not ready: ${svcDir(context)}")
@@ -246,10 +257,11 @@ object SherpaAsrManager {
             return null
         }
         val dir = svcDir(context)
-        val numThreads = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        val auto = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        val numThreads = if (threads in MIN_THREADS..MAX_THREADS) threads else auto
         val modelPath = dir.resolve(SVC_MODEL).absolutePath
         val tokensPath = dir.resolve(SVC_TOKENS).absolutePath
-        Log.i(TAG, "SenseVoice: model=$modelPath lang=$language threads=$numThreads")
+        Log.i(TAG, "SenseVoice: model=$modelPath lang=$language threads=$numThreads（自动值=$auto）")
         return try {
             val config = OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),

@@ -1,0 +1,82 @@
+package com.example.vr
+
+import android.content.Context
+import android.util.Log
+import java.io.File
+
+/**
+ * v127e：字幕导出（SRT）。
+ *
+ * 背景：此前"导出 SRT"按钮的回调 `onExportSubtitle` 从未接线，点上去没有任何反应；
+ * 且原导出依赖整片转写生成的临时文件，而该链路已随实时字幕方案移除。
+ * 现在直接**从内存字幕缓存导出**——实时字幕与手动加载的字幕都能导出。
+ *
+ * 落点：`Android/data/<pkg>/files/` 下（应用外部目录，免权限、文件管理器可访问），
+ * 与原先 `_asr.srt` 的位置一致，用户此前已习惯在该目录取文件。
+ */
+object SubtitleExporter {
+
+    private const val TAG = "SubtitleExporter"
+
+    /** 每行最大字数（与项目 SRT 换行口径一致） */
+    private const val CHARS_PER_LINE = 14
+
+    /**
+     * 导出为 SRT。
+     * @return 写出的文件；[cues] 为空时返回 null
+     */
+    fun exportSrt(context: Context, title: String?, cues: List<SubtitleCue>): File? {
+        val sorted = cues
+            .filter { it.text.isNotBlank() }
+            .sortedBy { it.startTimeMs }
+        if (sorted.isEmpty()) return null
+
+        val baseName = (title ?: "subtitles")
+            .substringBeforeLast('.')
+            .ifBlank { "subtitles" }
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val dir = context.getExternalFilesDir(null) ?: context.filesDir
+        dir.mkdirs()
+        val file = File(dir, "${baseName}.srt")
+
+        val sb = StringBuilder()
+        sorted.forEachIndexed { i, cue ->
+            sb.append(i + 1).append('\n')
+            sb.append(formatTime(cue.startTimeMs)).append(" --> ").append(formatTime(cue.endTimeMs)).append('\n')
+            sb.append(wrapText(cue.text, CHARS_PER_LINE)).append("\n\n")
+        }
+        return try {
+            file.writeText(sb.toString(), Charsets.UTF_8)
+            Log.i(TAG, "字幕已导出：${file.absolutePath}（${sorted.size} 条）")
+            file
+        } catch (e: Exception) {
+            Log.e(TAG, "字幕导出失败：${e.message}", e)
+            null
+        }
+    }
+
+    private fun formatTime(ms: Long): String {
+        val s = if (ms < 0) 0L else ms
+        return "%02d:%02d:%02d,%03d".format(
+            s / 3600000, (s % 3600000) / 60000, (s % 60000) / 1000, s % 1000
+        )
+    }
+
+    /** 按 [maxCharsPerLine] 折行；数字后不加空格，避免把 "3.14" 拆断 */
+    private fun wrapText(text: String, maxCharsPerLine: Int): String {
+        val trimmed = text.trim()
+        if (trimmed.length <= maxCharsPerLine) return trimmed
+        val sb = StringBuilder()
+        var count = 0
+        for (ch in trimmed) {
+            if (ch == '\n') {
+                sb.append('\n'); count = 0; continue
+            }
+            sb.append(ch); count++
+            if (count >= maxCharsPerLine) {
+                sb.append('\n'); count = 0
+            }
+        }
+        return sb.toString().trimEnd('\n')
+    }
+}

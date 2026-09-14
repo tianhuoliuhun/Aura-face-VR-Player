@@ -69,6 +69,13 @@ class RealtimeSubtitleEngine(private val context: Context) {
         private const val LOOKAHEAD_NARROW_MS = 5_000L   // 热节流时收窄
         private const val LOOKAHEAD_RELAXED_MS = 20_000L // 充电中放宽
 
+        /**
+         * v127e：播放点**前方**的回补余量。
+         * 用户从任意位置开始播、或向前小跳时，前 5 秒往往没有字幕（那个位置之前
+         * 还没生成过），所以每次游标移动都把 [cursor-5s, cursor] 也纳入高优先区间。
+         */
+        private const val BACKFILL_BEFORE_MS = 5_000L
+
         // 长句切分（对齐项目 SRT 14 字/行口径：2 行约 28 字，这里留紧一些到 20）
         // v127b：原 40 字 / 8 秒太宽松，实际字幕常占满两行且停留过久，用户体验偏"太长"。
         private const val MAX_CUE_CHARS = 20
@@ -157,7 +164,10 @@ class RealtimeSubtitleEngine(private val context: Context) {
     fun start(mediaUri: Uri, factory: RecognizerFactory, listener: Listener) {
         if (isRunning) stop()
         this.listener = listener
+        currentUri = mediaUri
+        currentFactory = factory
         cache.clear()
+        clearScanned()
         producedAnyCue = false
         generatedUpToMs = 0L
         cursorMs = 0L
@@ -226,6 +236,21 @@ class RealtimeSubtitleEngine(private val context: Context) {
         }
     }
 
+    /**
+     * v127e：重新生成字幕（字幕悬浮窗的「重新生成」按钮）。
+     *
+     * 清空缓存与已扫描记录后按当前播放点重新走一遍优先级调度：
+     * 先补当前点前 5 秒与之后的部分，再补齐其余，因此点一下很快就能看到
+     * 当前位置的字幕，而不用等全片跑完。
+     */
+    fun restart() {
+        val uri = currentUri ?: return
+        val factory = currentFactory ?: return
+        val l = listener ?: return
+        Log.i(TAG, "重新生成字幕：从 ${cursorMs}ms 开始")
+        start(uri, factory, l)
+    }
+
     /** 播放位置推进（UI 每 200ms 左右调用一次即可） */
     fun updateCursor(positionMs: Long) {
         cursorMs = positionMs
@@ -267,6 +292,20 @@ class RealtimeSubtitleEngine(private val context: Context) {
 
     // ==================== 预读循环 ====================
 
+    /**
+     * v127e：预读调度 —— **自动全局生成，按优先级推进**。
+     *
+     * 优先级（用户要求 + 体验考量）：
+     *  1. 当前播放点附近：[cursor-5s, cursor+lookahead]。
+     *     前 5 秒是刻意的「回补」——从任意位置起播、或向前小跳时，那个位置此前
+     *     没生成过字幕，不补的话跳过去就是一片空白。
+     *  2. 当前点之后：从 [cursor+lookahead] 顺序推进到片尾。
+     *  3. 其他：回头把片头到 [cursor-5s] 的缺口补齐。
+     * 三段都没有缺口时说明全片已覆盖 → 置 [isFullyGenerated] 并停止空转。
+     *
+     * 已扫描区间用 [scannedRanges] 记录（合并相邻），因此 seek 后不会重复解码
+     * 已生成的段落，只补真正的缺口。
+     */
     private suspend fun prefetchLoop(
         t: AudioTee,
         r: SegmentRecognizer,
@@ -277,50 +316,131 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 delay(300)
                 continue
             }
-            if (generatedUpToMs <= 0L) generatedUpToMs = cursorMs
 
-            val target = cursorMs + lookaheadMs
-            if (generatedUpToMs >= target) {
-                // 已超前足够：短暂休眠后再看游标是否前移
-                delay(250)
-                continue
-            }
-
-            val from = maxOf(generatedUpToMs, cursorMs)
-            val windowEndMs = minOf(from + DECODE_WINDOW_MS, target + DECODE_WINDOW_MS)
-            val t0 = System.currentTimeMillis()
-            processWindow(t, r, vad, from, windowEndMs)
-            Log.i(
-                TAG,
-                "窗口 ${from}~${windowEndMs}ms 完成，耗时 ${System.currentTimeMillis() - t0}ms，" +
-                    "缓存 ${cache.size()} 条"
-            )
-            generatedUpToMs = windowEndMs
-            generatedMs = windowEndMs
-
-            // v127b：给 UI 明确的进度/完成反馈。
-            // 实时字幕是边播边生成，原先只有"已开启"一句，用户看不出还要等多久、
-            // 也判断不了是否已经生成完，体验上像"卡住了"。
             val total = durationMs
-            if (total > 0L && generatedUpToMs >= total - 500L) {
+            // 时长未知时给一个足够大的推进上限（解码到流末尾会自然结束）
+            val endMs = if (total > 0L) total else cursorMs + DECODE_WINDOW_MS * 30
+
+            val gap = nextUnscannedRange(endMs)
+            if (gap == null) {
+                // 全片已覆盖：只报一次完成，然后低频轮询（用户 seek 后可能出现新缺口）
                 if (!isFullyGenerated) {
                     isFullyGenerated = true
                     listener?.onStatus("实时字幕已全部生成完成（共 ${cache.size()} 条）")
                 }
-            } else {
-                val pct = if (total > 0L) (generatedUpToMs * 100 / total).coerceIn(0L, 99L) else -1L
-                val ahead = generatedUpToMs - cursorMs
-                val tip = when {
-                    !producedAnyCue && generatedUpToMs > 20_000L ->
-                        // 播了 20 秒还没有任何语音：给明确反馈而不是静默失败（文档第十章）
+                delay(500)
+                continue
+            }
+
+            val t0 = System.currentTimeMillis()
+            val winFrom = gap.first
+            val winTo = gap.last + 1   // 半开区间
+            processWindow(t, r, vad, winFrom, winTo)
+            markScanned(winFrom, winTo)
+            Log.i(
+                TAG,
+                "窗口 ${winFrom}~${winTo}ms 完成，耗时 ${System.currentTimeMillis() - t0}ms，" +
+                    "缓存 ${cache.size()} 条，已覆盖 ${scannedMs()}/${if (total > 0) total else -1}ms"
+            )
+
+            generatedMs = scannedMs()
+            if (total > 0L && generatedMs < total) isFullyGenerated = false
+
+            // 状态文案
+            if (total > 0L) {
+                val pct = (generatedMs * 100 / total).coerceIn(0L, 100L)
+                // 播了 20 秒还没有任何语音：给明确反馈而不是静默失败（文档第十章）
+                listener?.onStatus(
+                    if (!producedAnyCue && scannedMs() > 20_000L && cache.size() == 0)
                         "未检测到语音内容（可能是纯音乐或无人声）"
-                    pct >= 0 -> "实时字幕生成中 ${pct}%　已生成至 ${fmt(generatedUpToMs)}/${fmt(total)}"
-                    else -> "实时字幕生成中　已生成至 ${fmt(generatedUpToMs)}（超前 ${ahead / 1000}s）"
-                }
-                listener?.onStatus(tip)
+                    else "实时字幕生成中 ${pct}%　已生成 ${fmt(generatedMs)}/${fmt(total)}"
+                )
+            } else {
+                listener?.onStatus("实时字幕生成中　已生成至 ${fmt(generatedMs)}")
             }
         }
     }
+
+    // ==================== 已扫描区间管理 ====================
+
+    /**
+     * 选出下一个待处理区间（长度约一个解码窗口），按上述优先级。
+     * 返回 null 表示三段都没有缺口。
+     */
+    private fun nextUnscannedRange(endMs: Long): LongRange? {
+        val cur = cursorMs
+        val nearStart = (cur - BACKFILL_BEFORE_MS).coerceAtLeast(0L)
+        val nearEnd = (cur + lookaheadMs).coerceAtMost(endMs)
+
+        // 1) 当前点附近（含前方 5 秒回补）
+        firstGapIn(nearStart, nearEnd)?.let { return it }
+        // 2) 当前点之后
+        firstGapIn(nearEnd, endMs)?.let { return it }
+        // 3) 其他：片头 → 当前点前
+        firstGapIn(0L, nearStart)?.let { return it }
+        return null
+    }
+
+    /** 在 [fromMs, toMs) 内找第一个未被扫描的子区间（长度 ≤ 一个解码窗口） */
+    private fun firstGapIn(fromMs: Long, toMs: Long): LongRange? {
+        if (fromMs >= toMs) return null
+        var pos = fromMs
+        var guard = 0
+        while (pos < toMs && guard++ < 10_000) {
+            val hit = scannedRanges.firstOrNull { pos >= it.first && pos < it.last }
+            if (hit == null) {
+                val len = minOf(DECODE_WINDOW_MS, toMs - pos)
+                if (len <= 0L) return null
+                return pos until (pos + len)
+            }
+            pos = hit.last
+        }
+        return null
+    }
+
+    /** 标记区间已扫描（合并相邻/重叠区间，保持按起点有序） */
+    private fun markScanned(fromMs: Long, toMs: Long) {
+        if (toMs <= fromMs) return
+        val merged = ArrayList<LongRange>(scannedRanges.size + 1)
+        var newStart = fromMs
+        var newEnd = toMs
+        var inserted = false
+        for (r in scannedRanges) {
+            when {
+                r.last < newStart -> merged.add(r)                    // 完全在前
+                r.first > newEnd -> {                                 // 完全在后
+                    if (!inserted) { merged.add(newStart until newEnd); inserted = true }
+                    merged.add(r)
+                }
+                else -> {                                             // 有重叠 → 合并
+                    newStart = minOf(newStart, r.first)
+                    newEnd = maxOf(newEnd, r.last)
+                }
+            }
+        }
+        if (!inserted) merged.add(newStart until newEnd)
+        scannedRanges.clear()
+        scannedRanges.addAll(merged)
+    }
+
+    /** 已覆盖总时长（毫秒） */
+    private fun scannedMs(): Long {
+        var sum = 0L
+        for (r in scannedRanges) sum += (r.last - r.first)
+        return sum
+    }
+
+    /** 清空扫描记录（重新生成时用） */
+    private fun clearScanned() {
+        scannedRanges.clear()
+    }
+
+    /** v127e：已扫描（解码+识别过）的音频区间，合并相邻；仅预读线程访问 */
+    private val scannedRanges = ArrayList<LongRange>()
+
+    /** 启动参数留存，供 [restart] 重新生成时复用 */
+    private var currentUri: Uri? = null
+    private var currentFactory: RecognizerFactory? = null
 
     private fun fmt(ms: Long): String {
         val s = (ms / 1000L).coerceAtLeast(0L)

@@ -500,6 +500,13 @@ fun VRPlayerScreen(
     val asrEngineType = AsrEngineType.SENSEVOICE
     // v111：sherpa 引擎语言选择（中/英/日/韩/自动）
     var sherpaLangCode by remember { mutableStateOf("auto") }
+    // v127e：SenseVoice 推理线程数（1~10，推荐 4~6）
+    var asrThreads by remember {
+        mutableIntStateOf(
+            if (isMemoryModeEnabled) prefs.getInt("asr_threads", SherpaAsrManager.DEFAULT_THREADS)
+            else SherpaAsrManager.DEFAULT_THREADS
+        )
+    }
     var isBatchTranscribing by remember { mutableStateOf(false) }
     var batchTranscribeProgress by remember { mutableFloatStateOf(0f) }
     var batchTranscribeStatus by remember { mutableStateOf("") }
@@ -533,6 +540,43 @@ fun VRPlayerScreen(
                 }
             }
         }
+    }
+
+    /**
+     * v127e：导出当前字幕为 SRT。
+     *
+     * 此前 SubtitleSettingsPanel 的 onExportSubtitle 从未接线（点了没反应），
+     * 且原实现依赖整片转写生成的临时文件——该链路已随实时字幕方案移除。
+     * 现在直接从内存字幕缓存导出：实时字幕与手动加载的字幕都能导出。
+     */
+    fun exportSubtitleSrt() {
+        val cues = if (isRealtimeSubtitleEnabled) realtimeCues else loadedSubtitleCues
+        if (cues.isEmpty()) {
+            Toast.makeText(context, "暂无可导出的字幕", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val f = SubtitleExporter.exportSrt(context, selectedMediaItem.title, cues)
+        Toast.makeText(
+            context,
+            if (f != null) "已导出 ${cues.size} 条字幕：\n${f.absolutePath}" else "字幕导出失败",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    /** v127e：重新生成实时字幕（清空缓存后按当前播放点重新走优先级调度） */
+    fun regenerateRealtimeSubtitle() {
+        if (!isRealtimeSubtitleEnabled) {
+            Toast.makeText(context, "请先开启「实时 AI 字幕」", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!selectedMediaItem.isVideo) {
+            Toast.makeText(context, "当前是图片，没有音轨可识别", Toast.LENGTH_SHORT).show()
+            return
+        }
+        realtimeCues = emptyList()
+        realtimeDone = false
+        realtimeSubtitleEngine.restart()
+        Toast.makeText(context, "已重新开始生成字幕", Toast.LENGTH_SHORT).show()
     }
 
     // 后台生成全片 SRT 字幕（v110）：支持双引擎 Vosk / Qwen3-ASR
@@ -688,6 +732,7 @@ fun VRPlayerScreen(
                 putFloat("beauty_small_head", beautySmallHead)
                 putBoolean("is_split_screen_vr", isSplitScreenVR)
                 putBoolean("is_gyro_enabled", isGyroEnabled)
+                putInt("asr_threads", asrThreads)
                 putBoolean("gyro_inverted", gyroInverted)
                 putFloat("fov_deg", fovDeg)
                 putBoolean("is_video_mirrored", isVideoMirrored)
@@ -1955,9 +2000,9 @@ fun VRPlayerScreen(
         realtimeSubtitleEngine.start(
             mediaUri = Uri.parse(uriStr),
             factory = {
-                // v127：只剩 SenseVoice 一条路线
+                // v127：只剩 SenseVoice 一条路线；线程数取用户设置（1~10）
                 SherpaAsrManager
-                    .createRecognizer(context, sherpaLangCode)
+                    .createRecognizer(context, sherpaLangCode, asrThreads)
                     ?.let { SherpaSegmentRecognizer(it) }
             },
             listener = object : RealtimeSubtitleEngine.Listener {
@@ -2854,6 +2899,51 @@ fun VRPlayerScreen(
                             onUserInteraction = { keepUiAlight() }
                         )
 
+                        // v127e：推理线程数（1~10，推荐 4~6）
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("推理线程数", color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
+                                Text(
+                                    "$asrThreads 线程" + if (asrThreads in SherpaAsrManager.RECOMMENDED_THREADS) "（推荐）" else "",
+                                    color = if (asrThreads in SherpaAsrManager.RECOMMENDED_THREADS) AccentColor
+                                    else Color(0xFFFFB74D),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Slider(
+                                value = asrThreads.toFloat(),
+                                onValueChange = { v ->
+                                    asrThreads = v.toInt().coerceIn(SherpaAsrManager.MIN_THREADS, SherpaAsrManager.MAX_THREADS)
+                                },
+                                onValueChangeFinished = {
+                                    if (isMemoryModeEnabled) {
+                                        prefs.edit().putInt("asr_threads", asrThreads).apply()
+                                    }
+                                    // 识别器已按旧线程数创建，改动需重建引擎才生效
+                                    if (isRealtimeSubtitleEnabled) realtimeSubtitleEngine.restart()
+                                    keepUiAlight()
+                                },
+                                valueRange = SherpaAsrManager.MIN_THREADS.toFloat()..SherpaAsrManager.MAX_THREADS.toFloat(),
+                                steps = SherpaAsrManager.MAX_THREADS - SherpaAsrManager.MIN_THREADS - 1,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = AccentColor,
+                                    activeTrackColor = AccentColor,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
+                                ),
+                                modifier = Modifier.fillMaxWidth().height(24.dp)
+                            )
+                            Text(
+                                "太小识别跟不上播放，太大挤占解码/渲染；推荐 4~6",
+                                color = Color.White.copy(alpha = 0.4f),
+                                fontSize = 8.sp
+                            )
+                        }
+
                         // v126：实时 AI 字幕开关（边播边生成，不写 SRT、不改动原视频）
                         ExperimentalSwitchRow(
                             title = "实时 AI 字幕",
@@ -2889,6 +2979,51 @@ fun VRPlayerScreen(
                                     .height(3.dp)
                                     .padding(start = 4.dp, end = 4.dp)
                             )
+                        }
+
+                        // v127e：重新生成 / 导出（字幕悬浮窗操作）
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AccentColor.copy(alpha = 0.85f))
+                                    .clickable {
+                                        keepUiAlight()
+                                        regenerateRealtimeSubtitle()
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "重新生成字幕",
+                                    color = AccentOnColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .clickable {
+                                        keepUiAlight()
+                                        exportSubtitleSrt()
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "导出 SRT",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
 
                         // 打开完整字幕设置（设置面板并展开字幕分组）
@@ -4093,6 +4228,7 @@ fun VRPlayerScreen(
                                     },
                                     translator = subtitleTranslator,
                                     onTranslateFileRequested = { subtitleTranslator.translateCuesBatch(loadedSubtitleCues) },
+                                    onExportSubtitle = { exportSubtitleSrt() },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor,
                                     onUserActivity = { keepUiAlight() }
