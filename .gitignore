@@ -34,3 +34,9 @@ google-services.json
 
 # v117：WorkBuddy 本地工作数据（含本机绝对路径与个人记忆），不入仓
 .workbuddy/
+
+# v2.0.127：内置 ASR 模型（model.int8.onnx 228MB）不入库——
+# 超过 GitHub 单文件 100MB 硬限制，push 会被整包拒绝。
+# 改为构建前用脚本拉取：`python scripts/fetch_asr_model.py`
+# 注：tokens.txt 仅 0.3MB，随仓库提交，保证 clone 后目录结构完整。
+app/src/main/assets/sense-voice/model.int8.onnx

@@ -80,7 +80,7 @@ fun BatchTranscribeSection(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "SenseVoice-Small · 中英日韩粤 · CPU 推理 · 自带标点",
+                    "SenseVoice-Small · 内置模型（无需下载）· 中英日韩粤 · 自带标点",
                     color = Color.White.copy(alpha = 0.55f),
                     fontSize = 9.sp,
                     lineHeight = 12.sp
@@ -110,24 +110,35 @@ fun BatchTranscribeSection(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            if (modelReady) "模型已就绪（约 229MB）" else "模型未下载（约 229MB）",
+                            // v2.0.127：模型内置，这里显示实际生效来源（下载版优先于内置版）
+                            text = if (modelReady) "已就绪 · ${SherpaAsrManager.activeModelSource(context)}"
+                            else "模型不可用（内置资源缺失，可下载兜底）",
                             color = if (modelReady) accentColor.copy(alpha = 0.9f)
-                            else Color.White.copy(alpha = 0.5f),
+                            else Color(0xFFFFB74D),
                             fontSize = 8.sp
                         )
                     }
-                    if (!modelReady && !isDownloading) {
+                    if (!isDownloading) {
+                        // 内置模型已就绪时这里作为「更新/替换模型」入口保留
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(accentColor.copy(alpha = 0.85f))
+                                .background(
+                                    if (modelReady) Color.White.copy(alpha = 0.12f)
+                                    else accentColor.copy(alpha = 0.85f)
+                                )
                                 .clickable {
                                     onUserInteraction()
                                     SherpaAsrManager.startModelDownload(context)
                                 }
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
-                            Text("下载", color = accentOnColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (modelReady) "更新模型" else "下载模型",
+                                color = if (modelReady) Color.White.copy(alpha = 0.85f) else accentOnColor,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }

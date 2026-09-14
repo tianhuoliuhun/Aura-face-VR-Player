@@ -51,9 +51,10 @@
   - All LUTs are self-generated via numpy scripts (no third-party copyright)
 
 ### 🗣️ 字幕与语音转写 / Subtitles & ASR
-- 离线语音识别：**SenseVoice-Small**（sherpa-onnx，CPU int8，约 229MB）
-  - 中/英/日/韩/粤 5 语言，自带标点，RTF 0.026；首次使用自动下载（含断点续传）
-  - Offline ASR: SenseVoice-Small (sherpa-onnx, CPU int8, ~229MB) — zh/en/ja/ko/yue with punctuation
+- 离线语音识别：**SenseVoice-Small**（sherpa-onnx，CPU int8）
+  - 中/英/日/韩/粤 5 语言，自带标点，RTF 0.026
+  - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载；同一模型文件被复用于识别，不额外占用存储
+  - Offline ASR: SenseVoice-Small bundled in the APK — zh/en/ja/ko/yue with punctuation, no download needed
 - **实时 AI 字幕**：边播边生成，不写临时文件
   - 独立解码音频（AudioTee）+ **Silero VAD** 分段 + 按优先级全局生成
   - 优先补当前播放点（**含前 5 秒回补**）及其后内容，再回头补齐其余；跳转后可即时命中已生成部分
@@ -150,6 +151,7 @@ Aura-face-VR-Player/
 │       │   ├── luts/              # 12 款内置 3D LUT（.cube，v117 起生效，支持自选 .cube）
 │       │   ├── face_landmarker.task  # MediaPipe 人脸模型
 │       │   ├── silero_vad.onnx    # Silero VAD 语音活动检测（629KB）
+│       │   ├── sense-voice/       # SenseVoice 识别模型（内置；model.int8.onnx 由 scripts/fetch_asr_model.py 拉取）
 │       │   └── licenses.json      # 开源许可清单（自动生成）
 │       └── res/                   # 资源与字体（MiSans/OPPO Sans）
 ├── gradle/libs.versions.toml      # 依赖版本目录
@@ -176,7 +178,7 @@ Aura-face-VR-Player/
 
 | 项目 | 说明 / Notes |
 |---|---|
-| 产物 | **单个全架构 APK**（`app-release.apk`，约 183MB）/ Single universal APK (~183MB) |
+| 产物 | **单个全架构 APK**（`app-release.apk`，约 348MB，含内置 ASR 模型）/ Single universal APK (~348MB, ASR model bundled) |
 | 包含 ABI | `arm64-v8a` + `armeabi-v7a` + `x86_64` + `x86` 全包含 / All ABIs in one package |
 | 安装 | 系统自动选取匹配 ABI 的原生库，无需挑选 / The OS picks the matching native libs |
 
@@ -193,6 +195,19 @@ Aura-face-VR-Player/
 - Android SDK（compileSdk 36, minSdk 24, targetSdk 36）
 - Gradle 9.6.1（或使用项目内置 wrapper）
 
+### 第一步：拉取内置 ASR 模型（首次 clone 后必做）/ Fetch bundled ASR model
+
+`model.int8.onnx`（228MB）超过 GitHub 单文件 100MB 限制，**不纳入 git**，
+需先跑脚本拉到 `app/src/main/assets/sense-voice/`，否则 APK 不会内置模型
+（仍能编译，但离线字幕会退回运行时下载模式）。
+
+```powershell
+python scripts/fetch_asr_model.py          # 缺失才下载，支持断点续传
+python scripts/fetch_asr_model.py --check  # 只检查是否就绪
+```
+
+> 镜像源为 `hf-mirror.com`；不可达时脚本会提示手动下载地址（HuggingFace 官方仓库）。
+
 ### 构建命令 / Commands
 
 ```powershell
@@ -200,7 +215,7 @@ Aura-face-VR-Player/
 gradlew.bat assembleDebug
 
 # Release 包（正式分发，必须！见 RELEASE_SIGNING.md）
-# 产物：app\build\outputs\apk\release\app-release.apk（单包全架构，约 183MB）
+# 产物：app\build\outputs\apk\release\app-release.apk（单包全架构，约 348MB，含内置模型）
 gradlew.bat assembleRelease
 
 # 依赖许可证清单导出
@@ -221,7 +236,7 @@ python scripts/gen_licenses.py
   - Local-first: playback, beauty, LUT, and offline ASR all run on-device
 - **可选匿名统计（Firebase Analytics，免费）**：仅在你**首次启动明确同意后**才采集设备型号/系统版本/启动与活跃次数；拒绝或随时关闭后不再采集
   - Optional anonymous analytics (Firebase Analytics, free): collects device model / OS version / launches & active counts **only after you explicitly agree**; can be disabled anytime
-- **云端数据（可选）**：字幕翻译（用户自配 API Key）、ASR 模型下载（SenseVoice）、Firebase 统计
+- **云端数据（可选）**：字幕翻译（用户自配 API Key）、ASR 模型更新（可选，模型已内置）、Firebase 统计
   - Optional cloud data: subtitle translation (user-provided API keys), ASR model download, Firebase analytics
 - **不采集**：任何个人身份信息、视频内容、字幕内容
   - Never collected: personal identity, video content, subtitle content
@@ -258,7 +273,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | # | 中文 | English |
 |---|---|---|
 | 1 | **8K 硬解为实验功能**——默认关闭，需在「设置 → 8K 硬解实验」中按需开启，可能花屏或失败 | **8K decoding is experimental** — off by default; enable under Settings → 8K experiments; artifacts possible |
-| 2 | **ASR 模型需先下载**——SenseVoice-Small 约 229MB，首次开启实时字幕前需联网下载 | **ASR model needs download** — SenseVoice-Small ~229MB, downloaded on first use |
+| 2 | **安装包较大（约 348MB）**——ASR 模型已内置以保证开箱即用；若需精简版可自行移除 `assets/sense-voice/` 并改用下载兜底 | **Large APK (~348MB)** — the ASR model is bundled for out-of-the-box use |
 | 3 | **陀螺仪漂移**——长时间观看后水平朝向缓慢漂移，双击画面重置视角即可（原理性，GAME_ROTATION_VECTOR 无绝对北向基准） | **Gyroscope drift** — yaw drifts slowly over long sessions; double-tap to recenter (inherent to game rotation vector) |
 | 4 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timing mismatch** — auto-generated timestamps may not perfectly align |
 | 5 | **必应免费翻译端点风险**——非官方网页端点，随时可能失效 | **Bing free endpoint risk** — unofficial web endpoint may break anytime; LLM API keys recommended |
@@ -300,6 +315,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | v124 | 修复 8K 输入缓冲被拒后退回 1MB（一帧都放不下）/ Fix 8K input buffer rejected → fallback to 1MB |
 | v125 | 修复陀螺仪方向上下左右全部反向（另附转向反转开关）/ Fix inverted gyroscope direction (+ inversion toggle) |
 | **v1.0.126** | **实时 AI 字幕落地**：边播边生成（独立解码 + Silero VAD + 优先级全局生成，当前点前 5 秒回补）/ 翻译预读 + 磁盘缓存 / 整片转写停用 / 只保留 SenseVoice 引擎（移除 Vosk·Qwen3·QNN 与 136MB QNN 运行库）/ 修复 SRT 导出 / 推理线程 1–10 可调 / 字幕重新生成 · **Realtime AI subtitles**: decode-on-the-fly with Silero VAD & priority scheduling, translation prefetch + disk cache, SenseVoice-only (Vosk/Qwen3/QNN removed), SRT export fix, 1–10 threads |
+| **v2.0.127** | **ASR 模型内置**（SenseVoice 打进 APK，开箱即用，无需下载）/ 启动时自动清理已废弃引擎（Vosk·Qwen3·QNN）遗留的模型目录 / 下载链路保留为兜底与更新通道 · **Bundled ASR model** (off-the-shelf, no download) + auto-cleanup of legacy model dirs |
 
 ---
 

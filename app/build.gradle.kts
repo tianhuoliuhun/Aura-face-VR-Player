@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 126
-    versionName = "1.0.126"
+    versionCode = 127
+    versionName = "2.0.127"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -29,6 +29,13 @@ android {
     jniLibs {
       useLegacyPackaging = true
     }
+  }
+
+  // v2.0.127：SenseVoice 模型内置到 assets，必须禁止压缩。
+  // 若被压缩，sherpa-onnx 从 AssetManager 读取时需先解压到内存（239MB 峰值），
+  // 既慢又容易 OOM；noCompress 后可走文件描述符直接读。
+  androidResources {
+    noCompress += listOf("onnx", "bin", "txt")
   }
 
   signingConfigs {

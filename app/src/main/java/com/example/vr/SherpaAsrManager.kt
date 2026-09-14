@@ -35,24 +35,34 @@ import java.util.concurrent.TimeUnit
  * SenseVoice-Small 的依据（《模型来源与下载地址》）：234M 参数、中英日韩粤、
  * RTF 0.026、自带标点，是通用机型上实时字幕最合适的选择。
  *
- * 模型首次使用时下载缓存，单文件直链 + Range 断点续传。
+ * v2.0.127：模型**内置到 assets**（app/src/main/assets/sense-voice/），开箱即用。
+ * 识别器用 `OfflineRecognizer(assets, cfg)` 构造，模型与词表传 asset 相对路径，
+ * 因此无需把 239MB 复制到 filesDir（省一次复制与一份空间）。
+ * 配套：build.gradle.kts 里 `androidResources.noCompress += "onnx"`，
+ * 否则读取时需解压到内存（239MB 峰值）。
+ *
+ * **下载链路保留**，定位改为「兜底 + 更新」：
+ *  - 内置 assets 缺失或损坏时，自动回退到 filesDir 下的下载版模型；
+ *  - 需要替换/升级模型时，仍可通过 [startModelDownload] 下载到 filesDir，
+ *    且下载版优先于内置版生效（便于不发版换模型）。
  */
 object SherpaAsrManager {
 
     private const val TAG = "SherpaAsr"
 
-    // ===== SenseVoice CPU 配置 =====
+    // ===== SenseVoice 配置（v2.0.127：内置 assets + 可选下载兜底）=====
     //
-    // 依据《模型来源与下载地址》：
-    //   sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17，取 model.int8.onnx
-    //   （239MB）+ tokens.txt。234M 参数，中英日韩粤，RTF 0.026，自带标点。
-    //
-    // 下载走 hf-mirror 单文件直链而非官方 tar.bz2：239MB 的 bz2 在手机端解压很慢，
-    // 且中断后要整体重下；单文件可断点续传，配合国内镜像更稳。
+    // 模型：sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 的 model.int8.onnx
+    // （239MB）+ tokens.txt。234M 参数，中英日韩粤，RTF 0.026，自带标点。
+    private const val SVC_ASSET_DIR = "sense-voice"
+    private const val SVC_ASSET_MODEL = "$SVC_ASSET_DIR/model.int8.onnx"
+    private const val SVC_ASSET_TOKENS = "$SVC_ASSET_DIR/tokens.txt"
+
+    // 下载版（filesDir）：内置缺失时兜底，或用于不发版替换模型
     private const val SVC_DIR_NAME = "sense-voice-cpu"
     private const val SVC_MODEL = "model.int8.onnx"
     private const val SVC_TOKENS = "tokens.txt"
-    private const val SVC_MODEL_MB = 228
+    private const val SVC_MODEL_MB = 229
     private const val SVC_MODEL_URL =
         "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx"
     private const val SVC_TOKENS_URL =
@@ -67,7 +77,7 @@ object SherpaAsrManager {
     // ===== 共享状态 =====
     var isModelDownloading by mutableStateOf(false)
     var modelDownloadProgress by mutableFloatStateOf(0f)
-    var downloadStatus by mutableStateOf("就绪")
+    var downloadStatus by mutableStateOf("模型已内置，开箱即用")
 
     /** 最近一次识别器初始化失败的原因；null 表示未失败（供 UI 显示真实原因而非"请先下载"） */
     var lastInitError: String? = null
@@ -81,9 +91,38 @@ object SherpaAsrManager {
 
     // ===== 模型路径 =====
 
-    /** SenseVoice CPU 模型目录 */
+    /** 下载版模型目录（filesDir） */
     private fun svcDir(context: Context): File =
         File(context.filesDir, "sherpa_models/$SVC_DIR_NAME")
+
+    /** 内置 assets 是否可用（打包遗漏或损坏时返回 false，交由下载版兜底） */
+    private fun assetModelAvailable(context: Context): Boolean = try {
+        context.assets.open(SVC_ASSET_MODEL).close()
+        context.assets.open(SVC_ASSET_TOKENS).close()
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "内置模型不可用：${e.message}")
+        false
+    }
+
+    /** 下载版是否就绪（带最小尺寸校验，避免中断下载留下的残缺文件被误判） */
+    private fun downloadedModelReady(context: Context): Boolean {
+        val dir = svcDir(context)
+        val model = dir.resolve(SVC_MODEL)
+        val tok = dir.resolve(SVC_TOKENS)
+        return model.exists() && model.length() > 100_000_000L &&
+            tok.exists() && tok.length() > 1024L
+    }
+
+    /**
+     * 当前生效的模型来源。
+     * **下载版优先**：便于不发版替换模型（把新文件放进去即生效）。
+     */
+    fun activeModelSource(context: Context): String = when {
+        downloadedModelReady(context) -> "下载版（filesDir）"
+        assetModelAvailable(context) -> "内置版（assets）"
+        else -> "不可用"
+    }
 
     /** SenseVoice 支持的语言（语言标签直接透传给模型） */
     val sherpaLanguages = listOf(
@@ -95,14 +134,9 @@ object SherpaAsrManager {
         "yue" to "粤语"
     )
 
-    /** 模型是否就绪（带最小尺寸校验，避免中断下载留下的残缺文件被当作可用） */
-    fun isModelReady(context: Context): Boolean {
-        val dir = svcDir(context)
-        val model = dir.resolve(SVC_MODEL)
-        val tok = dir.resolve(SVC_TOKENS)
-        return model.exists() && model.length() > 100_000_000L &&
-            tok.exists() && tok.length() > 1024L
-    }
+    /** 模型是否就绪：下载版或内置版任一可用即可 */
+    fun isModelReady(context: Context): Boolean =
+        downloadedModelReady(context) || assetModelAvailable(context)
 
     // ===== 下载管理 =====
 
@@ -238,12 +272,77 @@ object SherpaAsrManager {
     // ===== 识别器创建 =====
 
     /**
+     * v2.0.127：清理已废弃引擎遗留的模型目录，释放设备存储。
+     *
+     * 被移除的引擎（v1.0.126 起不再使用）会留下数百 MB 到 1GB+ 的模型：
+     *  - `sherpa_models/sherpa-onnx-qwen3-*`：Qwen3-ASR（约 838MB）
+     *  - `sherpa_models/sherpa-onnx-qnn-*`：SenseVoice QNN（各 SoC 一套，约 161~241MB）
+     *  - `vosk_models/`：Vosk 各语言模型（40MB~1.3GB）
+     *
+     * **只删已知废弃目录，不做通配清理**；当前在用的
+     * `sherpa_models/sense-voice-cpu`（下载版兜底/更新通道）与 `silero_vad.onnx` 一律保留。
+     *
+     * 供 Application.onCreate 在后台线程调用（删除量大，不能占用主线程）。
+     * @return 释放的字节数
+     */
+    fun cleanupLegacyModels(context: Context): Long {
+        var freed = 0L
+        try {
+            // 1) sherpa_models 下已废弃引擎的目录
+            val root = File(context.filesDir, "sherpa_models")
+            if (root.isDirectory) {
+                root.listFiles()?.forEach { child ->
+                    if (!child.isDirectory) return@forEach
+                    val name = child.name
+                    val isLegacy = name.startsWith("sherpa-onnx-qwen3") ||
+                        name.startsWith("sherpa-onnx-qnn-")
+                    if (isLegacy) {
+                        val size = dirSize(child)
+                        if (child.deleteRecursively()) {
+                            freed += size
+                            Log.i(TAG, "已清理废弃模型目录：$name（${size / 1048576}MB）")
+                        } else {
+                            Log.w(TAG, "清理失败：${child.absolutePath}")
+                        }
+                    }
+                }
+            }
+            // 2) Vosk 模型目录（整个引擎已移除）
+            val vosk = File(context.filesDir, "vosk_models")
+            if (vosk.exists()) {
+                val size = dirSize(vosk)
+                if (vosk.deleteRecursively()) {
+                    freed += size
+                    Log.i(TAG, "已清理 Vosk 模型目录（${size / 1048576}MB）")
+                }
+            }
+            if (freed > 0) {
+                Log.i(TAG, "旧模型清理完成，共释放 ${freed / 1048576}MB")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "旧模型清理出错：${e.message}")
+        }
+        return freed
+    }
+
+    /** 递归统计目录体积（清理前先算，便于日志量化） */
+    private fun dirSize(dir: File): Long {
+        var sum = 0L
+        dir.listFiles()?.forEach { f ->
+            sum += if (f.isDirectory) dirSize(f) else f.length()
+        }
+        return sum
+    }
+
+    /**
      * 创建 SenseVoice 识别器。
      *
-     * [threads] 为推理线程数（1~10）；传 0 或越界时按设备核心数自动取
-     * `min(核数, 4)`。推荐值 4–6：
-     * - 太少：RTF 变差，实时字幕跟不上播放速度
-     * - 太多：把核心吃满，挤压视频解码与渲染，反而卡顿
+     * [threads] 为推理线程数（1~10）；传 0 或越界时按设备核心数自动取 `min(核数, 4)`。
+     * 推荐值 4–6：太少跟不上播放速度，太多会挤占视频解码与渲染。
+     *
+     * 模型来源：下载版（filesDir）优先，其次内置 assets —— 前者便于不发版换模型。
+     * 传 asset 路径时必须同时给非空 AssetManager，传绝对路径时必须给 null
+     * （sherpa-onnx 对"绝对路径 + 非空 AssetManager"会判定冲突并终止进程）。
      */
     fun createRecognizer(
         context: Context,
@@ -252,16 +351,32 @@ object SherpaAsrManager {
     ): OfflineRecognizer? {
         lastInitError = null
         if (!isModelReady(context)) {
-            Log.w(TAG, "SenseVoice model not ready: ${svcDir(context)}")
-            lastInitError = "模型未下载或文件不完整（约 ${SVC_MODEL_MB}MB）"
+            Log.w(TAG, "SenseVoice model not ready（内置缺失且无下载版）")
+            lastInitError = "模型不可用：内置资源缺失且未下载（约 ${SVC_MODEL_MB}MB）"
             return null
         }
-        val dir = svcDir(context)
         val auto = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
         val numThreads = if (threads in MIN_THREADS..MAX_THREADS) threads else auto
-        val modelPath = dir.resolve(SVC_MODEL).absolutePath
-        val tokensPath = dir.resolve(SVC_TOKENS).absolutePath
-        Log.i(TAG, "SenseVoice: model=$modelPath lang=$language threads=$numThreads（自动值=$auto）")
+        val useDownloaded = downloadedModelReady(context)
+
+        val assetManager: android.content.res.AssetManager?
+        val modelPath: String
+        val tokensPath: String
+        if (useDownloaded) {
+            val dir = svcDir(context)
+            assetManager = null
+            modelPath = dir.resolve(SVC_MODEL).absolutePath
+            tokensPath = dir.resolve(SVC_TOKENS).absolutePath
+        } else {
+            assetManager = context.assets
+            modelPath = SVC_ASSET_MODEL
+            tokensPath = SVC_ASSET_TOKENS
+        }
+        Log.i(
+            TAG,
+            "SenseVoice: source=${if (useDownloaded) "download" else "assets"} " +
+                "model=$modelPath lang=$language threads=$numThreads（自动值=$auto）"
+        )
         return try {
             val config = OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
@@ -278,7 +393,7 @@ object SherpaAsrManager {
                 ),
                 decodingMethod = "greedy_search",
             )
-            OfflineRecognizer(null, config).also {
+            OfflineRecognizer(assetManager, config).also {
                 Log.i(TAG, "SenseVoice recognizer created (lang=$language, threads=$numThreads)")
             }
         } catch (e: Throwable) {
