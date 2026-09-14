@@ -2865,10 +2865,20 @@ fun VRPlayerScreen(
                         ) { /* 消费点击，不穿透到背景层 */ }
                         .testTag("subtitle_quick_panel")
                 ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    // v2.0.128：面板内容较长（字幕开关 / 翻译 / ASR 引擎 / 推理线程 /
+                    // 实时字幕 / 生成进度与操作 / 完整设置入口…），在竖屏或低分辨率下
+                    // 会超出屏幕且无法滚动。改为「限高 + 竖向滚动」，
+                    // 并在右侧显示滚动条（内容未超出时不显示）。
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val quickPanelScroll = rememberScrollState()
+                        val density = LocalDensity.current
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 480.dp)
+                                .verticalScroll(quickPanelScroll)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                         // 字幕开关
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -3093,12 +3103,54 @@ fun VRPlayerScreen(
                             },
                             modifier = Modifier.align(Alignment.End)
                         ) {
-                            Text("完整字幕设置…", color = AccentColor, fontSize = 10.sp)
+                              Text("完整字幕设置…", color = AccentColor, fontSize = 10.sp)
+                          }
+                      }
+
+                        // 右侧滚动条：仅当内容超出限高时才出现
+                        if (quickPanelScroll.maxValue > 0) {
+                            // 可视高度 = 上面的限高（480.dp），内容超过它才会走到这里
+                            val viewH = with(density) { 480.dp.toPx() }
+                            val totalH = quickPanelScroll.maxValue + viewH
+                            val thumbRatio = (viewH / totalH).coerceIn(0.15f, 1f)
+                            val progress = quickPanelScroll.value.toFloat() /
+                                quickPanelScroll.maxValue.toFloat().coerceAtLeast(1f)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .fillMaxHeight()
+                                    .padding(vertical = 6.dp, horizontal = 2.dp)
+                                    .width(7.dp),
+                                contentAlignment = Alignment.TopEnd
+                            ) {
+                                // 轨道
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(Color.White.copy(alpha = 0.10f))
+                                )
+                                // 滑块
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .fillMaxHeight(thumbRatio)
+                                        .offset {
+                                            IntOffset(
+                                                0,
+                                                ((1f - thumbRatio) * progress * viewH).roundToInt()
+                                            )
+                                        }
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(AccentColor.copy(alpha = 0.75f))
+                                )
+                            }
                         }
                     }
-                }
-            }
-        }
+                  }
+              }
+          }
 
         // 4. Secondary Settings Dialog Panel (Hides other UI, so shown independently at root level when open!)
         AnimatedVisibility(
