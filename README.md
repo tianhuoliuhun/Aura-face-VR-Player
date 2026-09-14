@@ -51,17 +51,25 @@
   - All LUTs are self-generated via numpy scripts (no third-party copyright)
 
 ### 🗣️ 字幕与语音转写 / Subtitles & ASR
-- 离线语音识别：支持多引擎
-  - **Vosk**（Kaldi 架构）：中/英/日，模型按需下载（40MB~1.1GB），断点续传
-  - **Qwen3-ASR 0.6B**（sherpa-onnx）：29 语言 + 20 种方言，CPU 推理，~940MB 模型
-  - **SenseVoice QNN**（高通骁龙 NPU 加速）：中英日韩粤，SM8850 专属，~241MB 模型
-  - Offline speech recognition: multi-engine — Vosk (Kaldi), Qwen3-ASR (sherpa-onnx, CPU), SenseVoice QNN (Qualcomm NPU, SM8850)
+- 离线语音识别：**SenseVoice-Small**（sherpa-onnx，CPU int8，约 229MB）
+  - 中/英/日/韩/粤 5 语言，自带标点，RTF 0.026；首次使用自动下载（含断点续传）
+  - Offline ASR: SenseVoice-Small (sherpa-onnx, CPU int8, ~229MB) — zh/en/ja/ko/yue with punctuation
+- **实时 AI 字幕**：边播边生成，不写临时文件
+  - 独立解码音频（AudioTee）+ **Silero VAD** 分段 + 按优先级全局生成
+  - 优先补当前播放点（**含前 5 秒回补**）及其后内容，再回头补齐其余；跳转后可即时命中已生成部分
+  - 推理线程数可调（1–10，推荐 4–6）；字幕悬浮窗支持一键「重新生成」
+  - Realtime subtitles generated while playing — independent audio decode + Silero VAD, priority-based global generation
+- **字幕导出**：一键导出 SRT（直接由内存字幕缓存生成）
+  - One-tap SRT export from the in-memory subtitle cache
 - 整片转写：后台生成带时间轴的 SRT 字幕（静音断句 + 标点断句 + 14 字智能换行）
   - Full-video transcription to timed SRT (silence/punctuation segmentation, 14-char line wrap)
-- 转写策略按引擎区分（v122/v123 优化）：Vosk 走流式 400ms 喂入；Qwen3-ASR / SenseVoice 为离线模型，按**语音段整段识别**（静音 >700ms 或满 25s 断句），推理次数较逐块方式下降约 99.6%
-  - Engine-aware strategy: Vosk streams 400ms chunks; Qwen3-ASR / SenseVoice are offline models and decode whole speech segments (~99.6% fewer inference passes)
-- 长句自动切分：识别结果超过 40 字或 8 秒时按标点拆成多条，按字数比例分配时间（无标点时按字数等分）
-  - Long results are split by punctuation (>40 chars / >8s) with proportional timing
+- 转写策略：离线模型按**语音段整段识别**（Silero VAD 断句：静音 0.5s 或单段满 8s），
+  较逐块推理大幅减少推理次数
+  - Segment-level offline inference (Silero VAD: 0.5s silence or 8s max per segment)
+- 长句自动切分：单条超过 20 字或 5 秒时按标点拆成多条，按字数比例分配时间（无标点时按字数等分）
+  - Results >20 chars or >5s are split by punctuation with proportional timing
+- 翻译：**预读翻译**（提前翻译播放点前方 60 秒内的字幕，显示零等待）+ 磁盘缓存（换视频/重启后仍命中）
+  - Translation: ahead-of-playback prefetch + on-disk cache
 - ASR 语言选择：自动 / 中文 / 英文 / 日文 / 韩文
   - ASR language: Auto / Chinese / English / Japanese / Korean
 - 模型下载进度提示、断点续传、3 次重试
@@ -102,7 +110,7 @@
 ├─────────────────────────────────────────────────────┤
 │  智能模块 / Intelligence                             │
 │  MediaPipe Face Landmarker（人脸关键点 468 点）      │
-│  Vosk / Qwen3-ASR / SenseVoice QNN（多引擎 ASR）     │
+│  SenseVoice-Small + Silero VAD（实时字幕引擎）        │
 │  多引擎字幕翻译                                       │
 │  Room 持久化（设置记忆/字幕缓存）                   │
 └─────────────────────────────────────────────────────┘
@@ -118,9 +126,11 @@
 | `PlayerControlBar.kt` | Compose | 播放控制栏三组按钮 + 宽窄屏自适应布局（v121 拆出） |
 | `BeautySettingsSections.kt` | Compose | 美颜/模式提示/对比原图/预设等设置区块（v120–v121 拆出） |
 | `VRPlayerComponents.kt` | Compose | 通用组件：`TooltipIconButton` / `BeautySliderItem` / `ExperimentalSwitchRow` |
-| `AsrBatchTranscriber.kt` | 多引擎 | 批量字幕转写（Vosk 流式 / Qwen3、SenseVoice 按语音段整段识别） |
 | `MediaPipeFaceManager.kt` | MediaPipe Tasks | 468 点人脸关键点检测（arm64 真机） |
-| `SherpaAsrManager.kt` | sherpa-onnx | Qwen3-ASR / SenseVoice QNN 离线识别引擎管理 |
+| `SherpaAsrManager.kt` | sherpa-onnx | SenseVoice 模型下载与识别器管理（线程数可配） |
+| `RealtimeSubtitleEngine.kt` | 自研 | 实时字幕引擎：独立音频解码 + Silero VAD + 优先级调度 + seek 处理 |
+| `SubtitleCache.kt` | 自研 | 字幕稀疏时间索引（TreeMap + 二分查找，O(log n)） |
+| `SubtitleExporter.kt` | 自研 | SRT 导出（由内存字幕缓存生成） |
 | `LutUtils.kt` | 自研 | .cube 解析 + 三线性重采样 + 512×512 网格打包 |
 | `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（6 种引擎可切换） |
 
@@ -139,8 +149,8 @@ Aura-face-VR-Player/
 │       ├── assets/
 │       │   ├── luts/              # 12 款内置 3D LUT（.cube，v117 起生效，支持自选 .cube）
 │       │   ├── face_landmarker.task  # MediaPipe 人脸模型
+│       │   ├── silero_vad.onnx    # Silero VAD 语音活动检测（629KB）
 │       │   └── licenses.json      # 开源许可清单（自动生成）
-│       ├── jniLibs/arm64-v8a/     # QNN 加速库（15 个 .so，SM8850 专属）
 │       └── res/                   # 资源与字体（MiSans/OPPO Sans）
 ├── gradle/libs.versions.toml      # 依赖版本目录
 ├── scripts/gen_licenses.py        # 许可清单生成脚本
@@ -211,7 +221,7 @@ python scripts/gen_licenses.py
   - Local-first: playback, beauty, LUT, and offline ASR all run on-device
 - **可选匿名统计（Firebase Analytics，免费）**：仅在你**首次启动明确同意后**才采集设备型号/系统版本/启动与活跃次数；拒绝或随时关闭后不再采集
   - Optional anonymous analytics (Firebase Analytics, free): collects device model / OS version / launches & active counts **only after you explicitly agree**; can be disabled anytime
-- **云端数据（可选）**：字幕翻译（用户自配 API Key）、ASR 模型下载（Vosk/Qwen3/SenseVoice）、Firebase 统计
+- **云端数据（可选）**：字幕翻译（用户自配 API Key）、ASR 模型下载（SenseVoice）、Firebase 统计
   - Optional cloud data: subtitle translation (user-provided API keys), ASR model download, Firebase analytics
 - **不采集**：任何个人身份信息、视频内容、字幕内容
   - Never collected: personal identity, video content, subtitle content
@@ -248,7 +258,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | # | 中文 | English |
 |---|---|---|
 | 1 | **8K 硬解为实验功能**——默认关闭，需在「设置 → 8K 硬解实验」中按需开启，可能花屏或失败 | **8K decoding is experimental** — off by default; enable under Settings → 8K experiments; artifacts possible |
-| 2 | **ASR 模型需先下载**——Vosk 小模型 40MB / 中文大模型 1.3GB，Qwen3-ASR 838MB；首次转写前需联网下载 | **ASR models need download** — Vosk small 40MB / ZH large 1.3GB, Qwen3-ASR 838MB; downloaded on first use |
+| 2 | **ASR 模型需先下载**——SenseVoice-Small 约 229MB，首次开启实时字幕前需联网下载 | **ASR model needs download** — SenseVoice-Small ~229MB, downloaded on first use |
 | 3 | **陀螺仪漂移**——长时间观看后水平朝向缓慢漂移，双击画面重置视角即可（原理性，GAME_ROTATION_VECTOR 无绝对北向基准） | **Gyroscope drift** — yaw drifts slowly over long sessions; double-tap to recenter (inherent to game rotation vector) |
 | 4 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timing mismatch** — auto-generated timestamps may not perfectly align |
 | 5 | **必应免费翻译端点风险**——非官方网页端点，随时可能失效 | **Bing free endpoint risk** — unofficial web endpoint may break anytime; LLM API keys recommended |
@@ -289,6 +299,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | v123 | Vosk 转写优化（断句 reset / 400ms 喂入 / 模型缓存）+ 修复「模型不可用」死锁 / Vosk optimization + “model unavailable” deadlock fix |
 | v124 | 修复 8K 输入缓冲被拒后退回 1MB（一帧都放不下）/ Fix 8K input buffer rejected → fallback to 1MB |
 | v125 | 修复陀螺仪方向上下左右全部反向（另附转向反转开关）/ Fix inverted gyroscope direction (+ inversion toggle) |
+| **v1.0.126** | **实时 AI 字幕落地**：边播边生成（独立解码 + Silero VAD + 优先级全局生成，当前点前 5 秒回补）/ 翻译预读 + 磁盘缓存 / 整片转写停用 / 只保留 SenseVoice 引擎（移除 Vosk·Qwen3·QNN 与 136MB QNN 运行库）/ 修复 SRT 导出 / 推理线程 1–10 可调 / 字幕重新生成 · **Realtime AI subtitles**: decode-on-the-fly with Silero VAD & priority scheduling, translation prefetch + disk cache, SenseVoice-only (Vosk/Qwen3/QNN removed), SRT export fix, 1–10 threads |
 
 ---
 
