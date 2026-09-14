@@ -30,7 +30,7 @@
 # 本地构建（密码自动从 keystore.properties 读取）
 gradlew.bat assembleRelease
 
-# 产物：app\build\outputs\apk\release\app-release.apk
+# 产物：app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk
 ```
 
 CI / 服务器场景（不落地 keystore.properties）：
@@ -44,7 +44,7 @@ $env:KEY_PASSWORD    = "<key 密码>"
 
 ```powershell
 # 检查 APK 签名（apksigner，Android SDK build-tools）
-apksigner.bat verify --print-certs app\build\outputs\apk\release\app-release.apk
+apksigner.bat verify --print-certs app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk
 # 期望 CN 与生成密钥时填写的 dname 一致，且包含 v1+v2 签名方案（建议 v3）
 ```
 
@@ -54,7 +54,7 @@ apksigner.bat verify --print-certs app\build\outputs\apk\release\app-release.apk
 2. 验证签名证书为你的 upload 别名
 3. 创建 GitHub Release 并上传 APK（**一步到位**，create 时直接带上文件）：
    ```powershell
-   gh release create v<版本> app\build\outputs\apk\release\app-release.apk `
+   gh release create v<版本> app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk `
      --title "v<版本>" --notes "<更新说明>"
    ```
 4. 上架应用商店（如 Google Play）：使用 Play App Signing（上传密钥 + Play 签名密钥），
@@ -62,11 +62,13 @@ apksigner.bat verify --print-certs app\build\outputs\apk\release\app-release.apk
 
 > ⚠️ **只上传 release 包，绝不上传 debug 包**
 >
-> 发版时**默认就创建 Release 并附上 `app-release.apk`**（无需额外确认）。
-> `app-debug.apk` 使用公开的 Android debug key（密码 `android`），
+> 发版时**默认就创建 Release 并附上 release 包**（无需额外确认）。
+> v2.0.127 起产物已规范化命名：`Aura-face-VR-Player-v<版本>.apk`
+> （debug 为 `Aura-face-VR-Player-v<版本>-debug.apk`），由 `app/build.gradle.kts` 在 assemble 后自动重命名。
+> debug 包（`Aura-face-VR-Player-v<版本>-debug.apk`）使用公开的 Android debug key（密码 `android`），
 > 任何人都能重签伪装成更新，只允许用于本地/模拟器自测（`adb install -r -d`），
 > **禁止**作为 Release 附件或对外分发。
-> 若历史 Release 中误传过 debug 包，先删除再发布：`gh release delete-asset <tag> app-debug.apk -y`
+> 若历史 Release 中误传过 debug 包，先删除再发布：`gh release delete-asset <tag> Aura-face-VR-Player-v<版本>-debug.apk -y`
 
 ## 五、分发前 Checklist
 
@@ -75,5 +77,5 @@ apksigner.bat verify --print-certs app\build\outputs\apk\release\app-release.apk
 - [ ] 密钥库与密码已私密备份（离线/私密云盘）
 - [ ] `keystore.properties` 未被 git 跟踪（`git check-ignore keystore.properties`）
 - [ ] 版本号 `versionCode` / `versionName` 已递增
-- [ ] Release 附件**只有** `app-release.apk`（确认无 `app-debug.apk`）
+- [ ] Release 附件**只有** release 包（命名 `Aura-face-VR-Player-v<版本>.apk`，确认无 debug 包）
 - [ ] 源码中无任何本地路径、用户名、密钥、token（`git grep -n "C:\\Users\\\|D:\\\|sk-\|ghp_\|AKIA"`）

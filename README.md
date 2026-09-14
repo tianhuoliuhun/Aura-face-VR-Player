@@ -178,7 +178,7 @@ Aura-face-VR-Player/
 
 | 项目 | 说明 / Notes |
 |---|---|
-| 产物 | **单个全架构 APK**（`app-release.apk`，约 348MB，含内置 ASR 模型）/ Single universal APK (~348MB, ASR model bundled) |
+| 产物 | **单个全架构 APK**（`Aura-face-VR-Player-v<版本>.apk`，约 348MB，含内置 ASR 模型）/ Single universal APK (~348MB, ASR model bundled) |
 | 包含 ABI | `arm64-v8a` + `armeabi-v7a` + `x86_64` + `x86` 全包含 / All ABIs in one package |
 | 安装 | 系统自动选取匹配 ABI 的原生库，无需挑选 / The OS picks the matching native libs |
 
@@ -215,7 +215,7 @@ python scripts/fetch_asr_model.py --check  # 只检查是否就绪
 gradlew.bat assembleDebug
 
 # Release 包（正式分发，必须！见 RELEASE_SIGNING.md）
-# 产物：app\build\outputs\apk\release\app-release.apk（单包全架构，约 348MB，含内置模型）
+# 产物：app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk（单包全架构，约 348MB，含内置模型）
 gradlew.bat assembleRelease
 
 # 依赖许可证清单导出

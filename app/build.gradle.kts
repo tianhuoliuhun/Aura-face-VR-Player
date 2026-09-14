@@ -213,3 +213,38 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+// v2.0.127：APK 产物命名规范化。
+// 默认的 app-release.apk / app-debug.apk 看不出版本，归档与分发时极易混淆。
+// AGP 9 已移除旧的 applicationVariants 改名 API，这里改为在 assemble 完成后重命名文件，
+// 与 AGP 版本无关（src 不存在时自动跳过，可重复执行）。
+// 产物：Aura-face-VR-Player-v<versionName>.apk / -debug.apk
+// 注意两点，都是 AGP 9 + Gradle 9 的坑：
+// 1) assemble 任务注册较晚：必须用 afterEvaluate + matching（live 集合），
+//    直接用 tasks.named 会在配置期抛 "Task with name 'assembleRelease' not found"。
+// 2) 配置缓存（configuration cache）默认开启：doLast 闭包里不能再引用 project / android /
+//    layout，否则会报 cannot serialize DefaultProject。因此路径与版本号必须在配置期
+//    先算成纯 String，闭包内只用这些字符串。
+afterEvaluate {
+  val buildDirPath = layout.buildDirectory.asFile.get().absolutePath
+  val ver = android.defaultConfig.versionName ?: "unknown"
+  tasks.matching { it.name == "assembleRelease" || it.name == "assembleDebug" }.configureEach {
+    val type = name.removePrefix("assemble").lowercase()
+    val suffix = if (type == "release") "" else "-debug"
+    val dirPath = "$buildDirPath/outputs/apk/$type"
+    val srcName = "app-$type.apk"
+    val dstName = "Aura-face-VR-Player-v$ver$suffix.apk"
+    doLast {
+      val src = File(dirPath, srcName)
+      val dst = File(dirPath, dstName)
+      if (src.exists()) {
+        dst.delete()
+        if (src.renameTo(dst)) {
+          logger.lifecycle("[apk-name] APK -> $dstName")
+        } else {
+          logger.warn("[apk-name] 重命名失败（仍为 $srcName）")
+        }
+      }
+    }
+  }
+}
