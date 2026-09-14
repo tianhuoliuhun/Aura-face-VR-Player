@@ -2971,7 +2971,17 @@ fun VRPlayerScreen(
                         // v127b：实时字幕生成进度条（全片生成完则不再显示）
                         if (isRealtimeSubtitleEnabled && !realtimeDone && realtimeTotalMs > 0L) {
                             LinearProgressIndicator(
-                                progress = { (realtimeGeneratedMs.toFloat() / realtimeTotalMs).coerceIn(0f, 1f) },
+                                // v127f 修复闪退：progress 的 lambda 是**延迟求值**的，
+                                // 外层 if 判断通过后，total 仍可能在求值前被引擎 restart()
+                                // 重置为 0（切语言/切媒体/重新生成都会），此时 x/0 得到 NaN，
+                                // 而 coerceIn 对 NaN 无效 → Compose 抛
+                                // "IllegalArgumentException: current must not be NaN" 崩溃。
+                                // 因此必须在 lambda 内部再判一次分母。
+                                progress = {
+                                    val total = realtimeTotalMs
+                                    if (total <= 0L) 0f
+                                    else (realtimeGeneratedMs.toFloat() / total).coerceIn(0f, 1f)
+                                },
                                 color = AccentColor,
                                 trackColor = Color.White.copy(alpha = 0.12f),
                                 modifier = Modifier
