@@ -479,6 +479,17 @@ fun VRPlayerScreen(
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("subtitle_max_lines", 2) else 2)
     }
     val subtitleTranslator = remember { SubtitleTranslator(context) }
+    // v2.0.127：恢复上次的「字幕翻译」开关。
+    // 原先只在切换开关时写入 translation_enabled、却从没读取过，
+    // 因此每次重启翻译都回到关闭状态。这里在记忆模式下把它读回来。
+    LaunchedEffect(Unit) {
+        if (isMemoryModeEnabled) {
+            val wasEnabled = prefs.getBoolean("translation_enabled", false)
+            if (wasEnabled != subtitleTranslator.config.isEnabled) {
+                subtitleTranslator.config = subtitleTranslator.config.copy(isEnabled = wasEnabled)
+            }
+        }
+    }
     // v126：实时 AI 字幕引擎（方案文档「边播边生成」，不写 SRT 文件）
     val realtimeSubtitleEngine = remember { RealtimeSubtitleEngine(context) }
     var isRealtimeSubtitleEnabled by remember {
@@ -1993,9 +2004,14 @@ fun VRPlayerScreen(
                 val content = withContext(Dispatchers.IO) { matchedFile.readText() }
                 val cues = SubtitleParser.parseSrtOrVtt(content)
                 if (cues.isNotEmpty()) {
-                    loadedSubtitleCues = cues
-                    loadedSubtitleFileName = matchedFile.name
-                    isSubtitleEnabled = true
+                                    loadedSubtitleCues = cues
+                                    loadedSubtitleFileName = matchedFile.name
+                                    // v2.0.127：只有用户从未显式关闭过字幕时才自动开启。
+                                    // 原先这里无条件置 true，于是「用户关掉字幕 → 切视频/重新进入」
+                                    // 又会被自动打开，表现就是字幕开关不记忆。
+                                    if (!prefs.getBoolean("subtitle_user_disabled", false)) {
+                                        isSubtitleEnabled = true
+                                    }
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, "已加载字幕：${matchedFile.name}（${cues.size} 句）", Toast.LENGTH_SHORT).show()
                     }
@@ -4200,7 +4216,14 @@ fun VRPlayerScreen(
 
                                 SubtitleSettingsPanel(
                                     isSubtitleEnabled = isSubtitleEnabled,
-                                    onSubtitleEnabledChange = { isSubtitleEnabled = it },
+                                    onSubtitleEnabledChange = {
+                                        isSubtitleEnabled = it
+                                        // v2.0.127：记下用户的显式选择——关掉之后，
+                                        // 切视频时自动加载的字幕不会再把它重新打开
+                                        if (isMemoryModeEnabled) {
+                                            prefs.edit().putBoolean("subtitle_user_disabled", !it).apply()
+                                        }
+                                    },
                                     loadedSubtitleFileName = loadedSubtitleFileName,
                                     loadedCueCount = loadedSubtitleCues.size,
                                     onPickSubtitleFile = {
@@ -4271,6 +4294,13 @@ fun VRPlayerScreen(
                                         }
                                     },
                                     translator = subtitleTranslator,
+                                    onTranslateEnabledChange = { enabled ->
+                                        // v2.0.127：字幕面板里的翻译开关也要落盘，
+                                        // 否则重启后翻译总是回到关闭
+                                        if (isMemoryModeEnabled) {
+                                            prefs.edit().putBoolean("translation_enabled", enabled).apply()
+                                        }
+                                    },
                                     onTranslateFileRequested = { subtitleTranslator.translateCuesBatch(loadedSubtitleCues) },
                                     onExportSubtitle = { exportSubtitleSrt() },
                                     accentColor = AccentColor,

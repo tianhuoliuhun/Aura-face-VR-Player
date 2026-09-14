@@ -9,16 +9,22 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -44,7 +50,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -113,14 +122,26 @@ fun SubtitleSettingsPanel(
     onSubtitleFileLoaded: (File) -> Unit = {},
     translator: SubtitleTranslator? = null,
     onTranslateFileRequested: () -> Unit = {},
+    // v2.0.127：翻译开关的持久化回调。面板本身不持有 prefs，
+    // 由调用方写 SharedPreferences（原先只改内存 config，重启后翻译开关必丢）
+    onTranslateEnabledChange: (Boolean) -> Unit = {},
     accentColor: Color,
     accentOnColor: Color,
     onUserActivity: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
+    // v2.0.127：本面板内容很长（字幕开关/文件 / 字体字号样式 / 颜色描边背景 /
+    // 位置偏移延迟 / 翻译…），在设置弹窗里放不下时会被直接裁掉且无法滚动。
+    // 改为「限高 + 竖向滚动」，并在右侧画一条滚动条（内容未超出时不显示）。
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val panelScroll = rememberScrollState()
+        val density = LocalDensity.current
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(panelScroll),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
         // Section Header: 字幕与样式设置
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -177,7 +198,9 @@ fun SubtitleSettingsPanel(
                 fontSize = 10.sp,
                 modifier = Modifier.padding(vertical = 4.dp)
             )
-            return
+            // 注：外层已改为 BoxWithConstraints（非 inline），这里不能再写裸 return，
+            // 否则编译报 "'return' is prohibited here"。用标签从 Column 内容返回，语义一致。
+            return@Column
         }
 
         // ===== Section: 字幕文件与实时语音 =====
@@ -471,6 +494,7 @@ fun SubtitleSettingsPanel(
                         checked = translator.config.isEnabled,
                         onCheckedChange = { enabled ->
                             translator.config = translator.config.copy(isEnabled = enabled)
+                            onTranslateEnabledChange(enabled)
                             onUserActivity()
                         },
                         colors = SwitchDefaults.colors(
@@ -1287,6 +1311,45 @@ fun SubtitleSettingsPanel(
             )
         }
         } // end section 布局与时间
+    }
+
+        // 右侧滚动条：仅当内容超出限高时才出现
+        if (panelScroll.maxValue > 0) {
+            // 可视高度 = 上面的限高（420.dp），内容超过它时才会走到这里
+            val viewH = with(density) { 420.dp.toPx() }
+            val totalH = panelScroll.maxValue + viewH
+            val thumbRatio = (viewH / totalH).coerceIn(0.15f, 1f)
+            val progress = panelScroll.value.toFloat() /
+                panelScroll.maxValue.toFloat().coerceAtLeast(1f)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .padding(vertical = 6.dp, horizontal = 2.dp)
+                    .width(7.dp),
+                contentAlignment = Alignment.TopEnd
+            ) {
+                // 轨道
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.10f))
+                )
+                // 滑块
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight(thumbRatio)
+                        .offset {
+                            IntOffset(0, ((1f - thumbRatio) * progress * viewH).roundToInt())
+                        }
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(accentColor.copy(alpha = 0.75f))
+                )
+            }
+        }
     }
 }
 
