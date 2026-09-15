@@ -617,6 +617,27 @@ fun VRPlayerScreen(
         Toast.makeText(context, context.getString(R.string.toast_subtitle_restarted), Toast.LENGTH_SHORT).show()
     }
 
+    /**
+     * v2.0.136：加载应用 data 目录 subtitles/ 下的历史字幕文件，
+     * 并把字幕源切换到本地（关闭实时生成——内容相同，省电省 CPU）。
+     */
+    fun loadSavedSubtitleFile(f: File) {
+        try {
+            val cues = SubtitleParser.parseSrtOrVtt(f.readText())
+            if (cues.isEmpty()) return
+            loadedSubtitleCues = cues
+            loadedSubtitleFileName = f.name
+            isSubtitleEnabled = true
+            isRealtimeSubtitleEnabled = false
+            if (isMemoryModeEnabled) {
+                prefs.edit().putBoolean("realtime_subtitle_enabled", false).apply()
+            }
+            Toast.makeText(context, context.getString(R.string.toast_subtitle_autoloaded, f.name, cues.size), Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.w("VRPlayerScreen", "load saved subtitle failed: ${e.message}")
+        }
+    }
+
     // 后台生成全片 SRT 字幕（v110）：支持双引擎 Vosk / Qwen3-ASR
     fun startBatchTranscribe() {
         // v127：整片转写（生成 _asr.srt）已停用，改为边播边生成的实时字幕
@@ -1999,11 +2020,17 @@ fun VRPlayerScreen(
 
         val filesDir = context.getExternalFilesDir(null) ?: return@LaunchedEffect
         val srtFiles = filesDir.listFiles { f -> f.name.endsWith("_asr.srt") } ?: emptyArray()
-        // 按候选名精确匹配（忽略大小写），无匹配则放弃（不兜底）
-        val matchedFile = srtFiles.firstOrNull { srt ->
-            val srtBase = srt.name.removeSuffix("_asr.srt").lowercase()
-            candidateNames.any { cand -> cand.lowercase() == srtBase }
-        }
+        // v2.0.136：优先加载应用 data 目录 subtitles/ 下自动保存的历史字幕
+        // （<视频名>_<时间戳>.srt，listSavedSubtitles 已按时间倒序），取最新一份；
+        // 没有再回退到旧版整片转写的 <视频名>_asr.srt。
+        val savedFiles = candidateNames.flatMap { cand ->
+            SubtitleExporter.listSavedSubtitles(context, cand)
+        }.distinctBy { it.absolutePath }
+        val matchedFile: File? = savedFiles.firstOrNull { it.length() > 0 }
+            ?: srtFiles.firstOrNull { srt ->
+                val srtBase = srt.name.removeSuffix("_asr.srt").lowercase()
+                candidateNames.any { cand -> cand.lowercase() == srtBase }
+            }
 
         if (matchedFile != null && matchedFile.length() > 0) {
             try {
@@ -2072,6 +2099,28 @@ fun VRPlayerScreen(
                 }
             }
         )
+    }
+
+    // v2.0.136：实时字幕**全片生成完成**后，自动把本次生成的字幕保存到
+    // 应用 data 目录：subtitles/<视频名>_<yyyyMMdd-HHmmss>.srt。
+    // 每个视频本次会话只保存一次；下次打开同一视频时按名匹配自动加载。
+    var realtimeAutoSaved by remember(selectedMediaItem.uri) { mutableStateOf(false) }
+    LaunchedEffect(realtimeDone, selectedMediaItem.uri) {
+        if (!realtimeDone || realtimeAutoSaved) return@LaunchedEffect
+        if (!selectedMediaItem.isVideo) return@LaunchedEffect
+        val cues = realtimeSubtitleEngine.cache.snapshot()
+        if (cues.isEmpty()) return@LaunchedEffect
+        realtimeAutoSaved = true
+        val saved = withContext(Dispatchers.IO) {
+            SubtitleExporter.saveTimestamped(context, selectedMediaItem.title, cues)
+        }
+        if (saved != null) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.toast_subtitle_autosaved, saved.name),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     // Progress updates tracking
@@ -3116,6 +3165,79 @@ fun VRPlayerScreen(
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
+                            }
+                        }
+
+                        // v2.0.136：字幕源选择器 —— 实时 AI 生成 / 本地已保存的历史字幕
+                        var savedSubtitleFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+                        LaunchedEffect(isSubtitleQuickPanelOpen, selectedMediaItem.uri) {
+                            if (!isSubtitleQuickPanelOpen) return@LaunchedEffect
+                            val base = SubtitleExporter.safeBaseName(selectedMediaItem.title)
+                            savedSubtitleFiles = withContext(Dispatchers.IO) {
+                                // 只展示最新 5 份，避免面板过长
+                                SubtitleExporter.listSavedSubtitles(context, base).take(5)
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                stringResource(R.string.subtitle_source_title),
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            // 字幕源 1：实时 AI 生成
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isRealtimeSubtitleEnabled) AccentColor.copy(alpha = 0.30f)
+                                        else Color.White.copy(alpha = 0.08f)
+                                    )
+                                    .clickable {
+                                        keepUiAlight()
+                                        isRealtimeSubtitleEnabled = true
+                                        if (isMemoryModeEnabled) {
+                                            prefs.edit().putBoolean("realtime_subtitle_enabled", true).apply()
+                                        }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    stringResource(R.string.subtitle_source_realtime),
+                                    color = if (isRealtimeSubtitleEnabled) AccentColor else Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isRealtimeSubtitleEnabled) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            // 字幕源 2..n：data 目录 subtitles/ 下的历史字幕（最新在前）
+                            savedSubtitleFiles.forEach { f ->
+                                val selected = !isRealtimeSubtitleEnabled && loadedSubtitleFileName == f.name
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (selected) AccentColor.copy(alpha = 0.30f)
+                                            else Color.White.copy(alpha = 0.08f)
+                                        )
+                                        .clickable {
+                                            keepUiAlight()
+                                            loadSavedSubtitleFile(f)
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        f.name,
+                                        color = if (selected) AccentColor else Color.White.copy(alpha = 0.85f),
+                                        fontSize = 10.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
 

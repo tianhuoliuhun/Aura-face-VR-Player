@@ -80,6 +80,9 @@
     <string name="toast_image_no_audio_gen">當前是圖片，沒有音軌可識別（請打開視頻後再生成字幕）</string>
     <string name="toast_image_no_audio_realtime">當前是圖片，沒有音軌可用於實時字幕</string>
     <string name="toast_subtitle_autoloaded">已加載字幕：%1$s（%2$d 句）</string>
+    <string name="subtitle_source_title">字幕源</string>
+    <string name="subtitle_source_realtime">實時 AI 生成</string>
+    <string name="toast_subtitle_autosaved">已自動保存字幕：%1$s</string>
     <string name="toast_select_resolution_first">請先選擇一個分辨率限制後再進行降級轉碼</string>
     <string name="toast_cached_downscale">檢測到已緩存的 %1$s 降級版本，直接播放！</string>
     <string name="media_downscale_suffix"> （%1$s 降級版）</string>

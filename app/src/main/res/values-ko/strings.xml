@@ -62,6 +62,9 @@
     <string name="toast_image_no_audio_gen">이미지라서 오디오 트랙이 없습니다 (동영상을 연 뒤 생성하세요)</string>
     <string name="toast_image_no_audio_realtime">이미지라서 실시간 자막에 쓸 오디오 트랙이 없습니다</string>
     <string name="toast_subtitle_autoloaded">자막을 불러왔습니다: %1$s (%2$d줄)</string>
+    <string name="subtitle_source_title">자막 소스</string>
+    <string name="subtitle_source_realtime">실시간 AI 생성</string>
+    <string name="toast_subtitle_autosaved">자막 자동 저장됨: %1$s</string>
     <string name="toast_select_resolution_first">먼저 해상도 제한을 선택하세요</string>
     <string name="toast_cached_downscale">캐시된 %1$s 버전을 찾아 재생합니다</string>
     <string name="media_downscale_suffix"> (%1$s 변환본)</string>

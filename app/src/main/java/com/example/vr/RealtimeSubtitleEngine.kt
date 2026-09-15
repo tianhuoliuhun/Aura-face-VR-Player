@@ -156,6 +156,19 @@ class RealtimeSubtitleEngine(private val context: Context) {
     private var listener: Listener? = null
 
     /**
+     * v2.0.136：引擎代际号。每次 [start]/[stop] 递增；协程启动时捕获自己的代际，
+     * 循环每轮与窗口处理完成后校验，代际不等（说明已被新一代取代）立即退出且
+     * **不再写任何共享状态**。解决实测问题：stop() 是协作式取消，旧协程卡在
+     * 4~6.5s 的 60s 长窗口里退不出来，而 start() 已启动新协程——两个预读循环
+     * 并发读写同一份 scannedRanges，导致同一窗口重复识别 2~3 遍、进度倒跳、
+     * 调度状态损坏（logcat 15:37:54 实证）。
+     */
+    @Volatile private var generation = 0L
+
+    /** v2.0.136：scannedRanges 的访问锁（多代协程可能短暂并发，ArrayList 非线程安全） */
+    private val scanLock = Any()
+
+    /**
      * v127：native 资源（识别器 / VAD / 解码器）**只在启动协程内部持有与释放**。
      *
      * 曾经把它们放在字段里、由 [stop] 直接 release，结果实测 native abort：
@@ -170,6 +183,8 @@ class RealtimeSubtitleEngine(private val context: Context) {
     /** 启动实时字幕。[mediaUri] 支持 content://（相册）与 file:// */
     fun start(mediaUri: Uri, factory: RecognizerFactory, listener: Listener) {
         if (isRunning) stop()
+        generation++                      // v2.0.136：让尚未退出的旧代协程尽快自灭
+        val myGen = generation
         this.listener = listener
         currentUri = mediaUri
         currentFactory = factory
@@ -225,7 +240,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
             listener.onStatus("实时字幕已开启，正在生成…")
 
                 // 4) 预读主循环
-                prefetchLoop(t, rec, vad)
+                prefetchLoop(t, rec, vad, myGen)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -286,6 +301,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
 
     fun stop() {
         isRunning = false
+        generation++   // v2.0.136：旧代协程在当前窗口处理完后立即自灭，不再写共享状态
         // 只取消，不在这里释放 native 资源：释放由持有它们的协程在 finally 中完成，
         // 否则会与正在执行的识别并发，触发 native abort（见字段处说明）。
         job?.cancel()
@@ -317,9 +333,12 @@ class RealtimeSubtitleEngine(private val context: Context) {
     private suspend fun prefetchLoop(
         t: AudioTee,
         r: SegmentRecognizer,
-        vad: com.k2fsa.sherpa.onnx.Vad?
+        vad: com.k2fsa.sherpa.onnx.Vad?,
+        myGen: Long
     ) {
         while (currentCoroutineContext().isActive) {
+            // v2.0.136：已被新一代引擎取代 → 立即退出，不再读写任何共享状态
+            if (myGen != generation) return
             if (isScrubbing) {
                 delay(300)
                 continue
@@ -351,6 +370,9 @@ class RealtimeSubtitleEngine(private val context: Context) {
             } catch (e: Exception) {
                 Log.w(TAG, "窗口 ${winFrom}~${winTo}ms 处理失败（已跳过）: ${e.message}")
             }
+            // v2.0.136：窗口处理（可达数秒）期间若引擎已被重启，本代已过期——
+            // 直接退出，不能把本代窗口标记为已扫描，否则会污染新一代的调度。
+            if (myGen != generation) return
             markScanned(winFrom, winTo)
             Log.i(
                 TAG,
@@ -382,23 +404,23 @@ class RealtimeSubtitleEngine(private val context: Context) {
      * 选出下一个待处理区间（长度约一个解码窗口），按上述优先级。
      * 返回 null 表示三段都没有缺口。
      */
-    private fun nextUnscannedRange(endMs: Long): LongRange? {
+    private fun nextUnscannedRange(endMs: Long): LongRange? = synchronized(scanLock) {
         val cur = cursorMs
         val nearStart = (cur - BACKFILL_BEFORE_MS).coerceAtLeast(0L)
         val nearEnd = (cur + lookaheadMs).coerceAtMost(endMs)
 
         // 1) 当前点附近（含前方 5 秒回补）
-        firstGapIn(nearStart, nearEnd)?.let { return it }
+        firstGapIn(nearStart, nearEnd)?.let { return@synchronized it }
         // 2) 当前点之后
-        firstGapIn(nearEnd, endMs)?.let { return it }
+        firstGapIn(nearEnd, endMs)?.let { return@synchronized it }
         // 3) 其他：片头 → 当前点前
-        firstGapIn(0L, nearStart)?.let { return it }
-        return null
+        firstGapIn(0L, nearStart)?.let { return@synchronized it }
+        return@synchronized null
     }
 
     /** 在 [fromMs, toMs) 内找第一个未被扫描的子区间（长度 ≤ 一个解码窗口） */
-    private fun firstGapIn(fromMs: Long, toMs: Long): LongRange? {
-        if (fromMs >= toMs) return null
+    private fun firstGapIn(fromMs: Long, toMs: Long): LongRange? = synchronized(scanLock) {
+        if (fromMs >= toMs) return@synchronized null
         var pos = fromMs
         var guard = 0
         while (pos < toMs && guard++ < 10_000) {
@@ -409,17 +431,17 @@ class RealtimeSubtitleEngine(private val context: Context) {
             val hit = scannedRanges.firstOrNull { pos >= it.first && pos <= it.last }
             if (hit == null) {
                 val len = minOf(DECODE_WINDOW_MS, toMs - pos)
-                if (len <= 0L) return null
-                return pos until (pos + len)
+                if (len <= 0L) return@synchronized null
+                return@synchronized (pos until (pos + len))
             }
             pos = hit.last + 1
         }
-        return null
+        return@synchronized null
     }
 
     /** 标记区间已扫描（合并相邻/重叠区间，保持按起点有序） */
-    private fun markScanned(fromMs: Long, toMs: Long) {
-        if (toMs <= fromMs) return
+    private fun markScanned(fromMs: Long, toMs: Long) = synchronized(scanLock) {
+        if (toMs <= fromMs) return@synchronized
         val merged = ArrayList<LongRange>(scannedRanges.size + 1)
         var newStart = fromMs
         var newEnd = toMs
@@ -443,14 +465,14 @@ class RealtimeSubtitleEngine(private val context: Context) {
     }
 
     /** 已覆盖总时长（毫秒） */
-    private fun scannedMs(): Long {
+    private fun scannedMs(): Long = synchronized(scanLock) {
         var sum = 0L
         for (r in scannedRanges) sum += (r.last - r.first)
-        return sum
+        sum
     }
 
     /** 清空扫描记录（重新生成时用） */
-    private fun clearScanned() {
+    private fun clearScanned() = synchronized(scanLock) {
         scannedRanges.clear()
     }
 

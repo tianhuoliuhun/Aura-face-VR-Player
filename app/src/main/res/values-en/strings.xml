@@ -71,6 +71,9 @@
     <string name="toast_image_no_audio_gen">This is an image - no audio track (open a video to generate subtitles)</string>
     <string name="toast_image_no_audio_realtime">This is an image - no audio track for realtime subtitles</string>
     <string name="toast_subtitle_autoloaded">Subtitle loaded: %1$s (%2$d lines)</string>
+    <string name="subtitle_source_title">Subtitle source</string>
+    <string name="subtitle_source_realtime">Realtime AI</string>
+    <string name="toast_subtitle_autosaved">Subtitle auto-saved: %1$s</string>
     <string name="toast_select_resolution_first">Pick a resolution limit before downscaling</string>
     <string name="toast_cached_downscale">Found cached %1$s version - playing it</string>
     <string name="media_downscale_suffix"> (%1$s downscaled)</string>

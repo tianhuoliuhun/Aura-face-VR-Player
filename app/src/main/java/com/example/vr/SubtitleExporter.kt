@@ -31,14 +31,56 @@ object SubtitleExporter {
             .sortedBy { it.startTimeMs }
         if (sorted.isEmpty()) return null
 
-        val baseName = (title ?: "subtitles")
-            .substringBeforeLast('.')
-            .ifBlank { "subtitles" }
-            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val baseName = safeBaseName(title)
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         dir.mkdirs()
         val file = File(dir, "${baseName}.srt")
+        return writeSrt(file, sorted)
+    }
 
+    /**
+     * v2.0.136：实时字幕全片生成完成后**自动保存**。
+     * 落点：`Android/data/<pkg>/files/subtitles/`（应用专属 data 目录，免权限）。
+     * 命名：`<视频名>_<yyyyMMdd-HHmmss>.srt`（时间戳后缀，多次生成互不覆盖，
+     * 字典序即时间序）。打开同一视频时可按名匹配自动加载。
+     *
+     * @return 写出的文件；[cues] 为空或写入失败时返回 null
+     */
+    fun saveTimestamped(context: Context, title: String?, cues: List<SubtitleCue>): File? {
+        val sorted = cues
+            .filter { it.text.isNotBlank() }
+            .sortedBy { it.startTimeMs }
+        if (sorted.isEmpty()) return null
+
+        val baseName = safeBaseName(title)
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+            .format(java.util.Date())
+        val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "subtitles")
+        dir.mkdirs()
+        val file = File(dir, "${baseName}_${stamp}.srt")
+        return writeSrt(file, sorted)
+    }
+
+    /**
+     * v2.0.136：列出 data 目录 subtitles/ 下属于某视频的历史字幕。
+     * 匹配 `<videoBase>_<时间戳>.srt`；按文件名倒序（最新在前）。
+     */
+    fun listSavedSubtitles(context: Context, videoBase: String?): List<File> {
+        val base = safeBaseName(videoBase)
+        val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "subtitles")
+        return dir.listFiles { f ->
+            f.isFile && f.name.startsWith("${base}_") && f.name.endsWith(".srt")
+        }?.sortedByDescending { it.name } ?: emptyList()
+    }
+
+    /** 视频标题 → 安全文件名基础（去扩展名、替换非法字符） */
+    fun safeBaseName(title: String?): String =
+        (title ?: "subtitles")
+            .substringBeforeLast('.')
+            .ifBlank { "subtitles" }
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+
+    private fun writeSrt(file: File, sorted: List<SubtitleCue>): File? {
         val sb = StringBuilder()
         sorted.forEachIndexed { i, cue ->
             sb.append(i + 1).append('\n')
