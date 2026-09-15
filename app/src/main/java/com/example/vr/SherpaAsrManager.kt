@@ -2,6 +2,7 @@ package com.example.vr
 
 import android.content.Context
 import android.util.Log
+import com.example.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -77,7 +78,7 @@ object SherpaAsrManager {
     // ===== 共享状态 =====
     var isModelDownloading by mutableStateOf(false)
     var modelDownloadProgress by mutableFloatStateOf(0f)
-    var downloadStatus by mutableStateOf("模型已内置，开箱即用")
+    var downloadStatus by mutableStateOf("")
 
     /** 最近一次识别器初始化失败的原因；null 表示未失败（供 UI 显示真实原因而非"请先下载"） */
     var lastInitError: String? = null
@@ -119,19 +120,20 @@ object SherpaAsrManager {
      * **下载版优先**：便于不发版替换模型（把新文件放进去即生效）。
      */
     fun activeModelSource(context: Context): String = when {
-        downloadedModelReady(context) -> "下载版（filesDir）"
-        assetModelAvailable(context) -> "内置版（assets）"
-        else -> "不可用"
+        downloadedModelReady(context) -> context.getString(R.string.asr_source_downloaded)
+        assetModelAvailable(context) -> context.getString(R.string.asr_source_assets)
+        else -> context.getString(R.string.asr_source_unavailable)
     }
 
     /** SenseVoice 支持的语言（语言标签直接透传给模型） */
+    data class SherpaLang(val code: String, val labelResId: Int)
     val sherpaLanguages = listOf(
-        "auto" to "自动",
-        "zh" to "中文",
-        "en" to "英文",
-        "ja" to "日文",
-        "ko" to "韩文",
-        "yue" to "粤语"
+        SherpaLang("auto", R.string.asr_lang_auto),
+        SherpaLang("zh", R.string.asr_lang_zh),
+        SherpaLang("en", R.string.asr_lang_en),
+        SherpaLang("ja", R.string.asr_lang_ja),
+        SherpaLang("ko", R.string.asr_lang_ko),
+        SherpaLang("yue", R.string.asr_lang_yue)
     )
 
     /** 模型是否就绪：下载版或内置版任一可用即可 */
@@ -147,12 +149,12 @@ object SherpaAsrManager {
         }
     }
 
-    fun cancelDownload() {
+    fun cancelDownload(context: Context) {
         downloadJob?.cancel()
         downloadJob = null
         isModelDownloading = false
         modelDownloadProgress = 0f
-        downloadStatus = "已取消"
+        downloadStatus = context.getString(R.string.asr_canceled)
     }
 
     /** 下载 SenseVoice 模型（单文件 ×2，带进度与断点续传） */
@@ -166,7 +168,7 @@ object SherpaAsrManager {
         withContextMain {
             isModelDownloading = true
             modelDownloadProgress = 0f
-            downloadStatus = "准备下载 SenseVoice 模型（约 ${SVC_MODEL_MB}MB）..."
+            downloadStatus = context.getString(R.string.asr_preparing_download, SVC_MODEL_MB)
         }
 
         // 模型占 99% 体积，词表瞬间完成，因此进度按 0.99 / 0.01 分配
@@ -176,12 +178,12 @@ object SherpaAsrManager {
             progressBase = 0f,
             progressSpan = 0.99f,
             expectMinBytes = 100_000_000L,
-            label = "SenseVoice 模型"
+            label = context.getString(R.string.asr_download_model)
         )
         if (!modelOk) {
             withContextMain {
                 isModelDownloading = false
-                downloadStatus = "SenseVoice 模型下载失败（可重试）"
+                downloadStatus = context.getString(R.string.asr_model_download_failed)
             }
             return@withContext null
         }
@@ -191,12 +193,12 @@ object SherpaAsrManager {
             progressBase = 0.99f,
             progressSpan = 0.01f,
             expectMinBytes = 1024L,
-            label = "词表"
+            label = context.getString(R.string.asr_vocab_label)
         )
         withContextMain {
             isModelDownloading = false
             modelDownloadProgress = 1f
-            downloadStatus = if (tokensOk) "SenseVoice 模型就绪" else "词表下载失败（可重试）"
+            downloadStatus = if (tokensOk) context.getString(R.string.asr_model_ready) else context.getString(R.string.asr_vocab_download_failed)
         }
         if (tokensOk) dir else null
     }
@@ -352,7 +354,7 @@ object SherpaAsrManager {
         lastInitError = null
         if (!isModelReady(context)) {
             Log.w(TAG, "SenseVoice model not ready（内置缺失且无下载版）")
-            lastInitError = "模型不可用：内置资源缺失且未下载（约 ${SVC_MODEL_MB}MB）"
+            lastInitError = context.getString(R.string.asr_model_unavailable_detail, SVC_MODEL_MB)
             return null
         }
         val auto = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
@@ -399,7 +401,7 @@ object SherpaAsrManager {
         } catch (e: Throwable) {
             // 用 Throwable：native 初始化失败可能抛 UnsatisfiedLinkError 等 Error 子类
             Log.e(TAG, "SenseVoice init failed: ${e.message}", e)
-            lastInitError = "初始化失败：${e.message ?: e.javaClass.simpleName}"
+            lastInitError = context.getString(R.string.asr_init_failed, e.message ?: e.javaClass.simpleName)
             null
         }
     }
@@ -420,7 +422,9 @@ object SherpaAsrManager {
     }
 
     fun shutdown() {
-        cancelDownload()
+        downloadJob?.cancel()
+        downloadJob = null
+        isModelDownloading = false
     }
 
     private suspend fun withContextMain(block: () -> Unit) = withContext(Dispatchers.Main) { block() }

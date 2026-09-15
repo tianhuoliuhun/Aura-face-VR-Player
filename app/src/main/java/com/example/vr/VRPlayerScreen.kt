@@ -572,7 +572,7 @@ fun VRPlayerScreen(
         if (code == sherpaLangCode) return
         sherpaLangCode = code
         if (isMemoryModeEnabled) prefs.edit().putString("sherpa_lang_code", code).apply()
-        val label = SherpaAsrManager.sherpaLanguages.firstOrNull { it.first == code }?.second ?: code
+        val label = SherpaAsrManager.sherpaLanguages.firstOrNull { it.code == code }?.let { context.getString(it.labelResId) } ?: code
         Toast.makeText(
             context,
             if (isRealtimeSubtitleEnabled) context.getString(R.string.asr_lang_switch_hint, label) else context.getString(R.string.asr_lang_label, label),
@@ -686,7 +686,7 @@ fun VRPlayerScreen(
                 isSubtitleEnabled = true
                 Toast.makeText(context, "字幕已生成并加载：${file.name}（${cues.size} 句）", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(context, "字幕生成失败：${batchTranscriber.statusMessage}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_subtitle_gen_failed, batchTranscriber.statusMessage), Toast.LENGTH_LONG).show()
             }
         }
         */
@@ -1746,7 +1746,7 @@ fun VRPlayerScreen(
                                         projectionModeUserAdjusted = true // 强制锁定，防止自动检测覆盖
                                         Toast.makeText(
                                             context,
-                                            "已强制切换为 ${targetMode.displayName}${if (targetStereo != StereoMode.MONO) " + ${targetStereo.displayName}" else ""}",
+                                            "已强制切换为 ${context.getString(targetMode.labelRes)}${if (targetStereo != StereoMode.MONO) " + ${context.getString(targetStereo.labelRes)}" else ""}",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
@@ -2993,7 +2993,7 @@ fun VRPlayerScreen(
                                 )
                                 Text(
                                     text = if (subtitleTranslator.config.isEnabled)
-                                        "${subtitleTranslator.config.engine.displayName} → ${subtitleTranslator.config.targetLanguage.displayName}"
+                                        "${stringResource(subtitleTranslator.config.engine.displayNameResId)} → ${stringResource(subtitleTranslator.config.targetLanguage.nameResId)}"
                                     else stringResource(R.string.subtitle_translate_off),
                                     color = Color.White.copy(alpha = 0.5f),
                                     fontSize = 9.sp
@@ -3657,7 +3657,7 @@ fun VRPlayerScreen(
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
-                                                        text = mode.displayName,
+                                                        text = stringResource(mode.labelRes),
                                                         color = if (isSelected) AccentOnColor else Color.White,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.SemiBold
@@ -3914,7 +3914,7 @@ fun VRPlayerScreen(
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
-                                                        text = mode.displayName,
+                                                        text = stringResource(mode.labelRes),
                                                         color = if (isSelected) AccentOnColor else Color.White,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.SemiBold
@@ -3987,7 +3987,7 @@ fun VRPlayerScreen(
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
-                                                        text = res.displayName,
+                                                        text = stringResource(res.labelRes),
                                                         color = if (isSelected) AccentOnColor else Color.White,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.SemiBold
@@ -4225,13 +4225,13 @@ fun VRPlayerScreen(
                                                         )
                                                         .clickable {
                                                             decoderEngine = engine
-                                                            Toast.makeText(context, context.getString(R.string.toast_decoder_switched, engine.displayName), Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, context.getString(R.string.toast_decoder_switched, context.getString(engine.labelRes)), Toast.LENGTH_SHORT).show()
                                                             keepUiAlight()
                                                         },
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
-                                                        text = engine.displayName,
+                                                        text = stringResource(engine.labelRes),
                                                         color = if (isSelected) AccentOnColor else Color.White,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.SemiBold
@@ -4358,7 +4358,9 @@ fun VRPlayerScreen(
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
                                             Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                                            SherpaAsrManager.sherpaLanguages.forEach { (code, label) ->
+                                            SherpaAsrManager.sherpaLanguages.forEach { lang ->
+                                                val code = lang.code
+                                                val label = stringResource(lang.labelResId)
                                                 val sel = sherpaLangCode == code
                                                 Box(
                                                     modifier = Modifier
@@ -4437,7 +4439,7 @@ fun VRPlayerScreen(
                                                 )
                                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                                     Text(stringResource(R.string.asr_download_percent, (SherpaAsrManager.modelDownloadProgress * 100).toInt()), color = Color(0xFF4FC3F7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                                    Text(SherpaAsrManager.downloadStatus, color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(if (SherpaAsrManager.downloadStatus.isEmpty()) stringResource(R.string.asr_status_builtin_ready) else SherpaAsrManager.downloadStatus, color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 }
                                                 Text(
                                                     text = stringResource(R.string.asr_cancel_download),
@@ -4447,7 +4449,7 @@ fun VRPlayerScreen(
                                                     modifier = Modifier.align(Alignment.End)
                                                         .clip(RoundedCornerShape(4.dp))
                                                         .background(Color(0xFFEF5350).copy(alpha = 0.15f))
-                                                        .clickable { SherpaAsrManager.cancelDownload() }
+                                                        .clickable { SherpaAsrManager.cancelDownload(context) }
                                                         .padding(horizontal = 10.dp, vertical = 3.dp)
                                                 )
                                             }
@@ -4610,7 +4612,7 @@ BatchTranscribeSection(
                                     projectionMode == ProjectionMode.FISHEYE
 
                                 // v120 拆分：模式提示条 / 对比原图 / 美颜预设 → BeautySettingsSections.kt
-                                BeautyModeHintBar(is2DMode = is2DBeautyMode, modeName = projectionMode.displayName)
+                                BeautyModeHintBar(is2DMode = is2DBeautyMode, modeName = stringResource(projectionMode.labelRes))
 
                                 BeautyCompareSwitch(
                                     checked = beautyCompareEnabled,

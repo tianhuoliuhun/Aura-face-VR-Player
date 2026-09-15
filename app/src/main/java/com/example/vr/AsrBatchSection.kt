@@ -147,7 +147,7 @@ fun BatchTranscribeSection(
 
                 if (isDownloading) {
                     Text(
-                        SherpaAsrManager.downloadStatus,
+                        if (SherpaAsrManager.downloadStatus.isEmpty()) stringResource(R.string.asr_status_builtin_ready) else SherpaAsrManager.downloadStatus,
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 8.sp,
                         maxLines = 1,
@@ -164,7 +164,7 @@ fun BatchTranscribeSection(
                             .align(Alignment.End)
                             .clip(RoundedCornerShape(4.dp))
                             .background(Color(0xFFEF5350).copy(alpha = 0.15f))
-                            .clickable { SherpaAsrManager.cancelDownload() }
+                            .clickable { SherpaAsrManager.cancelDownload(context) }
                             .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
                         Text(stringResource(R.string.asr_cancel_download), color = Color(0xFFEF5350), fontSize = 8.sp)
@@ -179,7 +179,9 @@ fun BatchTranscribeSection(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                SherpaAsrManager.sherpaLanguages.forEach { (code, label) ->
+                SherpaAsrManager.sherpaLanguages.forEach { lang ->
+                    val code = lang.code
+                    val label = stringResource(lang.labelResId)
                     val sel = sherpaLangCode == code
                     Box(
                         modifier = Modifier

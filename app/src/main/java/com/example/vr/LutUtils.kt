@@ -1,6 +1,8 @@
 package com.example.vr
 
 import java.io.InputStream
+import android.content.Context
+import com.example.R
 import kotlin.math.floor
 
 /**
@@ -20,21 +22,27 @@ object LutUtils {
     const val GRID = 8              // 每行格数
     const val TEX_SIZE = 512        // 输出纹理尺寸（GRID * LUT_OUT）
 
-    /** 内置 LUT 预设列表（assets/luts/ 下的文件名 → 中文名） */
-    val builtinLuts: List<Pair<String, String>> = listOf(
-        "01_Classic_Cyan_Orange" to "经典青橙",
-        "02_Cinematic_Dark" to "电影暗调",
-        "03_Soft_Film" to "柔和胶片",
-        "04_Japanese_Fresh" to "日系清新",
-        "05_Warm_Sunset" to "暖阳日落",
-        "06_Cool_Blue_Night" to "冷蓝夜色",
-        "07_Vintage_Film" to "复古胶片",
-        "08_Cyberpunk" to "赛博朋克",
-        "09_Black_White_Cinema" to "黑白电影",
-        "10_Intense_Cyan_Orange" to "强烈青橙",
-        "11_Soft_Teal" to "柔和青绿",
-        "12_High_Contrast" to "高对比"
+    /** 内置 LUT 预设列表（assets/luts/ 下的文件名 → 本地化名称资源 ID） */
+    data class BuiltinLut(val fileName: String, val nameResId: Int)
+    val builtinLuts: List<BuiltinLut> = listOf(
+        BuiltinLut("01_Classic_Cyan_Orange", R.string.lut_classic_cyan_orange),
+        BuiltinLut("02_Cinematic_Dark", R.string.lut_cinematic_dark),
+        BuiltinLut("03_Soft_Film", R.string.lut_soft_film),
+        BuiltinLut("04_Japanese_Fresh", R.string.lut_japanese_fresh),
+        BuiltinLut("05_Warm_Sunset", R.string.lut_warm_sunset),
+        BuiltinLut("06_Cool_Blue_Night", R.string.lut_cool_blue_night),
+        BuiltinLut("07_Vintage_Film", R.string.lut_vintage_film),
+        BuiltinLut("08_Cyberpunk", R.string.lut_cyberpunk),
+        BuiltinLut("09_Black_White_Cinema", R.string.lut_black_white_cinema),
+        BuiltinLut("10_Intense_Cyan_Orange", R.string.lut_intense_cyan_orange),
+        BuiltinLut("11_Soft_Teal", R.string.lut_soft_teal),
+        BuiltinLut("12_High_Contrast", R.string.lut_high_contrast)
     )
+
+    /** 由文件名解析本地化显示名；非内置（自定义）LUT 直接返回文件名 */
+    fun lutDisplayName(fileName: String, context: Context): String {
+        return builtinLuts.firstOrNull { it.fileName == fileName }?.let { context.getString(it.nameResId) } ?: fileName
+    }
 
     /**
      * 解析 .cube 流并返回 512x512 RGBA（每像素 4 字节，自上而下）。

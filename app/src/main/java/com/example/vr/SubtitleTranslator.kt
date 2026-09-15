@@ -1,5 +1,6 @@
 package com.example.vr
 
+import com.example.R
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -27,77 +28,82 @@ import java.util.concurrent.TimeUnit
 
 enum class TranslationEngine(
     val id: Int,
-    val displayName: String,
+    val displayNameResId: Int,
     val defaultBaseUrl: String,
     val defaultModel: String,
     val requiresApiKey: Boolean
 ) {
     BING(
         id = 0,
-        displayName = "必应翻译",
+        displayNameResId = R.string.engine_bing,
         defaultBaseUrl = "https://cn.bing.com/ttranslatev3",
         defaultModel = "bing-translate",
         requiresApiKey = false
     ),
     DEEPSEEK(
         id = 1,
-        displayName = "DeepSeek API",
+        displayNameResId = R.string.engine_deepseek,
         defaultBaseUrl = "https://api.deepseek.com/v1",
         defaultModel = "deepseek-chat",
         requiresApiKey = true
     ),
     QWEN(
         id = 2,
-        displayName = "通义千问",
+        displayNameResId = R.string.engine_qwen,
         defaultBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         defaultModel = "qwen-turbo",
         requiresApiKey = true
     ),
     GLM(
         id = 3,
-        displayName = "智谱",
+        displayNameResId = R.string.engine_glm,
         defaultBaseUrl = "https://open.bigmodel.cn/api/paas/v4",
         defaultModel = "glm-4-flash",
         requiresApiKey = true
     ),
     MIMO(
         id = 4,
-        displayName = "MiniMax / MIMO",
+        displayNameResId = R.string.engine_mimo,
         defaultBaseUrl = "https://api.minimax.chat/v1",
         defaultModel = "abab6.5g-chat",
         requiresApiKey = true
     ),
     OPENAI(
         id = 5,
-        displayName = "OpenAI API",
+        displayNameResId = R.string.engine_openai,
         defaultBaseUrl = "https://api.openai.com/v1",
         defaultModel = "gpt-4o-mini",
         requiresApiKey = true
     ),
     CUSTOM(
         id = 6,
-        displayName = "自定义 LLM / API",
+        displayNameResId = R.string.engine_custom,
         defaultBaseUrl = "https://api.openai.com/v1",
         defaultModel = "gpt-3.5-turbo",
         requiresApiKey = true
     )
 }
 
-enum class TranslationDisplayMode(val id: Int, val displayName: String) {
-    DUAL_LANGUAGE(0, "双语对照"),
-    TARGET_ONLY(1, "仅显示译文")
+enum class TranslationDisplayMode(val id: Int, val displayNameResId: Int) {
+    DUAL_LANGUAGE(0, R.string.subtitle_mode_bilingual),
+    TARGET_ONLY(1, R.string.subtitle_mode_translated_only)
 }
 
-enum class TranslationTargetLanguage(val id: Int, val displayName: String, val code: String) {
-    ZH(0, "简体中文", "zh"),
-    EN(1, "英语", "en"),
-    JA(2, "日语", "ja"),
-    KO(3, "韩语", "ko"),
-    ZH_HANT(4, "繁体中文", "zh-TW"),
-    FR(5, "法语", "fr"),
-    DE(6, "德语", "de"),
-    ES(7, "西班牙语", "es"),
-    RU(8, "俄语", "ru")
+enum class TranslationTargetLanguage(
+    val id: Int,
+    val displayName: String,
+    val code: String,
+    val nameResId: Int
+) {
+    ZH(0, "简体中文", "zh", R.string.lang_zh),
+    EN(1, "英语", "en", R.string.lang_en),
+    JA(2, "日语", "ja", R.string.lang_ja),
+    KO(3, "韩语", "ko", R.string.lang_ko),
+    ZH_HANT(4, "繁体中文", "zh-TW", R.string.lang_zh_hant),
+    FR(5, "法语", "fr", R.string.lang_fr),
+    DE(6, "德语", "de", R.string.lang_de),
+    ES(7, "西班牙语", "es", R.string.lang_es),
+    RU(8, "俄语", "ru", R.string.lang_ru)
 }
 
 data class TranslationConfig(
@@ -122,7 +128,7 @@ class SubtitleTranslator(private val context: Context) {
     }
 
     var config by mutableStateOf(TranslationConfig())
-    var statusMessage by mutableStateOf("字幕翻译就绪")
+    var statusMessage by mutableStateOf(context.getString(R.string.subtitle_translate_ready))
     var isTranslating by mutableStateOf(false)
 
     // Translation cache: key = "$targetLangCode:$sourceText" -> translated text
@@ -481,7 +487,7 @@ class SubtitleTranslator(private val context: Context) {
             var doneCount = 0
 
             withContext(Dispatchers.Main) {
-                statusMessage = "开始批量翻译字幕文件 (${total} 条)..."
+                statusMessage = context.getString(R.string.subtitle_batch_start, total)
             }
 
             for (i in cues.indices) {
@@ -493,7 +499,7 @@ class SubtitleTranslator(private val context: Context) {
                 if (isSessionLimitReached) {
                     withContext(Dispatchers.Main) {
                         isTranslating = false
-                        statusMessage = "已达到本次会话翻译上限（$maxSessionTranslations 条），已停止翻译"
+                        statusMessage = context.getString(R.string.subtitle_session_limit, maxSessionTranslations)
                     }
                     return@launch
                 }
@@ -509,7 +515,7 @@ class SubtitleTranslator(private val context: Context) {
                 if (doneCount % 5 == 0 || doneCount == total) {
                     val count = doneCount
                     withContext(Dispatchers.Main) {
-                        statusMessage = "字幕翻译进度: $count/$total"
+                        statusMessage = context.getString(R.string.subtitle_translate_progress, count, total)
                         onProgress(count, total)
                     }
                 }
@@ -517,7 +523,7 @@ class SubtitleTranslator(private val context: Context) {
 
             withContext(Dispatchers.Main) {
                 isTranslating = false
-                statusMessage = "字幕全片翻译完成 (${total} 条)"
+                statusMessage = context.getString(R.string.subtitle_batch_done, total)
             }
         }
     }
@@ -696,7 +702,7 @@ class SubtitleTranslator(private val context: Context) {
         val apiKey = config.apiKey.trim()
         if (config.engine.requiresApiKey && apiKey.isBlank()) {
             withContext(Dispatchers.Main) {
-                statusMessage = "请先设置 ${config.engine.displayName} 的 API Key"
+                statusMessage = context.getString(R.string.translate_please_set_api_key, context.getString(config.engine.displayNameResId))
             }
             return ""
         }
@@ -740,7 +746,7 @@ class SubtitleTranslator(private val context: Context) {
                     if (!response.isSuccessful) {
                         Log.e("SubtitleTranslator", "API HTTP Error: ${response.code} ${response.message}")
                         withContext(Dispatchers.Main) {
-                            statusMessage = "API 错误: HTTP ${response.code}"
+                            statusMessage = context.getString(R.string.subtitle_api_error, response.code)
                         }
                         return@withContext ""
                     }
@@ -761,7 +767,7 @@ class SubtitleTranslator(private val context: Context) {
             } catch (e: Exception) {
                 Log.e("SubtitleTranslator", "HTTP Request Exception", e)
                 withContext(Dispatchers.Main) {
-                    statusMessage = "翻译失败: ${e.localizedMessage}"
+                    statusMessage = context.getString(R.string.subtitle_translate_failed, e.localizedMessage ?: "")
                 }
                 ""
             }
@@ -770,7 +776,7 @@ class SubtitleTranslator(private val context: Context) {
 
     fun clearCache() {
         translationCache.clear()
-        statusMessage = "翻译缓存已清空"
+        statusMessage = context.getString(R.string.subtitle_cache_cleared)
     }
 
     /**

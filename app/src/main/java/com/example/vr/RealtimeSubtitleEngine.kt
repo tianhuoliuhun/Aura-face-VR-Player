@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+import com.example.R
+
 /**
  * v126：实时 AI 字幕引擎（方案文档「AI 字幕集成播放器」P0+P1）。
  *
@@ -201,7 +203,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
         val s = CoroutineScope(Dispatchers.Default + SupervisorJob())
         scope = s
         isRunning = true
-        listener.onStatus("正在准备实时字幕引擎…")
+        listener.onStatus(context.getString(R.string.rt_preparing))
 
         job = s.launch {
             // native 资源全部在本协程内创建与释放（见上方字段处的说明）：
@@ -219,7 +221,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
                     null
                 }
                 if (rec == null) {
-                    listener.onStatus("实时字幕不可用：识别模型未就绪")
+                    listener.onStatus(context.getString(R.string.rt_unavailable))
                     isRunning = false
                     return@launch
                 }
@@ -231,13 +233,13 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 val t = AudioTee(context, mediaUri)
                 if (!t.open()) {
                     hasAudioTrack = false
-                    listener.onStatus("该视频没有可用的音轨，无法生成实时字幕")
+                    listener.onStatus(context.getString(R.string.rt_no_audio))
                     isRunning = false
                     return@launch
                 }
             teeLocal = t
             durationMs = t.durationMs
-            listener.onStatus("实时字幕已开启，正在生成…")
+            listener.onStatus(context.getString(R.string.rt_started))
 
                 // 4) 预读主循环
                 prefetchLoop(t, rec, vad, myGen)
@@ -353,7 +355,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 // 全片已覆盖：只报一次完成，然后低频轮询（用户 seek 后可能出现新缺口）
                 if (!isFullyGenerated) {
                     isFullyGenerated = true
-                    listener?.onStatus("实时字幕已全部生成完成（共 ${cache.size()} 条）")
+                    listener?.onStatus(context.getString(R.string.rt_all_done, cache.size()))
                 }
                 delay(500)
                 continue
@@ -389,11 +391,11 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 // 播了 20 秒还没有任何语音：给明确反馈而不是静默失败（文档第十章）
                 listener?.onStatus(
                     if (!producedAnyCue && scannedMs() > 20_000L && cache.size() == 0)
-                        "未检测到语音内容（可能是纯音乐或无人声）"
-                    else "实时字幕生成中 ${pct}%　已生成 ${fmt(generatedMs)}/${fmt(total)}"
+                        context.getString(R.string.rt_no_speech)
+                    else context.getString(R.string.rt_generating_pct, pct, fmt(generatedMs), fmt(total))
                 )
             } else {
-                listener?.onStatus("实时字幕生成中　已生成至 ${fmt(generatedMs)}")
+                listener?.onStatus(context.getString(R.string.rt_generating_to, fmt(generatedMs)))
             }
         }
     }

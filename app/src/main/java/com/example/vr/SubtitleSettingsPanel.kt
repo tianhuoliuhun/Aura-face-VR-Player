@@ -577,7 +577,7 @@ fun SubtitleSettingsPanel(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = lang.displayName.substringBefore(" "),
+                                        text = stringResource(lang.nameResId),
                                         color = if (isSel) accentOnColor else Color.White,
                                         fontSize = 8.sp,
                                         fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -641,7 +641,7 @@ fun SubtitleSettingsPanel(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = eng.displayName.substringBefore(" "),
+                                            text = stringResource(eng.displayNameResId),
                                             color = if (isSel) accentOnColor else Color.White,
                                             fontSize = 8.sp,
                                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -665,7 +665,7 @@ fun SubtitleSettingsPanel(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = eng.displayName.substringBefore(" "),
+                                            text = stringResource(eng.displayNameResId),
                                             color = if (isSel) accentOnColor else Color.White,
                                             fontSize = 8.sp,
                                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -686,7 +686,7 @@ fun SubtitleSettingsPanel(
                                     translator.config = translator.config.copy(apiKey = key)
                                     onUserActivity()
                                 },
-                                label = { Text("${translator.config.engine.displayName} API Key", fontSize = 9.sp) },
+                                label = { Text(stringResource(translator.config.engine.displayNameResId) + " API Key", fontSize = 9.sp) },
                                 singleLine = true,
                                 modifier = Modifier
                                     .fillMaxWidth()

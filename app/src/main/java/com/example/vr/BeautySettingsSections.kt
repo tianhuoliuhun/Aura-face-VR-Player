@@ -181,16 +181,19 @@ fun LutFilterSection(
                     }
                 )
             }
-            items(LutUtils.builtinLuts) { (file, cnName) ->
-                val selected = lutName == cnName
+            items(LutUtils.builtinLuts) { lut ->
+                val file = lut.fileName
+                val cnName = stringResource(lut.nameResId)
+                val selected = lutName == file
                 LutChip(
                     text = cnName,
                     selected = selected,
                     accentColor = accentColor,
+
                     onClick = {
                         if (isLutLoading) return@LutChip
                         onLutLoadingChange(true)
-                        onLutNameChange(cnName)
+                        onLutNameChange(file)
                         scope.launch(Dispatchers.IO) {
                             try {
                                 val rgba = context.assets.open("luts/$file.cube").use {
@@ -276,7 +279,7 @@ fun LutFilterSection(
             }
         }
         Text(
-            text = stringResource(R.string.lut_current, lutName),
+            text = stringResource(R.string.lut_current, LutUtils.lutDisplayName(lutName, context)),
             color = Color.White.copy(alpha = 0.45f),
             fontSize = 9.sp
         )
