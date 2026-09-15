@@ -317,6 +317,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | **v1.0.126** | **实时 AI 字幕落地**：边播边生成（独立解码 + Silero VAD + 优先级全局生成，当前点前 5 秒回补）/ 翻译预读 + 磁盘缓存 / 整片转写停用 / 只保留 SenseVoice 引擎（移除 Vosk·Qwen3·QNN 与 136MB QNN 运行库）/ 修复 SRT 导出 / 推理线程 1–10 可调 / 字幕重新生成 · **Realtime AI subtitles**: decode-on-the-fly with Silero VAD & priority scheduling, translation prefetch + disk cache, SenseVoice-only (Vosk/Qwen3/QNN removed), SRT export fix, 1–10 threads |
 | **v2.0.127** | **ASR 模型内置**（SenseVoice 打进 APK，开箱即用，无需下载）/ 启动时自动清理已废弃引擎（Vosk·Qwen3·QNN）遗留的模型目录 / 下载链路保留为兜底与更新通道 · **Bundled ASR model** (off-the-shelf, no download) + auto-cleanup of legacy model dirs |
 | **v2.0.128** | 修复**字幕开关不记忆**（自动加载字幕时会把用户关掉的字幕重新打开）/ 修复**字幕翻译开关不记忆**（只写不读 + 字幕面板内的开关未落盘）/ 字幕设置面板改为**限高滚动并带滚动条** · Fixed subtitle & translation toggle not persisting; scrollable subtitle settings panel |
+| **v2.0.129** | **界面多语言（第一批）**：支持简体中文 / 繁体中文 / English，默认跟随系统，设置里可手动切换（切换后重建界面）。首批覆盖字幕快捷面板与完整字幕设置面板共 45 条文案 · **i18n (batch 1)**: zh-CN / zh-TW / en, follows system by default with in-app switch |
 
 ---
 

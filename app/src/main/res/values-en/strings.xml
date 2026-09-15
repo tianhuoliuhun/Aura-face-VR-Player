@@ -1,3 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aura face VR Player</string>
+
+    <!-- ===== Interface language (v2.0.129) ===== -->
+    <string name="ui_language">Interface language</string>
+    <string name="ui_language_hint">The UI reloads right away; playback position is kept</string>
+
+    <!-- ===== Subtitle quick panel ===== -->
+    <string name="subtitle_quick_title">Subtitles</string>
+    <string name="subtitle_state_on">Showing</string>
+    <string name="subtitle_state_off">Hidden</string>
+    <string name="subtitle_translate_title">Subtitle translation</string>
+    <string name="subtitle_translate_off">Off</string>
+    <string name="asr_threads">Inference threads</string>
+    <string name="asr_threads_value">%1$d threads</string>
+    <string name="asr_threads_recommended">(recommended)</string>
+    <string name="asr_threads_hint">Too few can\'t keep up with playback; too many starve decoding/rendering. 4~6 recommended</string>
+    <string name="realtime_subtitle_title">Realtime AI subtitles</string>
+    <string name="realtime_subtitle_desc">Generates subtitles while playing: rolling look-ahead in background, scrub to preview instantly</string>
+    <string name="subtitle_regenerate">Regenerate subtitles</string>
+    <string name="subtitle_export_srt">Export SRT</string>
+    <string name="subtitle_open_full_settings">Full subtitle settings…</string>
+
+    <!-- ===== Subtitle settings panel ===== -->
+    <string name="subtitle_settings_group">5. Subtitles &amp;\nOmni dual-eye style</string>
+    <string name="subtitle_enabled">Subtitles on</string>
+    <string name="subtitle_disabled">Subtitles off</string>
+    <string name="subtitle_off_hint">Subtitles are off. Turn them on to load external SRT/VTT files and customize VR/flat rendering styles</string>
+    <string name="subtitle_section_file">Subtitle file &amp; realtime speech</string>
+    <string name="subtitle_current_file">Current: %1$s</string>
+    <string name="subtitle_no_file">No external subtitle loaded</string>
+    <string name="subtitle_cues_loaded">%1$d timed cues loaded</string>
+    <string name="subtitle_import_hint">Supports local .srt / .vtt text subtitle files</string>
+    <string name="subtitle_import">Import SRT/VTT</string>
+    <string name="subtitle_export">Export SRT</string>
+    <string name="subtitle_online_search">Online subtitle search</string>
+    <string name="subtitle_search_need_key">Free API Key required</string>
+    <string name="subtitle_search_keyword">Search keyword (e.g. file name)</string>
+    <string name="subtitle_search_language">Language</string>
+    <string name="subtitle_search_searching">Searching...</string>
+    <string name="subtitle_search_not_found">No results (check Key or keyword)</string>
+    <string name="subtitle_search_found">%1$d results found</string>
+    <string name="subtitle_search_go">Search</string>
+    <string name="subtitle_downloading">Downloading: %1$s...</string>
+    <string name="subtitle_downloaded">Downloaded and loaded</string>
+    <string name="subtitle_download_failed">Download failed (may need credits or invalid Key)</string>
+    <string name="subtitle_section_translate">Realtime translation</string>
+    <string name="subtitle_translate_neural">AI neural interpretation</string>
+    <string name="subtitle_translate_switch">Realtime AI subtitle translation</string>
+    <string name="subtitle_translate_file">Translate subtitle file</string>
+    <string name="subtitle_translate_clear_cache">Clear cache</string>
+    <string name="subtitle_translate_target_lang">Target language</string>
+    <string name="subtitle_display_mode">Display mode</string>
+    <string name="subtitle_mode_bilingual">Bilingual</string>
+    <string name="subtitle_mode_translated_only">Translation only</string>
+    <string name="subtitle_translate_engine">Translation engine</string>
 </resources>

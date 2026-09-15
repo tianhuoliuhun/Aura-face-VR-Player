@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
@@ -16,12 +17,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.example.ui.theme.MyApplicationTheme
 import com.example.vr.AnalyticsManager
+import com.example.vr.LanguageManager
 import com.example.vr.VRPlayerScreen
 
 class MainActivity : ComponentActivity() {
     private var externalMediaUriState by mutableStateOf<String?>(null)
     // v107：首次启动隐私同意弹窗（未同意前不采集任何数据）
     private var showPrivacyDialog by mutableStateOf(false)
+
+    // v2.0.129：应用内界面语言。必须在 attachBaseContext 阶段包装 Context，
+    // 晚于此（如 onCreate 里改 configuration）对已加载的资源不生效。
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LanguageManager.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -51,6 +51,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
@@ -159,7 +161,7 @@ fun SubtitleSettingsPanel(
                     modifier = Modifier.height(18.dp)
                 )
                 Text(
-                    text = "5. 字幕功能与\n全向双眼样式",
+                    text = stringResource(R.string.subtitle_settings_group),
                     color = accentColor,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
@@ -172,7 +174,7 @@ fun SubtitleSettingsPanel(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = if (isSubtitleEnabled) "字幕已开启" else "字幕已关闭",
+                    text = if (isSubtitleEnabled) stringResource(R.string.subtitle_enabled) else stringResource(R.string.subtitle_disabled),
                     color = if (isSubtitleEnabled) Color.White else Color.White.copy(alpha = 0.5f),
                     fontSize = 11.sp
                 )
@@ -193,7 +195,7 @@ fun SubtitleSettingsPanel(
 
         if (!isSubtitleEnabled) {
             Text(
-                text = "字幕功能处于关闭状态，开启后可加载外部 SRT/VTT 文件并自定义 VR/平面渲染样式",
+                text = stringResource(R.string.subtitle_off_hint),
                 color = Color.White.copy(alpha = 0.4f),
                 fontSize = 10.sp,
                 modifier = Modifier.padding(vertical = 4.dp)
@@ -205,7 +207,7 @@ fun SubtitleSettingsPanel(
 
         // ===== Section: 字幕文件与实时语音 =====
         SubtitleSection(
-            title = "字幕文件与实时语音",
+            title = stringResource(R.string.subtitle_section_file),
             icon = Icons.Default.FileOpen,
             accentColor = accentColor,
             initiallyExpanded = true
@@ -221,13 +223,13 @@ fun SubtitleSettingsPanel(
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = if (loadedSubtitleFileName.isNotEmpty()) "当前字幕: $loadedSubtitleFileName" else "未加载外部字幕",
+                    text = if (loadedSubtitleFileName.isNotEmpty()) stringResource(R.string.subtitle_current_file, loadedSubtitleFileName) else stringResource(R.string.subtitle_no_file),
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = if (loadedCueCount > 0) "已载入 $loadedCueCount 条时间轴字幕" else "支持导入本地 .srt / .vtt 文本字幕文件",
+                    text = if (loadedCueCount > 0) stringResource(R.string.subtitle_cues_loaded, loadedCueCount) else stringResource(R.string.subtitle_import_hint),
                     color = Color.White.copy(alpha = 0.5f),
                     fontSize = 9.sp
                 )
@@ -258,7 +260,7 @@ fun SubtitleSettingsPanel(
                         modifier = Modifier.height(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("导入SRT/VTT字幕", fontSize = 10.sp)
+                    Text(stringResource(R.string.subtitle_import), fontSize = 10.sp)
                 }
 
                 OutlinedButton(
@@ -272,7 +274,7 @@ fun SubtitleSettingsPanel(
                         .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
                         .height(32.dp)
                 ) {
-                    Text("导出SRT", fontSize = 10.sp)
+                    Text(stringResource(R.string.subtitle_export), fontSize = 10.sp)
                 }
             }
         }
@@ -301,8 +303,8 @@ fun SubtitleSettingsPanel(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("在线字幕搜索", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                Text("需免费 API Key", color = Color.White.copy(alpha = 0.4f), fontSize = 8.sp)
+                Text(stringResource(R.string.subtitle_online_search), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.subtitle_search_need_key), color = Color.White.copy(alpha = 0.4f), fontSize = 8.sp)
             }
 
             OutlinedTextField(
@@ -329,7 +331,7 @@ fun SubtitleSettingsPanel(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    label = { Text("搜索关键词（如文件名）", fontSize = 8.sp) },
+                    label = { Text(stringResource(R.string.subtitle_search_keyword), fontSize = 8.sp) },
                     singleLine = true,
                     modifier = Modifier
                         .weight(1f)
@@ -342,7 +344,7 @@ fun SubtitleSettingsPanel(
                     )
                 )
                 Column {
-                    Text("语言", color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp)
+                    Text(stringResource(R.string.subtitle_search_language), color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         for (l in listOf("zh", "en", "ja")) {
                             val sel = searchLang == l
@@ -362,10 +364,11 @@ fun SubtitleSettingsPanel(
                     onClick = {
                         searchScope.launch {
                             searchBusy = true
-                            searchStatus = "搜索中..."
+                            searchStatus = searchContext.getString(R.string.subtitle_search_searching)
                             searchResults = subtitleSearch.search(subtitleSearchApiKey, searchQuery, searchLang)
                             searchBusy = false
-                            searchStatus = if (searchResults.isEmpty()) "未找到结果（检查 Key 或关键词）" else "找到 ${searchResults.size} 条结果"
+                            searchStatus = if (searchResults.isEmpty()) searchContext.getString(R.string.subtitle_search_not_found)
+                            else searchContext.getString(R.string.subtitle_search_found, searchResults.size)
                         }
                     },
                     enabled = !searchBusy,
@@ -376,7 +379,7 @@ fun SubtitleSettingsPanel(
                         .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
                         .height(40.dp)
                 ) {
-                    Text("搜索", fontSize = 11.sp)
+                    Text(stringResource(R.string.subtitle_search_go), fontSize = 11.sp)
                 }
             }
 
@@ -394,17 +397,17 @@ fun SubtitleSettingsPanel(
                             .clickable {
                                 searchScope.launch {
                                     searchBusy = true
-                                    searchStatus = "下载中: ${r.releaseName}..."
+                                    searchStatus = searchContext.getString(R.string.subtitle_downloading, r.releaseName)
                                     val file = subtitleSearch.download(
                                         subtitleSearchApiKey, r.fileId,
                                         java.io.File(searchContext.cacheDir, "online_subtitle_${r.fileId}.srt")
                                     )
                                     searchBusy = false
                                     if (file != null) {
-                                        searchStatus = "已下载并加载"
+                                        searchStatus = searchContext.getString(R.string.subtitle_downloaded)
                                         onSubtitleFileLoaded(file)
                                     } else {
-                                        searchStatus = "下载失败（可能需积分或 Key 无效）"
+                                        searchStatus = searchContext.getString(R.string.subtitle_download_failed)
                                     }
                                 }
                             }
@@ -440,7 +443,7 @@ fun SubtitleSettingsPanel(
         // ===== Section: 实时翻译 =====
         } // end section 字幕文件与实时语音
         SubtitleSection(
-            title = "实时翻译",
+            title = stringResource(R.string.subtitle_section_translate),
             icon = Icons.Default.Translate,
             accentColor = accentColor,
             initiallyExpanded = false
@@ -476,14 +479,14 @@ fun SubtitleSettingsPanel(
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "AI 神经同传",
+                                text = stringResource(R.string.subtitle_translate_neural),
                                 color = if (translator.config.isEnabled) accentOnColor else Color.White,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                         Text(
-                            text = "字幕实时AI翻译",
+                            text = stringResource(R.string.subtitle_translate_switch),
                             color = Color.White,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
@@ -534,7 +537,7 @@ fun SubtitleSettingsPanel(
                                     }
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
-                                Text("翻译字幕文件", color = accentColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.subtitle_translate_file), color = accentColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Box(
@@ -547,14 +550,14 @@ fun SubtitleSettingsPanel(
                                     }
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
-                                Text("清空缓存", color = Color.White.copy(alpha = 0.8f), fontSize = 8.sp)
+                                Text(stringResource(R.string.subtitle_translate_clear_cache), color = Color.White.copy(alpha = 0.8f), fontSize = 8.sp)
                             }
                         }
                     }
 
                     // Target Language Selector
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("目标翻译语言", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                        Text(stringResource(R.string.subtitle_translate_target_lang), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -590,7 +593,7 @@ fun SubtitleSettingsPanel(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("显示模式", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                            Text(stringResource(R.string.subtitle_display_mode), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 for (mode in TranslationDisplayMode.values()) {
                                     val isSel = translator.config.displayMode == mode
@@ -607,7 +610,7 @@ fun SubtitleSettingsPanel(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = if (mode == TranslationDisplayMode.DUAL_LANGUAGE) "双语对照" else "仅显示译文",
+                                            text = if (mode == TranslationDisplayMode.DUAL_LANGUAGE) stringResource(R.string.subtitle_mode_bilingual) else stringResource(R.string.subtitle_mode_translated_only),
                                             color = if (isSel) accentOnColor else Color.White,
                                             fontSize = 9.sp
                                         )
@@ -619,7 +622,7 @@ fun SubtitleSettingsPanel(
 
                     // Translation Engine Selector
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("翻译引擎", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                        Text(stringResource(R.string.subtitle_translate_engine), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             val engines = TranslationEngine.values()
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

@@ -56,6 +56,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import androidx.compose.material.icons.Icons
@@ -2885,19 +2887,33 @@ fun VRPlayerScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("字幕", color = AccentColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                stringResource(R.string.subtitle_quick_title),
+                                color = AccentColor,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    if (isSubtitleEnabled) "显示中" else "已关闭",
+                                    if (isSubtitleEnabled) stringResource(R.string.subtitle_state_on)
+                                    else stringResource(R.string.subtitle_state_off),
                                     color = Color.White.copy(alpha = 0.6f),
                                     fontSize = 10.sp
                                 )
                                 Switch(
                                     checked = isSubtitleEnabled,
-                                    onCheckedChange = { isSubtitleEnabled = it; keepUiAlight() },
+                                    onCheckedChange = {
+                                        isSubtitleEnabled = it
+                                        // v2.0.128：与完整字幕设置面板保持一致——记下用户的
+                                        // 显式选择，否则切视频时自动加载的字幕会把它重新打开
+                                        if (isMemoryModeEnabled) {
+                                            prefs.edit().putBoolean("subtitle_user_disabled", !it).apply()
+                                        }
+                                        keepUiAlight()
+                                    },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = AccentOnColor,
                                         checkedTrackColor = AccentColor,
@@ -2917,7 +2933,7 @@ fun VRPlayerScreen(
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    "字幕翻译",
+                                    stringResource(R.string.subtitle_translate_title),
                                     color = Color.White,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -2925,7 +2941,7 @@ fun VRPlayerScreen(
                                 Text(
                                     text = if (subtitleTranslator.config.isEnabled)
                                         "${subtitleTranslator.config.engine.displayName} → ${subtitleTranslator.config.targetLanguage.displayName}"
-                                    else "未开启",
+                                    else stringResource(R.string.subtitle_translate_off),
                                     color = Color.White.copy(alpha = 0.5f),
                                     fontSize = 9.sp
                                 )
@@ -2963,9 +2979,15 @@ fun VRPlayerScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("推理线程数", color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp)
                                 Text(
-                                    "$asrThreads 线程" + if (asrThreads in SherpaAsrManager.RECOMMENDED_THREADS) "（推荐）" else "",
+                                    stringResource(R.string.asr_threads),
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 10.sp
+                                )
+                                Text(
+                                    stringResource(R.string.asr_threads_value, asrThreads) +
+                                        if (asrThreads in SherpaAsrManager.RECOMMENDED_THREADS)
+                                            stringResource(R.string.asr_threads_recommended) else "",
                                     color = if (asrThreads in SherpaAsrManager.RECOMMENDED_THREADS) AccentColor
                                     else Color(0xFFFFB74D),
                                     fontSize = 10.sp,
@@ -2995,7 +3017,7 @@ fun VRPlayerScreen(
                                 modifier = Modifier.fillMaxWidth().height(24.dp)
                             )
                             Text(
-                                "太小识别跟不上播放，太大挤占解码/渲染；推荐 4~6",
+                                stringResource(R.string.asr_threads_hint),
                                 color = Color.White.copy(alpha = 0.4f),
                                 fontSize = 8.sp
                             )
@@ -3003,8 +3025,8 @@ fun VRPlayerScreen(
 
                         // v126：实时 AI 字幕开关（边播边生成，不写 SRT、不改动原视频）
                         ExperimentalSwitchRow(
-                            title = "实时 AI 字幕",
-                            desc = "边播边生成字幕：后台滚动预读，拖动进度条可即时回看",
+                            title = stringResource(R.string.realtime_subtitle_title),
+                            desc = stringResource(R.string.realtime_subtitle_desc),
                             checked = isRealtimeSubtitleEnabled,
                             onChanged = {
                                 isRealtimeSubtitleEnabled = it
@@ -3066,7 +3088,7 @@ fun VRPlayerScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    "重新生成字幕",
+                                    stringResource(R.string.subtitle_regenerate),
                                     color = AccentOnColor,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
@@ -3085,7 +3107,7 @@ fun VRPlayerScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    "导出 SRT",
+                                    stringResource(R.string.subtitle_export_srt),
                                     color = Color.White,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -3103,7 +3125,11 @@ fun VRPlayerScreen(
                             },
                             modifier = Modifier.align(Alignment.End)
                         ) {
-                              Text("完整字幕设置…", color = AccentColor, fontSize = 10.sp)
+                              Text(
+                                  stringResource(R.string.subtitle_open_full_settings),
+                                  color = AccentColor,
+                                  fontSize = 10.sp
+                              )
                           }
                       }
 
@@ -4510,6 +4536,55 @@ BatchTranscribeSection(
                                 }
 
                                 SettingsHeader()
+
+                                // v2.0.129：界面语言（跟随系统 / 简体中文 / 繁體中文 / English）
+                                val currentLangTag = remember { LanguageManager.getTag(context) }
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        stringResource(R.string.ui_language),
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        LanguageManager.options.forEach { tag ->
+                                            val selected = currentLangTag == tag
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(
+                                                        if (selected) AccentColor
+                                                        else Color.White.copy(alpha = 0.08f)
+                                                    )
+                                                    .clickable {
+                                                        keepUiAlight()
+                                                        LanguageManager.applyAndRecreate(context, tag)
+                                                    }
+                                                    .padding(vertical = 6.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    LanguageManager.displayName(tag),
+                                                    color = if (selected) AccentOnColor
+                                                    else Color.White.copy(alpha = 0.75f),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = if (selected) FontWeight.Bold
+                                                    else FontWeight.Normal,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        stringResource(R.string.ui_language_hint),
+                                        color = Color.White.copy(alpha = 0.4f),
+                                        fontSize = 8.sp
+                                    )
+                                }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(20.dp)

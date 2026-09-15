@@ -1,3 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aura美颜VR播放器</string>
+
+    <!-- ===== 界面语言（v2.0.129）===== -->
+    <string name="ui_language">界面语言</string>
+    <string name="ui_language_hint">切换后立即重建界面，播放进度会保留</string>
+
+    <!-- ===== 字幕快捷面板 ===== -->
+    <string name="subtitle_quick_title">字幕</string>
+    <string name="subtitle_state_on">显示中</string>
+    <string name="subtitle_state_off">已关闭</string>
+    <string name="subtitle_translate_title">字幕翻译</string>
+    <string name="subtitle_translate_off">未开启</string>
+    <string name="asr_threads">推理线程数</string>
+    <string name="asr_threads_value">%1$d 线程</string>
+    <string name="asr_threads_recommended">（推荐）</string>
+    <string name="asr_threads_hint">太小识别跟不上播放，太大挤占解码/渲染；推荐 4~6</string>
+    <string name="realtime_subtitle_title">实时 AI 字幕</string>
+    <string name="realtime_subtitle_desc">边播边生成字幕：后台滚动预读，拖动进度条可即时回看</string>
+    <string name="subtitle_regenerate">重新生成字幕</string>
+    <string name="subtitle_export_srt">导出 SRT</string>
+    <string name="subtitle_open_full_settings">完整字幕设置…</string>
+
+    <!-- ===== 字幕设置面板 ===== -->
+    <string name="subtitle_settings_group">5. 字幕功能与\n全向双眼样式</string>
+    <string name="subtitle_enabled">字幕已开启</string>
+    <string name="subtitle_disabled">字幕已关闭</string>
+    <string name="subtitle_off_hint">字幕功能处于关闭状态，开启后可加载外部 SRT/VTT 文件并自定义 VR/平面渲染样式</string>
+    <string name="subtitle_section_file">字幕文件与实时语音</string>
+    <string name="subtitle_current_file">当前字幕：%1$s</string>
+    <string name="subtitle_no_file">未加载外部字幕</string>
+    <string name="subtitle_cues_loaded">已载入 %1$d 条时间轴字幕</string>
+    <string name="subtitle_import_hint">支持导入本地 .srt / .vtt 文本字幕文件</string>
+    <string name="subtitle_import">导入SRT/VTT字幕</string>
+    <string name="subtitle_export">导出SRT</string>
+    <string name="subtitle_online_search">在线字幕搜索</string>
+    <string name="subtitle_search_need_key">需免费 API Key</string>
+    <string name="subtitle_search_keyword">搜索关键词（如文件名）</string>
+    <string name="subtitle_search_language">语言</string>
+    <string name="subtitle_search_searching">搜索中...</string>
+    <string name="subtitle_search_not_found">未找到结果（检查 Key 或关键词）</string>
+    <string name="subtitle_search_found">找到 %1$d 条结果</string>
+    <string name="subtitle_search_go">搜索</string>
+    <string name="subtitle_downloading">下载中：%1$s...</string>
+    <string name="subtitle_downloaded">已下载并加载</string>
+    <string name="subtitle_download_failed">下载失败（可能需积分或 Key 无效）</string>
+    <string name="subtitle_section_translate">实时翻译</string>
+    <string name="subtitle_translate_neural">AI 神经同传</string>
+    <string name="subtitle_translate_switch">字幕实时AI翻译</string>
+    <string name="subtitle_translate_file">翻译字幕文件</string>
+    <string name="subtitle_translate_clear_cache">清空缓存</string>
+    <string name="subtitle_translate_target_lang">目标翻译语言</string>
+    <string name="subtitle_display_mode">显示模式</string>
+    <string name="subtitle_mode_bilingual">双语对照</string>
+    <string name="subtitle_mode_translated_only">仅显示译文</string>
+    <string name="subtitle_translate_engine">翻译引擎</string>
 </resources>
