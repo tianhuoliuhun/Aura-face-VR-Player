@@ -57,28 +57,28 @@
     <string name="subtitle_translate_engine">翻译引擎</string>
 
     <!-- ===== batch ===== -->
-    <string name="toast_subtitle_loaded">成功加载 %%1$d 条字幕！</string>
-    <string name="toast_subtitle_load_failed">字幕加载失败：%%1$s</string>
-    <string name="asr_lang_switch_hint">识别语言：%%1$s（重新加载模型，约 5 秒）</string>
-    <string name="asr_lang_label">识别语言：%%1$s</string>
+    <string name="toast_subtitle_loaded">成功加载 %1$d 条字幕！</string>
+    <string name="toast_subtitle_load_failed">字幕加载失败：%1$s</string>
+    <string name="asr_lang_switch_hint">识别语言：%1$s（重新加载模型，约 5 秒）</string>
+    <string name="asr_lang_label">识别语言：%1$s</string>
     <string name="toast_no_subtitle_export">暂无可导出的字幕</string>
-    <string name="toast_subtitle_exported">已导出 %%1$d 条字幕：\n%%2$s</string>
+    <string name="toast_subtitle_exported">已导出 %1$d 条字幕：\n%2$s</string>
     <string name="toast_subtitle_export_failed">字幕导出失败</string>
     <string name="toast_enable_realtime_first">请先开启「实时 AI 字幕」</string>
     <string name="toast_image_no_audio">当前是图片，没有音轨可识别</string>
     <string name="toast_subtitle_restarted">已重新开始生成字幕</string>
     <string name="toast_image_no_audio_gen">当前是图片，没有音轨可识别（请打开视频后再生成字幕）</string>
     <string name="toast_image_no_audio_realtime">当前是图片，没有音轨可用于实时字幕</string>
-    <string name="toast_subtitle_autoloaded">已加载字幕：%%1$s（%%2$d 句）</string>
+    <string name="toast_subtitle_autoloaded">已加载字幕：%1$s（%2$d 句）</string>
     <string name="toast_select_resolution_first">请先选择一个分辨率限制后再进行降级转码</string>
-    <string name="toast_cached_downscale">检测到已缓存的 %%1$s 降级版本，直接播放！</string>
-    <string name="media_downscale_suffix"> （%%1$s 降级版）</string>
+    <string name="toast_cached_downscale">检测到已缓存的 %1$s 降级版本，直接播放！</string>
+    <string name="media_downscale_suffix"> （%1$s 降级版）</string>
     <string name="toast_transcode_init">正在初始化转码引擎...</string>
-    <string name="toast_transcoding_progress">正在降轨转码为 %%1$s... %%2$d%%%%</string>
-    <string name="toast_transcode_ok">降轨转码成功！正在播放 %%1$s 视频</string>
-    <string name="toast_transcode_failed">转码降轨失败：%%1$s</string>
-    <string name="toast_path_not_exist">路径不存在：%%1$s</string>
-    <string name="toast_connect_failed">连接失败：%%1$s</string>
+    <string name="toast_transcoding_progress">正在降轨转码为 %1$s... %2$d%%</string>
+    <string name="toast_transcode_ok">降轨转码成功！正在播放 %1$s 视频</string>
+    <string name="toast_transcode_failed">转码降轨失败：%1$s</string>
+    <string name="toast_path_not_exist">路径不存在：%1$s</string>
+    <string name="toast_connect_failed">连接失败：%1$s</string>
     <string name="toast_enter_server_addr">请输入服务器地址</string>
 
     <!-- ===== batch ===== -->
@@ -166,12 +166,12 @@
     <string name="asr_downloading">⬇ 下载中</string>
     <string name="asr_ready">✓ 已就绪</string>
     <string name="asr_not_downloaded">未下载</string>
-    <string name="asr_download_percent">下载 %%1$d%%%%</string>
+    <string name="asr_download_percent">下载 %1$d%%</string>
     <string name="asr_cancel_download">取消下载</string>
     <string name="asr_click_to_download_prefix">点击下载 </string>
-    <string name="asr_model_ready_hint">%%1$s 已就绪，实时字幕可直接使用</string>
-    <string name="toast_online_subtitle_loaded">在线字幕已加载 %%1$d 条</string>
-    <string name="toast_subtitle_parse_failed">字幕解析失败：%%1$s</string>
+    <string name="asr_model_ready_hint">%1$s 已就绪，实时字幕可直接使用</string>
+    <string name="toast_online_subtitle_loaded">在线字幕已加载 %1$d 条</string>
+    <string name="toast_subtitle_parse_failed">字幕解析失败：%1$s</string>
     <string name="beauty_preset_natural">自然</string>
     <string name="beauty_preset_light">淡妆</string>
     <string name="beauty_preset_heavy">浓妆</string>
@@ -217,7 +217,7 @@
     <string name="smb_connect">连接</string>
     <string name="smb_parent">上级</string>
     <string name="speed_control">倍速</string>
-    <string name="fast_forwarding">长按快进中 %%1$s</string>
+    <string name="fast_forwarding">长按快进中 %1$s</string>
     <string name="unlock_ui">解锁控制界面</string>
     <string name="lock_ui">锁定控制界面</string>
     <string name="import_local_media">导入本地照片或视频</string>
@@ -231,11 +231,11 @@
     <string name="media_external_desc">从第三方软件导入播放的视频</string>
     <string name="action_import_video">导入视频</string>
     <string name="action_import_image">导入图像</string>
-    <string name="media_imported_desc">用户从本地相册导入的媒体内容。路径：%%1$s</string>
+    <string name="media_imported_desc">用户从本地相册导入的媒体内容。路径：%1$s</string>
     <string name="lut_custom">自定义 LUT</string>
-    <string name="toast_lut_applied">LUT 已应用：%%1$s</string>
+    <string name="toast_lut_applied">LUT 已应用：%1$s</string>
     <string name="toast_lut_parse_failed">LUT 解析失败</string>
-    <string name="toast_lut_load_failed">LUT 加载失败：%%1$s</string>
+    <string name="toast_lut_load_failed">LUT 加载失败：%1$s</string>
     <string name="toast_fixing_container">检测到视频拖动定位异常，正在自动修复容器（无需转码）...</string>
     <string name="toast_container_fixed">视频容器已修复，现在可以正常拖动定位了</string>
     <string name="toast_container_fixed_no_audio">视频容器已修复（音频轨道不兼容，播放将无声）</string>
@@ -247,9 +247,9 @@
     <string name="toast_detected_360">检测到 2:1 全景视频，已切换至 VR_360 全景（单目）</string>
     <string name="toast_detected_2d">检测到普通 2D 视频，已切换至平面模式</string>
     <string name="toast_2d_mono">普通 2D 视频已恢复单目显示（3D 立体仅适用于 3D 片源）</string>
-    <string name="toast_res_exceeds">当前视频分辨率 (%%1$dx%%2$d) 超过设置限制，可能导致卡顿。</string>
-    <string name="toast_8k_hint">该视频为 %%1$dx%%2$d 8K超高清，若卡顿建议开启解码限制。</string>
-    <string name="toast_8k_patching">视频 %%1$dx%%2$d 超出硬件解码标称上限，正在尝试修改编码头硬解</string>
+    <string name="toast_res_exceeds">当前视频分辨率 (%1$dx%2$d) 超过设置限制，可能导致卡顿。</string>
+    <string name="toast_8k_hint">该视频为 %1$dx%2$d 8K超高清，若卡顿建议开启解码限制。</string>
+    <string name="toast_8k_patching">视频 %1$dx%2$d 超出硬件解码标称上限，正在尝试修改编码头硬解</string>
     <string name="toast_hw_failed_sw">硬件解码失败，自动切换软件解码</string>
 
     <!-- ===== batch ===== -->
@@ -273,11 +273,11 @@
     <string name="lut_intensity">滤镜强度</string>
     <string name="loading">加载中</string>
     <string name="lut_custom_pick">自选 LUT</string>
-    <string name="lut_current">当前：%%1$s（内置 12 款，支持 .cube 文件）</string>
+    <string name="lut_current">当前：%1$s（内置 12 款，支持 .cube 文件）</string>
     <string name="beauty_section_portrait">2D 人像精修 · 需 2D 模式 + 人脸检测</string>
     <string name="beauty_3d_disabled">3D 停用</string>
-    <string name="beauty_status_2d">当前 2D 模式（%%1$s）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸</string>
-    <string name="beauty_status_3d">当前 3D 模式（%%1$s）：仅磨皮/美白等通用效果生效；瘦脸/大眼/口红等 2D 人像精修已停用，切换 2D 模式后自动恢复</string>
+    <string name="beauty_status_2d">当前 2D 模式（%1$s）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸</string>
+    <string name="beauty_status_3d">当前 3D 模式（%1$s）：仅磨皮/美白等通用效果生效；瘦脸/大眼/口红等 2D 人像精修已停用，切换 2D 模式后自动恢复</string>
     <string name="beauty_compare_original">对比原图</string>
     <string name="beauty_compare_desc">开启后临时关闭全部美颜，直观对比效果</string>
     <string name="beauty_preset_custom">自定义</string>
@@ -299,24 +299,24 @@
     <string name="cd_play_pause">播放暂停</string>
 
     <!-- ===== batch ===== -->
-    <string name="info_file">文件：%%1$s\n</string>
-    <string name="info_title">标题：%%1$s\n</string>
-    <string name="info_duration">时长：%%1$d 分 %%2$d 秒\n</string>
+    <string name="info_file">文件：%1$s\n</string>
+    <string name="info_title">标题：%1$s\n</string>
+    <string name="info_duration">时长：%1$d 分 %2$d 秒\n</string>
     <string name="unknown">未知</string>
-    <string name="info_resolution">分辨率：%%1$d × %%2$d\n</string>
-    <string name="info_video_codec">视频编码：%%1$s\n</string>
-    <string name="info_fps">帧率：%%1$d fps\n</string>
-    <string name="info_bitrate">码率：%%1$d kbps\n</string>
+    <string name="info_resolution">分辨率：%1$d × %2$d\n</string>
+    <string name="info_video_codec">视频编码：%1$s\n</string>
+    <string name="info_fps">帧率：%1$d fps\n</string>
+    <string name="info_bitrate">码率：%1$d kbps\n</string>
     <string name="info_hw">硬件</string>
     <string name="label_resolution">分辨率</string>
-    <string name="info_resolution2">分辨率：%%1$d × %%2$d\n</string>
-    <string name="info_rotation">旋转：%%1$d°\n</string>
+    <string name="info_resolution2">分辨率：%1$d × %2$d\n</string>
+    <string name="info_rotation">旋转：%1$d°\n</string>
     <string name="label_fps">帧率</string>
-    <string name="info_fps2">帧率：%%1$d fps\n</string>
+    <string name="info_fps2">帧率：%1$d fps\n</string>
     <string name="label_bitrate">码率</string>
-    <string name="info_bitrate2">码率：%%1$d kbps\n</string>
+    <string name="info_bitrate2">码率：%1$d kbps\n</string>
     <string name="label_codec">编码</string>
-    <string name="info_codec">编码：%%1$s\n</string>
+    <string name="info_codec">编码：%1$s\n</string>
     <string name="info_unavailable">未能读取视频信息</string>
     <string name="resolution_hint_title">分辨率提示</string>
     <string name="action_downscale">一键降级转码</string>
@@ -325,12 +325,12 @@
     <string name="downscaling_desc">正在利用底层硬件编码器将 8K 超清视频高保真转码为较小分辨率以保证完美流畅播放。请勿退出应用。</string>
     <string name="cd_beauty_icon">美颜图标</string>
     <string name="app_desc">美颜VR播放器</string>
-    <string name="current_media">当前媒体：%%1$s</string>
+    <string name="current_media">当前媒体：%1$s</string>
     <string name="cd_vr_split_mode">VR分屏戴戴模式</string>
     <string name="cd_drag_thumbnail">视频拖拽预览缩略图</string>
     <string name="cd_image_state">图像状态</string>
     <string name="auto">自动</string>
-    <string name="toast_decoder_switched">已切换解码器为：%%1$s</string>
+    <string name="toast_decoder_switched">已切换解码器为：%1$s</string>
     <string name="info_hw_decode">硬件解码</string>
 
     <!-- ===== batch ===== -->
@@ -338,7 +338,7 @@
     <string name="subtitle_preview_header">― 实时字幕效果预览 ―</string>
     <string name="subtitle_preview_sample">这是 VR 空间与平面同步字幕预览效果\nOPPO Sans VF 变体字体</string>
     <string name="subtitle_font">字幕字体</string>
-    <string name="subtitle_font_weight">VF 变体字重：%%1$d</string>
+    <string name="subtitle_font_weight">VF 变体字重：%1$d</string>
     <string name="font_weight_thin">极细</string>
     <string name="font_weight_light">纤细</string>
     <string name="font_weight_regular">常规</string>
@@ -348,27 +348,27 @@
     <string name="italic_on">斜体：开</string>
     <string name="italic_off">斜体：关</string>
     <string name="subtitle_color">字幕颜色</string>
-    <string name="subtitle_text_alpha">不透明度：%%1$d%%%%</string>
+    <string name="subtitle_text_alpha">不透明度：%1$d%%</string>
     <string name="subtitle_stroke">文字描边</string>
     <string name="subtitle_stroke_advanced">高阶描边</string>
     <string name="subtitle_background">字幕背景</string>
     <string name="subtitle_section_layout">布局与时间</string>
-    <string name="subtitle_font_size">字幕大小：%%1$dsp</string>
+    <string name="subtitle_font_size">字幕大小：%1$dsp</string>
     <string name="subtitle_max_lines">每段行数</string>
-    <string name="subtitle_n_lines">%%1$d 行</string>
+    <string name="subtitle_n_lines">%1$d 行</string>
     <string name="subtitle_align">对齐方式</string>
-    <string name="subtitle_offset_y">字幕垂直移动：%%1$d%%%%</string>
+    <string name="subtitle_offset_y">字幕垂直移动：%1$d%%</string>
     <string name="align_bottom">底部</string>
     <string name="align_center">居中</string>
     <string name="align_top">顶部</string>
-    <string name="subtitle_offset_x">字幕水平偏移：%%1$d%%%%</string>
+    <string name="subtitle_offset_x">字幕水平偏移：%1$d%%</string>
     <string name="subtitle_delay">字幕延迟时间补偿</string>
     <string name="subtitle_ipd">VR 双眼视差/瞳距微调</string>
 
     <!-- ===== batch ===== -->
     <string name="asr_section_title">实时字幕（引擎与模型）</string>
     <string name="asr_sensevoice_bundled">SenseVoice-Small · 内置模型（无需下载）· 中英日韩粤 · 自带标点</string>
-    <string name="asr_model_ready_source">已就绪 · %%1$s</string>
+    <string name="asr_model_ready_source">已就绪 · %1$s</string>
     <string name="asr_model_unavailable">模型不可用（内置资源缺失，可下载兜底）</string>
     <string name="asr_update_model">更新模型</string>
     <string name="asr_download_model">下载模型</string>
@@ -378,7 +378,7 @@
     <string name="licenses_load_failed">加载失败</string>
     <string name="licenses_read_failed">无法读取 licenses.json</string>
     <string name="licenses_loading">正在加载许可清单…</string>
-    <string name="licenses_count">本应用使用了以下开源软件与资源（共 %%1$d 项）。</string>
+    <string name="licenses_count">本应用使用了以下开源软件与资源（共 %1$d 项）。</string>
     <string name="licenses_note">许可证全文可通过链接查看；LGPL 组件按 LGPL 2.1 条款提供。</string>
 
     <!-- ===== enum options ===== -->

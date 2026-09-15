@@ -270,6 +270,10 @@ class RealtimeSubtitleEngine(private val context: Context) {
         cursorMs = targetMs
         val keepUntil = targetMs + lookaheadMs
         cache.invalidateAfter(keepUntil)
+        // v2.0.134：已扫描记录必须与缓存同步作废。否则 scannedRanges 仍声称整片已扫描，
+        // 预读循环会误判为"无需再生成"而空转，被清掉的后方字幕永远不再补回
+        // —— 这是"字幕放一会儿就消失"的根因之一。
+        trimScannedAfter(keepUntil)
         generatedUpToMs = minOf(generatedUpToMs, cache.lastEndMs()).coerceAtLeast(0L)
         if (generatedUpToMs < targetMs) generatedUpToMs = targetMs
         Log.i(TAG, "seek → ${targetMs}ms, 保留至 ${keepUntil}ms, 缓存 ${cache.size()} 条")
@@ -335,7 +339,14 @@ class RealtimeSubtitleEngine(private val context: Context) {
             val t0 = System.currentTimeMillis()
             val winFrom = gap.first
             val winTo = gap.last + 1   // 半开区间
-            processWindow(t, r, vad, winFrom, winTo)
+            // v2.0.134：单窗口解码/识别异常不应中断整条生成链路——
+            // 否则最后一个窗口抛错会让进度卡在 99% 且引擎停摆。
+            // 标记已扫描后继续，保证进度能走到 100% 并完成。
+            try {
+                processWindow(t, r, vad, winFrom, winTo)
+            } catch (e: Exception) {
+                Log.w(TAG, "窗口 ${winFrom}~${winTo}ms 处理失败（已跳过）: ${e.message}")
+            }
             markScanned(winFrom, winTo)
             Log.i(
                 TAG,
@@ -433,6 +444,24 @@ class RealtimeSubtitleEngine(private val context: Context) {
     /** 清空扫描记录（重新生成时用） */
     private fun clearScanned() {
         scannedRanges.clear()
+    }
+
+    /**
+     * Seek 后同步作废"已跑过头"的已扫描记录，与 [SubtitleCache.invalidateAfter] 保持一致。
+     * 只保留 [timeMs] 之前（含跨边界截断）的区间，[timeMs] 之后的视为未扫描，
+     * 让预读循环重新补回被清掉的后方字幕。
+     */
+    private fun trimScannedAfter(timeMs: Long) {
+        val out = ArrayList<LongRange>(scannedRanges.size)
+        for (r in scannedRanges) {
+            when {
+                r.last <= timeMs -> out.add(r)                   // 完全在前：保留
+                r.first < timeMs -> out.add(r.first until timeMs) // 跨边界：截断到 timeMs
+                else -> {}                                        // 完全在后：丢弃
+            }
+        }
+        scannedRanges.clear()
+        scannedRanges.addAll(out)
     }
 
     /** v127e：已扫描（解码+识别过）的音频区间，合并相邻；仅预读线程访问 */

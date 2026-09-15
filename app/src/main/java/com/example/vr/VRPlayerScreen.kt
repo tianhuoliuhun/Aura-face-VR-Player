@@ -1865,6 +1865,10 @@ fun VRPlayerScreen(
     LaunchedEffect(playerInstance, selectedMediaItem.uri, isVideoPlaying) {
         var lastSavedAt = 0L
         var lastPosForRealtime = 0L
+        // v2.0.134：effect 因暂停/播放切换或播放器重建而重启时，局部变量会重置为 0；
+        // 若首帧直接拿当前播放位置与 0 比较，会误判成一次 >2s 的大跳 seek，
+        // 触发 onSeek 清空后续字幕缓存（"字幕放一会儿就没了"）。首帧只用来初始化基准。
+        var realtimeSeekInit = false
         while (true) {
             playerInstance?.let { player ->
                 currentPositionMs = player.currentPosition

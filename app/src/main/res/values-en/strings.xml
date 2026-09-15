@@ -57,28 +57,29 @@
     <string name="subtitle_translate_engine">Translation engine</string>
 
     <!-- ===== batch ===== -->
-    <string name="toast_subtitle_loaded">Loaded %%1$d subtitle cues</string>
-    <string name="toast_subtitle_load_failed">Failed to load subtitle: %%1$s</string>
-    <string name="asr_lang_switch_hint">Recognition language: %%1$s (reloading model, ~5s)</string>
-    <string name="asr_lang_label">Recognition language: %%1$s</string>
+    <string name="toast_subtitle_loaded">Loaded %1$d subtitle cues</string>
+    <string name="toast_subtitle_load_failed">Failed to load subtitle: %1$s</string>
+    <string name="asr_lang_switch_hint">Recognition language: %1$s (reloading model, ~5s)</string>
+    <string name="asr_lang_label">Recognition language: %1$s</string>
     <string name="toast_no_subtitle_export">No subtitles to export</string>
-    <string name="toast_subtitle_exported">Exported %%1$d cues://n%%2$s</string>
+    <string name="toast_subtitle_exported">Exported %1$d cues:
+%2$s</string>
     <string name="toast_subtitle_export_failed">Failed to export subtitles</string>
     <string name="toast_enable_realtime_first">Please enable Realtime AI subtitles first</string>
     <string name="toast_image_no_audio">This is an image - no audio track to recognize</string>
     <string name="toast_subtitle_restarted">Subtitle generation restarted</string>
     <string name="toast_image_no_audio_gen">This is an image - no audio track (open a video to generate subtitles)</string>
     <string name="toast_image_no_audio_realtime">This is an image - no audio track for realtime subtitles</string>
-    <string name="toast_subtitle_autoloaded">Subtitle loaded: %%1$s (%%2$d lines)</string>
+    <string name="toast_subtitle_autoloaded">Subtitle loaded: %1$s (%2$d lines)</string>
     <string name="toast_select_resolution_first">Pick a resolution limit before downscaling</string>
-    <string name="toast_cached_downscale">Found cached %%1$s version - playing it</string>
-    <string name="media_downscale_suffix"> (%%1$s downscaled)</string>
+    <string name="toast_cached_downscale">Found cached %1$s version - playing it</string>
+    <string name="media_downscale_suffix"> (%1$s downscaled)</string>
     <string name="toast_transcode_init">Initializing transcoder...</string>
-    <string name="toast_transcoding_progress">Downscaling to %%1$s... %%2$d%%%%</string>
-    <string name="toast_transcode_ok">Downscale done! Playing %%1$s video</string>
-    <string name="toast_transcode_failed">Downscaling failed: %%1$s</string>
-    <string name="toast_path_not_exist">Path does not exist: %%1$s</string>
-    <string name="toast_connect_failed">Connection failed: %%1$s</string>
+    <string name="toast_transcoding_progress">Downscaling to %1$s... %2$d%%</string>
+    <string name="toast_transcode_ok">Downscale done! Playing %1$s video</string>
+    <string name="toast_transcode_failed">Downscaling failed: %1$s</string>
+    <string name="toast_path_not_exist">Path does not exist: %1$s</string>
+    <string name="toast_connect_failed">Connection failed: %1$s</string>
     <string name="toast_enter_server_addr">Please enter the server address</string>
 
     <!-- ===== batch ===== -->
@@ -166,12 +167,12 @@
     <string name="asr_downloading">⬇ Downloading</string>
     <string name="asr_ready">✓ Ready</string>
     <string name="asr_not_downloaded">Not downloaded</string>
-    <string name="asr_download_percent">Downloading %%1$d%%%%</string>
+    <string name="asr_download_percent">Downloading %1$d%%</string>
     <string name="asr_cancel_download">Cancel download</string>
     <string name="asr_click_to_download_prefix">Tap to download </string>
-    <string name="asr_model_ready_hint">%%1$s ready - realtime subtitles available</string>
-    <string name="toast_online_subtitle_loaded">Loaded %%1$d online subtitle cues</string>
-    <string name="toast_subtitle_parse_failed">Failed to parse subtitle: %%1$s</string>
+    <string name="asr_model_ready_hint">%1$s ready - realtime subtitles available</string>
+    <string name="toast_online_subtitle_loaded">Loaded %1$d online subtitle cues</string>
+    <string name="toast_subtitle_parse_failed">Failed to parse subtitle: %1$s</string>
     <string name="beauty_preset_natural">Natural</string>
     <string name="beauty_preset_light">Light</string>
     <string name="beauty_preset_heavy">Glam</string>
@@ -217,7 +218,7 @@
     <string name="smb_connect">Connect</string>
     <string name="smb_parent">Up</string>
     <string name="speed_control">Speed</string>
-    <string name="fast_forwarding">Fast-forwarding %%1$s</string>
+    <string name="fast_forwarding">Fast-forwarding %1$s</string>
     <string name="unlock_ui">Unlock controls</string>
     <string name="lock_ui">Lock controls</string>
     <string name="import_local_media">Import local photo or video</string>
@@ -231,11 +232,11 @@
     <string name="media_external_desc">Video imported from another app</string>
     <string name="action_import_video">Import video</string>
     <string name="action_import_image">Import image</string>
-    <string name="media_imported_desc">Media imported from local album. Path: %%1$s</string>
+    <string name="media_imported_desc">Media imported from local album. Path: %1$s</string>
     <string name="lut_custom">Custom LUT</string>
-    <string name="toast_lut_applied">LUT applied: %%1$s</string>
+    <string name="toast_lut_applied">LUT applied: %1$s</string>
     <string name="toast_lut_parse_failed">Failed to parse LUT</string>
-    <string name="toast_lut_load_failed">Failed to load LUT: %%1$s</string>
+    <string name="toast_lut_load_failed">Failed to load LUT: %1$s</string>
     <string name="toast_fixing_container">Seeking looks broken - remuxing container (no re-encode)...</string>
     <string name="toast_container_fixed">Container fixed - seeking works now</string>
     <string name="toast_container_fixed_no_audio">Container fixed (audio track incompatible, playback will be silent)</string>
@@ -247,9 +248,9 @@
     <string name="toast_detected_360">2:1 panorama detected - switched to VR_360 (mono)</string>
     <string name="toast_detected_2d">Plain 2D detected - switched to flat mode</string>
     <string name="toast_2d_mono">2D restored to mono (3D stereo only for 3D sources)</string>
-    <string name="toast_res_exceeds">Resolution (%%1$dx%%2$d) exceeds the limit - may stutter.</string>
-    <string name="toast_8k_hint">This is %%1$dx%%2$d 8K - enable decode limits if it stutters.</string>
-    <string name="toast_8k_patching">%%1$dx%%2$d exceeds HW decoder limits - patching headers</string>
+    <string name="toast_res_exceeds">Resolution (%1$dx%2$d) exceeds the limit - may stutter.</string>
+    <string name="toast_8k_hint">This is %1$dx%2$d 8K - enable decode limits if it stutters.</string>
+    <string name="toast_8k_patching">%1$dx%2$d exceeds HW decoder limits - patching headers</string>
     <string name="toast_hw_failed_sw">Hardware decode failed - switched to software</string>
 
     <!-- ===== batch ===== -->
@@ -273,11 +274,11 @@
     <string name="lut_intensity">Filter intensity</string>
     <string name="loading">Loading</string>
     <string name="lut_custom_pick">Pick custom LUT</string>
-    <string name="lut_current">Current: %%1$s (12 built-in, .cube files supported)</string>
+    <string name="lut_current">Current: %1$s (12 built-in, .cube files supported)</string>
     <string name="beauty_section_portrait">2D portrait retouch - needs 2D mode &amp; face detection</string>
     <string name="beauty_3d_disabled">Disabled in 3D</string>
-    <string name="beauty_status_2d">2D mode (%%1$s): all effects available; portrait retouch needs a detected face</string>
-    <string name="beauty_status_3d">3D mode (%%1$s): only general effects apply; portrait retouch is off until you switch to 2D</string>
+    <string name="beauty_status_2d">2D mode (%1$s): all effects available; portrait retouch needs a detected face</string>
+    <string name="beauty_status_3d">3D mode (%1$s): only general effects apply; portrait retouch is off until you switch to 2D</string>
     <string name="beauty_compare_original">Compare with original</string>
     <string name="beauty_compare_desc">Temporarily disables all beauty effects for an A/B view</string>
     <string name="beauty_preset_custom">Custom</string>
@@ -299,24 +300,24 @@
     <string name="cd_play_pause">Play / pause</string>
 
     <!-- ===== batch ===== -->
-    <string name="info_file">File: %%1$s\n</string>
-    <string name="info_title">Title: %%1$s\n</string>
-    <string name="info_duration">Duration: %%1$d min %%2$d s\n</string>
+    <string name="info_file">File: %1$s\n</string>
+    <string name="info_title">Title: %1$s\n</string>
+    <string name="info_duration">Duration: %1$d min %2$d s\n</string>
     <string name="unknown">Unknown</string>
-    <string name="info_resolution">Resolution: %%1$dx%%2$d\n</string>
-    <string name="info_video_codec">Video codec: %%1$s\n</string>
-    <string name="info_fps">Frame rate: %%1$d fps\n</string>
-    <string name="info_bitrate">Bitrate: %%1$d kbps\n</string>
+    <string name="info_resolution">Resolution: %1$dx%2$d\n</string>
+    <string name="info_video_codec">Video codec: %1$s\n</string>
+    <string name="info_fps">Frame rate: %1$d fps\n</string>
+    <string name="info_bitrate">Bitrate: %1$d kbps\n</string>
     <string name="info_hw">Hardware</string>
     <string name="label_resolution">Resolution</string>
-    <string name="info_resolution2">Resolution: %%1$dx%%2$d\n</string>
-    <string name="info_rotation">Rotation: %%1$d°\n</string>
+    <string name="info_resolution2">Resolution: %1$dx%2$d\n</string>
+    <string name="info_rotation">Rotation: %1$d°\n</string>
     <string name="label_fps">Frame rate</string>
-    <string name="info_fps2">Frame rate: %%1$d fps\n</string>
+    <string name="info_fps2">Frame rate: %1$d fps\n</string>
     <string name="label_bitrate">Bitrate</string>
-    <string name="info_bitrate2">Bitrate: %%1$d kbps\n</string>
+    <string name="info_bitrate2">Bitrate: %1$d kbps\n</string>
     <string name="label_codec">Codec</string>
-    <string name="info_codec">Codec: %%1$s\n</string>
+    <string name="info_codec">Codec: %1$s\n</string>
     <string name="info_unavailable">Could not read media info</string>
     <string name="resolution_hint_title">Resolution notice</string>
     <string name="action_downscale">One-tap downscale</string>
@@ -325,12 +326,12 @@
     <string name="downscaling_desc">Re-encoding the 8K video to a smaller resolution with the hardware encoder for smooth playback. Please keep the app open.</string>
     <string name="cd_beauty_icon">Beauty</string>
     <string name="app_desc">Beauty VR Player</string>
-    <string name="current_media">Now playing: %%1$s</string>
+    <string name="current_media">Now playing: %1$s</string>
     <string name="cd_vr_split_mode">VR split-screen mode</string>
     <string name="cd_drag_thumbnail">Scrub preview thumbnail</string>
     <string name="cd_image_state">Image state</string>
     <string name="auto">Auto</string>
-    <string name="toast_decoder_switched">Decoder switched to: %%1$s</string>
+    <string name="toast_decoder_switched">Decoder switched to: %1$s</string>
     <string name="info_hw_decode">Hardware decoding</string>
 
     <!-- ===== batch ===== -->
@@ -338,7 +339,7 @@
     <string name="subtitle_preview_header">— Live subtitle preview —</string>
     <string name="subtitle_preview_sample">Preview of subtitles in VR space and flat view\nOPPO Sans VF variable font</string>
     <string name="subtitle_font">Font</string>
-    <string name="subtitle_font_weight">VF weight: %%1$d</string>
+    <string name="subtitle_font_weight">VF weight: %1$d</string>
     <string name="font_weight_thin">Thin</string>
     <string name="font_weight_light">Light</string>
     <string name="font_weight_regular">Regular</string>
@@ -348,27 +349,27 @@
     <string name="italic_on">Italic: on</string>
     <string name="italic_off">Italic: off</string>
     <string name="subtitle_color">Text color</string>
-    <string name="subtitle_text_alpha">Opacity: %%1$d%%%%</string>
+    <string name="subtitle_text_alpha">Opacity: %1$d%%</string>
     <string name="subtitle_stroke">Text outline</string>
     <string name="subtitle_stroke_advanced">Advanced outline</string>
     <string name="subtitle_background">Background</string>
     <string name="subtitle_section_layout">Layout &amp; timing</string>
-    <string name="subtitle_font_size">Text size: %%1$dsp</string>
+    <string name="subtitle_font_size">Text size: %1$dsp</string>
     <string name="subtitle_max_lines">Lines per cue</string>
-    <string name="subtitle_n_lines">%%1$d lines</string>
+    <string name="subtitle_n_lines">%1$d lines</string>
     <string name="subtitle_align">Alignment</string>
-    <string name="subtitle_offset_y">Vertical offset: %%1$d%%%%</string>
+    <string name="subtitle_offset_y">Vertical offset: %1$d%%</string>
     <string name="align_bottom">Bottom</string>
     <string name="align_center">Center</string>
     <string name="align_top">Top</string>
-    <string name="subtitle_offset_x">Horizontal offset: %%1$d%%%%</string>
+    <string name="subtitle_offset_x">Horizontal offset: %1$d%%</string>
     <string name="subtitle_delay">Subtitle delay compensation</string>
     <string name="subtitle_ipd">VR parallax / IPD fine tune</string>
 
     <!-- ===== batch ===== -->
     <string name="asr_section_title">Realtime subtitles (engine &amp; model)</string>
     <string name="asr_sensevoice_bundled">SenseVoice-Small - bundled (no download) - zh/en/ja/ko/yue - with punctuation</string>
-    <string name="asr_model_ready_source">Ready - %%1$s</string>
+    <string name="asr_model_ready_source">Ready - %1$s</string>
     <string name="asr_model_unavailable">Model unavailable (bundled copy missing, download as fallback)</string>
     <string name="asr_update_model">Update model</string>
     <string name="asr_download_model">Download model</string>
@@ -378,7 +379,7 @@
     <string name="licenses_load_failed">Failed to load</string>
     <string name="licenses_read_failed">Could not read licenses.json</string>
     <string name="licenses_loading">Loading licenses…</string>
-    <string name="licenses_count">This app uses the following open source software and assets (%%1$d items).</string>
+    <string name="licenses_count">This app uses the following open source software and assets (%1$d items).</string>
     <string name="licenses_note">Full license texts are available via the links; LGPL components follow LGPL 2.1.</string>
 
     <!-- ===== enum options ===== -->

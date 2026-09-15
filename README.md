@@ -322,6 +322,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | **v2.0.131** | 切换语言**不再重建 Activity**（当前视频/进度/预览图全部保留）/ 语言选项移入「UI 主题」分区 / 新增**日语、韩语**（五语各 400 条）/ 枚举选项名（字幕字体·颜色·描边·背景、投影/Warp/分辨率/立体/解码器）完成多语言 · **i18n**: ja/ko added, language switch keeps playback, 400 strings x 5 languages |
 | **v2.0.132** | **修复 v2.0.131 切语言闪退**：`LanguageManager.wrap` 改为只覆盖 `getResources()`、base 仍指向 Activity 的 `ContextWrapper`，恢复 `rememberLauncherForActivityResult` 顺着 LocalContext 找 `ActivityResultRegistryOwner` 的链路 |
 | **v2.0.133** | 修复切语言后**语言选项高亮停留原语言**：`currentLangTag` 改用 `remember(context)`（context=LocalContext.current，切语言后是新的 localizedContext 对象）重算，高亮实时跟随当前语言 |
+| **v2.0.134** | ① 修复**五语格式占位符双写 `%%`** 致参数被丢弃、界面显示 `%1$s` 字面（「已就绪 %1$s」、导出 SRT 等），5 语统一修正 58~63 处/语，英文 `//n`→`\n`；② 修复**实时字幕生成卡在 99% 不完成**：单窗口解码/识别异常会穿透预读循环中断整条生成链路，已将该窗口处理包 try/catch、失败仅跳过并继续；③ 修复**看一会儿字幕就消失**：`onSeek` 之前只清缓存未同步清理「已扫描区间」记录，导致被清掉的后方字幕不再补回（新增 `trimScannedAfter`）；且播放位置同步 effect 以 `isVideoPlaying` 为 key，暂停/恢复重启会把基准误判成 >2s 大跳而误触发 seek 清空缓存，已改为首帧仅初始化基准 |
 
 ---
 
