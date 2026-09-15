@@ -323,6 +323,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | **v2.0.132** | **修复 v2.0.131 切语言闪退**：`LanguageManager.wrap` 改为只覆盖 `getResources()`、base 仍指向 Activity 的 `ContextWrapper`，恢复 `rememberLauncherForActivityResult` 顺着 LocalContext 找 `ActivityResultRegistryOwner` 的链路 |
 | **v2.0.133** | 修复切语言后**语言选项高亮停留原语言**：`currentLangTag` 改用 `remember(context)`（context=LocalContext.current，切语言后是新的 localizedContext 对象）重算，高亮实时跟随当前语言 |
 | **v2.0.134** | ① 修复**五语格式占位符双写 `%%`** 致参数被丢弃、界面显示 `%1$s` 字面（「已就绪 %1$s」、导出 SRT 等），5 语统一修正 58~63 处/语，英文 `//n`→`\n`；② 修复**实时字幕生成卡在 99% 不完成**：单窗口解码/识别异常会穿透预读循环中断整条生成链路，已将该窗口处理包 try/catch、失败仅跳过并继续；③ 修复**看一会儿字幕就消失**：`onSeek` 之前只清缓存未同步清理「已扫描区间」记录，导致被清掉的后方字幕不再补回（新增 `trimScannedAfter`）；且播放位置同步 effect 以 `isVideoPlaying` 为 key，暂停/恢复重启会把基准误判成 >2s 大跳而误触发 seek 清空缓存，已改为首帧仅初始化基准 |
+| **v2.0.135** | 实测（logcat）推翻 v2.0.134 ③ 的判断：生成速度仅 **≈1x 实时**，seek 清掉前沿后播放头 12s 内必然追上、字幕必消失。① **`onSeek` 不再清任何缓存/扫描记录**（seek 后前方已生成字幕依然正确，清掉再按 1x 补回纯属浪费；往回拖瞬时命中、往前拖直接可用）；② 修 `firstGapIn` **1ms 滑移**（已扫描区间闭区间末尾被当新 gap，每窗重复解码上窗末尾 1ms）；③ 解码窗口 20s→60s（摊薄每窗 seek 到关键帧+flush 的固定开销，提升生成吞吐） |
 
 ---
 

@@ -61,8 +61,15 @@ class RealtimeSubtitleEngine(private val context: Context) {
         private const val MIN_SEGMENT_MS = 300L
         private const val MAX_SEGMENT_MS = 25_000L
 
-        /** 单次解码窗口：一次解 20 秒交给 VAD，避免频繁 seek */
-        private const val DECODE_WINDOW_MS = 20_000L
+        /**
+         * 单次解码窗口（v2.0.135：20s → 60s）。
+         * decodeWindow 每次都要 seekTo 最近关键帧重解，关键帧间隔常见 5–10s，
+         * 窗口越小平摊的冗余解码越多（20s 窗口浪费可达 1/3）。60s 窗口把
+         * seek/flush/VAD-reset 固定开销摊薄 3 倍，实测显著提升生成吞吐；
+         * 且当前点附近（priority 1，cursor-5s~cursor+lookahead）仍按实际缺口
+         * 长度处理，不受窗口变大影响。
+         */
+        private const val DECODE_WINDOW_MS = 60_000L
 
         /** 预读窗口（文档推荐 10–15 秒）：太短会被偶发卡顿打断，太长拖动后做无用功 */
         private const val LOOKAHEAD_DEFAULT_MS = 12_000L
@@ -262,22 +269,19 @@ class RealtimeSubtitleEngine(private val context: Context) {
     }
 
     /**
-     * Seek 处理（文档第七章）：
-     * - 作废「已跑过头」的条目，但**保留前方已生成的**（往回拖才能瞬时命中）；
-     * - 从新位置重建预读。
+     * Seek 处理（v2.0.135 重写）：
+     * **只更新播放头，不清任何缓存/扫描记录。**
+     *
+     * v2.0.134 及之前会 invalidateAfter(target+lookahead) 清掉前沿之后的字幕，
+     * 实测（MuMu logcat）生成速度仅 ≈1x 实时：清掉后播放头 12 秒内必然追上
+     * 生成前沿，此后一直处于"未生成区间"——这就是"拖动/切场景后字幕放一会儿
+     * 就消失"的真正根因。而 seek 后前方已生成的字幕依然正确（音频没变），
+     * 清掉再按 1x 速度补回纯属浪费。故：往回拖，旧字幕仍在（瞬时命中）；
+     * 往前拖，前沿字幕直接可用。真正需要全量清空的只有换媒体（start 已做）。
      */
     fun onSeek(targetMs: Long) {
         cursorMs = targetMs
-        val keepUntil = targetMs + lookaheadMs
-        cache.invalidateAfter(keepUntil)
-        // v2.0.134：已扫描记录必须与缓存同步作废。否则 scannedRanges 仍声称整片已扫描，
-        // 预读循环会误判为"无需再生成"而空转，被清掉的后方字幕永远不再补回
-        // —— 这是"字幕放一会儿就消失"的根因之一。
-        trimScannedAfter(keepUntil)
-        generatedUpToMs = minOf(generatedUpToMs, cache.lastEndMs()).coerceAtLeast(0L)
-        if (generatedUpToMs < targetMs) generatedUpToMs = targetMs
-        Log.i(TAG, "seek → ${targetMs}ms, 保留至 ${keepUntil}ms, 缓存 ${cache.size()} 条")
-        listener?.onCuesUpdated(cache.snapshot())
+        Log.i(TAG, "seek → ${targetMs}ms, 缓存保留 ${cache.size()} 条，已覆盖 ${scannedMs()}ms")
     }
 
     fun stop() {
@@ -398,13 +402,17 @@ class RealtimeSubtitleEngine(private val context: Context) {
         var pos = fromMs
         var guard = 0
         while (pos < toMs && guard++ < 10_000) {
-            val hit = scannedRanges.firstOrNull { pos >= it.first && pos < it.last }
+            // v2.0.135 修 1ms 滑移：scannedRanges 存的是 [first, last]（last=末毫秒，闭区间），
+            // 旧代码匹配条件用 pos < it.last 且跳转用 pos = hit.last，导致每个已扫描区间的
+            // 最后一毫秒永远被当成新 gap 返回——每个窗口都重复解码上窗末尾 1ms（logcat 实证：
+            // 窗口首尾 16122~18081 / 18080~19906 重叠）。正确：命中判定含 last，跳到 last+1。
+            val hit = scannedRanges.firstOrNull { pos >= it.first && pos <= it.last }
             if (hit == null) {
                 val len = minOf(DECODE_WINDOW_MS, toMs - pos)
                 if (len <= 0L) return null
                 return pos until (pos + len)
             }
-            pos = hit.last
+            pos = hit.last + 1
         }
         return null
     }
@@ -444,24 +452,6 @@ class RealtimeSubtitleEngine(private val context: Context) {
     /** 清空扫描记录（重新生成时用） */
     private fun clearScanned() {
         scannedRanges.clear()
-    }
-
-    /**
-     * Seek 后同步作废"已跑过头"的已扫描记录，与 [SubtitleCache.invalidateAfter] 保持一致。
-     * 只保留 [timeMs] 之前（含跨边界截断）的区间，[timeMs] 之后的视为未扫描，
-     * 让预读循环重新补回被清掉的后方字幕。
-     */
-    private fun trimScannedAfter(timeMs: Long) {
-        val out = ArrayList<LongRange>(scannedRanges.size)
-        for (r in scannedRanges) {
-            when {
-                r.last <= timeMs -> out.add(r)                   // 完全在前：保留
-                r.first < timeMs -> out.add(r.first until timeMs) // 跨边界：截断到 timeMs
-                else -> {}                                        // 完全在后：丢弃
-            }
-        }
-        scannedRanges.clear()
-        scannedRanges.addAll(out)
     }
 
     /** v127e：已扫描（解码+识别过）的音频区间，合并相邻；仅预读线程访问 */
