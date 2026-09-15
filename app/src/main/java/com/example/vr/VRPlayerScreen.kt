@@ -1195,9 +1195,9 @@ fun VRPlayerScreen(
 
         // If cached file already exists, load and play it immediately
         if (cacheFile.exists() && cacheFile.length() > 1024) {
-            Toast.makeText(context, context.getString(R.string.toast_cached_downscale, maxResolution.displayName), Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_cached_downscale, context.getString(maxResolution.labelRes)), Toast.LENGTH_SHORT).show()
             val transcodedMediaItem = selectedMediaItem.copy(
-                title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, maxResolution.displayName),
+                title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, context.getString(maxResolution.labelRes)),
                 uri = cacheFile.absolutePath,
                 isDemo = false
             )
@@ -1258,7 +1258,7 @@ fun VRPlayerScreen(
                     val progressState = transformer.getProgress(progressHolder)
                     if (progressState == Transformer.PROGRESS_STATE_AVAILABLE) {
                         transcodingProgress = progressHolder.progress
-                        transcodingStatusText = context.getString(R.string.toast_transcoding_progress, maxResolution.displayName, transcodingProgress)
+                        transcodingStatusText = context.getString(R.string.toast_transcoding_progress, context.getString(maxResolution.labelRes), transcodingProgress)
                         keepUiAlight()
                     }
                     delay(500)
@@ -1277,9 +1277,9 @@ fun VRPlayerScreen(
                 }
 
                 isTranscoding = false
-                Toast.makeText(context, context.getString(R.string.toast_transcode_ok, maxResolution.displayName), Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_transcode_ok, context.getString(maxResolution.labelRes)), Toast.LENGTH_LONG).show()
                 val transcodedMediaItem = selectedMediaItem.copy(
-                    title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, maxResolution.displayName),
+                    title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, context.getString(maxResolution.labelRes)),
                     uri = cacheFile.absolutePath,
                     isDemo = false
                 )
@@ -3340,6 +3340,58 @@ fun VRPlayerScreen(
                                         color = AccentColor,
                                         fontSize = 12.sp
                                     )
+                                    // v2.0.131：界面语言放进「UI 主题」分区（原先挂在设置顶部）。
+                                    // 切换只替换 LocalContext，不重建 Activity，当前视频与播放进度不丢。
+                                    val currentLangTag = remember { LanguageManager.getTag(context) }
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            stringResource(R.string.ui_language),
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        // 6 种语言分两行排（一列太挤）
+                                        LanguageManager.options.chunked(3).forEach { rowTags ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                rowTags.forEach { tag ->
+                                                    val sel = currentLangTag == tag
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(
+                                                                if (sel) AccentColor
+                                                                else Color.White.copy(alpha = 0.08f)
+                                                            )
+                                                            .clickable {
+                                                                keepUiAlight()
+                                                                LanguageManager.apply(context, tag)
+                                                            }
+                                                            .padding(vertical = 6.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            LanguageManager.displayName(tag),
+                                                            color = if (sel) AccentOnColor
+                                                            else Color.White.copy(alpha = 0.75f),
+                                                            fontSize = 9.sp,
+                                                            fontWeight = if (sel) FontWeight.Bold
+                                                            else FontWeight.Normal,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            stringResource(R.string.ui_language_hint),
+                                            color = Color.White.copy(alpha = 0.4f),
+                                            fontSize = 8.sp
+                                        )
+                                    }
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         listOf(0 to stringResource(R.string.theme_solid), 1 to stringResource(R.string.theme_liquid_glass)).forEach { (m, label) ->
                                             val sel = glassMode == m
@@ -4536,55 +4588,6 @@ BatchTranscribeSection(
                                 }
 
                                 SettingsHeader()
-
-                                // v2.0.129：界面语言（跟随系统 / 简体中文 / 繁體中文 / English）
-                                val currentLangTag = remember { LanguageManager.getTag(context) }
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        stringResource(R.string.ui_language),
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        LanguageManager.options.forEach { tag ->
-                                            val selected = currentLangTag == tag
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(
-                                                        if (selected) AccentColor
-                                                        else Color.White.copy(alpha = 0.08f)
-                                                    )
-                                                    .clickable {
-                                                        keepUiAlight()
-                                                        LanguageManager.applyAndRecreate(context, tag)
-                                                    }
-                                                    .padding(vertical = 6.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    LanguageManager.displayName(tag),
-                                                    color = if (selected) AccentOnColor
-                                                    else Color.White.copy(alpha = 0.75f),
-                                                    fontSize = 9.sp,
-                                                    fontWeight = if (selected) FontWeight.Bold
-                                                    else FontWeight.Normal,
-                                                    textAlign = TextAlign.Center
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Text(
-                                        stringResource(R.string.ui_language_hint),
-                                        color = Color.White.copy(alpha = 0.4f),
-                                        fontSize = 8.sp
-                                    )
-                                }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(20.dp)

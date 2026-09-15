@@ -821,7 +821,7 @@ fun SubtitleSettingsPanel(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = fOpt.displayName,
+                                text = stringResource(fOpt.labelRes),
                                 color = if (isSel) accentOnColor else Color.White,
                                 fontSize = 9.sp,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -980,7 +980,7 @@ fun SubtitleSettingsPanel(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = sOpt.displayName,
+                            text = stringResource(sOpt.labelRes),
                             color = if (isSel) accentOnColor else Color.White,
                             fontSize = 9.sp
                         )
@@ -1007,7 +1007,7 @@ fun SubtitleSettingsPanel(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = sOpt.displayName,
+                            text = stringResource(sOpt.labelRes),
                             color = if (isSel) accentOnColor else Color.White,
                             fontSize = 9.sp
                         )
@@ -1033,7 +1033,7 @@ fun SubtitleSettingsPanel(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = bgOpt.displayName,
+                            text = stringResource(bgOpt.labelRes),
                             color = if (isSel) accentOnColor else Color.White,
                             fontSize = 9.sp
                         )
@@ -1125,7 +1125,7 @@ fun SubtitleSettingsPanel(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = alignOpt.displayName,
+                                text = stringResource(alignOpt.labelRes),
                                 color = if (isSel) accentOnColor else Color.White,
                                 fontSize = 9.sp
                             )

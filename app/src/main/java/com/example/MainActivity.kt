@@ -11,10 +11,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.example.R
 import com.example.ui.theme.MyApplicationTheme
@@ -22,10 +25,12 @@ import com.example.vr.AnalyticsManager
 import com.example.vr.LanguageManager
 import com.example.vr.VRPlayerScreen
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), LanguageManager.LanguageHost {
     private var externalMediaUriState by mutableStateOf<String?>(null)
     // v107：首次启动隐私同意弹窗（未同意前不采集任何数据）
     private var showPrivacyDialog by mutableStateOf(false)
+    // v2.0.131：当前界面语言（变更即触发重组，不重建 Activity）
+    private var appLanguageTag by mutableStateOf(LanguageManager.SYSTEM)
 
     // v2.0.129：应用内界面语言。必须在 attachBaseContext 阶段包装 Context，
     // 晚于此（如 onCreate 里改 configuration）对已加载的资源不生效。
@@ -39,6 +44,7 @@ class MainActivity : ComponentActivity() {
         hideSystemUi()
 
         handleIncomingIntent(intent)
+        appLanguageTag = LanguageManager.getTag(this)
 
         // v107：统计隐私同意检查 —— 默认不采集，用户同意后才初始化统计 SDK
         if (!AnalyticsManager.hasConsent(this)) {
@@ -49,6 +55,14 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
+            // v2.0.131：界面语言。
+            // 原先切语言要 Activity.recreate()，会把播放器、当前视频与预览图一起重建掉。
+            // 改为只替换 LocalContext：Compose 树用新语言的 Context 取资源并重组，
+            // Activity 与播放状态原样保留。
+            val localizedContext = remember(appLanguageTag) {
+                LanguageManager.wrap(this@MainActivity, appLanguageTag)
+            }
+            CompositionLocalProvider(LocalContext provides localizedContext) {
             MyApplicationTheme {
                 // v107：隐私与数据统计同意弹窗（不可忽略，必须二选一）
                 if (showPrivacyDialog) {
@@ -88,7 +102,17 @@ class MainActivity : ComponentActivity() {
                     }
                 )
             }
+            }
         }
+    }
+
+    /**
+     * v2.0.131：切换界面语言——只更新 Compose 的 LocalContext，不重建 Activity，
+     * 因此当前视频、播放进度与预览缩略图都不会丢。
+     */
+    override fun applyLanguage(tag: String) {
+        LanguageManager.setTag(this, tag)
+        appLanguageTag = tag
     }
 
     // v107：活跃统计由火山引擎 SDK 自动采集（前台/后台切换），无需手动上报

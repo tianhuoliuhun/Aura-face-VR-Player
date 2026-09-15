@@ -25,6 +25,15 @@ import java.util.Locale
  */
 object LanguageManager {
 
+    /**
+     * 宿主 Activity 需要实现的接口。
+     * v2.0.131：切语言改用「替换 LocalContext + 重组」，不再 Activity.recreate()，
+     * 这样当前视频、播放进度、预览缩略图都不会丢。
+     */
+    interface LanguageHost {
+        fun applyLanguage(tag: String)
+    }
+
     /** 跟随系统语言（默认） */
     const val SYSTEM = "system"
 
@@ -37,11 +46,17 @@ object LanguageManager {
     /** 英语 */
     const val EN = "en"
 
+    /** 日语 */
+    const val JA = "ja"
+
+    /** 韩语 */
+    const val KO = "ko"
+
     private const val PREF_FILE = "vr_player_prefs"
     private const val PREF_KEY = "app_language"
 
     /** 界面上可选的语言（顺序即展示顺序） */
-    val options: List<String> = listOf(SYSTEM, ZH_CN, ZH_TW, EN)
+    val options: List<String> = listOf(SYSTEM, ZH_CN, ZH_TW, EN, JA, KO)
 
     /**
      * 语言选择项自己的名称。刻意用各自语言书写（不随界面语言变化），
@@ -51,6 +66,8 @@ object LanguageManager {
         ZH_CN -> "简体中文"
         ZH_TW -> "繁體中文"
         EN -> "English"
+        JA -> "日本語"
+        KO -> "한국어"
         else -> "跟随系统 / Follow system"
     }
 
@@ -76,14 +93,20 @@ object LanguageManager {
     }
 
     /**
-     * 保存并立即生效（重建当前 Activity）。
-     * @return true 表示已触发重建
+     * 保存并立即生效。
+     * 优先走 [LanguageHost]（只换 LocalContext，不重建 Activity，播放状态不丢）；
+     * 宿主没实现该接口时才退回 recreate（此时会丢失播放状态，仅作兜底）。
+     * @return true 表示已应用
      */
-    fun applyAndRecreate(context: Context, tag: String): Boolean {
+    fun apply(context: Context, tag: String): Boolean {
         setTag(context, tag)
         // 注意：Compose 里的 LocalContext.current 常被 ContextThemeWrapper 等包装多层，
         // 必须逐层解包才能拿到 Activity，只转一次会静默失败。
         val activity = findActivity(context) ?: return false
+        if (activity is LanguageHost) {
+            activity.applyLanguage(tag)
+            return true
+        }
         activity.recreate()
         return true
     }
@@ -102,6 +125,8 @@ object LanguageManager {
         ZH_CN -> Locale.SIMPLIFIED_CHINESE
         ZH_TW -> Locale.TRADITIONAL_CHINESE
         EN -> Locale.ENGLISH
+        JA -> Locale.JAPANESE
+        KO -> Locale.KOREAN
         else -> null // system：不覆盖，交给系统 locale
     }
 }
