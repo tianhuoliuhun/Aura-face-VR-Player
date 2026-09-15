@@ -320,6 +320,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | **v2.0.129** | **界面多语言（第一批）**：支持简体中文 / 繁体中文 / English，默认跟随系统，设置里可手动切换（切换后重建界面）。首批覆盖字幕快捷面板与完整字幕设置面板共 45 条文案 · **i18n (batch 1)**: zh-CN / zh-TW / en, follows system by default with in-app switch |
 | **v2.0.130** | **界面多语言（第二批，累计 352 条）**：繁体改为**大陆用词+繁体字形**（线程/缓存/视频/搜索/导出，非台灣慣用詞）；翻译范围扩到播放控制栏、视频信息、降级转码、8K 硬解、悬浮球、解码器、美颜分区、开源许可、隐私弹窗与全部 Toast 提示 · **i18n batch 2**: traditional Chinese now uses mainland terminology; 352 strings localized |
 | **v2.0.131** | 切换语言**不再重建 Activity**（当前视频/进度/预览图全部保留）/ 语言选项移入「UI 主题」分区 / 新增**日语、韩语**（五语各 400 条）/ 枚举选项名（字幕字体·颜色·描边·背景、投影/Warp/分辨率/立体/解码器）完成多语言 · **i18n**: ja/ko added, language switch keeps playback, 400 strings x 5 languages |
+| **v2.0.132** | **修复 v2.0.131 切语言闪退**：`LanguageManager.wrap` 改为只覆盖 `getResources()`、base 仍指向 Activity 的 `ContextWrapper`，恢复 `rememberLauncherForActivityResult` 顺着 LocalContext 找 `ActivityResultRegistryOwner` 的链路 |
 
 ---
 

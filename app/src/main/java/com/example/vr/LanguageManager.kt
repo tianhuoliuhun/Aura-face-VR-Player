@@ -2,7 +2,9 @@ package com.example.vr
 
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.Configuration
+import android.content.res.Resources
 import java.util.Locale
 
 /**
@@ -81,15 +83,28 @@ object LanguageManager {
     }
 
     /**
-     * 按 [tag] 包装 Context。供 `Activity.attachBaseContext()` 调用，
-     * 使 Activity 及其 Compose 树使用指定语言的资源。
+     * 按 [tag] 包装 Context，使 Activity 及其 Compose 树使用指定语言的资源。
+     *
+     * 实现要点（v2.0.131 修闪退）：
+     * 之前直接 `context.createConfigurationContext(config)` 返回的是**不回溯到原
+     * Activity** 的新 Context。Compose 的 `rememberLauncherForActivityResult` 会顺着
+     * `LocalContext` 用 `findOwner<ActivityResultRegistryOwner>()` 找 Activity，链路一断
+     * 就在切语言重组时抛 `IllegalStateException` 闪退。
+     * 这里改成只覆盖 `getResources()` 返回本地化资源、baseContext 仍指向原 Context 的
+     * `ContextWrapper`——资源本地化了，`findOwner` 顺着 base 仍能命中 Activity。
+     *
+     * 同时被 `Activity.attachBaseContext()`（整 Activity 本地化）和 `setContent`
+     * （只替换 Compose 的 LocalContext）复用，两种场景都要求 base 链路不丢。
      */
     fun wrap(context: Context, tag: String = getTag(context)): Context {
         val locale = localeOf(tag) ?: return context
-        val config = Configuration(context.resources.configuration)
-        config.setLocale(locale)
-        config.setLayoutDirection(locale)
-        return context.createConfigurationContext(config)
+        val cfg = Configuration(context.resources.configuration)
+        cfg.setLocale(locale)
+        cfg.setLayoutDirection(locale)
+        val localizedResources = context.createConfigurationContext(cfg).resources
+        return object : ContextWrapper(context) {
+            override fun getResources(): Resources = localizedResources
+        }
     }
 
     /**
