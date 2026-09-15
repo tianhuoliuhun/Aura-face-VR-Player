@@ -3342,7 +3342,10 @@ fun VRPlayerScreen(
                                     )
                                     // v2.0.131：界面语言放进「UI 主题」分区（原先挂在设置顶部）。
                                     // 切换只替换 LocalContext，不重建 Activity，当前视频与播放进度不丢。
-                                    val currentLangTag = remember { LanguageManager.getTag(context) }
+                                    // v2.0.133：必须以 context（LocalContext.current，切语言后是新的
+                                    // localizedContext 对象）为 key 重算，否则 remember 只在首次组合
+                                    // 缓存旧 tag，高亮停在原语言上。
+                                    val currentLangTag = remember(context) { LanguageManager.getTag(context) }
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(
                                             stringResource(R.string.ui_language),
