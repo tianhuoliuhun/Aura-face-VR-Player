@@ -546,7 +546,7 @@ fun VRPlayerScreen(
                         loadedSubtitleCues = cues
                         val name = uri.lastPathSegment?.substringAfterLast('/') ?: "外部字幕.srt"
                         loadedSubtitleFileName = name
-                        Toast.makeText(context, "成功加载 ${cues.size} 条字幕！", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_subtitle_loaded, cues.size), Toast.LENGTH_SHORT).show()
                         if (subtitleTranslator.config.isEnabled) {
                             subtitleTranslator.translateCuesBatch(cues)
                         }
@@ -554,7 +554,7 @@ fun VRPlayerScreen(
                 } catch (e: Exception) {
                     Log.e("VRPlayerScreen", "Error reading subtitle file", e)
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "字幕加载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_subtitle_load_failed, (e.message ?: "")), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -575,7 +575,7 @@ fun VRPlayerScreen(
         val label = SherpaAsrManager.sherpaLanguages.firstOrNull { it.first == code }?.second ?: code
         Toast.makeText(
             context,
-            if (isRealtimeSubtitleEnabled) "识别语言：$label（重新加载模型，约 5 秒）" else "识别语言：$label",
+            if (isRealtimeSubtitleEnabled) context.getString(R.string.asr_lang_switch_hint, label) else context.getString(R.string.asr_lang_label, label),
             Toast.LENGTH_SHORT
         ).show()
     }
@@ -590,13 +590,13 @@ fun VRPlayerScreen(
     fun exportSubtitleSrt() {
         val cues = if (isRealtimeSubtitleEnabled) realtimeCues else loadedSubtitleCues
         if (cues.isEmpty()) {
-            Toast.makeText(context, "暂无可导出的字幕", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_no_subtitle_export), Toast.LENGTH_SHORT).show()
             return
         }
         val f = SubtitleExporter.exportSrt(context, selectedMediaItem.title, cues)
         Toast.makeText(
             context,
-            if (f != null) "已导出 ${cues.size} 条字幕：\n${f.absolutePath}" else "字幕导出失败",
+            if (f != null) context.getString(R.string.toast_subtitle_exported, cues.size, f.absolutePath) else context.getString(R.string.toast_subtitle_export_failed),
             Toast.LENGTH_LONG
         ).show()
     }
@@ -604,17 +604,17 @@ fun VRPlayerScreen(
     /** v127e：重新生成实时字幕（清空缓存后按当前播放点重新走优先级调度） */
     fun regenerateRealtimeSubtitle() {
         if (!isRealtimeSubtitleEnabled) {
-            Toast.makeText(context, "请先开启「实时 AI 字幕」", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_enable_realtime_first), Toast.LENGTH_SHORT).show()
             return
         }
         if (!selectedMediaItem.isVideo) {
-            Toast.makeText(context, "当前是图片，没有音轨可识别", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_image_no_audio), Toast.LENGTH_SHORT).show()
             return
         }
         realtimeCues = emptyList()
         realtimeDone = false
         realtimeSubtitleEngine.restart()
-        Toast.makeText(context, "已重新开始生成字幕", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.toast_subtitle_restarted), Toast.LENGTH_SHORT).show()
     }
 
     // 后台生成全片 SRT 字幕（v110）：支持双引擎 Vosk / Qwen3-ASR
@@ -627,7 +627,7 @@ fun VRPlayerScreen(
         // v123：图片没有音轨，此前直接开跑会在解码阶段才失败（提示"音轨解码失败"，
         // 用户无从判断）。这里提前拦下并给明确说明。
         if (!selectedMediaItem.isVideo) {
-            batchTranscribeStatus = "当前是图片，没有音轨可识别（请打开视频后再生成字幕）"
+            batchTranscribeStatus = stringResource(R.string.toast_image_no_audio_gen)
             Toast.makeText(context, batchTranscribeStatus, Toast.LENGTH_SHORT).show()
             return
         }
@@ -677,7 +677,7 @@ fun VRPlayerScreen(
     // v103：悬浮球按下时的速度提示条（仅显示 1 秒后自动隐藏）
     var showSpeedHud by remember { mutableStateOf(false) }
     // v104：LUT 视频滤镜状态
-    var lutName by remember { mutableStateOf("无滤镜") }       // 当前滤镜名
+    var lutName by remember { mutableStateOf(context.getString(R.string.lut_none)) }       // 当前滤镜名
     var lutMix by remember { mutableFloatStateOf(0.8f) }       // 滤镜强度 0~1
     var isLutLoading by remember { mutableStateOf(false) }     // 解析中
     // v91：主界面字幕快捷面板
@@ -994,14 +994,14 @@ fun VRPlayerScreen(
             val realName = Uri.parse(initialVideoUri).lastPathSegment
                 ?.substringAfterLast('/')
                 ?.substringBeforeLast('.')
-                ?.takeIf { it.isNotBlank() } ?: "外部视频"
+                ?.takeIf { it.isNotBlank() } ?: context.getString(R.string.media_external_video)
             val customItem = MediaItem(
                 id = "imported_" + System.currentTimeMillis(),
                 title = realName,
                 uri = initialVideoUri,
                 isVideo = true,
                 isDemo = false,
-                description = "从第三方软件导入播放的视频"
+                description = context.getString(R.string.media_external_desc)
             )
             selectedMediaItem = customItem
             projectionMode = ProjectionMode.STANDARD
@@ -1058,14 +1058,14 @@ fun VRPlayerScreen(
                 ?.substringAfterLast('/')
                 ?.substringBeforeLast('.')
                 ?.takeIf { it.isNotBlank() }
-                ?: if (isVideo) "导入视频" else "导入图像"
+                ?: if (isVideo) context.getString(R.string.action_import_video) else context.getString(R.string.action_import_image)
             val customItem = MediaItem(
                 id = "custom_" + System.currentTimeMillis(),
                 title = realName,
                 uri = uri.toString(),
                 isVideo = isVideo,
                 isDemo = false,
-                description = "用户从本地相册导入的媒体内容。路径: ${uri.lastPathSegment}"
+                description = context.getString(R.string.media_imported_desc, uri.lastPathSegment)
             )
 
             // Setup smart default projections
@@ -1131,16 +1131,16 @@ fun VRPlayerScreen(
                             currentGlSurfaceView?.renderer?.setLutTexture(rgba)
                             currentGlSurfaceView?.renderer?.lutMix = lutMix
                             lutName = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')
-                                ?: "自定义 LUT"
-                            Toast.makeText(context, "LUT 已应用：$lutName", Toast.LENGTH_SHORT).show()
+                                ?: context.getString(R.string.lut_custom)
+                            Toast.makeText(context, context.getString(R.string.toast_lut_applied, lutName), Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, "LUT 解析失败", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.toast_lut_parse_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 } catch (e: Exception) {
                     Log.e("VRPlayerScreen", "LUT load failed", e)
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "LUT 加载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_lut_load_failed, (e.message ?: "")), Toast.LENGTH_SHORT).show()
                     }
                 } finally {
                     withContext(Dispatchers.Main) { isLutLoading = false }
@@ -1183,7 +1183,7 @@ fun VRPlayerScreen(
     fun startDownscalingTranscode() {
         val uriStr = selectedMediaItem.uri ?: return
         if (maxResolution == MaxResolution.UNRESTRICTED) {
-            Toast.makeText(context, "请先选择一个分辨率限制后再进行降级转码", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_select_resolution_first), Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -1195,9 +1195,9 @@ fun VRPlayerScreen(
 
         // If cached file already exists, load and play it immediately
         if (cacheFile.exists() && cacheFile.length() > 1024) {
-            Toast.makeText(context, "检测到已缓存的 ${maxResolution.displayName} 降级版本，直接播放！", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_cached_downscale, maxResolution.displayName), Toast.LENGTH_SHORT).show()
             val transcodedMediaItem = selectedMediaItem.copy(
-                title = selectedMediaItem.title + " (${maxResolution.displayName} 降级版)",
+                title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, maxResolution.displayName),
                 uri = cacheFile.absolutePath,
                 isDemo = false
             )
@@ -1209,7 +1209,7 @@ fun VRPlayerScreen(
 
         isTranscoding = true
         transcodingProgress = 0
-        transcodingStatusText = "正在初始化转码引擎..."
+        transcodingStatusText = context.getString(R.string.toast_transcode_init)
 
         scope.launch(Dispatchers.Main) {
             var tempOutFile: File? = null
@@ -1258,7 +1258,7 @@ fun VRPlayerScreen(
                     val progressState = transformer.getProgress(progressHolder)
                     if (progressState == Transformer.PROGRESS_STATE_AVAILABLE) {
                         transcodingProgress = progressHolder.progress
-                        transcodingStatusText = "正在降轨转码为 ${maxResolution.displayName}... ${transcodingProgress}%"
+                        transcodingStatusText = context.getString(R.string.toast_transcoding_progress, maxResolution.displayName, transcodingProgress)
                         keepUiAlight()
                     }
                     delay(500)
@@ -1277,9 +1277,9 @@ fun VRPlayerScreen(
                 }
 
                 isTranscoding = false
-                Toast.makeText(context, "降轨转码成功！正在播放 ${maxResolution.displayName} 视频", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_transcode_ok, maxResolution.displayName), Toast.LENGTH_LONG).show()
                 val transcodedMediaItem = selectedMediaItem.copy(
-                    title = selectedMediaItem.title + " (${maxResolution.displayName} 降级版)",
+                    title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, maxResolution.displayName),
                     uri = cacheFile.absolutePath,
                     isDemo = false
                 )
@@ -1292,7 +1292,7 @@ fun VRPlayerScreen(
                 withContext(Dispatchers.IO) {
                     tempOutFile?.let { if (it.exists()) it.delete() }
                 }
-                Toast.makeText(context, "转码降轨失败: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.toast_transcode_failed, e.localizedMessage), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1323,7 +1323,7 @@ fun VRPlayerScreen(
             try {
                 val dir = jcifs.smb.SmbFile(path)
                 if (!dir.exists() || !dir.isDirectory) {
-                    withContext(Dispatchers.Main) { smbError = "路径不存在: $path" }
+                    withContext(Dispatchers.Main) { smbError = context.getString(R.string.toast_path_not_exist, path) }
                     return@launch
                 }
                 val entries = dir.listFiles()?.toList() ?: emptyList()
@@ -1332,7 +1332,7 @@ fun VRPlayerScreen(
                     smbEntries = entries
                 }
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { smbError = "连接失败: ${e.message}" }
+                withContext(Dispatchers.Main) { smbError = context.getString(R.string.toast_connect_failed, (e.message ?: "")) }
             }
         }
     }
@@ -1340,7 +1340,7 @@ fun VRPlayerScreen(
     fun connectSmb() {
         val host = smbHost.trim()
         if (host.isEmpty()) {
-            smbError = "请输入服务器地址"
+            smbError = context.getString(R.string.toast_enter_server_addr)
             return
         }
         val creds = if (smbUser.isNotBlank()) "${smbUser}:${smbPass}@" else ""
@@ -1370,7 +1370,7 @@ fun VRPlayerScreen(
         seekUnsupported = false
         Toast.makeText(
             context,
-            "检测到视频拖动定位异常，正在自动修复容器（无需转码）...",
+            context.getString(R.string.toast_fixing_container),
             Toast.LENGTH_LONG
         ).show()
 
@@ -1382,17 +1382,17 @@ fun VRPlayerScreen(
                 if (result.success && out.length() > 1024) {
                     Toast.makeText(
                         context,
-                        if (result.audioIncluded) "视频容器已修复，现在可以正常拖动定位了" else "视频容器已修复（音频轨道不兼容，播放将无声）",
+                        if (result.audioIncluded) context.getString(R.string.toast_container_fixed) else context.getString(R.string.toast_container_fixed_no_audio),
                         Toast.LENGTH_LONG
                     ).show()
                     selectedMediaItem = selectedMediaItem.copy(
                         uri = Uri.fromFile(out).toString(),
-                        title = selectedMediaItem.title + " (已修复)"
+                        title = selectedMediaItem.title + context.getString(R.string.suffix_fixed)
                     )
                     photoReloadTrigger++
                 } else {
                     seekUnsupported = true
-                    Toast.makeText(context, "该视频格式不支持拖动定位（自动修复失败）", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_seek_unsupported), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -1419,7 +1419,7 @@ fun VRPlayerScreen(
         isRemuxing = true
         Toast.makeText(
             context,
-            "视频超出硬件解码标称上限，正在修改编码头尝试硬件解码（实验性）...",
+            context.getString(R.string.toast_patching_header),
             Toast.LENGTH_LONG
         ).show()
 
@@ -1448,12 +1448,12 @@ fun VRPlayerScreen(
                 if (result.success && out.length() > 1024) {
                     Toast.makeText(
                         context,
-                        "已生成硬件解码兼容版本，正在播放（若花屏/黑屏/无声请反馈芯片型号）",
+                        context.getString(R.string.toast_hw_patch_ok),
                         Toast.LENGTH_LONG
                     ).show()
                     selectedMediaItem = selectedMediaItem.copy(
                         uri = Uri.fromFile(out).toString(),
-                        title = selectedMediaItem.title + " (硬解适配)"
+                        title = selectedMediaItem.title + context.getString(R.string.suffix_hw_patched)
                     )
                     photoReloadTrigger++
                 } else {
@@ -1505,9 +1505,9 @@ fun VRPlayerScreen(
         val title = selectedMediaItem.title
         val displayName = getMediaDisplayName()
         val sb = StringBuilder()
-        sb.append("文件: $displayName\n")
+        sb.append(context.getString(R.string.info_file, displayName))
         if (title != null && title != displayName) {
-            sb.append("标题: $title\n")
+            sb.append(context.getString(R.string.info_title, title))
         }
         var gotAny = false
         playerInstance?.let { p ->
@@ -1515,21 +1515,21 @@ fun VRPlayerScreen(
                 val dur = p.duration
                 if (dur > 0) {
                     gotAny = true
-                    sb.append("时长: ${dur / 1000 / 60}分${(dur / 1000) % 60}秒\n")
+                    sb.append(context.getString(R.string.info_duration, dur / 1000 / 60, (dur / 1000) % 60))
                 }
                 val groups = p.currentTracks?.groups
                 if (groups != null && groups.isNotEmpty()) {
                     gotAny = true
                     for (g in groups) {
                         val f = g.mediaTrackGroup.getFormat(0)
-                        val mime = f.sampleMimeType ?: "未知"
+                        val mime = f.sampleMimeType ?: context.getString(R.string.unknown)
                         if (mime.startsWith("video/")) {
                             if (f.width > 0 && f.height > 0) {
-                                sb.append("分辨率: ${f.width} × ${f.height}\n")
+                                sb.append(context.getString(R.string.info_resolution, f.width, f.height))
                             }
-                            sb.append("视频编码: $mime\n")
-                            if (f.frameRate > 0f) sb.append("帧率: ${f.frameRate} fps\n")
-                            if (f.bitrate > 0) sb.append("码率: ${f.bitrate / 1000} kbps\n")
+                            sb.append(context.getString(R.string.info_video_codec, mime))
+                            if (f.frameRate > 0f) sb.append(context.getString(R.string.info_fps, f.frameRate))
+                            if (f.bitrate > 0) sb.append(context.getString(R.string.info_bitrate, f.bitrate / 1000))
                         } else if (mime.startsWith("audio/")) {
                             sb.append("音轨: $mime ${f.language ?: ""}\n")
                         } else {
@@ -1537,7 +1537,7 @@ fun VRPlayerScreen(
                         }
                     }
                 }
-                sb.append("解码: ${if (isSoftwareDecoding) "软件" else "硬件"}\n")
+                sb.append("解码: ${if (isSoftwareDecoding) "软件" else context.getString(R.string.info_hw)}\n")
             } catch (e: Exception) {
                 Log.e("VRPlayerScreen", "video info player read failed", e)
             }
@@ -1567,17 +1567,17 @@ fun VRPlayerScreen(
                     gotAny = true
                     val w = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
                     val h = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                    if (w != null && h != null && !sb.contains("分辨率")) {
-                        sb.append("分辨率: $w × $h\n")
+                    if (w != null && h != null && !sb.contains(context.getString(R.string.label_resolution))) {
+                        sb.append(context.getString(R.string.info_resolution2, w, h))
                     }
                     val rotation = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                    if (rotation != null && rotation != "0") sb.append("旋转: $rotation°\n")
+                    if (rotation != null && rotation != "0") sb.append(context.getString(R.string.info_rotation, rotation))
                     val fps = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
-                    if (fps != null && fps != "-1" && !sb.contains("帧率")) sb.append("帧率: $fps fps\n")
+                    if (fps != null && fps != "-1" && !sb.contains(context.getString(R.string.label_fps))) sb.append(context.getString(R.string.info_fps2, fps))
                     val bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)
-                    if (bitrate != null && !sb.contains("码率")) sb.append("码率: ${bitrate.toLong() / 1000} kbps\n")
+                    if (bitrate != null && !sb.contains(context.getString(R.string.label_bitrate))) sb.append(context.getString(R.string.info_bitrate2, bitrate.toLong() / 1000))
                     val mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
-                    if (mime != null && !sb.contains("编码")) sb.append("编码: $mime\n")
+                    if (mime != null && !sb.contains(context.getString(R.string.label_codec))) sb.append(context.getString(R.string.info_codec, mime))
                 }
             } catch (e: Exception) {
                 Log.e("VRPlayerScreen", "video info retriever failed", e)
@@ -1585,7 +1585,7 @@ fun VRPlayerScreen(
                 try { retriever?.release() } catch (_: Exception) {}
             }
 
-            val info = if (gotAny) sb.toString() else "未能读取视频信息"
+            val info = if (gotAny) sb.toString() else context.getString(R.string.info_unavailable)
             withContext(Dispatchers.Main) {
                 videoInfoDialogText = info
             }
@@ -1739,7 +1739,7 @@ fun VRPlayerScreen(
                                                 projectionMode = ProjectionMode.VR_360
                                                 stereoMode = StereoMode.MONO
                                                 currentGlSurfaceView?.renderer?.warpDualCenter = true
-                                                Toast.makeText(context, "检测到 2:1 全景视频，已切换至 VR_360 全景（单目）", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, context.getString(R.string.toast_detected_360), Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                         else -> {
@@ -1748,7 +1748,7 @@ fun VRPlayerScreen(
                                                 projectionMode = ProjectionMode.STANDARD
                                                 stereoMode = StereoMode.MONO
                                                 currentGlSurfaceView?.renderer?.warpDualCenter = false
-                                                Toast.makeText(context, "检测到普通 2D 视频，已切换至平面模式", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, context.getString(R.string.toast_detected_2d), Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     }
@@ -1765,15 +1765,15 @@ fun VRPlayerScreen(
                                     vidAspect !in 1.80f..2.20f && stereoMode != StereoMode.MONO
                                 ) {
                                     stereoMode = StereoMode.MONO
-                                    Toast.makeText(context, "普通 2D 视频已恢复单目显示（3D 立体仅适用于 3D 片源）", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.toast_2d_mono), Toast.LENGTH_SHORT).show()
                                 }
                                 
                                 // Detect ultra high resolution (like 8K or exceeds user set resolution limit)
                                 if (width > maxResolution.width || height > maxResolution.height) {
-                                    resolutionTipText = "当前视频分辨率 (${width}x${height}) 超过设置限制，可能导致卡顿。"
+                                    resolutionTipText = context.getString(R.string.toast_res_exceeds, width, height)
                                     showResolutionTip = true
                                 } else if (width >= 7680 || height >= 4320) {
-                                    resolutionTipText = "该视频为 ${width}x${height} 8K超高清，若卡顿建议开启解码限制。"
+                                    resolutionTipText = context.getString(R.string.toast_8k_hint, width, height)
                                     showResolutionTip = true
                                 } else {
                                     showResolutionTip = false
@@ -1786,7 +1786,7 @@ fun VRPlayerScreen(
                                 ) {
                                     val cap = DecoderCapabilities.getBestHardwareDecoderMax()
                                     if (cap != null && (width > cap.width || height > cap.height)) {
-                                        resolutionTipText = "视频 ${width}x${height} 超出硬件解码标称上限，正在尝试修改编码头硬解"
+                                        resolutionTipText = context.getString(R.string.toast_8k_patching, width, height)
                                         showResolutionTip = true
                                         startLevelPatchFix()
                                     }
@@ -1841,7 +1841,7 @@ fun VRPlayerScreen(
                             (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                                 error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED)
                         ) {
-                            Toast.makeText(context, "硬件解码失败，自动切换软件解码", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.toast_hw_failed_sw), Toast.LENGTH_SHORT).show()
                             isSoftwareDecoding = true
                         }
                     }
@@ -2015,7 +2015,7 @@ fun VRPlayerScreen(
                                         isSubtitleEnabled = true
                                     }
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "已加载字幕：${matchedFile.name}（${cues.size} 句）", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_subtitle_autoloaded, matchedFile.name, cues.size), Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
@@ -2041,7 +2041,7 @@ fun VRPlayerScreen(
             return@LaunchedEffect
         }
         if (!selectedMediaItem.isVideo) {
-            realtimeSubtitleStatus = "当前是图片，没有音轨可用于实时字幕"
+            realtimeSubtitleStatus = context.getString(R.string.toast_image_no_audio_realtime)
             return@LaunchedEffect
         }
         val uriStr = selectedMediaItem.uri ?: return@LaunchedEffect
@@ -2312,7 +2312,7 @@ fun VRPlayerScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Warning,
-                        contentDescription = "分辨率提示",
+                        contentDescription = stringResource(R.string.resolution_hint_title),
                         tint = Color(0xFFFF9800),
                         modifier = Modifier.size(16.dp)
                     )
@@ -2326,7 +2326,7 @@ fun VRPlayerScreen(
                     Spacer(modifier = Modifier.width(4.dp))
                     if (selectedMediaItem.uri != null && maxResolution != MaxResolution.UNRESTRICTED) {
                         Text(
-                            text = "一键降级转码",
+                            text = stringResource(R.string.action_downscale),
                             color = AccentColor,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -2339,7 +2339,7 @@ fun VRPlayerScreen(
                         Spacer(modifier = Modifier.width(4.dp))
                     }
                     Text(
-                        text = "我知道了",
+                        text = stringResource(R.string.action_got_it),
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -2381,14 +2381,14 @@ fun VRPlayerScreen(
                         )
                         
                         Text(
-                            text = "视频分辨率降轨转换中",
+                            text = stringResource(R.string.downscaling_title),
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
                         
                         Text(
-                            text = "正在利用底层硬件编码器将 8K 超清视频高保真转码为较小分辨率以保证完美流畅播放。请勿退出应用。",
+                            text = stringResource(R.string.downscaling_desc),
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center
@@ -2442,7 +2442,7 @@ fun VRPlayerScreen(
             ) {
                 Icon(
                     imageVector = if (isUiLocked) Icons.Default.Lock else Icons.Default.LockOpen,
-                    contentDescription = if (isUiLocked) "解锁控制界面" else "锁定控制界面",
+                    contentDescription = if (isUiLocked) stringResource(R.string.unlock_ui) else stringResource(R.string.lock_ui),
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -2482,13 +2482,13 @@ fun VRPlayerScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.Face, // Face / Beauty Icon
-                                contentDescription = "美颜图标",
+                                contentDescription = stringResource(R.string.cd_beauty_icon),
                                 tint = AccentColor,
                                 modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "美颜VR播放器",
+                                text = stringResource(R.string.app_desc),
                                 color = TextLightColor,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
@@ -2496,7 +2496,7 @@ fun VRPlayerScreen(
                             )
                         }
                         Text(
-                            text = "当前媒体: ${getMediaDisplayName()}",
+                            text = stringResource(R.string.current_media, getMediaDisplayName()),
                             color = AccentColor.copy(alpha = 0.85f),
                             fontSize = 11.sp,
                             maxLines = 1,
@@ -2524,7 +2524,7 @@ fun VRPlayerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Add,
-                                contentDescription = "导入本地照片或视频"
+                                contentDescription = stringResource(R.string.import_local_media)
                             )
                         }
 
@@ -2543,7 +2543,7 @@ fun VRPlayerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ViewInAr,
-                                contentDescription = "VR分屏戴戴模式",
+                                contentDescription = stringResource(R.string.cd_vr_split_mode),
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -2563,7 +2563,7 @@ fun VRPlayerScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
-                                contentDescription = "磨皮参数与投影二级控制菜单",
+                                contentDescription = stringResource(R.string.beauty_projection_menu),
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -2646,7 +2646,7 @@ fun VRPlayerScreen(
                                                 hoverPreviewBitmap?.let { bmp ->
                                                     androidx.compose.foundation.Image(
                                                         bitmap = bmp.asImageBitmap(),
-                                                        contentDescription = "视频拖拽预览缩略图",
+                                                        contentDescription = stringResource(R.string.cd_drag_thumbnail),
                                                         modifier = Modifier
                                                             .size(160.dp, 90.dp)
                                                             .clip(RoundedCornerShape(8.dp))
@@ -2765,14 +2765,14 @@ fun VRPlayerScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
                                             imageVector = Icons.Default.Star,
-                                            contentDescription = "图像状态",
+                                            contentDescription = stringResource(R.string.cd_image_state),
                                             tint = Color(0xFFFFD700),
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("全景图像已静态渲染 • 手指拖曳查看", color = AccentColor, fontSize = 11.sp)
+                                        Text(stringResource(R.string.image_static_panorama), color = AccentColor, fontSize = 11.sp)
                                     }
-                                    Text("支持双指缩放", color = TextSoftColor, fontSize = 11.sp)
+                                    Text(stringResource(R.string.image_pinch_zoom), color = TextSoftColor, fontSize = 11.sp)
                                 }
                             }
 
@@ -3243,7 +3243,7 @@ fun VRPlayerScreen(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "高级播放参数与美肤协同微调",
+                                    text = stringResource(R.string.settings_dialog_title),
                                     color = Color.White,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
@@ -3256,7 +3256,7 @@ fun VRPlayerScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.FolderOpen,
-                                        contentDescription = "局域网播放",
+                                        contentDescription = stringResource(R.string.action_lan_play),
                                         tint = Color.White.copy(alpha = 0.7f),
                                         modifier = Modifier.size(16.dp)
                                     )
@@ -3267,7 +3267,7 @@ fun VRPlayerScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Info,
-                                        contentDescription = "视频信息",
+                                        contentDescription = stringResource(R.string.action_media_info),
                                         tint = Color.White.copy(alpha = 0.7f),
                                         modifier = Modifier.size(16.dp)
                                     )
@@ -3282,7 +3282,7 @@ fun VRPlayerScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.QueueMusic,
-                                        contentDescription = "音轨/字幕轨选择",
+                                        contentDescription = stringResource(R.string.action_track_select),
                                         tint = Color.White.copy(alpha = 0.7f),
                                         modifier = Modifier.size(16.dp)
                                     )
@@ -3294,7 +3294,7 @@ fun VRPlayerScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "关闭",
+                                    contentDescription = stringResource(R.string.action_close),
                                     tint = Color.White.copy(alpha = 0.6f)
                                 )
                             }
@@ -3304,7 +3304,7 @@ fun VRPlayerScreen(
                                 @Composable
                                 fun SettingsSection0() {
                                 Text(
-                                    text = "0. UI 主题与玻璃效果（8/2 功能）",
+                                    text = stringResource(R.string.settings_group_ui_theme),
                                     color = AccentColor,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
@@ -3341,7 +3341,7 @@ fun VRPlayerScreen(
                                         fontSize = 12.sp
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        listOf(0 to "实色", 1 to "液体玻璃").forEach { (m, label) ->
+                                        listOf(0 to stringResource(R.string.theme_solid), 1 to stringResource(R.string.theme_liquid_glass)).forEach { (m, label) ->
                                             val sel = glassMode == m
                                             Box(
                                                 modifier = Modifier
@@ -3369,7 +3369,7 @@ fun VRPlayerScreen(
                                 @Composable
                                 fun SettingsSection1() {
                                 Text(
-                                    text = "1. 镜头投影与视角模式",
+                                    text = stringResource(R.string.settings_group_projection),
                                     color = AccentColor,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
@@ -3383,8 +3383,8 @@ fun VRPlayerScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("投影智能检测", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                            Text("自动识别 2:1 全景 / 普通 2D 内容并切换投影与立体模式", color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                            Text(stringResource(R.string.projection_auto_detect), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(stringResource(R.string.projection_auto_detect_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
                                         }
                                         Switch(
                                             checked = isSmartProjectionEnabled,
@@ -3404,14 +3404,14 @@ fun VRPlayerScreen(
 
                                     // 强制视频类型判断（自动/2D/360°/180°/3D 左右/3D 上下）
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("强制视频类型", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                        Text(stringResource(R.string.force_video_type), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                         val forceOptions = listOf(
-                                            0 to "自动",
+                                            0 to stringResource(R.string.auto),
                                             1 to "2D",
                                             2 to "360°",
                                             3 to "180°",
-                                            4 to "3D左右",
-                                            5 to "3D上下"
+                                            4 to stringResource(R.string.video_type_3d_sbs),
+                                            5 to stringResource(R.string.video_type_3d_tab)
                                         )
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -3442,13 +3442,13 @@ fun VRPlayerScreen(
                                             }
                                         }
                                         Text(
-                                            text = "自动：按宽高比识别；强制：固定视频类型并锁定（2:1 全景自动开启双中心变形）",
+                                            text = stringResource(R.string.force_video_type_desc),
                                             color = Color.White.copy(alpha = 0.4f),
                                             fontSize = 8.sp
                                         )
                                     }
 
-                                    Text("视角格式", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Text(stringResource(R.string.view_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     ProjectionMode.values().toList().chunked(3).forEach { rowModes ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -3488,7 +3488,7 @@ fun VRPlayerScreen(
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("立体格式", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Text(stringResource(R.string.stereo_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -3511,9 +3511,9 @@ fun VRPlayerScreen(
                                             ) {
                                                 Text(
                                                     text = when (mode) {
-                                                        StereoMode.MONO -> "平面2D"
-                                                        StereoMode.SBS -> "左右3D"
-                                                        StereoMode.TAB -> "上下3D"
+                                                        StereoMode.MONO -> stringResource(R.string.stereo_2d)
+                                                        StereoMode.SBS -> stringResource(R.string.stereo_sbs)
+                                                        StereoMode.TAB -> stringResource(R.string.stereo_tab)
                                                     },
                                                     color = if (isSelected) AccentOnColor else Color.White,
                                                     fontSize = 10.sp,
@@ -3525,12 +3525,12 @@ fun VRPlayerScreen(
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("视频画面镜像", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Text(stringResource(R.string.video_mirror), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        listOf(false to "正常画面", true to "左右镜像").forEach { (mirrored, label) ->
+                                        listOf(false to stringResource(R.string.mirror_normal), true to stringResource(R.string.mirror_hflip)).forEach { (mirrored, label) ->
                                             val isSelected = isVideoMirrored == mirrored
                                             Box(
                                                 modifier = Modifier
@@ -3560,14 +3560,14 @@ fun VRPlayerScreen(
                                 // 陀螺仪朝向模式：决定"头部转动"如何映射为画面视角。
                                 // 手持横屏与 VR 眼镜平放时正确的轴向完全不同，选错会导致方向错乱。
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("陀螺仪朝向模式", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Text(stringResource(R.string.gyro_orientation_mode), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         listOf(
-                                            VRSensorManager.OrientationMode.HANDHELD to "手持横屏",
-                                            VRSensorManager.OrientationMode.VR_BOX to "VR眼镜平放"
+                                            VRSensorManager.OrientationMode.HANDHELD to stringResource(R.string.gyro_handheld),
+                                            VRSensorManager.OrientationMode.VR_BOX to stringResource(R.string.gyro_vr_flat)
                                         ).forEach { (mode, label) ->
                                             val isSelected = gyroOrientationMode == mode
                                             Box(
@@ -3594,7 +3594,7 @@ fun VRPlayerScreen(
                                         }
                                     }
                                     Text(
-                                        text = "手持横屏举着看选「手持」；手机放进 VR 眼镜透过屏幕看选「平放」。切换时自动以当前朝向为视角原点，双击画面可随时重置视角。仅 360°/180°/盒子模式生效",
+                                        text = stringResource(R.string.gyro_orientation_desc),
                                         color = Color.White.copy(alpha = 0.4f),
                                         fontSize = 8.sp
                                     )
@@ -3603,8 +3603,8 @@ fun VRPlayerScreen(
                                 // v125：陀螺仪转向反转。默认关闭（v125 起已修正为正确方向），
                                 // 个别机型或 VR 眼镜模式下若仍上下/左右相反，打开此项即可。
                                 ExperimentalSwitchRow(
-                                    title = "反转陀螺仪转向",
-                                    desc = "若画面上下/左右仍与头部动作相反，打开此项",
+                                    title = stringResource(R.string.gyro_invert),
+                                    desc = stringResource(R.string.gyro_invert_desc),
                                     checked = gyroInverted,
                                     onChanged = { gyroInverted = it; keepUiAlight() },
                                     accentColor = AccentColor,
@@ -3612,12 +3612,12 @@ fun VRPlayerScreen(
                                 )
 
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("音频声道镜像", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Text(stringResource(R.string.audio_channel_mirror), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        listOf(false to "正常声道", true to "声道反转").forEach { (mirrored, label) ->
+                                        listOf(false to stringResource(R.string.audio_normal), true to stringResource(R.string.audio_swapped)).forEach { (mirrored, label) ->
                                             val isSelected = isAudioMirrored == mirrored
                                             Box(
                                                 modifier = Modifier
@@ -3646,12 +3646,12 @@ fun VRPlayerScreen(
 
                                 if (projectionMode == ProjectionMode.VR_180) {
                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text("180°穹幕源画面裁剪", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                        Text(stringResource(R.string.dome_half_crop), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            listOf(1 to "仅左半屏", 0 to "仅右半屏").forEach { (half, label) ->
+                                            listOf(1 to stringResource(R.string.dome_half_left), 0 to stringResource(R.string.dome_half_right)).forEach { (half, label) ->
                                                 val isSelected = domeHalfSelect == half
                                                 Box(
                                                     modifier = Modifier
@@ -3684,7 +3684,7 @@ fun VRPlayerScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text("视场角 (FOV) 视野广度", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                        Text(stringResource(R.string.fov_title), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                         Text("${fovDeg.toInt()}°", color = AccentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                     }
                                     Slider(
@@ -3706,7 +3706,7 @@ fun VRPlayerScreen(
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("视频变形/透视效果", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Text(stringResource(R.string.warp_title), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     WarpMode.values().toList().chunked(3).forEach { rowModes ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -3750,13 +3750,13 @@ fun VRPlayerScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             val label = when (warpMode) {
-                                                WarpMode.CYLINDER_RECT -> "等距矩形柱面弯曲率"
-                                                WarpMode.CYLINDER -> "等距圆柱弯曲率"
-                                                WarpMode.SPHERE -> "球面立体膨胀度"
-                                                WarpMode.CURVE -> "环幕曲率调节"
-                                                WarpMode.ANTI_SPHERE -> "反向球面收缩度"
-                                                WarpMode.ANTI_CURVE -> "反向曲率收缩度"
-                                                else -> "变焦弯曲率"
+                                                WarpMode.CYLINDER_RECT -> stringResource(R.string.warp_equirect_cylinder)
+                                                WarpMode.CYLINDER -> stringResource(R.string.warp_equirect_column)
+                                                WarpMode.SPHERE -> stringResource(R.string.warp_sphere_expand)
+                                                WarpMode.CURVE -> stringResource(R.string.warp_ring_curve)
+                                                WarpMode.ANTI_SPHERE -> stringResource(R.string.warp_sphere_shrink)
+                                                WarpMode.ANTI_CURVE -> stringResource(R.string.warp_curve_shrink)
+                                                else -> stringResource(R.string.warp_zoom_curve)
                                             }
                                             Text(label, color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                             Text(String.format("%.2f", videoCurvature), color = AccentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -3779,7 +3779,7 @@ fun VRPlayerScreen(
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("最大视频解码分辨率限制 (低配设备推荐 4K 或 2K)", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    Text(stringResource(R.string.max_resolution_title), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     MaxResolution.values().toList().chunked(3).forEach { rowResolutions ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -3821,63 +3821,63 @@ fun VRPlayerScreen(
                                 @Composable
                                 fun SettingsSection8K() {
                                 Text(
-                                    text = "8K 硬解实验（实验性，默认关闭）",
+                                    text = stringResource(R.string.group_8k_hw),
                                     color = AccentColor,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
                                 ExperimentalSwitchRow(
-                                    title = "编码头 level 适配（4.1）",
-                                    desc = "超出硬件解码上限的 8K 视频自动修改 SPS level 尝试硬解",
+                                    title = stringResource(R.string.level_patch),
+                                    desc = stringResource(R.string.level_patch_desc),
                                     checked = levelPatchEnabled,
                                     onChanged = { levelPatchEnabled = it },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor
                                 )
                                 ExperimentalSwitchRow(
-                                    title = "level 压至 5.1（更激进）",
-                                    desc = "配合上方开关，把 level 压到 5.1 绕过等级校验，花屏风险更高",
+                                    title = stringResource(R.string.level51),
+                                    desc = stringResource(R.string.level51_desc),
                                     checked = level51Enabled,
                                     onChanged = { level51Enabled = it },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor
                                 )
                                 ExperimentalSwitchRow(
-                                    title = "强制硬解选择器",
-                                    desc = "跳过系统能力过滤，把所有硬件解码器都试一遍",
+                                    title = stringResource(R.string.force_hw_decoder),
+                                    desc = stringResource(R.string.force_hw_decoder_desc),
                                     checked = forceHwDecoderEnabled,
                                     onChanged = { forceHwDecoderEnabled = it },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor
                                 )
                                 ExperimentalSwitchRow(
-                                    title = "分辨率头欺骗（改 4K）",
-                                    desc = "位级重写 SPS 宽高为 3840x2160，驱动按头分配资源，可能花屏",
+                                    title = stringResource(R.string.spoof_resolution),
+                                    desc = stringResource(R.string.spoof_resolution_desc),
                                     checked = spoofResolutionEnabled,
                                     onChanged = { spoofResolutionEnabled = it },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor
                                 )
                                 ExperimentalSwitchRow(
-                                    title = "缩小输出缓冲硬解",
-                                    desc = "硬解输出缩到 1920px 宽，降低带宽/OOM 风险，画质略降",
+                                    title = stringResource(R.string.downscale_output),
+                                    desc = stringResource(R.string.downscale_output_desc),
                                     checked = downscaleOutputEnabled,
                                     onChanged = { downscaleOutputEnabled = it },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor
                                 )
                                 ExperimentalSwitchRow(
-                                    title = "补充解码参数",
-                                    desc = "给解码器注入更大的输入缓冲等参数，部分机型有效",
+                                    title = stringResource(R.string.add_codec_params),
+                                    desc = stringResource(R.string.add_codec_params_desc),
                                     checked = addCodecParamsEnabled,
                                     onChanged = { addCodecParamsEnabled = it },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor
                                 )
                                 ExperimentalSwitchRow(
-                                    title = "硬解失败自动切软件",
-                                    desc = "硬件解码报错时自动切换软件解码兜底",
+                                    title = stringResource(R.string.auto_fallback_soft),
+                                    desc = stringResource(R.string.auto_fallback_soft_desc),
                                     checked = autoFallbackSoftEnabled,
                                     onChanged = { autoFallbackSoftEnabled = it },
                                     accentColor = AccentColor,
@@ -3891,7 +3891,7 @@ fun VRPlayerScreen(
                                         .padding(8.dp)
                                 ) {
                                     Text(
-                                        text = "说明：360°与180°全景支持陀螺仪或滑动实现多视角流畅环顾。",
+                                        text = stringResource(R.string.panorama_note),
                                         color = Color.White.copy(alpha = 0.5f),
                                         fontSize = 9.sp,
                                         lineHeight = 12.sp
@@ -3903,7 +3903,7 @@ fun VRPlayerScreen(
                                 fun SettingsSection3() {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(
-                                        text = "3. 悬浮球控速与播放倍速",
+                                        text = stringResource(R.string.settings_group_floating_ball),
                                         color = AccentColor,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
@@ -3922,8 +3922,8 @@ fun VRPlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("启用屏幕悬浮球", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                            Text("长按悬浮球快进，支持自由拖动放置", color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                            Text(stringResource(R.string.floating_ball_enable), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(stringResource(R.string.floating_ball_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
                                         }
                                         Switch(
                                             checked = isFloatingBallEnabled,
@@ -3943,7 +3943,7 @@ fun VRPlayerScreen(
 
                                     if (isFloatingBallEnabled) {
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Text("悬浮球长按倍速", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                            Text(stringResource(R.string.floating_ball_speed), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -3977,7 +3977,7 @@ fun VRPlayerScreen(
                                     }
 
                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text("基础常规播放倍速", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                        Text(stringResource(R.string.base_playback_speed), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -4015,7 +4015,7 @@ fun VRPlayerScreen(
                                 fun SettingsSection4() {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(
-                                        text = "4. 解码内核与帧率限制",
+                                        text = stringResource(R.string.settings_group_decoder),
                                         color = AccentColor,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
@@ -4023,7 +4023,7 @@ fun VRPlayerScreen(
 
                                     // 解码器切换 EXO/MPV
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("解码器引擎", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                        Text(stringResource(R.string.decoder_engine), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -4040,7 +4040,7 @@ fun VRPlayerScreen(
                                                         )
                                                         .clickable {
                                                             decoderEngine = engine
-                                                            Toast.makeText(context, "已切换解码器为: ${engine.displayName}", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, context.getString(R.string.toast_decoder_switched, engine.displayName), Toast.LENGTH_SHORT).show()
                                                             keepUiAlight()
                                                         },
                                                     contentAlignment = Alignment.Center
@@ -4058,12 +4058,12 @@ fun VRPlayerScreen(
 
                                     // 软硬解码切换
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("解码模式", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                        Text(stringResource(R.string.decode_mode), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            listOf(false to "硬件解码 (GPU加速)", true to "软件解码 (CPU兼容)").forEach { (isSw, label) ->
+                                            listOf(false to stringResource(R.string.decode_hw), true to stringResource(R.string.decode_sw)).forEach { (isSw, label) ->
                                                 val isSelected = isSoftwareDecoding == isSw
                                                 Box(
                                                     modifier = Modifier
@@ -4075,7 +4075,7 @@ fun VRPlayerScreen(
                                                         )
                                                         .clickable {
                                                             isSoftwareDecoding = isSw
-                                                            Toast.makeText(context, "已切换为: ${if (isSw) "软件解码" else "硬件解码"}", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "已切换为: ${if (isSw) "软件解码" else context.getString(R.string.info_hw_decode)}", Toast.LENGTH_SHORT).show()
                                                             keepUiAlight()
                                                         },
                                                     contentAlignment = Alignment.Center
@@ -4093,8 +4093,8 @@ fun VRPlayerScreen(
 
                                     // 帧率限制 12/18/24/30/48/60/90/120
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("帧率限制 (FPS Limit)", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        val fpsList = listOf(0 to "不限制", 12 to "12", 18 to "18", 24 to "24", 30 to "30", 48 to "48", 60 to "60", 90 to "90", 120 to "120")
+                                        Text(stringResource(R.string.fps_limit), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                        val fpsList = listOf(0 to stringResource(R.string.no_limit), 12 to "12", 18 to "18", 24 to "24", 30 to "30", 48 to "48", 60 to "60", 90 to "90", 120 to "120")
                                         fpsList.chunked(5).forEach { rowFps ->
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
@@ -4147,7 +4147,7 @@ fun VRPlayerScreen(
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = "AI 字幕引擎",
+                                        text = stringResource(R.string.asr_engine_title),
                                         color = AccentColor,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
@@ -4160,7 +4160,7 @@ fun VRPlayerScreen(
                                     }
                                     // 引擎说明
                                     Text(
-                                        text = "SenseVoice-Small：中英日韩粤 5 语言，CPU 推理自带标点，模型 ~229MB（首次需下载）",
+                                        text = stringResource(R.string.asr_engine_sensevoice_desc),
                                         color = Color.White.copy(alpha = 0.45f),
                                         fontSize = 8.sp,
                                         lineHeight = 11.sp
@@ -4172,7 +4172,7 @@ fun VRPlayerScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            Text("识别语言", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                                            Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
                                             SherpaAsrManager.sherpaLanguages.forEach { (code, label) ->
                                                 val sel = sherpaLangCode == code
                                                 Box(
@@ -4205,7 +4205,7 @@ fun VRPlayerScreen(
                                             sherpaReady.value = SherpaAsrManager.isModelReady(context)
                                         }
                                         val modelName = "SenseVoice-Small INT8"
-                                        val modelDesc = "中英日韩粤 · CPU 推理 · ~229MB 下载"
+                                        val modelDesc = stringResource(R.string.asr_sensevoice_tag)
                                         val modelSizeMB = 229
                                         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                             // 模型信息
@@ -4229,9 +4229,9 @@ fun VRPlayerScreen(
                                                 }
                                                 Text(
                                                     text = when {
-                                                        SherpaAsrManager.isModelDownloading -> "⬇ 下载中"
-                                                        sherpaReady.value -> "✓ 已就绪"
-                                                        else -> "未下载"
+                                                        SherpaAsrManager.isModelDownloading -> stringResource(R.string.asr_downloading)
+                                                        sherpaReady.value -> stringResource(R.string.asr_ready)
+                                                        else -> stringResource(R.string.asr_not_downloaded)
                                                     },
                                                     color = when {
                                                         SherpaAsrManager.isModelDownloading -> Color(0xFF4FC3F7)
@@ -4251,11 +4251,11 @@ fun VRPlayerScreen(
                                                     modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
                                                 )
                                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                                    Text("下载 ${(SherpaAsrManager.modelDownloadProgress * 100).toInt()}%", color = Color(0xFF4FC3F7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                    Text(stringResource(R.string.asr_download_percent, (SherpaAsrManager.modelDownloadProgress * 100).toInt()), color = Color(0xFF4FC3F7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                                     Text(SherpaAsrManager.downloadStatus, color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 }
                                                 Text(
-                                                    text = "取消下载",
+                                                    text = stringResource(R.string.asr_cancel_download),
                                                     color = Color(0xFFEF5350),
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Bold,
@@ -4269,7 +4269,7 @@ fun VRPlayerScreen(
                                             // 下载按钮
                                             if (!sherpaReady.value && !SherpaAsrManager.isModelDownloading) {
                                                 Text(
-                                                    text = "点击下载 " + modelName + "（" + modelSizeMB + "MB）",
+                                                    text = stringResource(R.string.asr_click_to_download_prefix) + modelName + "（" + modelSizeMB + "MB）",
                                                     color = Color.White,
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
@@ -4283,7 +4283,7 @@ fun VRPlayerScreen(
                                             }
                                             if (sherpaReady.value) {
                                                 Text(
-                                                    text = "$modelName 已就绪，实时字幕可直接使用",
+                                                    text = stringResource(R.string.asr_model_ready_hint, modelName),
                                                     color = Color(0xFF81C784),
                                                     fontSize = 8.sp
                                                 )
@@ -4352,7 +4352,7 @@ fun VRPlayerScreen(
                                                     isSubtitleEnabled = true
                                                     Toast.makeText(
                                                         context,
-                                                        "在线字幕已加载 ${cues.size} 条",
+                                                        context.getString(R.string.toast_online_subtitle_loaded, cues.size),
                                                         Toast.LENGTH_SHORT
                                                     ).show()
                                                     if (subtitleTranslator.config.isEnabled) {
@@ -4364,7 +4364,7 @@ fun VRPlayerScreen(
                                                 withContext(Dispatchers.Main) {
                                                     Toast.makeText(
                                                         context,
-                                                        "字幕解析失败: ${e.message}",
+                                                        context.getString(R.string.toast_subtitle_parse_failed, (e.message ?: "")),
                                                         Toast.LENGTH_SHORT
                                                     ).show()
                                                 }
@@ -4402,9 +4402,9 @@ BatchTranscribeSection(
                                 fun applyBeautyPreset(name: String) {
                                     beautyPreset = name
                                     val p = when (name) {
-                                        "自然" -> floatArrayOf(0.4f, 0.3f, 0.2f, 0.15f, 0.15f, 0.1f, 0.1f, 0.2f, 0.15f, 0.15f, 0.3f, 0.1f, 0.1f)
-                                        "淡妆" -> floatArrayOf(0.6f, 0.5f, 0.4f, 0.3f, 0.3f, 0.2f, 0.2f, 0.3f, 0.35f, 0.35f, 0.45f, 0.2f, 0.2f)
-                                        "浓妆" -> floatArrayOf(0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.35f, 0.35f, 0.5f, 0.6f, 0.6f, 0.7f, 0.4f, 0.35f)
+                                        context.getString(R.string.beauty_preset_natural) -> floatArrayOf(0.4f, 0.3f, 0.2f, 0.15f, 0.15f, 0.1f, 0.1f, 0.2f, 0.15f, 0.15f, 0.3f, 0.1f, 0.1f)
+                                        context.getString(R.string.beauty_preset_light) -> floatArrayOf(0.6f, 0.5f, 0.4f, 0.3f, 0.3f, 0.2f, 0.2f, 0.3f, 0.35f, 0.35f, 0.45f, 0.2f, 0.2f)
+                                        context.getString(R.string.beauty_preset_heavy) -> floatArrayOf(0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.35f, 0.35f, 0.5f, 0.6f, 0.6f, 0.7f, 0.4f, 0.35f)
                                         else -> return
                                     }
                                     beautyLevel = p[0]; beautyWhitening = p[1]; beautyFaceSlimming = p[2]; beautyBigEyes = p[3]
@@ -4414,7 +4414,7 @@ BatchTranscribeSection(
                                 }
 
                                 Text(
-                                    text = "2. Shader 实时美颜",
+                                    text = stringResource(R.string.settings_group_beauty),
                                     color = AccentColor,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
@@ -4470,17 +4470,17 @@ BatchTranscribeSection(
                                     accentColor = AccentColor,
                                     enabled = is2DBeautyMode,
                                     params = listOf(
-                                        PortraitParam("瘦脸", beautyFaceSlimming) { beautyFaceSlimming = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("大眼", beautyBigEyes) { beautyBigEyes = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("去黑眼圈", beautyDarkCircles) { beautyDarkCircles = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("瘦鼻", beautyNoseSlimming) { beautyNoseSlimming = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("嘴型调整", beautyMouth) { beautyMouth = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("美牙", beautyTeethWhitening) { beautyTeethWhitening = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("口红", beautyLipstick) { beautyLipstick = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("腮红", beautyBlush) { beautyBlush = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("眉毛", beautyEyebrows) { beautyEyebrows = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("长腿", beautyLongLegs) { beautyLongLegs = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam("小头", beautySmallHead) { beautySmallHead = it; beautyPreset = "自定义"; keepUiAlight() }
+                                        PortraitParam(stringResource(R.string.beauty_face_slim), beautyFaceSlimming) { beautyFaceSlimming = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_big_eyes), beautyBigEyes) { beautyBigEyes = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_dark_circles), beautyDarkCircles) { beautyDarkCircles = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_nose_slim), beautyNoseSlimming) { beautyNoseSlimming = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_mouth), beautyMouth) { beautyMouth = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_teeth), beautyTeethWhitening) { beautyTeethWhitening = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_lipstick), beautyLipstick) { beautyLipstick = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_blush), beautyBlush) { beautyBlush = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_eyebrows), beautyEyebrows) { beautyEyebrows = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_long_legs), beautyLongLegs) { beautyLongLegs = it; beautyPreset = "自定义"; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_small_head), beautySmallHead) { beautySmallHead = it; beautyPreset = "自定义"; keepUiAlight() }
                                     )
                                 )
                                 }
@@ -4512,13 +4512,13 @@ BatchTranscribeSection(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Column {
                                     Text(
-                                        text = "记忆当前所有的微调参数",
+                                        text = stringResource(R.string.memory_mode),
                                         color = Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = "开启后退出重进时可恢复设置",
+                                        text = stringResource(R.string.memory_mode_desc),
                                         color = Color.White.copy(alpha = 0.5f),
                                         fontSize = 9.sp
                                     )
@@ -4530,7 +4530,7 @@ BatchTranscribeSection(
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentColor),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("确认并应用", color = AccentOnColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.action_confirm_apply), color = AccentOnColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                                 }
@@ -4635,7 +4635,7 @@ BatchTranscribeSection(
                                                 Spacer(modifier = Modifier.weight(1f))
                                                 Icon(
                                                     imageVector = Icons.Default.KeyboardArrowDown,
-                                                    contentDescription = if (expanded) "收起" else "展开",
+                                                    contentDescription = if (expanded) stringResource(R.string.action_collapse) else stringResource(R.string.action_expand),
                                                     tint = Color.White.copy(alpha = 0.5f),
                                                     modifier = Modifier
                                                         .size(16.dp)
@@ -4653,14 +4653,14 @@ BatchTranscribeSection(
                                     }
 
                                     // 左列分组（二级菜单）：主题 → 投影 → 8K → 倍速 → 解码 → 字幕
-                                    SettingsGroup("主题与玻璃效果", "theme") { SettingsSection0() }
-                                    SettingsGroup("镜头投影与视角", "proj") { SettingsSection1() }
-                                    SettingsGroup("8K 硬解实验", "8k") { SettingsSection8K() }
-                                    SettingsGroup("悬浮球与播放倍速", "ball") { SettingsSection3() }
-                                    SettingsGroup("解码内核与帧率", "decode") { SettingsSection4() }
-                                    SettingsGroup("字幕功能设置", "sub") { SettingsSectionSubtitle() }
+                                    SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme") { SettingsSection0() }
+                                    SettingsGroup(stringResource(R.string.group_title_projection), "proj") { SettingsSection1() }
+                                    SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k") { SettingsSection8K() }
+                                    SettingsGroup(stringResource(R.string.group_title_floating_ball), "ball") { SettingsSection3() }
+                                    SettingsGroup(stringResource(R.string.group_title_decoder), "decode") { SettingsSection4() }
+                                    SettingsGroup(stringResource(R.string.group_title_subtitle), "sub") { SettingsSectionSubtitle() }
                                     // v106：关于与开源许可（合规署名入口）
-                                    SettingsGroup("关于与开源许可", "about") {
+                                    SettingsGroup(stringResource(R.string.group_title_about), "about") {
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -4672,18 +4672,18 @@ BatchTranscribeSection(
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = "开源软件许可",
+                                                    text = stringResource(R.string.licenses_title),
                                                     color = Color.White.copy(alpha = 0.85f),
                                                     fontSize = 11.sp
                                                 )
                                                 Text(
-                                                    text = "查看本项目使用的开源组件、字体与模型",
+                                                    text = stringResource(R.string.licenses_desc),
                                                     color = Color.White.copy(alpha = 0.45f),
                                                     fontSize = 9.sp
                                                 )
                                             }
                                             Text(
-                                                text = "查看",
+                                                text = stringResource(R.string.action_view),
                                                 color = AccentColor,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold
@@ -4720,7 +4720,7 @@ BatchTranscribeSection(
             AlertDialog(
                 onDismissRequest = { videoInfoDialogText = null },
                 containerColor = Color(0xFC18171C),
-                title = { Text("视频信息", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.action_media_info), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
                 text = {
                     Text(
                         text = info,
@@ -4731,7 +4731,7 @@ BatchTranscribeSection(
                 },
                 confirmButton = {
                     TextButton(onClick = { videoInfoDialogText = null }) {
-                        Text("关闭", color = AccentColor)
+                        Text(stringResource(R.string.action_close), color = AccentColor)
                     }
                 }
             )
@@ -4745,7 +4745,7 @@ BatchTranscribeSection(
             AlertDialog(
                 onDismissRequest = { trackDialogOpen = false },
                 containerColor = Color(0xFC18171C),
-                title = { Text("音轨与字幕轨", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.track_dialog_title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
                 text = {
                     Column(
                         modifier = Modifier
@@ -4754,11 +4754,11 @@ BatchTranscribeSection(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (audioGroup == null && textGroup == null) {
-                            Text("当前媒体没有可切换的音轨/字幕轨", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                            Text(stringResource(R.string.track_none), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
                         }
 
                         audioGroup?.let { g ->
-                            Text("音轨", color = AccentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.track_audio), color = AccentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             for (i in 0 until g.mediaTrackGroup.length) {
                                 val f = g.mediaTrackGroup.getFormat(i)
                                 val isSel = selectedAudioTrack == i
@@ -4790,7 +4790,7 @@ BatchTranscribeSection(
                         }
 
                         if (textGroup != null) {
-                            Text("字幕轨（内嵌）", color = AccentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.track_subtitle_embedded), color = AccentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             // Disable subtitles option
                             Row(
                                 modifier = Modifier
@@ -4808,7 +4808,7 @@ BatchTranscribeSection(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("关闭内嵌字幕", color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp)
+                                Text(stringResource(R.string.track_subtitle_off), color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp)
                             }
                             for (i in 0 until textGroup.mediaTrackGroup.length) {
                                 val f = textGroup.mediaTrackGroup.getFormat(i)
@@ -4841,7 +4841,7 @@ BatchTranscribeSection(
                         }
 
                         Text(
-                            text = "内嵌字幕与外部 SRT 均可显示；外部字幕优先于内嵌字幕",
+                            text = stringResource(R.string.track_subtitle_note),
                             color = Color.White.copy(alpha = 0.4f),
                             fontSize = 9.sp
                         )
@@ -4849,7 +4849,7 @@ BatchTranscribeSection(
                 },
                 confirmButton = {
                     TextButton(onClick = { trackDialogOpen = false }) {
-                        Text("关闭", color = AccentColor)
+                        Text(stringResource(R.string.action_close), color = AccentColor)
                     }
                 }
             )
@@ -4859,7 +4859,7 @@ BatchTranscribeSection(
             AlertDialog(
                 onDismissRequest = { smbDialogOpen = false },
                 containerColor = Color(0xFC18171C),
-                title = { Text("局域网播放 (SMB)", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.smb_title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
                 text = {
                     Column(
                         modifier = Modifier
@@ -4870,7 +4870,7 @@ BatchTranscribeSection(
                         OutlinedTextField(
                             value = smbHost,
                             onValueChange = { smbHost = it },
-                            label = { Text("服务器地址 (IP 或主机名)", fontSize = 10.sp) },
+                            label = { Text(stringResource(R.string.smb_server_addr), fontSize = 10.sp) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -4887,7 +4887,7 @@ BatchTranscribeSection(
                             OutlinedTextField(
                                 value = smbUser,
                                 onValueChange = { smbUser = it },
-                                label = { Text("用户名（可选）", fontSize = 9.sp) },
+                                label = { Text(stringResource(R.string.smb_username), fontSize = 9.sp) },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
                                 colors = OutlinedTextFieldDefaults.colors(
@@ -4900,7 +4900,7 @@ BatchTranscribeSection(
                             OutlinedTextField(
                                 value = smbPass,
                                 onValueChange = { smbPass = it },
-                                label = { Text("密码", fontSize = 9.sp) },
+                                label = { Text(stringResource(R.string.smb_password), fontSize = 9.sp) },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
                                 colors = OutlinedTextFieldDefaults.colors(
@@ -4915,7 +4915,7 @@ BatchTranscribeSection(
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentColor),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
-                                Text("连接", fontSize = 11.sp)
+                                Text(stringResource(R.string.smb_connect), fontSize = 11.sp)
                             }
                         }
 
@@ -4940,7 +4940,7 @@ BatchTranscribeSection(
                                         browseSmb(parent.substring(0, idx + 1))
                                     }
                                 }) {
-                                    Text("上级", fontSize = 10.sp, color = AccentColor)
+                                    Text(stringResource(R.string.smb_parent), fontSize = 10.sp, color = AccentColor)
                                 }
                             }
                         }
@@ -5001,7 +5001,7 @@ BatchTranscribeSection(
                 },
                 confirmButton = {
                     TextButton(onClick = { smbDialogOpen = false }) {
-                        Text("关闭", color = AccentColor)
+                        Text(stringResource(R.string.action_close), color = AccentColor)
                     }
                 }
             )
@@ -5120,7 +5120,7 @@ BatchTranscribeSection(
                 ) {
                     Icon(
                         imageVector = Icons.Default.FastForward,
-                        contentDescription = "倍速",
+                        contentDescription = stringResource(R.string.speed_control),
                         tint = if (isFloatingBallPressed) AccentOnColor else AccentColor,
                         modifier = Modifier.size(if (isFloatingBallPressed) 20.dp else 16.dp)
                     )
@@ -5169,7 +5169,7 @@ BatchTranscribeSection(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "长按快进中 $speedText",
+                            text = stringResource(R.string.fast_forwarding, speedText),
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold

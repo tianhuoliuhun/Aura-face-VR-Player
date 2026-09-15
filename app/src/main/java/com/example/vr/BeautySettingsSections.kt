@@ -31,6 +31,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -73,10 +75,10 @@ fun GeneralBeautySection(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
-        SectionTitle("通用美颜 · 2D/3D 均生效", accentColor)
+        SectionTitle(stringResource(R.string.beauty_section_common), accentColor)
 
         BeautySliderItem(
-            "美颜强度 (磨皮)", beautyLevel, onBeautyLevelChange, accentColor = accentColor
+            stringResource(R.string.beauty_smooth), beautyLevel, onBeautyLevelChange, accentColor = accentColor
         )
 
         // 曝光：值域 -0.3~0.3，显示带正负号，故未复用 BeautySliderItem
@@ -85,7 +87,7 @@ fun GeneralBeautySection(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("画面曝光 (亮度)", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                Text(stringResource(R.string.beauty_brightness), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
                 Text(
                     if (brightnessLevel >= 0) "+${(brightnessLevel * 100).toInt()}" else "${(brightnessLevel * 100).toInt()}",
                     color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold
@@ -110,7 +112,7 @@ fun GeneralBeautySection(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("五官轮廓塑形 (对比度)", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                Text(stringResource(R.string.beauty_contrast), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
                 Text("${(contrastLevel * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
             Slider(
@@ -126,7 +128,7 @@ fun GeneralBeautySection(
             )
         }
 
-        BeautySliderItem("美白", whiteningLevel, onWhiteningLevelChange, accentColor = accentColor)
+        BeautySliderItem(stringResource(R.string.beauty_whitening), whiteningLevel, onWhiteningLevelChange, accentColor = accentColor)
     }
 }
 
@@ -156,8 +158,9 @@ fun LutFilterSection(
     val context: Context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val ctx = LocalContext.current
     Column(modifier = modifier) {
-        SectionTitle("LUT 视频滤镜", accentColor)
+        SectionTitle(stringResource(R.string.lut_section_title), accentColor)
 
         // 内置 LUT 横向选择（无滤镜 + 12 款风格）
         LazyRow(
@@ -165,13 +168,13 @@ fun LutFilterSection(
             modifier = Modifier.fillMaxWidth()
         ) {
             item {
-                val selected = lutName == "无滤镜"
+                val selected = lutName == stringResource(R.string.lut_none)
                 LutChip(
-                    text = "无滤镜",
+                    text = stringResource(R.string.lut_none),
                     selected = selected,
                     accentColor = accentColor,
                     onClick = {
-                        onLutNameChange("无滤镜")
+                        onLutNameChange(ctx.getString(R.string.lut_none))
                         onApplyLutRgba(null)
                         onLutMixChange(0f)
                         onUserInteraction()
@@ -220,7 +223,7 @@ fun LutFilterSection(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("滤镜强度", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                    Text(stringResource(R.string.lut_intensity), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
                     Text("${(lutMix * 100).toInt()}%", color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
                 Slider(
@@ -264,7 +267,7 @@ fun LutFilterSection(
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (isLutLoading) "加载中" else "自选 LUT",
+                        text = if (isLutLoading) stringResource(R.string.loading) else stringResource(R.string.lut_custom_pick),
                         color = Color(0xFF1A1A2E),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
@@ -273,7 +276,7 @@ fun LutFilterSection(
             }
         }
         Text(
-            text = "当前：$lutName（内置 12 款，支持 .cube 文件）",
+            text = stringResource(R.string.lut_current, lutName),
             color = Color.White.copy(alpha = 0.45f),
             fontSize = 9.sp
         )
@@ -325,7 +328,7 @@ fun PortraitRetouchSection(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
-        SectionTitle("2D 人像精修 · 需 2D 模式 + 人脸检测", accentColor)
+        SectionTitle(stringResource(R.string.beauty_section_portrait), accentColor)
         params.forEach { p ->
             BeautySliderItem(
                 label = p.label,
@@ -333,7 +336,7 @@ fun PortraitRetouchSection(
                 onValueChange = p.onChange,
                 accentColor = accentColor,
                 enabled = enabled,
-                badge = if (enabled) null else "3D 停用"
+                badge = if (enabled) null else stringResource(R.string.beauty_3d_disabled)
             )
         }
     }
@@ -371,9 +374,9 @@ fun BeautyModeHintBar(
     ) {
         Text(
             text = if (is2DMode)
-                "当前 2D 模式（$modeName）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸"
+                stringResource(R.string.beauty_status_2d, modeName)
             else
-                "当前 3D 模式（$modeName）：仅磨皮/美白等通用效果生效；瘦脸/大眼/口红等 2D 人像精修已停用，切换 2D 模式后自动恢复",
+                stringResource(R.string.beauty_status_3d, modeName),
             color = Color.White.copy(alpha = 0.92f),
             fontSize = 9.sp,
             lineHeight = 12.sp,
@@ -397,8 +400,8 @@ fun BeautyCompareSwitch(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("对比原图", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            Text("开启后临时关闭全部美颜，直观对比效果", color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+            Text(stringResource(R.string.beauty_compare_original), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.beauty_compare_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
         }
         Switch(
             checked = checked,
@@ -420,7 +423,7 @@ fun BeautyPresetRow(
     preset: String,
     onPresetChange: (String) -> Unit,
     accentColor: Color,
-    presets: List<String> = listOf("自然", "淡妆", "浓妆", "自定义"),
+    presets: List<String> = listOf(stringResource(R.string.beauty_preset_natural), stringResource(R.string.beauty_preset_light), stringResource(R.string.beauty_preset_heavy), stringResource(R.string.beauty_preset_custom)),
     modifier: Modifier = Modifier
 ) {
     Row(

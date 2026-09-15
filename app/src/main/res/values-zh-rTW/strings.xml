@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  繁體（大陸用詞）
+  v2.0.129：本文件只做「字形繁體化」，**詞彙沿用大陸習慣**，
+  不使用台灣慣用詞。翻譯時請遵守下表，避免混用：
+    线程（不用執行緒）  缓存（不用快取）    视频（不用影片）    文件（不用檔案）
+    搜索（不用搜尋）    导入/导出（不用匯入/匯出）  加载（不用載入）
+    实时（不用即時）    界面（不用介面）    支持（不用支援）    点击（不用點擊）
+    自定义（不用自訂）  本地（不用本機）    在线（不用線上）    积分（不用點數）
+    无效（不用無效）    推荐（不用建議）    识别（不用辨識）    当前（不用目前）
+-->
 <resources>
     <string name="app_name">Aura美顏VR播放器</string>
 
-    <!-- ===== 介面語言（v2.0.129）===== -->
-    <string name="ui_language">介面語言</string>
-    <string name="ui_language_hint">切換後立即重建介面，播放進度會保留</string>
+    <!-- ===== 界面語言（v2.0.129）===== -->
+    <string name="ui_language">界面語言</string>
+    <string name="ui_language_hint">切換後立即重建界面，播放進度會保留</string>
 
     <!-- ===== 字幕快捷面板 ===== -->
     <string name="subtitle_quick_title">字幕</string>
@@ -12,47 +22,372 @@
     <string name="subtitle_state_off">已關閉</string>
     <string name="subtitle_translate_title">字幕翻譯</string>
     <string name="subtitle_translate_off">未開啟</string>
-    <string name="asr_threads">推論執行緒數</string>
-    <string name="asr_threads_value">%1$d 執行緒</string>
-    <string name="asr_threads_recommended">（建議）</string>
-    <string name="asr_threads_hint">太小辨識跟不上播放，太大排擠解碼/渲染；建議 4~6</string>
-    <string name="realtime_subtitle_title">即時 AI 字幕</string>
-    <string name="realtime_subtitle_desc">邊播邊生成字幕：背景滾動預讀，拖動進度條可即時回看</string>
+    <string name="asr_threads">推理線程數</string>
+    <string name="asr_threads_value">%1$d 線程</string>
+    <string name="asr_threads_recommended">（推薦）</string>
+    <string name="asr_threads_hint">太小識別跟不上播放，太大擠佔解碼/渲染；推薦 4~6</string>
+    <string name="realtime_subtitle_title">實時 AI 字幕</string>
+    <string name="realtime_subtitle_desc">邊播邊生成字幕：後台滾動預讀，拖動進度條可實時回看</string>
     <string name="subtitle_regenerate">重新生成字幕</string>
-    <string name="subtitle_export_srt">匯出 SRT</string>
-    <string name="subtitle_open_full_settings">完整字幕設定…</string>
+    <string name="subtitle_export_srt">導出 SRT</string>
+    <string name="subtitle_open_full_settings">完整字幕設置…</string>
 
-    <!-- ===== 字幕設定面板 ===== -->
+    <!-- ===== 字幕設置面板 ===== -->
     <string name="subtitle_settings_group">5. 字幕功能與\n全向雙眼樣式</string>
     <string name="subtitle_enabled">字幕已開啟</string>
     <string name="subtitle_disabled">字幕已關閉</string>
-    <string name="subtitle_off_hint">字幕功能處於關閉狀態，開啟後可載入外部 SRT/VTT 檔案並自訂 VR/平面渲染樣式</string>
-    <string name="subtitle_section_file">字幕檔案與即時語音</string>
-    <string name="subtitle_current_file">目前字幕：%1$s</string>
-    <string name="subtitle_no_file">未載入外部字幕</string>
-    <string name="subtitle_cues_loaded">已載入 %1$d 條時間軸字幕</string>
-    <string name="subtitle_import_hint">支援匯入本機 .srt / .vtt 文字字幕檔案</string>
-    <string name="subtitle_import">匯入SRT/VTT字幕</string>
-    <string name="subtitle_export">匯出SRT</string>
-    <string name="subtitle_online_search">線上字幕搜尋</string>
+    <string name="subtitle_off_hint">字幕功能處於關閉狀態，開啟後可加載外部 SRT/VTT 文件並自定義 VR/平面渲染樣式</string>
+    <string name="subtitle_section_file">字幕文件與實時語音</string>
+    <string name="subtitle_current_file">當前字幕：%1$s</string>
+    <string name="subtitle_no_file">未加載外部字幕</string>
+    <string name="subtitle_cues_loaded">已載入 %1$d 条時間軸字幕</string>
+    <string name="subtitle_import_hint">支持導入本地 .srt / .vtt 文本字幕文件</string>
+    <string name="subtitle_import">導入SRT/VTT字幕</string>
+    <string name="subtitle_export">導出SRT</string>
+    <string name="subtitle_online_search">在線字幕搜索</string>
     <string name="subtitle_search_need_key">需免費 API Key</string>
-    <string name="subtitle_search_keyword">搜尋關鍵字（如檔案名稱）</string>
+    <string name="subtitle_search_keyword">搜索關鍵詞（如文件名稱）</string>
     <string name="subtitle_search_language">語言</string>
-    <string name="subtitle_search_searching">搜尋中...</string>
-    <string name="subtitle_search_not_found">未找到結果（檢查 Key 或關鍵字）</string>
-    <string name="subtitle_search_found">找到 %1$d 筆結果</string>
-    <string name="subtitle_search_go">搜尋</string>
+    <string name="subtitle_search_searching">搜索中...</string>
+    <string name="subtitle_search_not_found">未找到結果（檢查 Key 或關鍵詞）</string>
+    <string name="subtitle_search_found">找到 %1$d 个結果</string>
+    <string name="subtitle_search_go">搜索</string>
     <string name="subtitle_downloading">下載中：%1$s...</string>
-    <string name="subtitle_downloaded">已下載並載入</string>
-    <string name="subtitle_download_failed">下載失敗（可能需點數或 Key 無效）</string>
-    <string name="subtitle_section_translate">即時翻譯</string>
+    <string name="subtitle_downloaded">已下載並加載</string>
+    <string name="subtitle_download_failed">下載失敗（可能需積分或 Key 無效）</string>
+    <string name="subtitle_section_translate">實時翻譯</string>
     <string name="subtitle_translate_neural">AI 神經同傳</string>
-    <string name="subtitle_translate_switch">字幕即時AI翻譯</string>
-    <string name="subtitle_translate_file">翻譯字幕檔案</string>
-    <string name="subtitle_translate_clear_cache">清除快取</string>
+    <string name="subtitle_translate_switch">字幕實時AI翻譯</string>
+    <string name="subtitle_translate_file">翻譯字幕文件</string>
+    <string name="subtitle_translate_clear_cache">清空緩存</string>
     <string name="subtitle_translate_target_lang">目標翻譯語言</string>
     <string name="subtitle_display_mode">顯示模式</string>
     <string name="subtitle_mode_bilingual">雙語對照</string>
     <string name="subtitle_mode_translated_only">僅顯示譯文</string>
     <string name="subtitle_translate_engine">翻譯引擎</string>
+
+    <!-- ===== batch ===== -->
+    <string name="toast_subtitle_loaded">成功加載 %%1$d 條字幕！</string>
+    <string name="toast_subtitle_load_failed">字幕加載失敗：%%1$s</string>
+    <string name="asr_lang_switch_hint">識別語言：%%1$s（重新加載模型，約 5 秒）</string>
+    <string name="asr_lang_label">識別語言：%%1$s</string>
+    <string name="toast_no_subtitle_export">暫無可導出的字幕</string>
+    <string name="toast_subtitle_exported">已導出 %%1$d 條字幕：\n%%2$s</string>
+    <string name="toast_subtitle_export_failed">字幕導出失敗</string>
+    <string name="toast_enable_realtime_first">請先開啓「實時 AI 字幕」</string>
+    <string name="toast_image_no_audio">當前是圖片，沒有音軌可識別</string>
+    <string name="toast_subtitle_restarted">已重新開始生成字幕</string>
+    <string name="toast_image_no_audio_gen">當前是圖片，沒有音軌可識別（請打開視頻後再生成字幕）</string>
+    <string name="toast_image_no_audio_realtime">當前是圖片，沒有音軌可用於實時字幕</string>
+    <string name="toast_subtitle_autoloaded">已加載字幕：%%1$s（%%2$d 句）</string>
+    <string name="toast_select_resolution_first">請先選擇一個分辨率限制後再進行降級轉碼</string>
+    <string name="toast_cached_downscale">檢測到已緩存的 %%1$s 降級版本，直接播放！</string>
+    <string name="media_downscale_suffix"> （%%1$s 降級版）</string>
+    <string name="toast_transcode_init">正在初始化轉碼引擎...</string>
+    <string name="toast_transcoding_progress">正在降軌轉碼爲 %%1$s... %%2$d%%%%</string>
+    <string name="toast_transcode_ok">降軌轉碼成功！正在播放 %%1$s 視頻</string>
+    <string name="toast_transcode_failed">轉碼降軌失敗：%%1$s</string>
+    <string name="toast_path_not_exist">路徑不存在：%%1$s</string>
+    <string name="toast_connect_failed">連接失敗：%%1$s</string>
+    <string name="toast_enter_server_addr">請輸入服務器地址</string>
+
+    <!-- ===== batch ===== -->
+    <string name="settings_dialog_title">高級播放參數與美膚協同微調</string>
+    <string name="action_lan_play">局域網播放</string>
+    <string name="action_media_info">視頻信息</string>
+    <string name="action_track_select">音軌/字幕軌選擇</string>
+    <string name="action_close">關閉</string>
+    <string name="settings_group_ui_theme">0. UI 主題與玻璃效果（8/2 功能）</string>
+    <string name="theme_solid">實色</string>
+    <string name="theme_liquid_glass">液體玻璃</string>
+    <string name="settings_group_projection">1. 鏡頭投影與視角模式</string>
+    <string name="projection_auto_detect">投影智能檢測</string>
+    <string name="projection_auto_detect_desc">自動識別 2:1 全景 / 普通 2D 內容並切換投影與立體模式</string>
+    <string name="force_video_type">強制視頻類型</string>
+    <string name="video_type_3d_sbs">3D左右</string>
+    <string name="video_type_3d_tab">3D上下</string>
+    <string name="force_video_type_desc">自動：按寬高比識別；強制：固定視頻類型並鎖定（2:1 全景自動開啓雙中心變形）</string>
+    <string name="view_format">視角格式</string>
+    <string name="stereo_format">立體格式</string>
+    <string name="stereo_2d">平面2D</string>
+    <string name="stereo_sbs">左右3D</string>
+    <string name="stereo_tab">上下3D</string>
+    <string name="video_mirror">視頻畫面鏡像</string>
+    <string name="mirror_normal">正常畫面</string>
+    <string name="mirror_hflip">左右鏡像</string>
+    <string name="gyro_orientation_mode">陀螺儀朝向模式</string>
+    <string name="gyro_handheld">手持橫屏</string>
+    <string name="gyro_vr_flat">VR眼鏡平放</string>
+    <string name="gyro_orientation_desc">手持橫屏舉着看選「手持」；手機放進 VR 眼鏡透過屏幕看選「平放」。切換時自動以當前朝向爲視角原點，雙擊畫面可隨時重置視角。僅 360°/180°/盒子模式生效</string>
+    <string name="gyro_invert">反轉陀螺儀轉向</string>
+    <string name="gyro_invert_desc">若畫面上下/左右仍與頭部動作相反，打開此項</string>
+    <string name="audio_channel_mirror">音頻聲道鏡像</string>
+    <string name="audio_normal">正常聲道</string>
+    <string name="audio_swapped">聲道反轉</string>
+
+    <!-- ===== batch ===== -->
+    <string name="dome_half_crop">180°穹幕源畫面裁剪</string>
+    <string name="dome_half_left">僅左半屏</string>
+    <string name="dome_half_right">僅右半屏</string>
+    <string name="fov_title">視場角 (FOV) 視野廣度</string>
+    <string name="warp_title">視頻變形/透視效果</string>
+    <string name="warp_equirect_cylinder">等距矩形柱面彎曲率</string>
+    <string name="warp_equirect_column">等距圓柱彎曲率</string>
+    <string name="warp_sphere_expand">球面立體膨脹度</string>
+    <string name="warp_ring_curve">環幕曲率調節</string>
+    <string name="warp_sphere_shrink">反向球面收縮度</string>
+    <string name="warp_curve_shrink">反向曲率收縮度</string>
+    <string name="warp_zoom_curve">變焦彎曲率</string>
+    <string name="max_resolution_title">最大視頻解碼分辨率限制 (低配設備推薦 4K 或 2K)</string>
+    <string name="group_8k_hw">8K 硬解實驗（實驗性，默認關閉）</string>
+    <string name="level_patch">編碼頭 level 適配（4.1）</string>
+    <string name="level_patch_desc">超出硬件解碼上限的 8K 視頻自動修改 SPS level 嘗試硬解</string>
+    <string name="level51">level 壓至 5.1（更激進）</string>
+    <string name="level51_desc">配合上方開關，把 level 壓到 5.1 繞過等級校驗，花屏風險更高</string>
+    <string name="force_hw_decoder">強制硬解選擇器</string>
+    <string name="force_hw_decoder_desc">跳過系統能力過濾，把所有硬件解碼器都試一遍</string>
+    <string name="spoof_resolution">分辨率頭欺騙（改 4K）</string>
+    <string name="spoof_resolution_desc">位級重寫 SPS 寬高爲 3840x2160，驅動按頭分配資源，可能花屏</string>
+    <string name="downscale_output">縮小輸出緩衝硬解</string>
+    <string name="downscale_output_desc">硬解輸出縮到 1920px 寬，降低帶寬/OOM 風險，畫質略降</string>
+    <string name="add_codec_params">補充解碼參數</string>
+    <string name="add_codec_params_desc">給解碼器注入更大的輸入緩衝等參數，部分機型有效</string>
+    <string name="auto_fallback_soft">硬解失敗自動切軟件</string>
+    <string name="auto_fallback_soft_desc">硬件解碼報錯時自動切換軟件解碼兜底</string>
+    <string name="panorama_note">說明：360°與180°全景支持陀螺儀或滑動實現多視角流暢環顧。</string>
+    <string name="settings_group_floating_ball">3. 懸浮球控速與播放倍速</string>
+    <string name="floating_ball_enable">啓用屏幕懸浮球</string>
+    <string name="floating_ball_desc">長按懸浮球快進，支持自由拖動放置</string>
+    <string name="floating_ball_speed">懸浮球長按倍速</string>
+    <string name="base_playback_speed">基礎常規播放倍速</string>
+    <string name="settings_group_decoder">4. 解碼內核與幀率限制</string>
+    <string name="decoder_engine">解碼器引擎</string>
+    <string name="decode_mode">解碼模式</string>
+    <string name="decode_hw">硬件解碼 (GPU加速)</string>
+    <string name="decode_sw">軟件解碼 (CPU兼容)</string>
+    <string name="fps_limit">幀率限制 (FPS Limit)</string>
+    <string name="no_limit">不限制</string>
+
+    <!-- ===== batch ===== -->
+    <string name="asr_engine_title">AI 字幕引擎</string>
+    <string name="asr_engine_sensevoice_desc">SenseVoice-Small：中英日韓粵 5 語言，CPU 推理自帶標點，模型 ~229MB（首次需下載）</string>
+    <string name="asr_language">識別語言</string>
+    <string name="asr_sensevoice_tag">中英日韓粵 · CPU 推理 · ~229MB 下載</string>
+    <string name="asr_downloading">⬇ 下載中</string>
+    <string name="asr_ready">✓ 已就緒</string>
+    <string name="asr_not_downloaded">未下載</string>
+    <string name="asr_download_percent">下載 %%1$d%%%%</string>
+    <string name="asr_cancel_download">取消下載</string>
+    <string name="asr_click_to_download_prefix">點擊下載 </string>
+    <string name="asr_model_ready_hint">%%1$s 已就緒，實時字幕可直接使用</string>
+    <string name="toast_online_subtitle_loaded">在線字幕已加載 %%1$d 條</string>
+    <string name="toast_subtitle_parse_failed">字幕解析失敗：%%1$s</string>
+    <string name="beauty_preset_natural">自然</string>
+    <string name="beauty_preset_light">淡妝</string>
+    <string name="beauty_preset_heavy">濃妝</string>
+    <string name="settings_group_beauty">2. Shader 實時美顏</string>
+    <string name="beauty_face_slim">瘦臉</string>
+    <string name="beauty_big_eyes">大眼</string>
+    <string name="beauty_dark_circles">去黑眼圈</string>
+    <string name="beauty_nose_slim">瘦鼻</string>
+    <string name="beauty_mouth">嘴型調整</string>
+    <string name="beauty_teeth">美牙</string>
+    <string name="beauty_lipstick">口紅</string>
+    <string name="beauty_blush">腮紅</string>
+    <string name="beauty_eyebrows">眉毛</string>
+    <string name="beauty_long_legs">長腿</string>
+    <string name="beauty_small_head">小頭</string>
+    <string name="memory_mode">記憶當前所有的微調參數</string>
+    <string name="memory_mode_desc">開啓後退出重進時可恢復設置</string>
+    <string name="action_confirm_apply">確認並應用</string>
+    <string name="action_collapse">收起</string>
+    <string name="action_expand">展開</string>
+
+    <!-- ===== batch ===== -->
+    <string name="group_title_ui_theme">主題與玻璃效果</string>
+    <string name="group_title_projection">鏡頭投影與視角</string>
+    <string name="group_title_8k_hw">8K 硬解實驗</string>
+    <string name="group_title_floating_ball">懸浮球與播放倍速</string>
+    <string name="group_title_decoder">解碼內核與幀率</string>
+    <string name="group_title_subtitle">字幕功能設置</string>
+    <string name="group_title_about">關於與開源許可</string>
+    <string name="licenses_title">開源軟件許可</string>
+    <string name="licenses_desc">查看本項目使用的開源組件、字體與模型</string>
+    <string name="action_view">查看</string>
+    <string name="track_dialog_title">音軌與字幕軌</string>
+    <string name="track_none">當前媒體沒有可切換的音軌/字幕軌</string>
+    <string name="track_audio">音軌</string>
+    <string name="track_subtitle_embedded">字幕軌（內嵌）</string>
+    <string name="track_subtitle_off">關閉內嵌字幕</string>
+    <string name="track_subtitle_note">內嵌字幕與外部 SRT 均可顯示；外部字幕優先於內嵌字幕</string>
+    <string name="smb_title">局域網播放 (SMB)</string>
+    <string name="smb_server_addr">服務器地址 (IP 或主機名)</string>
+    <string name="smb_username">用戶名（可選）</string>
+    <string name="smb_password">密碼</string>
+    <string name="smb_connect">連接</string>
+    <string name="smb_parent">上級</string>
+    <string name="speed_control">倍速</string>
+    <string name="fast_forwarding">長按快進中 %%1$s</string>
+    <string name="unlock_ui">解鎖控制界面</string>
+    <string name="lock_ui">鎖定控制界面</string>
+    <string name="import_local_media">導入本地照片或視頻</string>
+    <string name="beauty_projection_menu">磨皮參數與投影二級控制菜單</string>
+    <string name="image_static_panorama">全景圖像已靜態渲染 • 手指拖曳查看</string>
+    <string name="image_pinch_zoom">支持雙指縮放</string>
+
+    <!-- ===== batch ===== -->
+    <string name="lut_none">無濾鏡</string>
+    <string name="media_external_video">外部視頻</string>
+    <string name="media_external_desc">從第三方軟件導入播放的視頻</string>
+    <string name="action_import_video">導入視頻</string>
+    <string name="action_import_image">導入圖像</string>
+    <string name="media_imported_desc">用戶從本地相冊導入的媒體內容。路徑：%%1$s</string>
+    <string name="lut_custom">自定義 LUT</string>
+    <string name="toast_lut_applied">LUT 已應用：%%1$s</string>
+    <string name="toast_lut_parse_failed">LUT 解析失敗</string>
+    <string name="toast_lut_load_failed">LUT 加載失敗：%%1$s</string>
+    <string name="toast_fixing_container">檢測到視頻拖動定位異常，正在自動修復容器（無需轉碼）...</string>
+    <string name="toast_container_fixed">視頻容器已修復，現在可以正常拖動定位了</string>
+    <string name="toast_container_fixed_no_audio">視頻容器已修復（音頻軌道不兼容，播放將無聲）</string>
+    <string name="suffix_fixed"> （已修復）</string>
+    <string name="toast_seek_unsupported">該視頻格式不支持拖動定位（自動修復失敗）</string>
+    <string name="toast_patching_header">視頻超出硬件解碼標稱上限，正在修改編碼頭嘗試硬件解碼（實驗性）...</string>
+    <string name="toast_hw_patch_ok">已生成硬件解碼兼容版本，正在播放（若花屏/黑屏/無聲請反饋芯片型號）</string>
+    <string name="suffix_hw_patched"> （硬解適配）</string>
+    <string name="toast_detected_360">檢測到 2:1 全景視頻，已切換至 VR_360 全景（單目）</string>
+    <string name="toast_detected_2d">檢測到普通 2D 視頻，已切換至平面模式</string>
+    <string name="toast_2d_mono">普通 2D 視頻已恢復單目顯示（3D 立體僅適用於 3D 片源）</string>
+    <string name="toast_res_exceeds">當前視頻分辨率 (%%1$dx%%2$d) 超過設置限制，可能導致卡頓。</string>
+    <string name="toast_8k_hint">該視頻爲 %%1$dx%%2$d 8K超高清，若卡頓建議開啓解碼限制。</string>
+    <string name="toast_8k_patching">視頻 %%1$dx%%2$d 超出硬件解碼標稱上限，正在嘗試修改編碼頭硬解</string>
+    <string name="toast_hw_failed_sw">硬件解碼失敗，自動切換軟件解碼</string>
+
+    <!-- ===== batch ===== -->
+    <string name="privacy_dialog_title">隱私與數據統計</string>
+    <string name="privacy_dialog_msg1">是否允許本應用採集匿名使用數據（設備型號、系統版本、啓動與活躍次數）</string>
+    <string name="privacy_dialog_msg2">用於統計用戶量並改進產品？\n\n</string>
+    <string name="privacy_bullet_1">· 不採集任何個人信息\n</string>
+    <string name="privacy_bullet_2">· 數據用於日活/留存統計（Firebase Analytics）\n</string>
+    <string name="privacy_bullet_3">· 可隨時在設置中關閉\n</string>
+    <string name="privacy_bullet_4">· 拒絕不影響任何功能</string>
+    <string name="action_agree">同意</string>
+    <string name="action_decline">拒絕</string>
+
+    <!-- ===== batch ===== -->
+    <string name="beauty_section_common">通用美顏 · 2D/3D 均生效</string>
+    <string name="beauty_smooth">美顏強度 (磨皮)</string>
+    <string name="beauty_brightness">畫面曝光 (亮度)</string>
+    <string name="beauty_contrast">五官輪廓塑形 (對比度)</string>
+    <string name="beauty_whitening">美白</string>
+    <string name="lut_section_title">LUT 視頻濾鏡</string>
+    <string name="lut_intensity">濾鏡強度</string>
+    <string name="loading">加載中</string>
+    <string name="lut_custom_pick">自選 LUT</string>
+    <string name="lut_current">當前：%%1$s（內置 12 款，支持 .cube 文件）</string>
+    <string name="beauty_section_portrait">2D 人像精修 · 需 2D 模式 + 人臉檢測</string>
+    <string name="beauty_3d_disabled">3D 停用</string>
+    <string name="beauty_status_2d">當前 2D 模式（%%1$s）：全部美顏可用，人像精修（瘦臉/大眼/口紅等）需檢測到人臉</string>
+    <string name="beauty_status_3d">當前 3D 模式（%%1$s）：僅磨皮/美白等通用效果生效；瘦臉/大眼/口紅等 2D 人像精修已停用，切換 2D 模式後自動恢復</string>
+    <string name="beauty_compare_original">對比原圖</string>
+    <string name="beauty_compare_desc">開啓後臨時關閉全部美顏，直觀對比效果</string>
+    <string name="beauty_preset_custom">自定義</string>
+
+    <!-- ===== batch ===== -->
+    <string name="cd_gyro_on">陀螺儀已開啓</string>
+    <string name="cd_gyro_off">陀螺儀已關閉</string>
+    <string name="cd_view_locked">視角已鎖定</string>
+    <string name="cd_view_free">視角自由</string>
+    <string name="cd_portrait_locked">已鎖定豎屏</string>
+    <string name="cd_lock_portrait">點擊鎖定豎屏</string>
+    <string name="cd_prev">上一首</string>
+    <string name="cd_next">下一首</string>
+    <string name="cd_reset_view">重置視角中心</string>
+    <string name="cd_exit_vr_split">退出 VR 分屏</string>
+    <string name="cd_vr_split">VR 分屏模式</string>
+    <string name="cd_subtitle_panel">字幕與轉寫</string>
+    <string name="cd_playback_settings">播放參數與美顏</string>
+    <string name="cd_play_pause">播放暫停</string>
+
+    <!-- ===== batch ===== -->
+    <string name="info_file">文件：%%1$s\n</string>
+    <string name="info_title">標題：%%1$s\n</string>
+    <string name="info_duration">時長：%%1$d 分 %%2$d 秒\n</string>
+    <string name="unknown">未知</string>
+    <string name="info_resolution">分辨率：%%1$d × %%2$d\n</string>
+    <string name="info_video_codec">視頻編碼：%%1$s\n</string>
+    <string name="info_fps">幀率：%%1$d fps\n</string>
+    <string name="info_bitrate">碼率：%%1$d kbps\n</string>
+    <string name="info_hw">硬件</string>
+    <string name="label_resolution">分辨率</string>
+    <string name="info_resolution2">分辨率：%%1$d × %%2$d\n</string>
+    <string name="info_rotation">旋轉：%%1$d°\n</string>
+    <string name="label_fps">幀率</string>
+    <string name="info_fps2">幀率：%%1$d fps\n</string>
+    <string name="label_bitrate">碼率</string>
+    <string name="info_bitrate2">碼率：%%1$d kbps\n</string>
+    <string name="label_codec">編碼</string>
+    <string name="info_codec">編碼：%%1$s\n</string>
+    <string name="info_unavailable">未能讀取視頻信息</string>
+    <string name="resolution_hint_title">分辨率提示</string>
+    <string name="action_downscale">一鍵降級轉碼</string>
+    <string name="action_got_it">我知道了</string>
+    <string name="downscaling_title">視頻分辨率降軌轉換中</string>
+    <string name="downscaling_desc">正在利用底層硬件編碼器將 8K 超清視頻高保真轉碼爲較小分辨率以保證完美流暢播放。請勿退出應用。</string>
+    <string name="cd_beauty_icon">美顏圖標</string>
+    <string name="app_desc">美顏VR播放器</string>
+    <string name="current_media">當前媒體：%%1$s</string>
+    <string name="cd_vr_split_mode">VR分屏戴戴模式</string>
+    <string name="cd_drag_thumbnail">視頻拖拽預覽縮略圖</string>
+    <string name="cd_image_state">圖像狀態</string>
+    <string name="auto">自動</string>
+    <string name="toast_decoder_switched">已切換解碼器爲：%%1$s</string>
+    <string name="info_hw_decode">硬件解碼</string>
+
+    <!-- ===== batch ===== -->
+    <string name="subtitle_section_style">顯示樣式</string>
+    <string name="subtitle_preview_header">― 實時字幕效果預覽 ―</string>
+    <string name="subtitle_preview_sample">這是 VR 空間與平面同步字幕預覽效果\nOPPO Sans VF 變體字體</string>
+    <string name="subtitle_font">字幕字體</string>
+    <string name="subtitle_font_weight">VF 變體字重：%%1$d</string>
+    <string name="font_weight_thin">極細</string>
+    <string name="font_weight_light">纖細</string>
+    <string name="font_weight_regular">常規</string>
+    <string name="font_weight_medium">中黑</string>
+    <string name="font_weight_bold">粗體</string>
+    <string name="font_weight_black">黑體</string>
+    <string name="italic_on">斜體：開</string>
+    <string name="italic_off">斜體：關</string>
+    <string name="subtitle_color">字幕顏色</string>
+    <string name="subtitle_text_alpha">不透明度：%%1$d%%%%</string>
+    <string name="subtitle_stroke">文字描邊</string>
+    <string name="subtitle_stroke_advanced">高階描邊</string>
+    <string name="subtitle_background">字幕背景</string>
+    <string name="subtitle_section_layout">佈局與時間</string>
+    <string name="subtitle_font_size">字幕大小：%%1$dsp</string>
+    <string name="subtitle_max_lines">每段行數</string>
+    <string name="subtitle_n_lines">%%1$d 行</string>
+    <string name="subtitle_align">對齊方式</string>
+    <string name="subtitle_offset_y">字幕垂直移動：%%1$d%%%%</string>
+    <string name="align_bottom">底部</string>
+    <string name="align_center">居中</string>
+    <string name="align_top">頂部</string>
+    <string name="subtitle_offset_x">字幕水平偏移：%%1$d%%%%</string>
+    <string name="subtitle_delay">字幕延遲時間補償</string>
+    <string name="subtitle_ipd">VR 雙眼視差/瞳距微調</string>
+
+    <!-- ===== batch ===== -->
+    <string name="asr_section_title">實時字幕（引擎與模型）</string>
+    <string name="asr_sensevoice_bundled">SenseVoice-Small · 內置模型（無需下載）· 中英日韓粵 · 自帶標點</string>
+    <string name="asr_model_ready_source">已就緒 · %%1$s</string>
+    <string name="asr_model_unavailable">模型不可用（內置資源缺失，可下載兜底）</string>
+    <string name="asr_update_model">更新模型</string>
+    <string name="asr_download_model">下載模型</string>
+    <string name="asr_language_hint">「自動」按語音內容判別語種；中日混說時指定語種更準</string>
+
+    <!-- ===== batch ===== -->
+    <string name="licenses_load_failed">加載失敗</string>
+    <string name="licenses_read_failed">無法讀取 licenses.json</string>
+    <string name="licenses_loading">正在加載許可清單…</string>
+    <string name="licenses_count">本應用使用了以下開源軟件與資源（共 %%1$d 項）。</string>
+    <string name="licenses_note">許可證全文可通過鏈接查看；LGPL 組件按 LGPL 2.1 條款提供。</string>
 </resources>

@@ -28,6 +28,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -78,21 +80,21 @@ fun PlayerControlButtons(
             ) {
                 // 陀螺仪开关
                 TooltipIconButton(
-                    tooltip = if (isGyroEnabled) "陀螺仪已开启" else "陀螺仪已关闭",
+                    tooltip = if (isGyroEnabled) stringResource(R.string.cd_gyro_on) else stringResource(R.string.cd_gyro_off),
                     onClick = { onToggleGyro(); onUserInteraction() },
                     icon = Icons.Default.Explore,
                     isActive = isGyroEnabled
                 )
                 // 视角锁定（区别于屏幕旋转）
                 TooltipIconButton(
-                    tooltip = if (isViewLocked) "视角已锁定" else "视角自由",
+                    tooltip = if (isViewLocked) stringResource(R.string.cd_view_locked) else stringResource(R.string.cd_view_free),
                     onClick = { onToggleViewLock(); onUserInteraction() },
                     icon = if (isViewLocked) Icons.Default.Lock else Icons.Default.LockOpen,
                     isActive = isViewLocked
                 )
                 // 屏幕旋转
                 TooltipIconButton(
-                    tooltip = if (!isLandscape) "已锁定竖屏" else "点击锁定竖屏",
+                    tooltip = if (!isLandscape) stringResource(R.string.cd_portrait_locked) else stringResource(R.string.cd_lock_portrait),
                     onClick = { onToggleOrientation(); onUserInteraction() },
                     icon = Icons.Default.ScreenRotation,
                     isActive = !isLandscape
@@ -110,7 +112,7 @@ fun PlayerControlButtons(
                 IconButton(onClick = { onPrev(); onUserInteraction() }, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Default.SkipPrevious,
-                        contentDescription = "上一首",
+                        contentDescription = stringResource(R.string.cd_prev),
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
@@ -128,7 +130,7 @@ fun PlayerControlButtons(
                 IconButton(onClick = { onNext(); onUserInteraction() }, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Default.SkipNext,
-                        contentDescription = "下一首",
+                        contentDescription = stringResource(R.string.cd_next),
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
@@ -144,25 +146,25 @@ fun PlayerControlButtons(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TooltipIconButton(
-                    tooltip = "重置视角中心",
+                    tooltip = stringResource(R.string.cd_reset_view),
                     onClick = { onResetViewCenter(); onUserInteraction() },
                     icon = Icons.Default.MyLocation,
                     iconSize = 18.dp
                 )
                 TooltipIconButton(
-                    tooltip = if (isSplitScreenVR) "退出 VR 分屏" else "VR 分屏模式",
+                    tooltip = if (isSplitScreenVR) stringResource(R.string.cd_exit_vr_split) else stringResource(R.string.cd_vr_split),
                     onClick = { onToggleSplitScreen(); onUserInteraction() },
                     icon = Icons.Default.ViewInAr,
                     isActive = isSplitScreenVR
                 )
                 TooltipIconButton(
-                    tooltip = "字幕与转写",
+                    tooltip = stringResource(R.string.cd_subtitle_panel),
                     onClick = { onToggleSubtitlePanel(); onUserInteraction() },
                     icon = Icons.Default.Subtitles,
                     isActive = isSubtitlePanelOpen
                 )
                 TooltipIconButton(
-                    tooltip = "播放参数与美颜",
+                    tooltip = stringResource(R.string.cd_playback_settings),
                     onClick = { onToggleSettings(); onUserInteraction() },
                     icon = Icons.Default.Settings,
                     isActive = isSettingsOpen
@@ -222,7 +224,7 @@ fun PlayPauseButton(
     ) {
         Icon(
             imageVector = if (isVideo && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-            contentDescription = "播放暂停",
+            contentDescription = stringResource(R.string.cd_play_pause),
             tint = accentOnColor,
             modifier = Modifier.size(30.dp)
         )

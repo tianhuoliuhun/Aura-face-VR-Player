@@ -23,6 +23,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -74,13 +76,13 @@ fun BatchTranscribeSection(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    "实时字幕（引擎与模型）",
+                    stringResource(R.string.asr_section_title),
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "SenseVoice-Small · 内置模型（无需下载）· 中英日韩粤 · 自带标点",
+                    stringResource(R.string.asr_sensevoice_bundled),
                     color = Color.White.copy(alpha = 0.55f),
                     fontSize = 9.sp,
                     lineHeight = 12.sp
@@ -111,8 +113,8 @@ fun BatchTranscribeSection(
                         )
                         Text(
                             // v2.0.127：模型内置，这里显示实际生效来源（下载版优先于内置版）
-                            text = if (modelReady) "已就绪 · ${SherpaAsrManager.activeModelSource(context)}"
-                            else "模型不可用（内置资源缺失，可下载兜底）",
+                            text = if (modelReady) stringResource(R.string.asr_model_ready_source, SherpaAsrManager.activeModelSource(context))
+                            else stringResource(R.string.asr_model_unavailable),
                             color = if (modelReady) accentColor.copy(alpha = 0.9f)
                             else Color(0xFFFFB74D),
                             fontSize = 8.sp
@@ -134,7 +136,7 @@ fun BatchTranscribeSection(
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                if (modelReady) "更新模型" else "下载模型",
+                                if (modelReady) stringResource(R.string.asr_update_model) else stringResource(R.string.asr_download_model),
                                 color = if (modelReady) Color.White.copy(alpha = 0.85f) else accentOnColor,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
@@ -165,7 +167,7 @@ fun BatchTranscribeSection(
                             .clickable { SherpaAsrManager.cancelDownload() }
                             .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
-                        Text("取消下载", color = Color(0xFFEF5350), fontSize = 8.sp)
+                        Text(stringResource(R.string.asr_cancel_download), color = Color(0xFFEF5350), fontSize = 8.sp)
                     }
                 }
             }
@@ -176,7 +178,7 @@ fun BatchTranscribeSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text("识别语言", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
                 SherpaAsrManager.sherpaLanguages.forEach { (code, label) ->
                     val sel = sherpaLangCode == code
                     Box(
@@ -202,7 +204,7 @@ fun BatchTranscribeSection(
                 }
             }
             Text(
-                "「自动」按语音内容判别语种；中日混说时指定语种更准",
+                stringResource(R.string.asr_language_hint),
                 color = Color.White.copy(alpha = 0.4f),
                 fontSize = 8.sp,
                 lineHeight = 11.sp

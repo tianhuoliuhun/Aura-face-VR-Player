@@ -15,6 +15,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import com.example.ui.theme.MyApplicationTheme
 import com.example.vr.AnalyticsManager
 import com.example.vr.LanguageManager
@@ -52,15 +54,15 @@ class MainActivity : ComponentActivity() {
                 if (showPrivacyDialog) {
                     AlertDialog(
                         onDismissRequest = { /* 必须明确选择，不允许点击外部关闭 */ },
-                        title = { Text("隐私与数据统计") },
+                        title = { Text(stringResource(R.string.privacy_dialog_title)) },
                         text = {
                             Text(
-                                "是否允许本应用采集匿名使用数据（设备型号、系统版本、启动与活跃次数）" +
-                                    "用于统计用户量并改进产品？\n\n" +
-                                    "· 不采集任何个人信息\n" +
-                                    "· 数据用于日活/留存统计（Firebase Analytics）\n" +
-                                    "· 可随时在设置中关闭\n" +
-                                    "· 拒绝不影响任何功能"
+                                stringResource(R.string.privacy_dialog_msg1) +
+                                    stringResource(R.string.privacy_dialog_msg2) +
+                                    stringResource(R.string.privacy_bullet_1) +
+                                    stringResource(R.string.privacy_bullet_2) +
+                                    stringResource(R.string.privacy_bullet_3) +
+                                    stringResource(R.string.privacy_bullet_4)
                             )
                         },
                         confirmButton = {
@@ -68,13 +70,13 @@ class MainActivity : ComponentActivity() {
                                 AnalyticsManager.setConsent(this@MainActivity, true)
                                 showPrivacyDialog = false
                                 AnalyticsManager.reportAppOpen(this@MainActivity)
-                            }) { Text("同意") }
+                            }) { Text(stringResource(R.string.action_agree)) }
                         },
                         dismissButton = {
                             TextButton(onClick = {
                                 AnalyticsManager.setConsent(this@MainActivity, false)
                                 showPrivacyDialog = false
-                            }) { Text("拒绝") }
+                            }) { Text(stringResource(R.string.action_decline)) }
                         }
                     )
                 }

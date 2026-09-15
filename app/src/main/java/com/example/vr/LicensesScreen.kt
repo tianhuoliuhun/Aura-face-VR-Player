@@ -12,6 +12,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -57,7 +59,7 @@ private fun loadLicenses(context: Context): List<LicenseItem> {
             )
         }
     } catch (e: Exception) {
-        listOf(LicenseItem("加载失败", "无法读取 licenses.json", "", "", e.message ?: ""))
+        listOf(LicenseItem(context.getString(R.string.licenses_load_failed), context.getString(R.string.licenses_read_failed), "", "", e.message ?: ""))
     }
 }
 
@@ -90,7 +92,7 @@ fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
         containerColor = Color(0xFC18171C),
         title = {
             Text(
-                text = "开源软件许可",
+                text = stringResource(R.string.licenses_title),
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
@@ -98,7 +100,7 @@ fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
         },
         text = {
             if (licenses.isEmpty()) {
-                Text("正在加载许可清单…", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                Text(stringResource(R.string.licenses_loading), color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth(),
@@ -106,8 +108,8 @@ fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
                 ) {
                     item {
                         Text(
-                            text = "本应用使用了以下开源软件与资源（共 ${licenses.size} 项）。" +
-                                "许可证全文可通过链接查看；LGPL 组件按 LGPL 2.1 条款提供。",
+                            text = stringResource(R.string.licenses_count, licenses.size) +
+                                stringResource(R.string.licenses_note),
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 11.sp,
                             lineHeight = 16.sp
@@ -159,7 +161,7 @@ fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("关闭", color = accent)
+                Text(stringResource(R.string.action_close), color = accent)
             }
         }
     )

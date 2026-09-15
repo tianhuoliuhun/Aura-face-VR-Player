@@ -758,7 +758,7 @@ fun SubtitleSettingsPanel(
         // ===== Section: 显示样式 =====
         } // end section 实时翻译
         SubtitleSection(
-            title = "显示样式",
+            title = stringResource(R.string.subtitle_section_style),
             icon = Icons.Default.TextFields,
             accentColor = accentColor,
             initiallyExpanded = true
@@ -774,7 +774,7 @@ fun SubtitleSettingsPanel(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "― 实时字幕效果预览 ―",
+                text = stringResource(R.string.subtitle_preview_header),
                 color = Color.White.copy(alpha = 0.4f),
                 fontSize = 9.sp,
                 modifier = Modifier.padding(bottom = 6.dp)
@@ -782,7 +782,7 @@ fun SubtitleSettingsPanel(
 
             val sampleFontFamily = SubtitleFontHelper.getFontFamily(subtitleFont, fontWeightVal, isItalic)
             SubtitledText(
-                text = "这是 VR 空间与平面同步字幕预览效果\nOPPO Sans VF 变体字体",
+                text = stringResource(R.string.subtitle_preview_sample),
                 fontFamily = sampleFontFamily,
                 fontSizeSp = (fontSizeSp * 0.75f).toInt().coerceAtLeast(12),
                 fontWeightVal = fontWeightVal,
@@ -799,7 +799,7 @@ fun SubtitleSettingsPanel(
 
         // 1. Font Selection (包含 OPPO Sans VF)
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("字幕字体", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+            Text(stringResource(R.string.subtitle_font), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
             val fontChunked = SubtitleFont.values().toList().chunked(4)
             for (rowOptions in fontChunked) {
                 Row(
@@ -846,15 +846,15 @@ fun SubtitleSettingsPanel(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("VF 变体字重: $fontWeightVal", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                    Text(stringResource(R.string.subtitle_font_weight, fontWeightVal), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                     Text(
                         text = when (fontWeightVal) {
-                            in 100..200 -> "极细"
-                            in 201..350 -> "纤细"
-                            in 351..450 -> "常规"
-                            in 451..650 -> "中黑"
-                            in 651..800 -> "粗体"
-                            else -> "黑体"
+                            in 100..200 -> stringResource(R.string.font_weight_thin)
+                            in 201..350 -> stringResource(R.string.font_weight_light)
+                            in 351..450 -> stringResource(R.string.font_weight_regular)
+                            in 451..650 -> stringResource(R.string.font_weight_medium)
+                            in 651..800 -> stringResource(R.string.font_weight_bold)
+                            else -> stringResource(R.string.font_weight_black)
                         },
                         color = accentColor,
                         fontSize = 10.sp
@@ -889,7 +889,7 @@ fun SubtitleSettingsPanel(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (isItalic) "斜体: 开" else "斜体: 关",
+                    text = if (isItalic) stringResource(R.string.italic_on) else stringResource(R.string.italic_off),
                     color = if (isItalic) accentOnColor else Color.White,
                     fontSize = 10.sp
                 )
@@ -902,8 +902,8 @@ fun SubtitleSettingsPanel(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("字幕颜色", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-                Text("不透明度: ${(textAlpha * 100).roundToInt()}%", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_color), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_text_alpha, (textAlpha * 100).roundToInt()), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -963,7 +963,7 @@ fun SubtitleSettingsPanel(
         ) {
             // Stroke selector
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("文字描边", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_stroke), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 val strokeList = SubtitleStrokeOption.values()
                 for (sOpt in strokeList.take(3)) {
                     val isSel = selectedStrokeOption == sOpt
@@ -990,7 +990,7 @@ fun SubtitleSettingsPanel(
 
             // Stroke selector part 2
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("高阶描边", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_stroke_advanced), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 val strokeList = SubtitleStrokeOption.values()
                 for (sOpt in strokeList.drop(3)) {
                     val isSel = selectedStrokeOption == sOpt
@@ -1017,7 +1017,7 @@ fun SubtitleSettingsPanel(
 
             // Background selector
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("字幕背景", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_background), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 for (bgOpt in SubtitleBgOption.values().take(3)) {
                     val isSel = selectedBgOption == bgOpt
                     Box(
@@ -1045,7 +1045,7 @@ fun SubtitleSettingsPanel(
         // ===== Section: 布局与时间 =====
         } // end section 显示样式
         SubtitleSection(
-            title = "布局与时间",
+            title = stringResource(R.string.subtitle_section_layout),
             icon = Icons.Default.Tune,
             accentColor = accentColor,
             initiallyExpanded = false
@@ -1057,7 +1057,7 @@ fun SubtitleSettingsPanel(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1.2f)) {
-                Text("字幕大小: ${fontSizeSp}sp", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_font_size, fontSizeSp), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 Slider(
                     value = fontSizeSp.toFloat(),
                     onValueChange = {
@@ -1074,7 +1074,7 @@ fun SubtitleSettingsPanel(
             }
 
             Column(modifier = Modifier.weight(1f)) {
-                Text("每段行数", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_max_lines), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -1094,7 +1094,7 @@ fun SubtitleSettingsPanel(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "${n}行",
+                                text = stringResource(R.string.subtitle_n_lines, n),
                                 color = if (isSel) accentOnColor else Color.White,
                                 fontSize = 9.sp,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
@@ -1105,7 +1105,7 @@ fun SubtitleSettingsPanel(
             }
 
             Column(modifier = Modifier.weight(1f)) {
-                Text("对齐方式", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_align), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -1141,11 +1141,11 @@ fun SubtitleSettingsPanel(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("字幕垂直移动: ${(offsetYRatio * 100).roundToInt()}%", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_offset_y, (offsetYRatio * 100).roundToInt()), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("底部", color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.12f); onUserActivity() })
-                    Text("居中", color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.50f); onUserActivity() })
-                    Text("顶部", color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.82f); onUserActivity() })
+                    Text(stringResource(R.string.align_bottom), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.12f); onUserActivity() })
+                    Text(stringResource(R.string.align_center), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.50f); onUserActivity() })
+                    Text(stringResource(R.string.align_top), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.82f); onUserActivity() })
                 }
             }
             Slider(
@@ -1166,8 +1166,8 @@ fun SubtitleSettingsPanel(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("字幕水平偏移: ${(offsetXRatio * 100).roundToInt()}%", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-                Text("居中", color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetXRatioChange(0.0f); onUserActivity() })
+                Text(stringResource(R.string.subtitle_offset_x, (offsetXRatio * 100).roundToInt()), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.align_center), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetXRatioChange(0.0f); onUserActivity() })
             }
             Slider(
                 value = offsetXRatio,
@@ -1199,7 +1199,7 @@ fun SubtitleSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "字幕延迟时间补偿",
+                    text = stringResource(R.string.subtitle_delay),
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
@@ -1296,7 +1296,7 @@ fun SubtitleSettingsPanel(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("VR 双眼视差/瞳距微调", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                Text(stringResource(R.string.subtitle_ipd), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 Text("${(vrIpdOffsetRatio * 100).roundToInt()}%", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
             }
             Slider(
