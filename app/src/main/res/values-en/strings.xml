@@ -93,6 +93,12 @@
     <string name="action_close">Close</string>
     <string name="settings_group_ui_theme">0. UI theme &amp; glass effect</string>
     <string name="theme_solid">Solid</string>
+    <string name="theme_name_violet">Violet</string>
+    <string name="theme_name_indigo">Indigo</string>
+    <string name="theme_name_lake_cyan">Lagoon</string>
+    <string name="theme_name_rose">Rose</string>
+    <string name="theme_name_amber">Amber</string>
+    <string name="theme_name_mint">Mint</string>
     <string name="theme_liquid_glass">Liquid glass</string>
     <string name="settings_group_projection">1. Lens projection &amp; view mode</string>
     <string name="projection_auto_detect">Smart projection detection</string>

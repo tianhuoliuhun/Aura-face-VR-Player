@@ -3270,7 +3270,13 @@ fun VRPlayerScreen(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
-                                    .fillMaxHeight()
+                                    // v2.0.137 修"面板底部一大块空白"：原先 fillMaxHeight()
+                                    // 在 Box 里会填满**父级传入的最大约束**（整屏高），
+                                    // 把 BoxWithConstraints/面板从内容高度撑到屏幕高——
+                                    // 实测面板 593dp 而内容视口仅 480dp，底部多出 ~113dp 空白。
+                                    // 改为与内容视口同高的固定值（matchParentSize 在本版本
+                                    // Compose 无法 import，见 v2.0.128 记录）。
+                                    .height(480.dp)
                                     .padding(vertical = 6.dp, horizontal = 2.dp)
                                     .width(7.dp),
                                 contentAlignment = Alignment.TopEnd
@@ -3462,65 +3468,10 @@ fun VRPlayerScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = UiThemes.byId(uiThemeId).name,
+                                        text = stringResource(UiThemes.byId(uiThemeId).nameRes),
                                         color = AccentColor,
                                         fontSize = 12.sp
                                     )
-                                    // v2.0.131：界面语言放进「UI 主题」分区（原先挂在设置顶部）。
-                                    // 切换只替换 LocalContext，不重建 Activity，当前视频与播放进度不丢。
-                                    // v2.0.133：必须以 context（LocalContext.current，切语言后是新的
-                                    // localizedContext 对象）为 key 重算，否则 remember 只在首次组合
-                                    // 缓存旧 tag，高亮停在原语言上。
-                                    val currentLangTag = remember(context) { LanguageManager.getTag(context) }
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(
-                                            stringResource(R.string.ui_language),
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        // 6 种语言分两行排（一列太挤）
-                                        LanguageManager.options.chunked(3).forEach { rowTags ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                rowTags.forEach { tag ->
-                                                    val sel = currentLangTag == tag
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .weight(1f)
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .background(
-                                                                if (sel) AccentColor
-                                                                else Color.White.copy(alpha = 0.08f)
-                                                            )
-                                                            .clickable {
-                                                                keepUiAlight()
-                                                                LanguageManager.apply(context, tag)
-                                                            }
-                                                            .padding(vertical = 6.dp),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            LanguageManager.displayName(tag),
-                                                            color = if (sel) AccentOnColor
-                                                            else Color.White.copy(alpha = 0.75f),
-                                                            fontSize = 9.sp,
-                                                            fontWeight = if (sel) FontWeight.Bold
-                                                            else FontWeight.Normal,
-                                                            textAlign = TextAlign.Center
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Text(
-                                            stringResource(R.string.ui_language_hint),
-                                            color = Color.White.copy(alpha = 0.4f),
-                                            fontSize = 8.sp
-                                        )
-                                    }
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         listOf(0 to stringResource(R.string.theme_solid), 1 to stringResource(R.string.theme_liquid_glass)).forEach { (m, label) ->
                                             val sel = glassMode == m
@@ -3544,6 +3495,59 @@ fun VRPlayerScreen(
                                             }
                                         }
                                     }
+                                }
+                                // v2.0.137：语言选择独立成块——原先塞在「主题名 … 玻璃模式」
+                                // 同一行的中间（内部还有 fillMaxWidth 的两行按钮），垂直居中后
+                                // 与左右内容互相叠压，表现为"语言选择叠在主题和玻璃效果上面"。
+                                val currentLangTag = remember(context) { LanguageManager.getTag(context) }
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        stringResource(R.string.ui_language),
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    // 6 种语言分两行排（一列太挤）
+                                    LanguageManager.options.chunked(3).forEach { rowTags ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            rowTags.forEach { tag ->
+                                                val sel = currentLangTag == tag
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(
+                                                            if (sel) AccentColor
+                                                            else Color.White.copy(alpha = 0.08f)
+                                                        )
+                                                        .clickable {
+                                                            keepUiAlight()
+                                                            LanguageManager.apply(context, tag)
+                                                        }
+                                                        .padding(vertical = 6.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        LanguageManager.displayName(tag),
+                                                        color = if (sel) AccentOnColor
+                                                        else Color.White.copy(alpha = 0.75f),
+                                                        fontSize = 9.sp,
+                                                        fontWeight = if (sel) FontWeight.Bold
+                                                        else FontWeight.Normal,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        stringResource(R.string.ui_language_hint),
+                                        color = Color.White.copy(alpha = 0.4f),
+                                        fontSize = 8.sp
+                                    )
                                 }
                                 }
                                 /** 区块 1：镜头投影与视角模式（2D/鱼眼/360/180/盒子 + 变形） */

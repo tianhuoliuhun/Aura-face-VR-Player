@@ -82,6 +82,12 @@
     <string name="action_close">閉じる</string>
     <string name="settings_group_ui_theme">0. UI テーマとガラス効果</string>
     <string name="theme_solid">ベタ塗り</string>
+    <string name="theme_name_violet">バイオレット</string>
+    <string name="theme_name_indigo">インディゴ</string>
+    <string name="theme_name_lake_cyan">ラグーン</string>
+    <string name="theme_name_rose">ローズ</string>
+    <string name="theme_name_amber">アンバー</string>
+    <string name="theme_name_mint">ミント</string>
     <string name="theme_liquid_glass">リキッドガラス</string>
     <string name="settings_group_projection">1. レンズ投影と視野モード</string>
     <string name="projection_auto_detect">投影の自動検出</string>

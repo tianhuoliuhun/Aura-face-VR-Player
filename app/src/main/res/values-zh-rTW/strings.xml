@@ -102,6 +102,12 @@
     <string name="action_close">關閉</string>
     <string name="settings_group_ui_theme">0. UI 主題與玻璃效果（8/2 功能）</string>
     <string name="theme_solid">實色</string>
+    <string name="theme_name_violet">紫羅蘭</string>
+    <string name="theme_name_indigo">靛藍</string>
+    <string name="theme_name_lake_cyan">湖青</string>
+    <string name="theme_name_rose">玫瑰</string>
+    <string name="theme_name_amber">琥珀</string>
+    <string name="theme_name_mint">薄荷</string>
     <string name="theme_liquid_glass">液體玻璃</string>
     <string name="settings_group_projection">1. 鏡頭投影與視角模式</string>
     <string name="projection_auto_detect">投影智能檢測</string>

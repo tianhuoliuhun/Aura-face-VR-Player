@@ -82,6 +82,12 @@
     <string name="action_close">닫기</string>
     <string name="settings_group_ui_theme">0. UI 테마와 글래스 효과</string>
     <string name="theme_solid">단색</string>
+    <string name="theme_name_violet">바이올렛</string>
+    <string name="theme_name_indigo">인디고</string>
+    <string name="theme_name_lake_cyan">라군</string>
+    <string name="theme_name_rose">로즈</string>
+    <string name="theme_name_amber">앰버</string>
+    <string name="theme_name_mint">민트</string>
     <string name="theme_liquid_glass">리퀴드 글래스</string>
     <string name="settings_group_projection">1. 렌즈 투영과 시야 모드</string>
     <string name="projection_auto_detect">투영 자동 감지</string>

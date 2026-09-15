@@ -1,11 +1,14 @@
 package com.example.vr
 
 import android.content.SharedPreferences
+import androidx.annotation.StringRes
+import com.example.R
 import androidx.compose.ui.graphics.Color
 
 data class UiThemePalette(
     val id: Int,
-    val name: String,
+    // v2.0.137：主题颜色名改走字符串资源（原硬编码中文，其他语言下不翻译）
+    @StringRes val nameRes: Int,
     val bg: Color,
     val panelBg: Color,
     val accent: Color,
@@ -20,7 +23,7 @@ object UiThemes {
     val list = listOf(
         UiThemePalette(
             id = 0,
-            name = "紫罗兰",
+            nameRes = R.string.theme_name_violet,
             bg = Color(0xFF1C1B1F),
             panelBg = Color(0xF22B2930),
             accent = Color(0xFFD0BCFF),
@@ -32,7 +35,7 @@ object UiThemes {
         ),
         UiThemePalette(
             id = 1,
-            name = "靛蓝",
+            nameRes = R.string.theme_name_indigo,
             bg = Color(0xFF1B1D2B),
             panelBg = Color(0xF22B2C42),
             accent = Color(0xFF9FA8FF),
@@ -44,7 +47,7 @@ object UiThemes {
         ),
         UiThemePalette(
             id = 2,
-            name = "湖青",
+            nameRes = R.string.theme_name_lake_cyan,
             bg = Color(0xFF17242B),
             panelBg = Color(0xF225323B),
             accent = Color(0xFF80DEEA),
@@ -56,7 +59,7 @@ object UiThemes {
         ),
         UiThemePalette(
             id = 3,
-            name = "玫瑰",
+            nameRes = R.string.theme_name_rose,
             bg = Color(0xFF281C24),
             panelBg = Color(0xF2362632),
             accent = Color(0xFFF48FB1),
@@ -68,7 +71,7 @@ object UiThemes {
         ),
         UiThemePalette(
             id = 4,
-            name = "琥珀",
+            nameRes = R.string.theme_name_amber,
             bg = Color(0xFF272019),
             panelBg = Color(0xF2362B23),
             accent = Color(0xFFFFD54F),
@@ -80,7 +83,7 @@ object UiThemes {
         ),
         UiThemePalette(
             id = 5,
-            name = "薄荷",
+            nameRes = R.string.theme_name_mint,
             bg = Color(0xFF18241E),
             panelBg = Color(0xF224342A),
             accent = Color(0xFFA5D6A7),
