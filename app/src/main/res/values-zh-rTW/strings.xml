@@ -452,6 +452,7 @@
     <string name="stereo_tab_full">3D 上下立體 (Top-Bottom)</string>
     <string name="decoder_exo">EXO 解碼器</string>
     <string name="decoder_mpv">MPV 解碼器</string>
+    <string name="decoder_coming_soon">開發中</string>
     <string name="auto_opt">自動</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
     <string name="engine_bing">必應翻譯</string>

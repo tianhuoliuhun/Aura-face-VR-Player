@@ -410,6 +410,7 @@
     <string name="stereo_tab_full">3D 상하 입체</string>
     <string name="decoder_exo">EXO 디코더</string>
     <string name="decoder_mpv">MPV 디코더</string>
+    <string name="decoder_coming_soon">개발 중</string>
     <string name="auto_opt">자동</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
     <string name="engine_bing">빙 번역</string>

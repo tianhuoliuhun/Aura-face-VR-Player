@@ -397,8 +397,10 @@ fun VRPlayerScreen(
     var decoderEngine by remember {
         mutableStateOf(
             if (isMemoryModeEnabled) {
+                // v2.0.141：MPV 内核从未实现（仅 UI 占位），持久化的 MPV 偏好一律回退 EXO
                 val id = prefs.getInt("decoder_engine_id", 0)
-                DecoderEngine.values().find { it.id == id } ?: DecoderEngine.EXO
+                if (id == DecoderEngine.MPV.id) DecoderEngine.EXO
+                else DecoderEngine.values().find { it.id == id } ?: DecoderEngine.EXO
             } else DecoderEngine.EXO
         )
     }
@@ -4216,7 +4218,10 @@ fun VRPlayerScreen(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             DecoderEngine.values().forEach { engine ->
-                                                val isSelected = decoderEngine == engine
+                                                // v2.0.141：MPV 内核从未实现（仅 UI 占位，切换实际仍是
+                                                // ExoPlayer），置灰禁用并注明「开发中」，避免误导用户
+                                                val isPlaceholder = engine == DecoderEngine.MPV
+                                                val isSelected = !isPlaceholder && decoderEngine == engine
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
@@ -4225,7 +4230,7 @@ fun VRPlayerScreen(
                                                             if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
                                                             shape = RoundedCornerShape(8.dp)
                                                         )
-                                                        .clickable {
+                                                        .clickable(enabled = !isPlaceholder) {
                                                             decoderEngine = engine
                                                             Toast.makeText(context, context.getString(R.string.toast_decoder_switched, context.getString(engine.labelRes)), Toast.LENGTH_SHORT).show()
                                                             keepUiAlight()
@@ -4233,9 +4238,15 @@ fun VRPlayerScreen(
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
-                                                        text = stringResource(engine.labelRes),
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
+                                                        text = if (isPlaceholder) {
+                                                            stringResource(engine.labelRes) + " · " + stringResource(R.string.decoder_coming_soon)
+                                                        } else stringResource(engine.labelRes),
+                                                        color = when {
+                                                            isPlaceholder -> Color.White.copy(alpha = 0.35f)
+                                                            isSelected -> AccentOnColor
+                                                            else -> Color.White
+                                                        },
+                                                        fontSize = if (isPlaceholder) 9.sp else 10.sp,
                                                         fontWeight = FontWeight.SemiBold
                                                     )
                                                 }
