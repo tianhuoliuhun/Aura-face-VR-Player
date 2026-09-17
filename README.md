@@ -328,6 +328,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | **v2.0.137** | 修复**设置面板字幕浮窗**底部大片空白、语言选择与水印/主题卡片重叠、以及硬编码的中文颜色名（如「青橙」「赛博朋克」）；浮窗布局改为自适应高度 · Settings subtitle panel: whitespace/overlap fixes + hardcoded color-name cleanup |
 | **v2.0.138** | **设置面板硬编码中文全面多语言化（五语）**：翻译引擎（必应/DeepSeek/通义/智谱/MIMO/OpenAI/自定义）、目标语言、ASR 语言、12 款 LUT 滤镜、ASR 模型状态、字幕翻译状态、实时字幕状态、各类 Toast，以及投影/立体/解码器/分辨率模式名，全部迁入 `values-*` 字符串资源并适配简/繁/英/日/韩 · **Settings-panel i18n**: all hardcoded Chinese (engines, languages, LUTs, ASR/translation/realtime statuses, toasts, projection/stereo/decoder/resolution modes) moved to string resources, 5 languages |
 | **v2.0.139** | ① **修复第三方文件管理器（MT 管理器等）经 FTP/SMB 远程打开视频无法播放**：MT 对远程文件经本地回环 HTTP 代理（`http://127.0.0.1:port/...`）交给播放器，而 `DefaultDataSource` 只处理 file/asset/content、其余 scheme 全部落到 base 数据源——base 固定为 SmbDataSource 导致 http URI 被拿去 SMB 连接 127.0.0.1 而失败。新增 `SchemeRoutingDataSource` 按 scheme 分流：`smb://` → jcifs，其余 → `DefaultHttpDataSource`；并开启 `usesCleartextTraffic` 允许回环明文 HTTP；② **SMB 播放 seek 改真随机访问**：`SmbFileInputStream.skip()` 对大偏移要顺序读丢数据、长视频拖动极慢，改用 `SmbRandomAccessFile` |
+| **v2.0.140** | 修复远程视频（MT 回环代理）**实时字幕/批量转写误报「该视频没有可用的音轨」**：`AudioTee.open()` 第一步 `openFileDescriptor(uri)` 对 `http://` URI 必然抛异常、且临时文件兜底同样依赖它，导致 http 源永远报无音轨。现 http/https 先走框架 `MediaExtractor.setDataSource(context, uri, null)`（原生 HTTP 栈、支持 Range seek，无需下载），失败再回退经代理整文件下载到缓存打开；批量转写复用 AudioTee 一并修复 · Realtime/batch subtitle: fix false "no audio track" for remote http sources |
 
 ---
 

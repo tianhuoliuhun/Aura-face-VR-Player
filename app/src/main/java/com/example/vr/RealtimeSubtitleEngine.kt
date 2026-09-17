@@ -817,6 +817,32 @@ class RealtimeSubtitleEngine(private val context: Context) {
          * 的临时 URI 会抛 "Failed to instantiate extractor"（v123 实测）。
          */
         fun open(): Boolean {
+            val scheme = uri.scheme?.lowercase()
+            if (scheme == "http" || scheme == "https") {
+                // v2.0.140：http(s)（如 MT 管理器的本地回环代理 http://127.0.0.1:port/...）
+                // 走框架自带 HTTP 栈（支持 Range seek）；openFileDescriptor 对 http URI
+                // 必然抛异常（v2.0.139 实测误报“该视频没有可用的音轨”）。
+                val ex = MediaExtractor()
+                try {
+                    ex.setDataSource(context, uri, null)
+                    extractor = ex
+                    return openCodec(ex)
+                } catch (e: Exception) {
+                    Log.w(TAG, "AudioTee http 直连失败（${e.message}），回退整文件临时下载")
+                    try { ex.release() } catch (_: Exception) {}
+                    val tmp = downloadToTemp(uri) ?: return false
+                    val ex2 = MediaExtractor()
+                    try {
+                        ex2.setDataSource(tmp.absolutePath)
+                    } catch (e2: Exception) {
+                        Log.w(TAG, "AudioTee 临时文件打开失败：${e2.message}")
+                        try { ex2.release() } catch (_: Exception) {}
+                        return false
+                    }
+                    extractor = ex2
+                    return openCodec(ex2)
+                }
+            }
             val ex = MediaExtractor()
             try {
                 val pfd = context.contentResolver.openFileDescriptor(uri, "r")
@@ -885,6 +911,24 @@ class RealtimeSubtitleEngine(private val context: Context) {
             }
             tmp
         } catch (e: Exception) {
+            null
+        }
+
+        /** v2.0.140：http(s) 直连失败时的兜底——经回环代理整文件下载到缓存再打开 */
+        private fun downloadToTemp(uri: Uri): File? = try {
+            val tmp = File(context.cacheDir, "rt_asr_src.tmp")
+            val conn = (java.net.URL(uri.toString()).openConnection()
+                    as java.net.HttpURLConnection).apply {
+                connectTimeout = 10_000
+                readTimeout = 30_000
+                instanceFollowRedirects = true
+            }
+            conn.inputStream.use { input ->
+                tmp.outputStream().use { output -> input.copyTo(output, 1 shl 20) }
+            }
+            tmp
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioTee http 临时下载失败：${e.message}")
             null
         }
 
