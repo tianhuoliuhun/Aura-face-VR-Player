@@ -1688,10 +1688,12 @@ fun VRPlayerScreen(
                     }
                 }
             }
-            // SMB-aware data source factory so smb:// URIs stream over the LAN (8/2)
+            // v2.0.139: DefaultDataSource 只处理 file/asset/content，其余 scheme 落到 base。
+            // MT 等文件管理器把 FTP/SMB 远程文件经本地回环 HTTP 代理（http://127.0.0.1:port/...）
+            // 交给播放器，故 base 按 scheme 分流：smb:// → jcifs，其余 → DefaultHttpDataSource。
             val smbAwareFactory = androidx.media3.datasource.DefaultDataSource.Factory(
                 context,
-                SmbDataSource.Factory()
+                SchemeRoutingDataSource.Factory()
             )
             val exo = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(

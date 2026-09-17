@@ -327,7 +327,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | **v2.0.136** | ① **修复引擎重启后多预读协程并发踩踏**（logcat 实证：同一窗口被重复识别 2~3 遍、进度倒跳、窗口边界每轮 -1ms）：引入**代际 token**——旧代协程在窗口处理完成后发现已被新一代取代立即退出且不写共享状态；`scannedRanges` 全部访问加锁；② 实时字幕**全片生成完成后自动保存** `subtitles/<视频名>_<时间戳>.srt`（应用 data 目录，多次生成不覆盖）；③ **打开视频时自动加载**该目录下匹配的最新一份；④ 字幕悬浮窗新增**字幕源选择器**：实时 AI 生成 / 历史保存字幕一键切换（五语适配） |
 | **v2.0.137** | 修复**设置面板字幕浮窗**底部大片空白、语言选择与水印/主题卡片重叠、以及硬编码的中文颜色名（如「青橙」「赛博朋克」）；浮窗布局改为自适应高度 · Settings subtitle panel: whitespace/overlap fixes + hardcoded color-name cleanup |
 | **v2.0.138** | **设置面板硬编码中文全面多语言化（五语）**：翻译引擎（必应/DeepSeek/通义/智谱/MIMO/OpenAI/自定义）、目标语言、ASR 语言、12 款 LUT 滤镜、ASR 模型状态、字幕翻译状态、实时字幕状态、各类 Toast，以及投影/立体/解码器/分辨率模式名，全部迁入 `values-*` 字符串资源并适配简/繁/英/日/韩 · **Settings-panel i18n**: all hardcoded Chinese (engines, languages, LUTs, ASR/translation/realtime statuses, toasts, projection/stereo/decoder/resolution modes) moved to string resources, 5 languages |
-| **v2.0.137** | ① 修复**字幕悬浮窗底部一大块空白**（logcat+视图实测：面板 593dp 而内容视口 480dp）——右侧滚动条的 `fillMaxHeight()` 在 Box 中填满父级最大约束（整屏高）把面板撑高，改为与内容视口同高的固定值；② 修复**语言选择叠在主题/玻璃效果上**——语言块原先塞在「主题名 ⟷ 玻璃模式」同行中间，垂直居中后互相叠压，拆出为独立区块；③ **UI 主题颜色名国际化**——紫罗兰/靛蓝/湖青/玫瑰/琥珀/薄荷原为硬编码中文，改走字符串资源并补齐五语 |
+| **v2.0.139** | ① **修复第三方文件管理器（MT 管理器等）经 FTP/SMB 远程打开视频无法播放**：MT 对远程文件经本地回环 HTTP 代理（`http://127.0.0.1:port/...`）交给播放器，而 `DefaultDataSource` 只处理 file/asset/content、其余 scheme 全部落到 base 数据源——base 固定为 SmbDataSource 导致 http URI 被拿去 SMB 连接 127.0.0.1 而失败。新增 `SchemeRoutingDataSource` 按 scheme 分流：`smb://` → jcifs，其余 → `DefaultHttpDataSource`；并开启 `usesCleartextTraffic` 允许回环明文 HTTP；② **SMB 播放 seek 改真随机访问**：`SmbFileInputStream.skip()` 对大偏移要顺序读丢数据、长视频拖动极慢，改用 `SmbRandomAccessFile` |
 
 ---
 
