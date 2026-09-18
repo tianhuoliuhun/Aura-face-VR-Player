@@ -1,13 +1,40 @@
 package com.example.vr
 
+import android.content.Context
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
+
+/**
+ * v2.0.142：回环 HTTP 代理（MT 等）的播放缓存，供 [SchemeRoutingDataSource] 的 http 分支
+ * 复用——即使代理不支持 Range 也能按需拉取字节、正常 seek。上限 512MB，LRU 淘汰。
+ */
+private const val HTTP_CACHE_MAX_BYTES = 512L * 1024 * 1024
+
+private var httpCacheSingleton: SimpleCache? = null
+
+private fun getHttpCache(context: Context): SimpleCache {
+    synchronized(SmbDataSource::class.java) {
+        if (httpCacheSingleton == null) {
+            val dir = java.io.File(context.cacheDir, "http_stream_cache")
+            httpCacheSingleton = SimpleCache(
+                dir,
+                LeastRecentlyUsedCacheEvictor(HTTP_CACHE_MAX_BYTES),
+                StandaloneDatabaseProvider(context)
+            )
+        }
+        return httpCacheSingleton!!
+    }
+}
 
 /**
  * ExoPlayer DataSource that streams video over SMB (SMB2/SMB3) via jcifs-ng,
@@ -85,10 +112,10 @@ class SmbDataSource : BaseDataSource(/* isNetwork = */ true) {
  * "SMB open failed: Failed to connect: 0.0.0.0<00>/127.0.0.1"）。
  * 这里按 scheme 分流：smb:// → SmbDataSource(jcifs)，其余 → DefaultHttpDataSource。
  */
-class SchemeRoutingDataSource : BaseDataSource(/* isNetwork = */ true) {
+class SchemeRoutingDataSource(private val context: Context) : BaseDataSource(/* isNetwork = */ true) {
 
-    class Factory : DataSource.Factory {
-        override fun createDataSource(): DataSource = SchemeRoutingDataSource()
+    class Factory(private val context: Context) : DataSource.Factory {
+        override fun createDataSource(): DataSource = SchemeRoutingDataSource(context)
     }
 
     private var delegate: DataSource? = null
@@ -99,9 +126,12 @@ class SchemeRoutingDataSource : BaseDataSource(/* isNetwork = */ true) {
         val source: DataSource = if (isSmb) {
             SmbDataSource()
         } else {
-            DefaultHttpDataSource.Factory()
-                .setAllowCrossProtocolRedirects(true)
-                .createDataSource()
+            // v2.0.142：http(s)（MT 回环代理等）包 CacheDataSource——代理不支持 Range
+            // 时也能按需拉取字节、正常 seek（边下边播），moov 在尾部的 MP4 也能先读 moov。
+            CacheDataSource(
+                getHttpCache(context),
+                DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).createDataSource()
+            )
         }
         delegate = source
         return source.open(dataSpec)

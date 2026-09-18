@@ -1695,7 +1695,7 @@ fun VRPlayerScreen(
             // 交给播放器，故 base 按 scheme 分流：smb:// → jcifs，其余 → DefaultHttpDataSource。
             val smbAwareFactory = androidx.media3.datasource.DefaultDataSource.Factory(
                 context,
-                SchemeRoutingDataSource.Factory()
+                SchemeRoutingDataSource.Factory(context)
             )
             val exo = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(

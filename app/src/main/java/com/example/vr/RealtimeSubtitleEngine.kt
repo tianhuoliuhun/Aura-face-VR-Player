@@ -23,6 +23,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 import com.example.R
+import android.media.MediaDataSource
+import jcifs.smb.SmbFile
+import jcifs.smb.SmbRandomAccessFile
 
 /**
  * v126：实时 AI 字幕引擎（方案文档「AI 字幕集成播放器」P0+P1）。
@@ -800,6 +803,31 @@ class RealtimeSubtitleEngine(private val context: Context) {
      * **按范围反复解码**（预读窗口滚动 + seek），因此保持 extractor/codec 常驻，
      * 复用 codec 实例（创建开销约 50–100ms，不能每段重建）。
      */
+    /**
+     * v2.0.142：把 smb:// 暴露成 framework 的 [MediaDataSource]，让 [MediaExtractor]
+     * 能真随机访问（per-window seek）。底层用 jcifs [SmbRandomAccessFile]，与
+     * [SmbDataSource] 的 seek 实现一致（真随机访问，非 skip 顺序读）。
+     */
+    private class SmbMediaDataSource(private val smbUri: String) : MediaDataSource() {
+        private val raf = SmbRandomAccessFile(SmbFile(smbUri), "r")
+
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+            if (position >= raf.length()) return -1
+            raf.seek(position)
+            val n = raf.read(buffer, offset, size)
+            return if (n < 0) -1 else n
+        }
+
+        override fun getSize(): Long = raf.length()
+
+        override fun close() {
+            try {
+                raf.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     private class AudioTee(private val context: Context, private val uri: Uri) {
 
         private var extractor: MediaExtractor? = null
@@ -818,6 +846,30 @@ class RealtimeSubtitleEngine(private val context: Context) {
          */
         fun open(): Boolean {
             val scheme = uri.scheme?.lowercase()
+            if (scheme == "smb") {
+                // v2.0.142：smb://（应用内 SMB 浏览器）走 jcifs 真随机访问，
+                // openFileDescriptor 对 smb:// 必然抛异常（与 http 同源的「无音轨」误报）。
+                val ex = MediaExtractor()
+                try {
+                    ex.setDataSource(SmbMediaDataSource(uri.toString()))
+                    extractor = ex
+                    return openCodec(ex)
+                } catch (e: Exception) {
+                    Log.w(TAG, "AudioTee smb 直连失败（${e.message}），回退整文件下载")
+                    try { ex.release() } catch (_: Exception) {}
+                    val tmp = downloadSmbToTemp(uri) ?: return false
+                    val ex2 = MediaExtractor()
+                    try {
+                        ex2.setDataSource(tmp.absolutePath)
+                    } catch (e2: Exception) {
+                        Log.w(TAG, "AudioTee smb 临时文件打开失败：${e2.message}")
+                        try { ex2.release() } catch (_: Exception) {}
+                        return false
+                    }
+                    extractor = ex2
+                    return openCodec(ex2)
+                }
+            }
             if (scheme == "http" || scheme == "https") {
                 // v2.0.140：http(s)（如 MT 管理器的本地回环代理 http://127.0.0.1:port/...）
                 // 走框架自带 HTTP 栈（支持 Range seek）；openFileDescriptor 对 http URI
@@ -929,6 +981,20 @@ class RealtimeSubtitleEngine(private val context: Context) {
             tmp
         } catch (e: Exception) {
             Log.w(TAG, "AudioTee http 临时下载失败：${e.message}")
+            null
+        }
+
+        /** v2.0.142：smb:// 直连失败时的兜底——经 jcifs 整文件下载到缓存再打开
+         * （copyToTemp/downloadToTemp 都依赖 contentResolver.openFileDescriptor，对 smb:// 无效） */
+        private fun downloadSmbToTemp(uri: Uri): File? = try {
+            val smb = SmbFile(uri.toString())
+            val tmp = File(context.cacheDir, "rt_asr_src_smb.tmp")
+            smb.inputStream.use { input ->
+                tmp.outputStream().use { output -> input.copyTo(output, 1 shl 20) }
+            }
+            tmp
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioTee smb 临时下载失败：${e.message}")
             null
         }
 

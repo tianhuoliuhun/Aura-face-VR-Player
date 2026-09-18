@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 141
-    versionName = "2.0.141"
+    versionCode = 142
+    versionName = "2.0.142"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -178,6 +178,10 @@ dependencies {
   implementation("androidx.media3:media3-common:1.4.1")
   implementation("androidx.media3:media3-transformer:1.4.1")
   implementation("androidx.media3:media3-effect:1.4.1")
+  // v2.0.142：SimpleCache 需要 media3-database 提供 StandaloneDatabaseProvider
+  // （CacheDataSource / SimpleCache / LeastRecentlyUsedCacheEvictor 本身在 media3-datasource，
+  //  已由 media3-exoplayer 传递引入，无需再显式声明）
+  implementation("androidx.media3:media3-database:1.4.1")
   // Real Vosk offline speech recognition (Kaldi based, on-device ASR)
   // v117：纯 Java MPEG 音频软件解码兜底（JLayer，LGPL-2.1）
   // 背景：MPEG-1 Audio Layer II（Android 里的 MIME 是 audio/mpeg-L2）在 Android 上属可选格式，
