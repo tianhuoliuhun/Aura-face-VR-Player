@@ -462,6 +462,8 @@
     <string name="engine_mimo">MiniMax / MIMO</string>
     <string name="engine_openai">OpenAI API</string>
     <string name="engine_custom">自定義 LLM / API</string>
+    <string name="engine_mymemory">MyMemory 翻譯</string>
+    <string name="engine_libretranslate">LibreTranslate</string>
     <string name="lang_zh">簡體中文</string>
     <string name="lang_en">英語</string>
     <string name="lang_ja">日語</string>

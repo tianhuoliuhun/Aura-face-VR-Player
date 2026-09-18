@@ -676,9 +676,9 @@ fun SubtitleSettingsPanel(
                         }
                     }
 
-                    // API Key & Base URL Inputs for engines that require a key
-                    // (the free Bing endpoint needs neither key nor base URL)
-                    if (translator.config.engine.requiresApiKey) {
+                    // API Key & Base URL Inputs for engines that require a key.
+                    // 另外 LibreTranslate 允许自托管，因此也展示（用于填私有实例地址 / key）。
+                    if (translator.config.engine.requiresApiKey || translator.config.engine == TranslationEngine.LIBRETRANSLATE) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             OutlinedTextField(
                                 value = translator.config.apiKey,

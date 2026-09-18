@@ -420,6 +420,8 @@
     <string name="engine_mimo">MiniMax / MIMO</string>
     <string name="engine_openai">OpenAI API</string>
     <string name="engine_custom">사용자 지정 LLM / API</string>
+    <string name="engine_mymemory">MyMemory 번역</string>
+    <string name="engine_libretranslate">LibreTranslate</string>
     <string name="lang_zh">간체중국어</string>
     <string name="lang_en">영어</string>
     <string name="lang_ja">일본어</string>

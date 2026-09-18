@@ -2,6 +2,7 @@ package com.example.vr
 
 import com.example.R
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -81,6 +82,23 @@ enum class TranslationEngine(
         defaultBaseUrl = "https://api.openai.com/v1",
         defaultModel = "gpt-3.5-turbo",
         requiresApiKey = true
+    ),
+    // 免费翻译：MyMemory 公共 API（无需 key，沙箱内实测可用）。
+    MYMEMORY(
+        id = 7,
+        displayNameResId = R.string.engine_mymemory,
+        defaultBaseUrl = "https://api.mymemory.translated.net",
+        defaultModel = "",
+        requiresApiKey = false
+    ),
+    // 免费翻译：LibreTranslate（自托管或公共实例，标准 /translate 协议）。
+    // 沙箱内公共实例 TLS 被拦截、无法实测，真机端按标准协议自测。
+    LIBRETRANSLATE(
+        id = 8,
+        displayNameResId = R.string.engine_libretranslate,
+        defaultBaseUrl = "https://libretranslate.com",
+        defaultModel = "",
+        requiresApiKey = false
     )
 }
 
@@ -547,10 +565,11 @@ class SubtitleTranslator(private val context: Context) {
     private suspend fun fetchTranslation(text: String, targetLangCode: String): String {
         val result = translationSemaphore.withPermit {
             try {
-                if (config.engine == TranslationEngine.BING) {
-                    translateViaBing(text, targetLangCode)
-                } else {
-                    translateViaOpenAiApi(text, targetLangCode)
+                when (config.engine) {
+                    TranslationEngine.BING -> translateViaBing(text, targetLangCode)
+                    TranslationEngine.MYMEMORY -> translateViaMyMemory(text, targetLangCode)
+                    TranslationEngine.LIBRETRANSLATE -> translateViaLibreTranslate(text, targetLangCode)
+                    else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
                 Log.e("SubtitleTranslator", "Translation failed for engine ${config.engine}", e)
@@ -772,6 +791,114 @@ class SubtitleTranslator(private val context: Context) {
                 ""
             }
         }
+    }
+
+    /**
+     * MyMemory 免费翻译 API（无需 key，沙箱内实测可用）。
+     * GET https://api.mymemory.translated.net/get?q=<text>&langpair=<src>|<tgt>
+     * - src 支持 "Autodetect"（由 MyMemory 自动识别来源语言）
+     * - 响应体：{ responseData: { translatedText: "..." } }
+     * - 超限/出错时 responseStatus != 200，translatedText 可能为空或带回显原文
+     */
+    private suspend fun translateViaMyMemory(text: String, targetLangCode: String): String {
+        val target = mapMyMemoryLang(targetLangCode)
+        val langPair = "Autodetect|$target"
+        val base = getActiveBaseUrl().trim().trimEnd('/')
+        val url = "$base/get?q=${Uri.encode(text)}&langpair=${Uri.encode(langPair)}"
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder().url(url).build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e("SubtitleTranslator", "MyMemory HTTP Error: ${response.code} ${response.message}")
+                        withContext(Dispatchers.Main) {
+                            statusMessage = context.getString(R.string.subtitle_api_error, response.code)
+                        }
+                        return@withContext ""
+                    }
+                    val bodyStr = response.body?.string() ?: return@withContext ""
+                    val root = JSONObject(bodyStr)
+                    val translated = root.optJSONObject("responseData")
+                        ?.optString("translatedText")?.trim()
+                    if (translated.isNullOrBlank()) {
+                        val msg = root.optString("responseMessage", "")
+                        Log.w("SubtitleTranslator", "MyMemory 返回空结果：$msg")
+                        return@withContext ""
+                    }
+                    translated
+                }
+            } catch (e: Exception) {
+                Log.e("SubtitleTranslator", "MyMemory request exception", e)
+                withContext(Dispatchers.Main) {
+                    statusMessage = context.getString(R.string.subtitle_translate_failed, e.localizedMessage ?: "")
+                }
+                ""
+            }
+        }
+    }
+
+    /**
+     * LibreTranslate 翻译（自托管或公共实例），标准 /translate 协议。
+     * POST form: q / source / target / format，可选 api_key（填了就带）。
+     * 响应体：{ translatedText: "..." }
+     * 注意：沙箱内公共实例 TLS 被拦截、无法实测；按官方标准协议实现，真机端自测。
+     */
+    private suspend fun translateViaLibreTranslate(text: String, targetLangCode: String): String {
+        val apiKey = config.apiKey.trim()
+        val base = getActiveBaseUrl().trim().trimEnd('/')
+        val url = if (base.endsWith("/translate")) base else "$base/translate"
+        val target = mapLibreLang(targetLangCode)
+
+        val formBuilder = FormBody.Builder()
+            .add("q", text)
+            .add("source", "auto")
+            .add("target", target)
+            .add("format", "text")
+        if (apiKey.isNotBlank()) formBuilder.add("api_key", apiKey)
+
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Content-Type", "application/x-www-form-urlencoded")
+            .post(formBuilder.build())
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e("SubtitleTranslator", "LibreTranslate HTTP Error: ${response.code} ${response.message}")
+                        withContext(Dispatchers.Main) {
+                            statusMessage = context.getString(R.string.subtitle_api_error, response.code)
+                        }
+                        return@withContext ""
+                    }
+                    val bodyStr = response.body?.string() ?: return@withContext ""
+                    val root = JSONObject(bodyStr)
+                    root.optString("translatedText").trim()
+                }
+            } catch (e: Exception) {
+                Log.e("SubtitleTranslator", "LibreTranslate request exception", e)
+                withContext(Dispatchers.Main) {
+                    statusMessage = context.getString(R.string.subtitle_translate_failed, e.localizedMessage ?: "")
+                }
+                ""
+            }
+        }
+    }
+
+    /** MyMemory 目标语言码映射：简中→zh-CN，繁中→zh-TW，其余直接用 code */
+    private fun mapMyMemoryLang(code: String): String = when (code) {
+        "zh" -> "zh-CN"
+        "zh-TW" -> "zh-TW"
+        else -> code
+    }
+
+    /** LibreTranslate 目标语言码映射（与 MyMemory 基本一致） */
+    private fun mapLibreLang(code: String): String = when (code) {
+        "zh" -> "zh"
+        "zh-TW" -> "zh-TW"
+        else -> code
     }
 
     fun clearCache() {
