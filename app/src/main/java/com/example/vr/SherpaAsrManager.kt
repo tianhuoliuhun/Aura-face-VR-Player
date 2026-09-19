@@ -13,6 +13,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -645,9 +646,25 @@ object SherpaAsrManager {
         val dir = extDir(context, m)
         Log.i(TAG, "ext ASR (${m.key}): dir=$dir type=${m.modelType} threads=$numThreads")
         return try {
-            val config = OfflineRecognizerConfig(
-                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-                modelConfig = OfflineModelConfig(
+            // 按 modelType 选择模型子配置：
+            //  - "whisper" → whisper（encoder/decoder + language，多语言模型必须指定语言）
+            //  - 其余（zipformer / NeMo）→ transducer（encoder/decoder/joiner）
+            val modelConfig = if (m.modelType == "whisper") {
+                OfflineModelConfig(
+                    whisper = OfflineWhisperModelConfig(
+                        encoder = dir.resolve(m.encoder).absolutePath,
+                        decoder = dir.resolve(m.decoder).absolutePath,
+                        language = m.whisperLanguage ?: "en",
+                        task = "transcribe",
+                    ),
+                    modelType = "whisper",
+                    tokens = dir.resolve(m.tokens).absolutePath,
+                    numThreads = numThreads,
+                    debug = false,
+                    provider = "cpu",
+                )
+            } else {
+                OfflineModelConfig(
                     transducer = OfflineTransducerModelConfig(
                         encoder = dir.resolve(m.encoder).absolutePath,
                         decoder = dir.resolve(m.decoder).absolutePath,
@@ -658,11 +675,15 @@ object SherpaAsrManager {
                     numThreads = numThreads,
                     debug = false,
                     provider = "cpu",
-                ),
+                )
+            }
+            val config = OfflineRecognizerConfig(
+                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                modelConfig = modelConfig,
                 decodingMethod = "greedy_search",
             )
             OfflineRecognizer(null, config).also {
-                Log.i(TAG, "ext recognizer created: ${m.key}")
+                Log.i(TAG, "ext recognizer created: ${m.key} (type=${m.modelType})")
             }
         } catch (e: Throwable) {
             Log.e(TAG, "ext recognizer init failed: ${e.message}", e)

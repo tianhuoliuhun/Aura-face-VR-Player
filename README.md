@@ -78,8 +78,8 @@
 - 翻译：**预读翻译**（提前翻译播放点前方 60 秒内的字幕）+ 磁盘缓存（换视频/重启后仍命中）
   - Translation: ahead-of-playback prefetch + on-disk cache
 - **模型下载**：进度显示、**断点续传（Range）**、**5 次重试**、读超时 90 秒自动重连；
-  无「按文件」源的模型（如泰语）走 **tar.bz2 整包下载 + 流式解压**（只保留所需文件后删包）
-  - Downloads: progress, resume, 5 retries, 90s read-timeout reconnect; tar.bz2 whole-package fallback with streaming extract
+  若某模型没有「按文件」源，会退化为 **tar.bz2 整包下载 + 流式解压**（只保留所需文件后删包）
+  - Downloads: progress, resume, 5 retries, 90s read-timeout reconnect; falls back to tar.bz2 whole-package download with streaming extract when no per-file source exists
 - 字幕样式：字体/字号/位置/描边自定义，内置 MiSans、OPPO Sans 等中文字体；**字号为无级连续调节**
   - Subtitle styles: font/size/position/outline customizable (stepless size slider); bundled MiSans / OPPO Sans
 
@@ -90,7 +90,7 @@
 | 自动·中·英·日·韩·粤<br>Auto / zh / en / ja / ko / yue | SenseVoice-Small（**已内置 / bundled**） | 随 APK（229MB）<br>in APK (229MB) | 无需下载 / none |
 | 越南语 / Vietnamese | `sherpa-onnx-zipformer-vi-int8` | ≈74MB | hf-mirror |
 | 俄·法·德·西·白俄·克·意·波·乌<br>ru / fr / de / es / be / hr / it / pl / uk | `NeMo FastConformer 20k int8`<br>（**一个模型覆盖 11 语 / one model, 11 languages**） | 整包 102MB → 解压 ≈132MB<br>pkg 102MB → ≈132MB extracted | GitHub releases |
-| 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
+| 泰语 / Thai | `Whisper-tiny int8`（多语言，指定 `language=th`<br>multilingual, `language=th`） | ≈99MB<br>（原方案整包 664MB / was a 664MB package） | hf-mirror |
 
 ### 🌐 字幕在线翻译 / Online Translation
 - **9 种引擎**：必应翻译（免费） / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
@@ -325,7 +325,7 @@ All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo 
 | 3 | **陀螺仪漂移**——长时间观看后水平朝向缓慢漂移，双击画面重置视角即可（原理性，GAME_ROTATION_VECTOR 无绝对北向基准） | **Gyroscope drift** — yaw drifts slowly over long sessions; double-tap to recenter (inherent to game rotation vector) |
 | 4 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timeline mismatch** — auto-generated timestamps may not perfectly align |
 | 5 | **免费翻译端点有额度限制**——必应为非官方网页端点、MyMemory 匿名仅 5000 字符/天（已内置限速与冷却），重度使用建议自配 LLM API Key 或自建 LibreTranslate | **Free translation endpoints are rate-limited** — Bing is unofficial; MyMemory allows ~5000 chars/day anonymously (pacing & cooldown built in) |
-| 6 | **多语言 ASR 模型需联网首次下载**——11 种语言共用 102MB 包；泰语无「按文件」源，需下 664MB 整包（解压后仅保留约 154MB） | **Multi-language ASR models need a one-time download** — 11 languages share a 102MB package; Thai has no per-file source (664MB package, ~154MB kept) |
+| 6 | **多语言 ASR 模型需联网首次下载**——11 种语言共用 102MB 包；泰语用 Whisper-tiny（≈99MB，精度弱于专用模型） | **Multi-language ASR models need a one-time download** — 11 languages share a 102MB package; Thai uses Whisper-tiny (~99MB, lower accuracy than a dedicated model) |
 
 ---
 
@@ -386,6 +386,7 @@ All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo 
 | **v2.0.146** | **多语言 ASR 补齐 ru / fr / de / es / th**：① ru/fr/de/es 起初共用 `nemo-parakeet-tdt-0.6b-v3-int8`（≈639MB）；② **泰语没有可按文件下载的源** → 新增**整包兜底**：下载官方 tar.bz2（664MB）后**流式解压只提取需要的 int8 文件**（≈154MB）再删包（`BZip2CompressorInputStream` + `TarArchiveInputStream`，按 basename 匹配）；③ 识别语言增至 12 项 · Multi-language ASR: Thai via tar.bz2 whole-package extract fallback |
 | **v2.0.147** | **修复多语言模型「下载不动」**：设备实测日志 `encoder.int8.onnx HTTP 401` —— **hf-mirror 的「按文件」源按出口 IP / 缓存命中区别对待**，未被缓存的仓库在真机上直接 401（沙箱 IP 却是 206），导致 639MB 的 parakeet 根本下不来。① **ru/fr/de/es 改用官方同门 NeMo FastConformer**：`nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8`，**一个包覆盖 ru/de/es/fr**，整包 **102MB**、解压后 ≈132MB，走 **GitHub releases**（不再依赖 hf-mirror 按文件源）；② **下载加固**：读超时 600s→**90s**（卡住即抛超时→自动重试并按 **Range 续传**）、重试 **3→5** 次、请求统一带浏览器 UA；③ 整包完成判定改为 **97% 体积**，避免半包被当完整包、到解压才失败 · Fix "download stuck": hf-mirror per-file source 401s by egress IP; switch to a 102MB FastConformer + download hardening |
 | **v2.0.148** | **补齐 FastConformer 包全部语言**：该包名 `…-be-de-en-es-fr-hr-it-pl-ru-uk-…` 共覆盖 **11 种**语言。在已有 ru/de/es/fr 之外，新增 **be 白俄罗斯语 / hr 克罗地亚语 / it 意大利语 / pl 波兰语 / uk 乌克兰语**（en 英语不重复登记，内置 SenseVoice 已覆盖）。全部条目共用同一目录 → **下载一次（102MB），这 11 种语言全部可用**；识别语言由此增至 **17 项** · Add all remaining languages of the FastConformer package (be/hr/it/pl/uk) |
+| **v2.0.149** | **泰语改用更小的 Whisper-tiny**：泰语专用模型官方只有 **664MB 整包**（且 hf-mirror 对它的按文件源一律 401，只能整包下载再解压），体积代价过大 → 改用 **Whisper-tiny int8**（`tiny-encoder.int8.onnx` 12.9MB + `tiny-decoder.int8.onnx` 89.9MB + `tiny-tokens.txt` 0.8MB ≈ **99MB**，**hf-mirror 支持按文件下载**，体积降到 1/6.7）；识别器新增 **Whisper 分支**（`OfflineWhisperModelConfig` + `language=th`，多语言模型须显式指定语言）；代价是 tiny 精度弱于专用 zipformer · Thai switched to Whisper-tiny int8 (~99MB, per-file download) instead of the 664MB Thai zipformer package |
 
 ---
 

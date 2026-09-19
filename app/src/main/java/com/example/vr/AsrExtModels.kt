@@ -47,6 +47,11 @@ data class AsrExtModel(
     val sizeMb: Int,
     val files: List<AsrExtFile>,
     /**
+     * **Whisper 系列专用**：目标语言代码（多语言模型须显式指定，如 `"th"`）。
+     * 仅 [modelType] == `"whisper"` 时生效。
+     */
+    val whisperLanguage: String? = null,
+    /**
      * 整包回退方案：**仅在没有「可按文件下载」的源时使用**（如泰语）。
      * 有 [files] 时优先走按文件下载。
      */
@@ -163,37 +168,34 @@ object AsrExtModels {
     val UKRAINIAN = fastConformer("uk", R.string.asr_lang_uk)
 
     /**
-     * 泰语 —— zipformer transducer（int8 encoder）。
+     * 泰语 —— **Whisper-tiny（int8）**，多语言模型显式指定 `language = "th"`。
      *
-     * ⚠️ 泰语**没有可按文件下载的源**（2026-09-19 实测）：
-     *  - `hf-mirror` 对 `csukuangfj/sherpa-onnx-zipformer-thai-2024-06-20` **一律 401**
-     *    （`resolve` / `raw` / `api`、`?download=true`、其他镜像域名全部不可用）
-     *  - ModelScope 上没有该模型；官方也只发 GitHub releases 的 tar.bz2
-     * → 只能走**整包兜底**：下 664MB 的 tar.bz2，流式解出 int8 组合（≈154MB）后删包。
-     *
-     * 官方 int8 用法：`encoder…int8.onnx` + **decoder 用 fp32**（decoder 不量化）+ `joiner…int8.onnx` + tokens.txt
+     * 为什么换掉泰语专用 zipformer（2026-09-19 实测）：
+     *  - 官方只有 `sherpa-onnx-zipformer-thai-2024-06-20`，**整包 664MB**，
+     *    且 hf-mirror 对它的「按文件」源**一律 401**（resolve / raw / api / `?download=true`
+     *    及其它镜像域名全部不可用）→ 只能整包下载后解压，代价过大。
+     *  - 改用 Whisper-tiny 后：**hf-mirror 可按文件下载，三个文件合计 ≈99MB**（体积降到 1/6.7）
+     *    `tiny-encoder.int8.onnx` 12,937,772 + `tiny-decoder.int8.onnx` 89,855,401
+     *    + `tiny-tokens.txt` 816,730。
+     *  - 代价：tiny 是最小的 Whisper，**泰语精度不如专用 zipformer**（体积与精度的取舍）；
+     *    若日后要更高精度，可换 `whisper-base`（整包 198MB）。
      */
     val THAI = AsrExtModel(
         key = "th",
         labelResId = R.string.asr_lang_th,
-        dirName = "zipformer-thai-2024-06-20",
-        modelType = "transducer",
-        encoder = "encoder-epoch-12-avg-5.int8.onnx",
-        decoder = "decoder-epoch-12-avg-5.onnx",
-        joiner = "joiner-epoch-12-avg-5.int8.onnx",
-        tokens = "tokens.txt",
-        sizeMb = 154,
-        files = emptyList(),
-        archive = AsrExtArchive(
-            url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-thai-2024-06-20.tar.bz2",
-            wanted = mapOf(
-                "encoder-epoch-12-avg-5.int8.onnx" to 130_000_000L,
-                "decoder-epoch-12-avg-5.onnx" to 4_000_000L,
-                "joiner-epoch-12-avg-5.int8.onnx" to 800_000L,
-                "tokens.txt" to 20_000L
-            ),
-            packageMb = 664
-        )
+        dirName = "whisper-tiny-th",
+        modelType = "whisper",
+        encoder = "tiny-encoder.int8.onnx",
+        decoder = "tiny-decoder.int8.onnx",
+        joiner = "",                        // whisper 没有 joiner
+        tokens = "tiny-tokens.txt",
+        sizeMb = 99,
+        files = listOf(
+            f("sherpa-onnx-whisper-tiny", "tiny-encoder.int8.onnx", 10_000_000L),
+            f("sherpa-onnx-whisper-tiny", "tiny-decoder.int8.onnx", 80_000_000L),
+            f("sherpa-onnx-whisper-tiny", "tiny-tokens.txt", 500_000L)
+        ),
+        whisperLanguage = "th"
     )
 
     /**
