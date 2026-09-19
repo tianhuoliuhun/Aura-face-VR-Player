@@ -1,10 +1,10 @@
 # 🎬 Aura美颜VR播放器 / Aura face VR Player
 
 > 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体视频，
-> 内置实时 AI 人脸美颜、3D LUT 电影调色、离线语音转字幕、多引擎在线翻译与局域网 SMB 播放。
+> 内置实时 AI 人脸美颜、3D LUT 电影调色、**17 种语言的离线语音转字幕**、9 引擎在线翻译与局域网 SMB 播放。
 >
 > A professional mobile VR player with real-time AI beauty filters, 3D LUT color grading,
-> offline ASR subtitles, multi-engine online translation and LAN (SMB) playback.
+> offline ASR subtitles (**17 languages**), 9-engine online translation and LAN (SMB) playback.
 
 ![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
@@ -33,8 +33,8 @@
   - General beauty: skin smoothing (bilateral filter), whitening, brightness/contrast — works in 2D/3D
 - 2D 人像精修（MediaPipe 468 点面部关键点）：瘦脸、大眼、去黑眼圈、鼻梁塑形、嘴型调整、牙齿美白、口红、腮红、眉毛
   - 2D portrait retouch (MediaPipe 468 landmarks): face slimming, big eyes, dark-circle removal, nose shaping, mouth adjust, teeth whitening, lipstick, blush, eyebrows
-- 美颜预设：自然 / 淡妆 / 浓妆 / 自定义，支持对比原图（一键关美颜）
-  - Presets: Natural / Light / Heavy / Custom; one-tap before/after compare
+- 美颜预设：自然 / 淡妆 / 浓妆 / 自定义（**已持久化**，切语言也不会失配），支持对比原图（一键关美颜）
+  - Presets: Natural / Light / Heavy / Custom (persisted); one-tap before/after compare
 - 纯 Shader 实现（v102 起移除 GPUPixel），低功耗、零额外库体积
   - Pure shader pipeline since v102 (GPUPixel removed) — low power, zero extra libs
 
@@ -53,8 +53,13 @@
 ### 🗣️ 字幕与语音转写 / Subtitles & ASR
 - 离线语音识别：**SenseVoice-Small**（sherpa-onnx，CPU int8）
   - 中/英/日/韩/粤 5 语言，自带标点，RTF 0.026
-  - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载；同一模型文件被复用于识别，不额外占用存储
+  - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载
   - Offline ASR: SenseVoice-Small bundled in the APK — zh/en/ja/ko/yue with punctuation, no download needed
+- 🌍 **多语言扩展识别（共 17 种语言）**：内置 5 语之外，可在设置里**按需下载**官方离线模型
+  - 支持越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
+  - **模型不打进 APK**（否则安装包会涨到 1GB+），下载到**应用私有目录**，因此**不需要任何存储权限**
+  - 11 种语言共用同一份 FastConformer 模型 → **下载一次，这 11 种语言全部可用**
+  - On-demand downloadable offline ASR models for 11 more languages (see matrix below)
 - **实时 AI 字幕**：边播边生成，不写临时文件
   - 独立解码音频（AudioTee）+ **Silero VAD** 分段 + 按优先级全局生成
   - 优先补当前播放点（**含前 5 秒回补**）及其后内容，再回头补齐其余；跳转后可即时命中已生成部分
@@ -64,33 +69,51 @@
   - One-tap SRT export from the in-memory subtitle cache
 - 整片转写：后台生成带时间轴的 SRT 字幕（静音断句 + 标点断句 + 14 字智能换行）
   - Full-video transcription to timed SRT (silence/punctuation segmentation, 14-char line wrap)
-- 转写策略：离线模型按**语音段整段识别**（Silero VAD 断句：静音 0.5s 或单段满 8s），
-  较逐块推理大幅减少推理次数
+- 转写策略：离线模型按**语音段整段识别**（Silero VAD 断句：静音 0.5s 或单段满 8s）
   - Segment-level offline inference (Silero VAD: 0.5s silence or 8s max per segment)
-- 长句自动切分：单条超过 20 字或 5 秒时按标点拆成多条，按字数比例分配时间（无标点时按字数等分）
+- 长句自动切分：单条超过 20 字或 5 秒时按标点拆成多条，按字数比例分配时间
   - Results >20 chars or >5s are split by punctuation with proportional timing
-- 翻译：**预读翻译**（提前翻译播放点前方 60 秒内的字幕，显示零等待）+ 磁盘缓存（换视频/重启后仍命中）
+- 翻译：**预读翻译**（提前翻译播放点前方 60 秒内的字幕）+ 磁盘缓存（换视频/重启后仍命中）
   - Translation: ahead-of-playback prefetch + on-disk cache
-- ASR 语言选择：自动 / 中文 / 英文 / 日文 / 韩文
-  - ASR language: Auto / Chinese / English / Japanese / Korean
-- 模型下载进度提示、断点续传、3 次重试
-  - Download progress, resume on interruption, 3 retries
-- 字幕样式：字体/字号/位置/描边自定义，内置 MiSans、OPPO Sans 等中文字体
-  - Subtitle styles: font/size/position/outline customizable; bundled MiSans / OPPO Sans
+- **模型下载**：进度显示、**断点续传（Range）**、**5 次重试**、读超时 90 秒自动重连；
+  无「按文件」源的模型（如泰语）走 **tar.bz2 整包下载 + 流式解压**（只保留所需文件后删包）
+  - Downloads: progress, resume, 5 retries, 90s read-timeout reconnect; tar.bz2 whole-package fallback with streaming extract
+- 字幕样式：字体/字号/位置/描边自定义，内置 MiSans、OPPO Sans 等中文字体；**字号为无级连续调节**
+  - Subtitle styles: font/size/position/outline customizable (stepless size slider); bundled MiSans / OPPO Sans
+
+#### 🌍 多语言识别支持矩阵 / ASR Language Matrix
+
+| 语言 | 模型 | 体积 | 下载源 |
+|---|---|---|---|
+| 自动 / 中 / 英 / 日 / 韩 / 粤 | SenseVoice-Small（**已内置**） | 随 APK（229MB） | 无需下载 |
+| 越南语 | `sherpa-onnx-zipformer-vi-int8` | ≈74MB | hf-mirror |
+| 俄 / 法 / 德 / 西 / 白俄 / 克 / 意 / 波 / 乌 | `NeMo FastConformer 20k int8`（**一个模型覆盖 11 语**） | 整包 102MB → 解压 ≈132MB | GitHub releases |
+| 泰语 | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB | GitHub releases |
 
 ### 🌐 字幕在线翻译 / Online Translation
-- 多引擎：DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 必应翻译（免费端点）
-  - Engines: DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Bing (free endpoint)
+- **9 种引擎**：必应翻译（免费） / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
+  - 9 engines: Bing (free) / MyMemory (free) / LibreTranslate (free, self-hostable) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
+- 显示模式：**双语（原文+译文）** 与 **仅译文** 一键切换，选择**已持久化**
+  - Display modes: bilingual / translation-only, both persisted
+- MyMemory：匿名额度 **5000 字符/天**，程序内置**串行限速 + 错误文案识别 + 配额冷却 10 分钟 + 超长句跳过**，避免触发其限流
+  - MyMemory: built-in pacing, error-text detection and 10-min cooldown to respect its quota limits
+- LibreTranslate：标准 `/translate` 协议，设置面板可填 Base URL 指向**私有实例**
+  - LibreTranslate follows the standard protocol; Base URL configurable for a private instance
 - 必应翻译参考 [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api)（MIT，自研 Kotlin HTTP 实现，未直接引入 npm 包）
   - Bing translation inspired by [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api) (MIT; self-written Kotlin HTTP, npm package NOT bundled)
-- 用户自配 API Key（LLM 引擎），结果本地缓存，避免重复请求
-  - LLM engines require user-provided API keys; results cached locally
+- **引擎 / 目标语言 / API Key / Base URL / 模型名 / 显示模式全部持久化**（重启不丢）
+  - Engine, target language, API key, base URL, model and display mode are all persisted
+- 结果本地内存 + 磁盘缓存，避免重复请求
+  - Results cached in memory and on disk
 
-### 📁 局域网播放 / LAN Playback
+### 📁 局域网与远程播放 / LAN & Remote Playback
 - SMB 协议（jcifs-ng）：浏览局域网共享、直连播放 NAS/PC 视频
   - SMB (jcifs-ng) browsing & direct playback from NAS/PC
-- 支持本地文件、流媒体地址多来源
-  - Local files and stream URLs supported
+- **远程视频 seek 优化**：HTTP 分支包 `CacheDataSource` + `SimpleCache`（512MB LRU），
+  即使对方不支持 Range 也能边下边播、正常拖动；moov 在尾部的 MP4 也能先读 moov
+  - Remote seek: HTTP path wrapped with a 512MB LRU cache, enabling seek even without Range support
+- **远程视频也能生成实时字幕/转写**：`AudioTee` 对 `http(s)://` 走框架 MediaExtractor、对 `smb://` 用 jcifs 随机访问封装 `MediaDataSource`
+  - Realtime subtitles work for http and SMB sources too
 
 ---
 
@@ -107,13 +130,13 @@
 │  VRGLRenderer：投影变形/立体映射/美颜/LUT/字幕叠加     │
 ├─────────────────────────────────────────────────────┤
 │  播放内核（Media3 ExoPlayer + Transformer）          │
-│  硬解 8K、变速播放、音轨/字幕轨选择                  │
+│  硬解 8K、变速播放、音轨/字幕轨选择、缓存数据源        │
 ├─────────────────────────────────────────────────────┤
 │  智能模块 / Intelligence                             │
 │  MediaPipe Face Landmarker（人脸关键点 468 点）      │
-│  SenseVoice-Small + Silero VAD（实时字幕引擎）        │
-│  多引擎字幕翻译                                       │
-│  Room 持久化（设置记忆/字幕缓存）                   │
+│  SenseVoice + 多语言 transducer + Silero VAD        │
+│  9 引擎字幕翻译                                       │
+│  Room 持久化（设置记忆/字幕缓存）                     │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -121,19 +144,21 @@
 
 | 模块 | 技术 | 说明 |
 |---|---|---|
-| `VRGLRenderer.kt` | OpenGL ES 2.0 Shader | 核心渲染：投影、变形、美颜、LUT、合成（1513 行） |
-| `VRPlayerScreen.kt` | Compose | 播放器主界面 + 设置面板（4834 行，v120/v121 已按功能拆分） |
-| `AsrBatchSection.kt` | Compose | 后台转写区块（设置面板与字幕快捷面板复用，v121 拆出，~500 行） |
+| `VRGLRenderer.kt` | OpenGL ES 2.0 Shader | 核心渲染：投影、变形、美颜、LUT、合成 |
+| `VRPlayerScreen.kt` | Compose | 播放器主界面 + 设置面板（v120/v121 已按功能拆分） |
+| `AsrBatchSection.kt` | Compose | 后台转写区块（设置面板与字幕快捷面板复用，v121 拆出） |
 | `PlayerControlBar.kt` | Compose | 播放控制栏三组按钮 + 宽窄屏自适应布局（v121 拆出） |
 | `BeautySettingsSections.kt` | Compose | 美颜/模式提示/对比原图/预设等设置区块（v120–v121 拆出） |
 | `VRPlayerComponents.kt` | Compose | 通用组件：`TooltipIconButton` / `BeautySliderItem` / `ExperimentalSwitchRow` |
 | `MediaPipeFaceManager.kt` | MediaPipe Tasks | 468 点人脸关键点检测（arm64 真机） |
-| `SherpaAsrManager.kt` | sherpa-onnx | SenseVoice 模型下载与识别器管理（线程数可配） |
+| `SherpaAsrManager.kt` | sherpa-onnx | 识别器管理：内置 SenseVoice + **可下载的多语言扩展模型（transducer）**；含断点续传 / 整包解压 / 尺寸校验 |
+| `AsrExtModels.kt` | 自研 | **多语言扩展模型注册表**（语言 → 文件名清单 / 下载源 / 校验体积）；支持**多语言共用一个模型** |
 | `RealtimeSubtitleEngine.kt` | 自研 | 实时字幕引擎：独立音频解码 + Silero VAD + 优先级调度 + seek 处理 |
 | `SubtitleCache.kt` | 自研 | 字幕稀疏时间索引（TreeMap + 二分查找，O(log n)） |
 | `SubtitleExporter.kt` | 自研 | SRT 导出（由内存字幕缓存生成） |
+| `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（**9 种引擎**可切换，含 MyMemory 限速与配额冷却） |
 | `LutUtils.kt` | 自研 | .cube 解析 + 三线性重采样 + 512×512 网格打包 |
-| `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（6 种引擎可切换） |
+| `SchemeRoutingDataSource.kt` | 自研 | 按 scheme 分流数据源（`smb://` → jcifs，其余 → HTTP + 缓存） |
 
 ---
 
@@ -142,7 +167,7 @@
 ```
 Aura-face-VR-Player/
 ├── app/
-│   ├── build.gradle.kts            # 构建配置（版本/签名/ABI 分包/依赖）
+│   ├── build.gradle.kts            # 构建配置（版本/签名/依赖）
 │   ├── libs/
 │   │   └── sherpa-onnx-1.13.6.aar  # sherpa-onnx ASR 引擎
 │   └── src/main/
@@ -155,12 +180,15 @@ Aura-face-VR-Player/
 │       │   └── licenses.json      # 开源许可清单（自动生成）
 │       └── res/                   # 资源与字体（MiSans/OPPO Sans）
 ├── gradle/libs.versions.toml      # 依赖版本目录
+├── scripts/fetch_asr_model.py     # 内置 ASR 模型拉取脚本（hf-mirror，支持断点续传）
 ├── scripts/gen_licenses.py        # 许可清单生成脚本
 ├── LICENSE                        # Apache License 2.0
 ├── RELEASE_SIGNING.md             # 签名与发布流程
 ├── FIREBASE_ANALYTICS.md          # 统计接入说明
 └── README.md
 ```
+
+> 多语言扩展模型**不在仓库内**，由 App 运行时按需下载到设备私有目录。
 
 ---
 
@@ -178,7 +206,8 @@ Aura-face-VR-Player/
 
 | 项目 | 说明 / Notes |
 |---|---|
-| 产物 | **单个全架构 APK**（`Aura-face-VR-Player-v<版本>.apk`，约 348MB，含内置 ASR 模型）/ Single universal APK (~348MB, ASR model bundled) |
+| 产物 | **单个全架构 APK**（`Aura-face-VR-Player-v<版本>.apk`，含内置 ASR 模型）/ Single universal APK (ASR model bundled) |
+| 体积 | 约 **348MB**（其中内置 SenseVoice 模型占 229MB）/ ~348MB (229MB is the bundled ASR model) |
 | 包含 ABI | `arm64-v8a` + `armeabi-v7a` + `x86_64` + `x86` 全包含 / All ABIs in one package |
 | 安装 | 系统自动选取匹配 ABI 的原生库，无需挑选 / The OS picks the matching native libs |
 
@@ -191,13 +220,23 @@ Aura-face-VR-Player/
 ## 🔧 构建 / Build
 
 ### 环境要求 / Requirements
-- Android Studio（含 JDK 17+）
+- JDK 17+（本机实测 JDK 21）
 - Android SDK（compileSdk 36, minSdk 24, targetSdk 36）
-- Gradle 9.6.1（或使用项目内置 wrapper）
+- Gradle 9.6.1
+
+> ⚠️ **本仓库不包含 Gradle Wrapper**（没有 `gradlew` / `gradlew.bat`）。
+> 请用本机安装的 Gradle 直接调用，并设置 `JAVA_HOME`：
+>
+> ```powershell
+> $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot"   # 按本机路径调整
+> & "C:\Users\<你>\.gradle\dist\gradle-9.6.1\bin\gradle.bat" -p . assembleRelease
+> ```
+>
+> This repo has **no Gradle Wrapper** — invoke your local Gradle installation instead of `gradlew`.
 
 ### 第一步：拉取内置 ASR 模型（首次 clone 后必做）/ Fetch bundled ASR model
 
-`model.int8.onnx`（228MB）超过 GitHub 单文件 100MB 限制，**不纳入 git**，
+`model.int8.onnx`（约 228MB）超过 GitHub 单文件 100MB 限制，**不纳入 git**，
 需先跑脚本拉到 `app/src/main/assets/sense-voice/`，否则 APK 不会内置模型
 （仍能编译，但离线字幕会退回运行时下载模式）。
 
@@ -207,19 +246,20 @@ python scripts/fetch_asr_model.py --check  # 只检查是否就绪
 ```
 
 > 镜像源为 `hf-mirror.com`；不可达时脚本会提示手动下载地址（HuggingFace 官方仓库）。
+> 多语言（17 语）模型中只有 SenseVoice 需要随包：**其余 11 种语言由 App 运行时按需下载**。
 
 ### 构建命令 / Commands
 
 ```powershell
 # Debug 包（开发测试）
-gradlew.bat assembleDebug
+gradle.bat assembleDebug
 
 # Release 包（正式分发，必须！见 RELEASE_SIGNING.md）
-# 产物：app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk（单包全架构，约 348MB，含内置模型）
-gradlew.bat assembleRelease
+# 产物：app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk（单包全架构，含内置模型）
+gradle.bat assembleRelease
 
 # 依赖许可证清单导出
-gradlew.bat :app:dumpDependencies
+gradle.bat :app:dumpDependencies
 python scripts/gen_licenses.py
 ```
 
@@ -236,8 +276,8 @@ python scripts/gen_licenses.py
   - Local-first: playback, beauty, LUT, and offline ASR all run on-device
 - **可选匿名统计（Firebase Analytics，免费）**：仅在你**首次启动明确同意后**才采集设备型号/系统版本/启动与活跃次数；拒绝或随时关闭后不再采集
   - Optional anonymous analytics (Firebase Analytics, free): collects device model / OS version / launches & active counts **only after you explicitly agree**; can be disabled anytime
-- **云端数据（可选）**：字幕翻译（用户自配 API Key）、ASR 模型更新（可选，模型已内置）、Firebase 统计
-  - Optional cloud data: subtitle translation (user-provided API keys), ASR model download, Firebase analytics
+- **云端数据（可选）**：字幕翻译（用户自配 API Key 或免费公共端点）、多语言 ASR 模型下载、Firebase 统计
+  - Optional cloud data: subtitle translation, multi-language ASR model download, Firebase analytics
 - **不采集**：任何个人身份信息、视频内容、字幕内容
   - Never collected: personal identity, video content, subtitle content
 - 接入说明 / Integration guide: [FIREBASE_ANALYTICS.md](FIREBASE_ANALYTICS.md)
@@ -252,10 +292,10 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | 依赖 / Dependency | 许可证 / License | 用途 / Usage |
 |---|---|---|
 | Jetpack Compose / Material3 | Apache-2.0 | UI 框架 |
-| Media3 ExoPlayer / Transformer | Apache-2.0 | 播放内核 |
+| Media3 ExoPlayer / Transformer | Apache-2.0 | 播放内核 + 缓存数据源 |
 | MediaPipe Tasks Vision | Apache-2.0 | 人脸关键点 |
-| Vosk (Kaldi) | Apache-2.0 | 离线语音识别 |
-| sherpa-onnx | Apache-2.0 | Qwen3-ASR / SenseVoice QNN 识别 |
+| sherpa-onnx | Apache-2.0 | 离线语音识别（SenseVoice + 多语言 transducer） |
+| commons-compress | Apache-2.0 | tar.bz2 整包解压（多语言模型兜底下载） |
 | Retrofit / OkHttp / Moshi | Apache-2.0 | 网络与 JSON |
 | jcifs-ng | LGPL-2.1 | SMB 局域网播放 |
 | JNA | LGPL-2.1 / Apache-2.0 | 原生库桥接 |
@@ -264,7 +304,9 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 
 **资源 / Resources**：MiSans / OPPO Sans 字体（免费商用授权）、MediaPipe 模型（Apache-2.0）、12 款 LUT（项目自研 numpy 脚本生成，无第三方版权）。
 
-完整 141 项许可清单见应用内「设置 → 关于与开源许可」或 `app/src/main/assets/licenses.json`。
+**ASR 模型许可 / ASR model licenses**：SenseVoice、zipformer、NeMo FastConformer 均为 Apache-2.0；泰语 zipformer 模型源自 `icefall-asr-gigaspeech2`，亦为 Apache-2.0。
+
+完整许可清单见应用内「设置 → 关于与开源许可」或 `app/src/main/assets/licenses.json`。
 
 ---
 
@@ -275,8 +317,9 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | 1 | **8K 硬解为实验功能**——默认关闭，需在「设置 → 8K 硬解实验」中按需开启，可能花屏或失败 | **8K decoding is experimental** — off by default; enable under Settings → 8K experiments; artifacts possible |
 | 2 | **安装包较大（约 348MB）**——ASR 模型已内置以保证开箱即用；若需精简版可自行移除 `assets/sense-voice/` 并改用下载兜底 | **Large APK (~348MB)** — the ASR model is bundled for out-of-the-box use |
 | 3 | **陀螺仪漂移**——长时间观看后水平朝向缓慢漂移，双击画面重置视角即可（原理性，GAME_ROTATION_VECTOR 无绝对北向基准） | **Gyroscope drift** — yaw drifts slowly over long sessions; double-tap to recenter (inherent to game rotation vector) |
-| 4 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timing mismatch** — auto-generated timestamps may not perfectly align |
-| 5 | **必应免费翻译端点风险**——非官方网页端点，随时可能失效 | **Bing free endpoint risk** — unofficial web endpoint may break anytime; LLM API keys recommended |
+| 4 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timeline mismatch** — auto-generated timestamps may not perfectly align |
+| 5 | **免费翻译端点有额度限制**——必应为非官方网页端点、MyMemory 匿名仅 5000 字符/天（已内置限速与冷却），重度使用建议自配 LLM API Key 或自建 LibreTranslate | **Free translation endpoints are rate-limited** — Bing is unofficial; MyMemory allows ~5000 chars/day anonymously (pacing & cooldown built in) |
+| 6 | **多语言 ASR 模型需联网首次下载**——11 种语言共用 102MB 包；泰语无「按文件」源，需下 664MB 整包（解压后仅保留约 154MB） | **Multi-language ASR models need a one-time download** — 11 languages share a 102MB package; Thai has no per-file source (664MB package, ~154MB kept) |
 
 ---
 
@@ -329,26 +372,30 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 | **v2.0.138** | **设置面板硬编码中文全面多语言化（五语）**：翻译引擎（必应/DeepSeek/通义/智谱/MIMO/OpenAI/自定义）、目标语言、ASR 语言、12 款 LUT 滤镜、ASR 模型状态、字幕翻译状态、实时字幕状态、各类 Toast，以及投影/立体/解码器/分辨率模式名，全部迁入 `values-*` 字符串资源并适配简/繁/英/日/韩 · **Settings-panel i18n**: all hardcoded Chinese (engines, languages, LUTs, ASR/translation/realtime statuses, toasts, projection/stereo/decoder/resolution modes) moved to string resources, 5 languages |
 | **v2.0.139** | ① **修复第三方文件管理器（MT 管理器等）经 FTP/SMB 远程打开视频无法播放**：MT 对远程文件经本地回环 HTTP 代理（`http://127.0.0.1:port/...`）交给播放器，而 `DefaultDataSource` 只处理 file/asset/content、其余 scheme 全部落到 base 数据源——base 固定为 SmbDataSource 导致 http URI 被拿去 SMB 连接 127.0.0.1 而失败。新增 `SchemeRoutingDataSource` 按 scheme 分流：`smb://` → jcifs，其余 → `DefaultHttpDataSource`；并开启 `usesCleartextTraffic` 允许回环明文 HTTP；② **SMB 播放 seek 改真随机访问**：`SmbFileInputStream.skip()` 对大偏移要顺序读丢数据、长视频拖动极慢，改用 `SmbRandomAccessFile` |
 | **v2.0.140** | 修复远程视频（MT 回环代理）**实时字幕/批量转写误报「该视频没有可用的音轨」**：`AudioTee.open()` 第一步 `openFileDescriptor(uri)` 对 `http://` URI 必然抛异常、且临时文件兜底同样依赖它，导致 http 源永远报无音轨。现 http/https 先走框架 `MediaExtractor.setDataSource(context, uri, null)`（原生 HTTP 栈、支持 Range seek，无需下载），失败再回退经代理整文件下载到缓存打开；批量转写复用 AudioTee 一并修复 · Realtime/batch subtitle: fix false "no audio track" for remote http sources |
+| **v2.0.141** | 解码器列表新增 **MPV 占位项**：`DecoderEngine.MPV` 出现在选择器并标注为「占位」，**尚未真实接入**（选中会回退到内置解码器），为后续接入预留入口 · MPV decoder **placeholder** (selectable & labeled as placeholder; not yet wired, falls back to the built-in decoder) |
 | **v2.0.142** | ① **应用内 SMB 浏览器播放也能生成实时字幕/批量转写**：`AudioTee.open()` 新增 `smb://` 分支，用 jcifs `SmbRandomAccessFile` 包成 framework `MediaDataSource` 真随机访问喂给 `MediaExtractor`（直连失败再回退 jcifs 整文件下载到缓存），修掉「该视频没有可用的音轨」误报（v2.0.140 只修了 http）；② **远程视频 seek 优化**：`SchemeRoutingDataSource` 的 http 分支包 `CacheDataSource`+`SimpleCache`（512MB LRU），回环 HTTP 代理即使不支持 Range 也能按需拉取字节、正常 seek（边下边播），moov 在尾部的 MP4 也能先读 moov；③ **硬编码中文收尾审计**：活跃源码已无用户可见漏网硬编码中文（UI 全走 `labelRes`/`R.string`，仅保留 LLM prompt 与母语名等故意项） · SMB realtime subtitle + remote seek cache |
-| **v2.0.143** | **翻译引擎新增两个免费源**：① **MyMemory**（无需 key，沙箱内实测可用）——`GET .../get?q=&langpair=Autodetect|zh-CN`，支持自动识别来源语言、简/繁目标；② **LibreTranslate**（自托管或公共实例，标准 `/translate` 协议，可选 api_key）——新增设置面板「Base URL」输入便于指向私有实例。两者均接入统一缓存与限流出口，UI 引擎列表自动出现 · Add free translation engines: MyMemory (verified) + LibreTranslate (standard protocol, not sandbox-verified) |
-| **v2.0.144** | ① **翻译设置全面固化**：此前只有「字幕翻译」开关落盘，**引擎选择**、**「双语/仅译文」显示模式**、目标语言、API Key、Base URL、模型名重启即回默认（用户以为"选了没用"）；现全部持久化，并加「已恢复」门控，避免写回 effect 用默认值覆盖已存设置；② **美颜预设固化**：预设高亮改用稳定 id 落盘、恢复时按当前语言映射回本地化名（切语言不失配）；③ **字幕字号移到「字重」正下方**：原埋在「布局与时间」区不易发现，现为无级连续 slider（12~40）；④ **MyMemory 降速防报错**（依 usagelimits.php：匿名 5000 字符/天、按调用频率限流、超限以 HTTP 200 回错误文案）：新增「串行 + 最小间隔」限速、错误文案识别（不入缓存）、配额冷却 10 分钟、超 500 字节长句跳过 · Persist all translation settings + beauty preset; move font-size slider under font-weight; throttle MyMemory to avoid rate-limit errors |
-| **v2.0.145** | **多语言 ASR（越南语样板）**：ASR 语言选择在 SenseVoice 之外支持**可下载的离线扩展模型**——新增 `AsrExtModels` 注册表 + `SherpaAsrManager` 扩展通道（按需下载到 `filesDir`、离线 transducer 识别、多文件断点续传、逐文件尺寸校验防残缺）；越南语用 `sherpa-onnx-zipformer-vi-int8`（encoder/joiner int8 + decoder fp32 + tokens，≈74MB，hf-mirror 源，不需新增权限）；语言 chips 与模型状态区改为**随所选语言动态**（模型名/体积/就绪状态/下载目标），语言过多时每行 4 个自动换行 · Multi-language ASR sample: Vietnamese via downloadable offline zipformer transducer |
-| **v2.0.146** | **多语言 ASR 补齐 ru / fr / de / es / th**：① **ru/fr/de/es 共用同一个 `nemo-parakeet-tdt-0.6b-v3-int8`**（覆盖 25 种欧洲语言含 fr/de/es/ru；encoder·decoder·joiner 全 int8 + tokens ≈639MB，hf-mirror 按文件可达；四语共用同一目录 → **下载一次四语通用**），识别器 `modelType = nemo_transducer`；② **泰语没有可按文件下载的源**（hf-mirror 一律 401、ModelScope 无、其他镜像不可用）→ 新增**整包兜底**：下载官方 tar.bz2（664MB）后**流式解压只提取需要的 int8 文件**（≈154MB）再删包（`BZip2CompressorInputStream` + `TarArchiveInputStream`，按 basename 匹配、忽略包内目录）；③ 识别语言现共 12 项，每行 4 个自动换行 · Multi-language ASR: ru/fr/de/es via shared NeMo Parakeet + Thai via tar.bz2 extract fallback |
-| **v2.0.147** | **修复多语言模型「下载不动」**：设备实测日志 `encoder.int8.onnx HTTP 401` —— **hf-mirror 的「按文件」源按出口 IP / 缓存命中区别对待**，未被缓存的仓库（如 parakeet）在真机上直接 401（沙箱 IP 却是 206），导致 639MB 的 `nemo-parakeet-tdt-0.6b-v3-int8` 根本下不来。① **ru/fr/de/es 改用官方同门 NeMo FastConformer**：`nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8`，**一个包覆盖 ru/de/es/fr**，整包 **102MB**、解压后 ≈132MB，走 **GitHub releases**（不再依赖 hf-mirror 按文件源）；② **下载加固**：读超时 600s→**90s**（卡住即抛超时→自动重试并按 **Range 续传**）、重试 **3→5** 次、请求统一带浏览器 UA；③ 整包完成判定改为 **97% 体积**，避免半包被当完整包、到解压才失败 · Fix "download stuck": hf-mirror per-file source 401s by egress IP; ru/fr/de/es switched to a 102MB NeMo FastConformer covering all four, plus download hardening |
-| **v2.0.148** | **补齐 FastConformer 包全部语言**：该包名为 `…-be-de-en-es-fr-hr-it-pl-ru-uk-…`，共覆盖 **11 种**语言。在已有 ru/de/es/fr 之外，新增 **be 白俄罗斯语 / hr 克罗地亚语 / it 意大利语 / pl 波兰语 / uk 乌克兰语**（en 英语不重复登记，内置 SenseVoice 已覆盖）。全部条目共用同一目录 → **下载一次（102MB），这 11 种语言全部可用**；识别语言由此增至 **17 项** · Add all remaining languages of the FastConformer package (be/hr/it/pl/uk) |
+| **v2.0.143** | **翻译引擎新增两个免费源**：① **MyMemory**（无需 key，实测可用）——`GET .../get?q=…&langpair=Autodetect 到 zh-CN`，支持自动识别来源语言、简/繁目标；② **LibreTranslate**（自托管或公共实例，标准 `/translate` 协议，可选 api_key）——新增设置面板「Base URL」输入便于指向私有实例。两者均接入统一缓存与限流出口，UI 引擎列表自动出现 · Add free translation engines: MyMemory + LibreTranslate |
+| **v2.0.144** | ① **翻译设置全面固化**：此前只有「字幕翻译」开关落盘，**引擎选择**、**「双语/仅译文」显示模式**、目标语言、API Key、Base URL、模型名重启即回默认（用户以为"选了没用"）；现全部持久化，并加「已恢复」门控，避免写回 effect 用默认值覆盖已存设置；② **美颜预设固化**：预设高亮改用稳定 id 落盘、恢复时按当前语言映射回本地化名（切语言不失配）；③ **字幕字号移到「字重」正下方**：原埋在「布局与时间」区不易发现，现为无级连续 slider（12~40）；④ **MyMemory 降速防报错**（依 usagelimits：匿名 5000 字符/天、按调用频率限流、超限以 HTTP 200 回错误文案）：新增「串行 + 最小间隔」限速、错误文案识别（不入缓存）、配额冷却 10 分钟、超 500 字节长句跳过 · Persist all translation settings + beauty preset; move font-size slider under font-weight; throttle MyMemory |
+| **v2.0.145** | **多语言 ASR（越南语样板）**：ASR 语言选择在 SenseVoice 之外支持**可下载的离线扩展模型**——新增 `AsrExtModels` 注册表 + `SherpaAsrManager` 扩展通道（按需下载到 `filesDir`、离线 transducer 识别、多文件断点续传、逐文件尺寸校验防残缺）；越南语用 `sherpa-onnx-zipformer-vi-int8`（encoder/joiner int8 + decoder fp32 + tokens，≈74MB，hf-mirror 源，**不需新增权限**）；语言 chips 与模型状态区改为**随所选语言动态**，语言过多时每行 4 个自动换行 · Multi-language ASR sample: Vietnamese via downloadable offline zipformer transducer |
+| **v2.0.146** | **多语言 ASR 补齐 ru / fr / de / es / th**：① ru/fr/de/es 起初共用 `nemo-parakeet-tdt-0.6b-v3-int8`（≈639MB）；② **泰语没有可按文件下载的源** → 新增**整包兜底**：下载官方 tar.bz2（664MB）后**流式解压只提取需要的 int8 文件**（≈154MB）再删包（`BZip2CompressorInputStream` + `TarArchiveInputStream`，按 basename 匹配）；③ 识别语言增至 12 项 · Multi-language ASR: Thai via tar.bz2 whole-package extract fallback |
+| **v2.0.147** | **修复多语言模型「下载不动」**：设备实测日志 `encoder.int8.onnx HTTP 401` —— **hf-mirror 的「按文件」源按出口 IP / 缓存命中区别对待**，未被缓存的仓库在真机上直接 401（沙箱 IP 却是 206），导致 639MB 的 parakeet 根本下不来。① **ru/fr/de/es 改用官方同门 NeMo FastConformer**：`nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8`，**一个包覆盖 ru/de/es/fr**，整包 **102MB**、解压后 ≈132MB，走 **GitHub releases**（不再依赖 hf-mirror 按文件源）；② **下载加固**：读超时 600s→**90s**（卡住即抛超时→自动重试并按 **Range 续传**）、重试 **3→5** 次、请求统一带浏览器 UA；③ 整包完成判定改为 **97% 体积**，避免半包被当完整包、到解压才失败 · Fix "download stuck": hf-mirror per-file source 401s by egress IP; switch to a 102MB FastConformer + download hardening |
+| **v2.0.148** | **补齐 FastConformer 包全部语言**：该包名 `…-be-de-en-es-fr-hr-it-pl-ru-uk-…` 共覆盖 **11 种**语言。在已有 ru/de/es/fr 之外，新增 **be 白俄罗斯语 / hr 克罗地亚语 / it 意大利语 / pl 波兰语 / uk 乌克兰语**（en 英语不重复登记，内置 SenseVoice 已覆盖）。全部条目共用同一目录 → **下载一次（102MB），这 11 种语言全部可用**；识别语言由此增至 **17 项** · Add all remaining languages of the FastConformer package (be/hr/it/pl/uk) |
 
 ---
 
 ## 🗺️ 未来规划 / Roadmap
 
 - [x] ~~**实现并验证 LUT 滤镜链路**（UI → 纹理 → 着色器采样）~~ ✅ v117 已完成 / Done in v117
+- [x] ~~**实时 AI 字幕**（边播边生成 + 翻译预读）~~ ✅ v1.0.126 / Done in v1.0.126
+- [x] ~~**多语言 ASR（11 种可下载语言 + 内置 5 语）**~~ ✅ v2.0.148 / Done in v2.0.148
+- [ ] **把多语言模型搬到 ModelScope**，免去 102MB/664MB 的整包下载（可改为按文件、国内更快）/ Mirror models on ModelScope for faster per-file downloads
 - [ ] 修复陀螺仪漂移（方向问题已在 v125 修正，剩余为长时间 yaw 漂移）/ Fix gyro drift (direction fixed in v125; residual slow yaw drift)
 - [ ] 字幕时间轴对齐优化 / Subtitle timing alignment (VAD/endpoint calibration)
 - [ ] 人脸关键点 x86_64 支持 / x86_64 face-landmark support (emulator beauty)
+- [ ] **MPV 解码器真实接入**（v2.0.141 仅为占位）/ Wire the MPV decoder for real (v2.0.141 is a placeholder only)
 - [ ] 更多投影模式（CAVE / 半球）/ More projection modes (CAVE / hemisphere)
 - [ ] 字幕样式模板 / Subtitle style templates
 - [ ] 播放列表与历史记录同步 / Playlist & history sync
-- [ ] 国际语言包 / i18n language packs
 - [ ] 8K 硬解实验转正（当前为实验功能，默认关闭）/ Graduate experimental 8K decoding
 
 ---
@@ -357,64 +404,3 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 
 本项目采用 **Apache License 2.0** 开源（见 [LICENSE](LICENSE)），Copyright © 2026 tianhuoliuhun。
 可自由使用、修改、商用与再分发（保留版权与许可声明即可）。
-内置字体（MiSans/OPPO Sans）遵循各自授权条款（免费商用但禁止修改），
-第三方依赖遵循各自许可证（见上方清单与 `app/src/main/assets/licenses.json`）。
-
-Licensed under the **Apache License, Version 2.0** (see [LICENSE](LICENSE)). Copyright © 2026 tianhuoliuhun.
-You may use, modify, distribute and commercially use the code freely, provided that
-the copyright and license notices are retained. Bundled fonts (MiSans / OPPO Sans)
-are subject to their own terms (free for commercial use but modification prohibited);
-third-party dependencies remain under their respective licenses.
-
----
-
-## ⚠️ 免责声明 / Disclaimer
-
-> **此项目（Aura face VR Player）是个人为了兴趣而开发，仅用于学习和测试，请于下载后 24 小时内删除。**
-> 所用 API 皆从官方网站收集，不提供任何破解内容。
->
-> *This project (Aura face VR Player) is developed for personal interest,
-> intended for learning and testing purposes only. Please delete it within 24 hours after download.
-> All APIs used are collected from official websites. No cracked content is provided.*
-
----
-
-## 🔗 使用的开源项目 / Open Source Dependencies
-
-### 播放与渲染 / Playback & Rendering
-- **ExoPlayer / Media3**：Google 视频播放框架（Apache-2.0）
-- **MediaPipe**：Google 机器学习框架，人脸关键点（Apache-2.0）
-
-### 语音识别 / Speech Recognition
-- **Vosk**：离线语音识别引擎（Apache-2.0）— https://github.com/nicehash
-- **sherpa-onnx**：Qwen3-ASR / SenseVoice QNN 离线识别（Apache-2.0）— https://github.com/k2-fsa/sherpa-onnx
-
-### 网络与数据 / Networking & Data
-- **Retrofit**：https://github.com/square/retrofit — HTTP 客户端（Apache-2.0）
-- **OkHttp**：https://github.com/square/okhttp — HTTP 引擎（Apache-2.0）
-- **Moshi**：https://github.com/square/moshi — JSON 解析（Apache-2.0）
-- **jcifs-ng**：https://github.com/agno3/jcifs-ng — SMB 局域网播放（LGPL-2.1）
-
-### UI 框架 / UI Framework
-- **Jetpack Compose**（androidx）：响应式 UI（Apache-2.0）
-- **backdrop**：Android 液态玻璃效果（Apache-2.0）
-
-### 翻译参考 / Translation Reference
-- **bing-translate-api**：https://github.com/plainheart/bing-translate-api — 必应翻译封装（MIT，仅参考接口协议）
-
-### 基础库 / Foundation Libraries
-- **Kotlin**：https://github.com/JetBrains/kotlin（Apache-2.0）
-- **Firebase Android SDK**：统计与分析（Apache-2.0）— https://github.com/nicehash
-- **Guava**：Google 核心工具库（Apache-2.0）— https://github.com/nicehash
-- **Room**：本地数据库（Apache-2.0）— https://github.com/nicehash
-- **Bouncy Castle**：加密算法库（MIT）— https://github.com/nicehash
-- **JNA**：Java 原生接口桥接（LGPL-2.1 / Apache-2.0）— https://github.com/nicehash
-- **SLF4J**：日志门面（MIT）— https://github.com/nicehash
-
-### 内置资源 / Bundled Resources
-- **MiSans 字体**：小米免费商用字体（非开源，免费授权）
-- **OPPO Sans 字体**：OPPO 官方 — 免费商用字体（非开源，免费授权）
-- **12 款 3D LUT 调色预设**：项目自研（numpy 脚本生成，无第三方版权）
-
-> 以上所有 API 与资源均来自官方网站或正规渠道，不涉及任何破解内容。
-> All APIs and resources above are from official websites or legitimate channels. No cracked content is provided.
