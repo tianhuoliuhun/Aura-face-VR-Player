@@ -142,6 +142,27 @@ class SubtitleTranslator(private val context: Context) {
         /** 单次播放会话最多翻译多少条（超出后不再发起新请求，已翻译的照常显示） */
         const val MAX_SESSION_TRANSLATIONS = 600
 
+        // ===== 翻译缓存容量（v2.0.150 上调）=====
+
+        /**
+         * 磁盘缓存的「压缩阈值」：文件超过它才做一次整体重写（去重 + 裁剪）。
+         *
+         * 原值 4MB **偏小**：稍长的剧集就会把文件顶到阈值之上，而原实现重写后
+         * 文件大小 ≈ 内存缓存全量、往往仍高于阈值 → **此后每次翻译都会触发一次
+         * 全量重写**（每次几 MB 写盘），既慢又费电。现提升到 32MB，并配合下面的
+         * 软上限让重写后文件明显回落，恢复正常「追加一行」的 O(1) 写入。
+         */
+        private const val DISK_CACHE_COMPACT_THRESHOLD_BYTES = 32L * 1024 * 1024
+
+        /**
+         * 缓存条目软上限（同时决定压缩后保留的条数）。
+         * 约 20 万条 × 平均 ~120 字节 ≈ 24MB（低于 32MB 阈值）。
+         */
+        private const val CACHE_SOFT_MAX_ENTRIES = 200_000
+
+        /** 启动时最多加载多少行（超大文件保护，避免首屏被 IO 拖住） */
+        private const val CACHE_MAX_LOAD_LINES = 600_000
+
         /** 预读翻译的前瞻窗口（秒）与单轮条数上限 */
         private const val PREFETCH_LOOKAHEAD_MS = 60_000L
         private const val PREFETCH_MAX_ITEMS = 20
@@ -182,18 +203,28 @@ class SubtitleTranslator(private val context: Context) {
     private fun loadDiskCache() {
         try {
             if (!diskCacheFile.exists()) return
+            val fileMb = diskCacheFile.length() / 1048576.0
             var loaded = 0
-            diskCacheFile.forEachLine { line ->
-                val tab = line.indexOf('\t')
-                if (tab <= 0) return@forEachLine
-                val key = line.substring(0, tab)
-                val value = unescapeCache(line.substring(tab + 1))
-                if (key.isNotBlank() && value.isNotBlank()) {
-                    translationCache[key] = value
-                    loaded++
+            var lines = 0
+            // 用 readLine 循环而非 forEachLine：便于在超大文件上**提前收手**
+            diskCacheFile.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (loaded < CACHE_MAX_LOAD_LINES) {
+                    val line = reader.readLine() ?: break
+                    lines++
+                    val tab = line.indexOf('\t')
+                    if (tab <= 0) continue
+                    val key = line.substring(0, tab)
+                    val value = unescapeCache(line.substring(tab + 1))
+                    if (key.isNotBlank() && value.isNotBlank()) {
+                        translationCache[key] = value
+                        loaded++
+                    }
                 }
             }
-            Log.i("SubtitleTranslator", "翻译缓存加载完成：$loaded 条")
+            Log.i(
+                "SubtitleTranslator",
+                "翻译缓存加载完成：$loaded 条（读取 $lines 行 / 文件 ${"%.1f".format(fileMb)}MB）"
+            )
         } catch (e: Exception) {
             Log.w("SubtitleTranslator", "翻译缓存加载失败：${e.message}")
         }
@@ -203,8 +234,8 @@ class SubtitleTranslator(private val context: Context) {
     private fun appendDiskCache(key: String, value: String) {
         try {
             synchronized(diskWriteLock) {
-                // 体积保护：超过 4MB 就整体重写（去重后的最新内容）
-                if (diskCacheFile.exists() && diskCacheFile.length() > 4L * 1024 * 1024) {
+                // 体积保护：超过压缩阈值才整体重写（去重 + 裁剪），其余情况只追加一行
+                if (diskCacheFile.exists() && diskCacheFile.length() > DISK_CACHE_COMPACT_THRESHOLD_BYTES) {
                     rewriteDiskCache()
                     return
                 }
@@ -215,15 +246,36 @@ class SubtitleTranslator(private val context: Context) {
         }
     }
 
+    /**
+     * 整体重写磁盘缓存：**去重 + 按软上限裁剪**。
+     *
+     * v2.0.150：原实现只去重，重写后文件大小 ≈ 内存缓存全量，很可能仍高于压缩阈值，
+     * 于是**后续每次写入都会再触发一次全量重写**（性能退化）。现在重写前先把内存缓存
+     * 裁剪到 [CACHE_SOFT_MAX_ENTRIES]，重写后文件明显小于阈值，写入恢复为追加。
+     */
     private fun rewriteDiskCache() {
         try {
-            val sb = StringBuilder()
+            val overflow = translationCache.size - CACHE_SOFT_MAX_ENTRIES
+            if (overflow > 0) {
+                var removed = 0
+                val it = translationCache.keys.iterator()
+                while (it.hasNext() && removed < overflow) {
+                    it.next()
+                    it.remove()
+                    removed++
+                }
+                Log.i("SubtitleTranslator", "翻译缓存超软上限，淘汰 $removed 条")
+            }
+            val sb = StringBuilder(translationCache.size * 96 + 64)
             for ((k, v) in translationCache) {
                 if (k.isBlank() || v.isBlank()) continue
                 sb.append(k).append('\t').append(escapeCache(v)).append('\n')
             }
             diskCacheFile.writeText(sb.toString(), Charsets.UTF_8)
-            Log.i("SubtitleTranslator", "翻译缓存已重写（${translationCache.size} 条）")
+            Log.i(
+                "SubtitleTranslator",
+                "翻译缓存已重写：${translationCache.size} 条 / ${sb.length / 1024}KB"
+            )
         } catch (e: Exception) {
             Log.w("SubtitleTranslator", "翻译缓存重写失败：${e.message}")
         }

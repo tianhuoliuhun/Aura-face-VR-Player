@@ -105,8 +105,8 @@
   - Bing translation inspired by [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api) (MIT; self-written Kotlin HTTP, npm package NOT bundled)
 - **引擎 / 目标语言 / API Key / Base URL / 模型名 / 显示模式全部持久化**（重启不丢）
   - Engine, target language, API key, base URL, model and display mode are all persisted
-- 结果本地内存 + 磁盘缓存，避免重复请求
-  - Results cached in memory and on disk
+- **本地翻译词库（缓存）**：内存 + 磁盘双层，磁盘上限 **32MB（约 20 万条）**，跨视频、跨重启都命中，因此同一句话只翻一次
+  - Local translation memory: in-memory + on-disk (32MB / ~200k entries), survives video switches and app restarts
 
 ### 📁 局域网与远程播放 / LAN & Remote Playback
 - SMB 协议（jcifs-ng）：浏览局域网共享、直连播放 NAS/PC 视频
@@ -387,6 +387,7 @@ All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo 
 | **v2.0.147** | **修复多语言模型「下载不动」**：设备实测日志 `encoder.int8.onnx HTTP 401` —— **hf-mirror 的「按文件」源按出口 IP / 缓存命中区别对待**，未被缓存的仓库在真机上直接 401（沙箱 IP 却是 206），导致 639MB 的 parakeet 根本下不来。① **ru/fr/de/es 改用官方同门 NeMo FastConformer**：`nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8`，**一个包覆盖 ru/de/es/fr**，整包 **102MB**、解压后 ≈132MB，走 **GitHub releases**（不再依赖 hf-mirror 按文件源）；② **下载加固**：读超时 600s→**90s**（卡住即抛超时→自动重试并按 **Range 续传**）、重试 **3→5** 次、请求统一带浏览器 UA；③ 整包完成判定改为 **97% 体积**，避免半包被当完整包、到解压才失败 · Fix "download stuck": hf-mirror per-file source 401s by egress IP; switch to a 102MB FastConformer + download hardening |
 | **v2.0.148** | **补齐 FastConformer 包全部语言**：该包名 `…-be-de-en-es-fr-hr-it-pl-ru-uk-…` 共覆盖 **11 种**语言。在已有 ru/de/es/fr 之外，新增 **be 白俄罗斯语 / hr 克罗地亚语 / it 意大利语 / pl 波兰语 / uk 乌克兰语**（en 英语不重复登记，内置 SenseVoice 已覆盖）。全部条目共用同一目录 → **下载一次（102MB），这 11 种语言全部可用**；识别语言由此增至 **17 项** · Add all remaining languages of the FastConformer package (be/hr/it/pl/uk) |
 | **v2.0.149** | **泰语改用更小的 Whisper-tiny**：泰语专用模型官方只有 **664MB 整包**（且 hf-mirror 对它的按文件源一律 401，只能整包下载再解压），体积代价过大 → 改用 **Whisper-tiny int8**（`tiny-encoder.int8.onnx` 12.9MB + `tiny-decoder.int8.onnx` 89.9MB + `tiny-tokens.txt` 0.8MB ≈ **99MB**，**hf-mirror 支持按文件下载**，体积降到 1/6.7）；识别器新增 **Whisper 分支**（`OfflineWhisperModelConfig` + `language=th`，多语言模型须显式指定语言）；代价是 tiny 精度弱于专用 zipformer · Thai switched to Whisper-tiny int8 (~99MB, per-file download) instead of the 664MB Thai zipformer package |
+| **v2.0.150** | **翻译缓存优化（增大本地词库）**：① 磁盘缓存压缩阈值 **4MB → 32MB**（约可存 20 万条）—— 原值偏小，稍长的剧集就会把缓存文件顶到阈值以上，而原实现重写后文件仍大于阈值，**导致此后每次翻译都要做一次全量重写写盘**（几 MB/次，既慢又费电），这是个真问题；② `rewriteDiskCache` 增加**软上限裁剪**（重写前把内存缓存裁到 20 万条），使重写后文件回落到阈值以下，写入恢复为 O(1) 追加；③ 启动加载改用 `readLine` 循环并加**最大行数保护**（60 万行），避免超大缓存拖慢首屏；④ 加载/重写日志补充条数与 MB/KB，便于观察词库规模 · Translation cache: threshold 4MB→32MB, soft-cap trim on rewrite (fixes repeated full rewrites), load-time line cap, richer logs |
 
 ---
 
