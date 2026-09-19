@@ -153,7 +153,21 @@ fun VRPlayerScreen(
     }
 
     // Beauty and picture adjustments
-    var beautyPreset by remember { mutableStateOf("自定义") } // 预设：自然/淡妆/浓妆/自定义
+    // 预设：自然/淡妆/浓妆/自定义。
+    // v2.0.144 固化：用稳定 id 落盘（0自然/1淡妆/2浓妆/3自定义），恢复时按当前语言
+    // 映射回本地化名——避免把本地化字符串直接存盘后、切语言导致高亮失配。
+    var beautyPreset by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) {
+                when (prefs.getInt("beauty_preset_id", 3)) {
+                    0 -> context.getString(R.string.beauty_preset_natural)
+                    1 -> context.getString(R.string.beauty_preset_light)
+                    2 -> context.getString(R.string.beauty_preset_heavy)
+                    else -> context.getString(R.string.beauty_preset_custom)
+                }
+            } else context.getString(R.string.beauty_preset_custom)
+        )
+    }
     var beautyCompareEnabled by remember { mutableStateOf(false) } // 对比原图开关
     var beautyLevel by remember {
         mutableFloatStateOf(
@@ -484,14 +498,61 @@ fun VRPlayerScreen(
     }
     val subtitleTranslator = remember { SubtitleTranslator(context) }
     // v2.0.127：恢复上次的「字幕翻译」开关。
-    // 原先只在切换开关时写入 translation_enabled、却从没读取过，
-    // 因此每次重启翻译都回到关闭状态。这里在记忆模式下把它读回来。
+    // v2.0.144：翻译相关设置**全部**固化——此前只有 translation_enabled 落盘，
+    // 引擎（必应/MyMemory/…）与「双语/仅译文」显示模式每次重启都回到默认，
+    // 用户会以为"选了没用"。这里连同目标语言、API Key、Base URL、模型名一并读回。
+    // 另加「已恢复」门控：确保写回 effect 在恢复完成前不会用默认值覆盖已存设置。
+    var translatorSettingsRestored by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (isMemoryModeEnabled) {
-            val wasEnabled = prefs.getBoolean("translation_enabled", false)
-            if (wasEnabled != subtitleTranslator.config.isEnabled) {
-                subtitleTranslator.config = subtitleTranslator.config.copy(isEnabled = wasEnabled)
+            val c = subtitleTranslator.config
+            val engine = TranslationEngine.values()
+                .find { it.id == prefs.getInt("translate_engine_id", c.engine.id) } ?: c.engine
+            val displayMode = TranslationDisplayMode.values()
+                .find { it.id == prefs.getInt("translate_display_mode_id", c.displayMode.id) } ?: c.displayMode
+            val targetLang = TranslationTargetLanguage.values()
+                .find { it.id == prefs.getInt("translate_target_lang_id", c.targetLanguage.id) } ?: c.targetLanguage
+            subtitleTranslator.config = c.copy(
+                isEnabled = prefs.getBoolean("translation_enabled", false),
+                engine = engine,
+                displayMode = displayMode,
+                targetLanguage = targetLang,
+                apiKey = prefs.getString("translate_api_key", "") ?: "",
+                baseUrl = prefs.getString("translate_base_url", "") ?: "",
+                modelName = prefs.getString("translate_model_name", "") ?: ""
+            )
+        }
+        translatorSettingsRestored = true
+    }
+    // v2.0.144：翻译设置固化写回。key 变化即落盘（记忆模式关闭时清除）。
+    LaunchedEffect(
+        translatorSettingsRestored,
+        isMemoryModeEnabled,
+        subtitleTranslator.config.engine,
+        subtitleTranslator.config.displayMode,
+        subtitleTranslator.config.targetLanguage,
+        subtitleTranslator.config.apiKey,
+        subtitleTranslator.config.baseUrl,
+        subtitleTranslator.config.modelName
+    ) {
+        if (!translatorSettingsRestored) return@LaunchedEffect
+        prefs.edit().apply {
+            if (isMemoryModeEnabled) {
+                putInt("translate_engine_id", subtitleTranslator.config.engine.id)
+                putInt("translate_display_mode_id", subtitleTranslator.config.displayMode.id)
+                putInt("translate_target_lang_id", subtitleTranslator.config.targetLanguage.id)
+                putString("translate_api_key", subtitleTranslator.config.apiKey)
+                putString("translate_base_url", subtitleTranslator.config.baseUrl)
+                putString("translate_model_name", subtitleTranslator.config.modelName)
+            } else {
+                remove("translate_engine_id")
+                remove("translate_display_mode_id")
+                remove("translate_target_lang_id")
+                remove("translate_api_key")
+                remove("translate_base_url")
+                remove("translate_model_name")
             }
+            apply()
         }
     }
     // v126：实时 AI 字幕引擎（方案文档「边播边生成」，不写 SRT 文件）
@@ -769,8 +830,19 @@ fun VRPlayerScreen(
         spoofResolutionEnabled,
         downscaleOutputEnabled,
         addCodecParamsEnabled,
-        autoFallbackSoftEnabled
+        autoFallbackSoftEnabled,
+        beautyPreset
     ) {
+        // v2.0.144：美颜预设按稳定 id 落盘（本地化名只用于显示与匹配）。
+        // 名称无法识别（如切语言后残留旧语言名）时返回 -1，此时**不改动已存值**，
+        // 避免把预设误写成「自定义」。
+        val beautyPresetId = when (beautyPreset) {
+            context.getString(R.string.beauty_preset_natural) -> 0
+            context.getString(R.string.beauty_preset_light) -> 1
+            context.getString(R.string.beauty_preset_heavy) -> 2
+            context.getString(R.string.beauty_preset_custom) -> 3
+            else -> -1
+        }
         prefs.edit().apply {
             putBoolean("is_memory_mode_enabled", isMemoryModeEnabled)
             if (isMemoryModeEnabled) {
@@ -791,6 +863,7 @@ fun VRPlayerScreen(
                 putFloat("beauty_eyebrows", beautyEyebrows)
                 putFloat("beauty_long_legs", beautyLongLegs)
                 putFloat("beauty_small_head", beautySmallHead)
+                if (beautyPresetId >= 0) putInt("beauty_preset_id", beautyPresetId)
                 putBoolean("is_split_screen_vr", isSplitScreenVR)
                 putBoolean("is_gyro_enabled", isGyroEnabled)
                 putInt("asr_threads", asrThreads)
@@ -849,6 +922,7 @@ fun VRPlayerScreen(
                 remove("beauty_eyebrows")
                 remove("beauty_long_legs")
                 remove("beauty_small_head")
+                remove("beauty_preset_id")
                 remove("is_split_screen_vr")
                 remove("is_gyro_enabled")
                 remove("fov_deg")

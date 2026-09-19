@@ -14,7 +14,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -143,6 +145,19 @@ class SubtitleTranslator(private val context: Context) {
         /** 预读翻译的前瞻窗口（秒）与单轮条数上限 */
         private const val PREFETCH_LOOKAHEAD_MS = 60_000L
         private const val PREFETCH_MAX_ITEMS = 20
+
+        /**
+         * MyMemory 限速常量（v2.0.144）。
+         * usagelimits.php：免费匿名 5000 字符/天（提交邮箱可到 50000），按字符计量，
+         * 且会按调用频率限流；超限时**不返回 HTTP 错误**，而是把警告文案塞进
+         * responseData.translatedText。这里用「最小请求间隔降速」+「错误文案识别」+
+         * 「配额冷却」三层兜底，避免并发连打导致持续报错。
+         */
+        private const val MYMEMORY_MIN_INTERVAL_MS = 1_500L
+        /** MyMemory 单次请求 q 的上限为 500 字节 */
+        private const val MYMEMORY_MAX_QUERY_BYTES = 500
+        /** 触发配额/限流后的冷却时长 */
+        private const val MYMEMORY_COOLDOWN_MS = 10 * 60 * 1000L
     }
 
     var config by mutableStateOf(TranslationConfig())
@@ -242,6 +257,13 @@ class SubtitleTranslator(private val context: Context) {
     // v84：并发从 2 提升到 4（LLM API 无免费限流顾虑；Bing 失败会自动重试）
     // 允许几个并发请求，使慢行不再阻塞整条字幕队列。
     private val translationSemaphore = Semaphore(4)
+
+    // v2.0.144：MyMemory 专用节流器。与 translationSemaphore 不同，这里要求
+    // 「串行 + 最小间隔」——MyMemory 按调用频率限流，并发连打最容易触发报错。
+    private val myMemoryPacer = Mutex()
+    private var myMemoryLastCallMs = 0L
+    /** 配额/限流触发后的冷却截止时间（ms）；冷却期内直接跳过，不再打接口 */
+    private var myMemoryCooldownUntilMs = 0L
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -798,9 +820,39 @@ class SubtitleTranslator(private val context: Context) {
      * GET https://api.mymemory.translated.net/get?q=<text>&langpair=<src>|<tgt>
      * - src 支持 "Autodetect"（由 MyMemory 自动识别来源语言）
      * - 响应体：{ responseData: { translatedText: "..." } }
-     * - 超限/出错时 responseStatus != 200，translatedText 可能为空或带回显原文
+     *
+     * v2.0.144 限速（依据 usagelimits.php）：免费匿名仅 5000 字符/天、按字符计量、
+     * 且会按调用频率限流；**超限时不返回 HTTP 错误**，而是把警告文案写进
+     * translatedText。因此这里做三层兜底：
+     *  ① 串行 + 最小间隔（[MYMEMORY_MIN_INTERVAL_MS]）主动降速；
+     *  ② 识别错误文案（配额/限流/参数）判为失败，不写缓存；
+     *  ③ 命中配额类错误后进入冷却期（[MYMEMORY_COOLDOWN_MS]），期内直接跳过不再打接口。
      */
     private suspend fun translateViaMyMemory(text: String, targetLangCode: String): String {
+        // ③ 冷却期内直接跳过，避免持续连打（配额耗尽后需要等一段时间才恢复）
+        val nowMs = System.currentTimeMillis()
+        if (nowMs < myMemoryCooldownUntilMs) {
+            val leftMin = ((myMemoryCooldownUntilMs - nowMs) / 60000L).coerceAtLeast(1L)
+            Log.w("SubtitleTranslator", "MyMemory 冷却中，约 ${leftMin} 分钟后恢复")
+            withContext(Dispatchers.Main) {
+                statusMessage = context.getString(R.string.translate_mymemory_cooldown, leftMin)
+            }
+            return ""
+        }
+        // 单次请求 500 字节上限：超长文本直接跳过，避免必然报错
+        val byteLen = text.toByteArray(Charsets.UTF_8).size
+        if (byteLen > MYMEMORY_MAX_QUERY_BYTES) {
+            Log.w("SubtitleTranslator", "MyMemory 跳过超长文本（$byteLen 字节 > $MYMEMORY_MAX_QUERY_BYTES）")
+            return ""
+        }
+        // ① 串行 + 最小间隔：主动降低请求速度，避开调用频率限制
+        myMemoryPacer.withLock {
+            val since = System.currentTimeMillis() - myMemoryLastCallMs
+            val wait = MYMEMORY_MIN_INTERVAL_MS - since
+            if (wait > 0) delay(wait)
+            myMemoryLastCallMs = System.currentTimeMillis()
+        }
+
         val target = mapMyMemoryLang(targetLangCode)
         val langPair = "Autodetect|$target"
         val base = getActiveBaseUrl().trim().trimEnd('/')
@@ -820,10 +872,15 @@ class SubtitleTranslator(private val context: Context) {
                     val bodyStr = response.body?.string() ?: return@withContext ""
                     val root = JSONObject(bodyStr)
                     val translated = root.optJSONObject("responseData")
-                        ?.optString("translatedText")?.trim()
-                    if (translated.isNullOrBlank()) {
-                        val msg = root.optString("responseMessage", "")
-                        Log.w("SubtitleTranslator", "MyMemory 返回空结果：$msg")
+                        ?.optString("translatedText")?.trim().orEmpty()
+                    // ② MyMemory 用 HTTP 200 + 文案表达错误（配额/限流/参数非法）
+                    if (translated.isBlank() || isMyMemoryErrorText(translated)) {
+                        if (isMyMemoryQuotaText(translated)) {
+                            myMemoryCooldownUntilMs = System.currentTimeMillis() + MYMEMORY_COOLDOWN_MS
+                            Log.w("SubtitleTranslator", "MyMemory 配额/限流触发，冷却 ${MYMEMORY_COOLDOWN_MS / 60000} 分钟")
+                        }
+                        val detail = translated.ifBlank { root.optString("responseMessage", "") }
+                        Log.w("SubtitleTranslator", "MyMemory 返回异常，视为失败：$detail")
                         return@withContext ""
                     }
                     translated
@@ -836,6 +893,26 @@ class SubtitleTranslator(private val context: Context) {
                 ""
             }
         }
+    }
+
+    /** MyMemory 把错误当正文返回时的错误文案识别（配额/限流/参数/服务不可用） */
+    private fun isMyMemoryErrorText(s: String): Boolean {
+        val u = s.trim().uppercase()
+        if (u.isEmpty()) return false
+        val prefixBad = u.startsWith("PLEASE") || u.startsWith("INVALID") ||
+            u.startsWith("NO QUERY") || u.startsWith("YOU USED") ||
+            u.startsWith("MYMEMORY WARNING") ||
+            u.startsWith("TRANSLATION SERVICE TEMPORARILY UNAVAILABLE") ||
+            u.startsWith("QUERY LENGTH LIMIT")
+        return prefixBad || u.contains("ALL AVAILABLE FREE TRANSLATIONS") ||
+            u.contains("QUERY LENGTH LIMIT EXCEEDED")
+    }
+
+    /** 是否为「配额耗尽 / 服务暂不可用」类错误——命中则触发冷却 */
+    private fun isMyMemoryQuotaText(s: String): Boolean {
+        val u = s.trim().uppercase()
+        return u.contains("YOU USED ALL") || u.contains("ALL AVAILABLE FREE TRANSLATIONS") ||
+            u.contains("TEMPORARILY UNAVAILABLE") || u.contains("MYMEMORY WARNING")
     }
 
     /**

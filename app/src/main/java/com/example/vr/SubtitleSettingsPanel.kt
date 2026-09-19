@@ -896,6 +896,33 @@ fun SubtitleSettingsPanel(
             }
         }
 
+        // 2b. 字号（无级连续调节）——v2.0.144：从「布局与时间」移到字重正下方，就近调节
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    stringResource(R.string.subtitle_font_size, fontSizeSp),
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 10.sp
+                )
+            }
+            Slider(
+                value = fontSizeSp.toFloat(),
+                onValueChange = {
+                    onFontSizeChange(it.roundToInt())
+                    onUserActivity()
+                },
+                valueRange = 12f..40f,
+                colors = SliderDefaults.colors(
+                    thumbColor = accentColor,
+                    activeTrackColor = accentColor
+                ),
+                modifier = Modifier.height(20.dp)
+            )
+        }
+
         // 3. Text Color & Alpha
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(
@@ -1050,29 +1077,12 @@ fun SubtitleSettingsPanel(
             accentColor = accentColor,
             initiallyExpanded = false
         ) {
-        // 5. Size & Alignment
+        // 5. Alignment（字号已上移到「显示样式」区、字重正下方）
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1.2f)) {
-                Text(stringResource(R.string.subtitle_font_size, fontSizeSp), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-                Slider(
-                    value = fontSizeSp.toFloat(),
-                    onValueChange = {
-                        onFontSizeChange(it.roundToInt())
-                        onUserActivity()
-                    },
-                    valueRange = 12f..40f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = accentColor,
-                        activeTrackColor = accentColor
-                    ),
-                    modifier = Modifier.height(20.dp)
-                )
-            }
-
             Column(modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.subtitle_max_lines), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 Row(

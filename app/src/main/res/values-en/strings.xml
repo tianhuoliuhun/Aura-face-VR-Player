@@ -455,6 +455,7 @@
     <string name="engine_custom">Custom LLM / API</string>
     <string name="engine_mymemory">MyMemory</string>
     <string name="engine_libretranslate">LibreTranslate</string>
+    <string name="translate_mymemory_cooldown">MyMemory free quota reached; will retry in about %1$d min</string>
     <string name="lang_zh">Simplified Chinese</string>
     <string name="lang_en">English</string>
     <string name="lang_ja">Japanese</string>
