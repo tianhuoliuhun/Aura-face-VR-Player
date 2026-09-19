@@ -55,11 +55,13 @@
   - 中/英/日/韩/粤 5 语言，自带标点，RTF 0.026
   - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载
   - Offline ASR: SenseVoice-Small bundled in the APK — zh/en/ja/ko/yue with punctuation, no download needed
-- 🌍 **多语言扩展识别（共 17 种语言）**：内置 5 语之外，可在设置里**按需下载**官方离线模型
-  - 支持越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
+- 🌍 **多语言扩展识别（共 17 种语言）/ Multi-language ASR (17 languages)**
+  - 内置 5 语之外，可在设置里**按需下载**官方离线模型：越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
+  - Beyond the 5 bundled languages, more official offline models can be **downloaded on demand** in Settings: Vietnamese / Russian / French / German / Spanish / Belarusian / Croatian / Italian / Polish / Ukrainian / Thai
   - **模型不打进 APK**（否则安装包会涨到 1GB+），下载到**应用私有目录**，因此**不需要任何存储权限**
+  - Models are **NOT bundled** (the APK would exceed 1GB) and are downloaded into the **app-private directory**, so **no storage permission is required**
   - 11 种语言共用同一份 FastConformer 模型 → **下载一次，这 11 种语言全部可用**
-  - On-demand downloadable offline ASR models for 11 more languages (see matrix below)
+  - The 11 languages share a single FastConformer model — **download once, all 11 become available**
 - **实时 AI 字幕**：边播边生成，不写临时文件
   - 独立解码音频（AudioTee）+ **Silero VAD** 分段 + 按优先级全局生成
   - 优先补当前播放点（**含前 5 秒回补**）及其后内容，再回头补齐其余；跳转后可即时命中已生成部分
@@ -83,12 +85,12 @@
 
 #### 🌍 多语言识别支持矩阵 / ASR Language Matrix
 
-| 语言 | 模型 | 体积 | 下载源 |
+| 语言 / Language | 模型 / Model | 体积 / Size | 下载源 / Source |
 |---|---|---|---|
-| 自动 / 中 / 英 / 日 / 韩 / 粤 | SenseVoice-Small（**已内置**） | 随 APK（229MB） | 无需下载 |
-| 越南语 | `sherpa-onnx-zipformer-vi-int8` | ≈74MB | hf-mirror |
-| 俄 / 法 / 德 / 西 / 白俄 / 克 / 意 / 波 / 乌 | `NeMo FastConformer 20k int8`（**一个模型覆盖 11 语**） | 整包 102MB → 解压 ≈132MB | GitHub releases |
-| 泰语 | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB | GitHub releases |
+| 自动·中·英·日·韩·粤<br>Auto / zh / en / ja / ko / yue | SenseVoice-Small（**已内置 / bundled**） | 随 APK（229MB）<br>in APK (229MB) | 无需下载 / none |
+| 越南语 / Vietnamese | `sherpa-onnx-zipformer-vi-int8` | ≈74MB | hf-mirror |
+| 俄·法·德·西·白俄·克·意·波·乌<br>ru / fr / de / es / be / hr / it / pl / uk | `NeMo FastConformer 20k int8`<br>（**一个模型覆盖 11 语 / one model, 11 languages**） | 整包 102MB → 解压 ≈132MB<br>pkg 102MB → ≈132MB extracted | GitHub releases |
+| 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
 
 ### 🌐 字幕在线翻译 / Online Translation
 - **9 种引擎**：必应翻译（免费） / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
@@ -247,6 +249,9 @@ python scripts/fetch_asr_model.py --check  # 只检查是否就绪
 
 > 镜像源为 `hf-mirror.com`；不可达时脚本会提示手动下载地址（HuggingFace 官方仓库）。
 > 多语言（17 语）模型中只有 SenseVoice 需要随包：**其余 11 种语言由 App 运行时按需下载**。
+>
+> Mirror: `hf-mirror.com`; the script prints a manual download URL when unreachable.
+> Of the 17 languages, **only SenseVoice ships inside the APK** — the other 11 are downloaded on demand at runtime.
 
 ### 构建命令 / Commands
 
@@ -305,6 +310,7 @@ Built on a Google AI Studio generated skeleton; core features are self-developed
 **资源 / Resources**：MiSans / OPPO Sans 字体（免费商用授权）、MediaPipe 模型（Apache-2.0）、12 款 LUT（项目自研 numpy 脚本生成，无第三方版权）。
 
 **ASR 模型许可 / ASR model licenses**：SenseVoice、zipformer、NeMo FastConformer 均为 Apache-2.0；泰语 zipformer 模型源自 `icefall-asr-gigaspeech2`，亦为 Apache-2.0。
+All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo FastConformer ones — are Apache-2.0; the Thai zipformer derives from `icefall-asr-gigaspeech2` (also Apache-2.0).
 
 完整许可清单见应用内「设置 → 关于与开源许可」或 `app/src/main/assets/licenses.json`。
 
