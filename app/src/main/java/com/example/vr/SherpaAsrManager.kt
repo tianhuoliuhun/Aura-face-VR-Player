@@ -54,6 +54,13 @@ object SherpaAsrManager {
 
     private const val TAG = "SherpaAsr"
 
+    /** 下载最多尝试次数（配合 Range 断点续传；大文件在弱网下首次失败很常见） */
+    private const val MAX_DOWNLOAD_ATTEMPTS = 5
+
+    /** 下载请求统一使用的 UA（个别镜像对默认 okhttp UA 的策略不同，用浏览器 UA 更稳） */
+    private const val DOWNLOAD_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
     // ===== SenseVoice 配置（v2.0.127：内置 assets + 可选下载兜底）=====
     //
     // 模型：sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 的 model.int8.onnx
@@ -88,9 +95,16 @@ object SherpaAsrManager {
         private set
 
     private var downloadJob: Job? = null
+    /**
+     * 下载用 HTTP 客户端。
+     *
+     * `readTimeout` 刻意取 **90 秒**：一旦读阻塞超过它就抛 SocketTimeoutException，
+     * 从而让「连接挂死 / 被限速到零」能触发上层重试并按 **Range 续传**，
+     * 而不是干等到 600 秒才发现卡住（大文件下载体验的关键）。
+     */
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(600, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
         .build()
 
     // ===== 模型路径 =====
@@ -227,12 +241,13 @@ object SherpaAsrManager {
     ): Boolean {
         if (dest.exists() && dest.length() >= expectMinBytes) return true
         var attempt = 0
-        while (attempt < 3) {
+        while (attempt < MAX_DOWNLOAD_ATTEMPTS) {
             attempt++
             try {
                 val existing = if (dest.exists()) dest.length() else 0L
                 val req = Request.Builder().url(url).apply {
                     if (existing > 0) addHeader("Range", "bytes=$existing-")
+                    addHeader("User-Agent", DOWNLOAD_UA)
                 }.build()
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.code != 200 && resp.code != 206) {
@@ -550,8 +565,9 @@ object SherpaAsrManager {
                 dest = pkg,
                 progressBase = 0f,
                 progressSpan = 0.85f,
-                // 包体积留点余量判定，避免把中断的半包当完整包
-                expectMinBytes = (arc.packageMb - 40L).coerceAtLeast(1L) * 1024L * 1024L,
+                // 完成判定按整包 97% 体积：不足视为半包 → 继续 Range 续传，
+                // 避免"下到一半就当成完整包、到解压才失败"的浪费
+                expectMinBytes = (arc.packageMb.toLong() * 1024L * 1024L * 97L / 100L).coerceAtLeast(1L),
                 label = m.dirName
             )
             if (!downloaded) return false

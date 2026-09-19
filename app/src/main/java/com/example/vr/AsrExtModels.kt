@@ -102,41 +102,52 @@ object AsrExtModels {
         )
     )
 
-    // ===== ru / fr / de / es：四语**共用**一个 parakeet-tdt-0.6b-v3-int8 =====
+    // ===== ru / fr / de / es：四语**共用**一个 NeMo FastConformer（20k int8）=====
     //
-    // 源：`csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`（hf-mirror 按文件实测可达）
-    // 覆盖 25 种欧洲语言，含 fr / de / es / ru：
-    //   bg/hr/cs/da/nl/en/et/fi/fr/de/el/hu/it/lv/lt/mt/pl/pt/ro/sk/sl/es/sv/ru/uk
-    // 实测体积：encoder.int8 652,184,281 + decoder.int8 11,845,275 + joiner.int8 6,355,277
-    //           + tokens 93,939 ≈ **639MB**（体积偏大，但一个模型覆盖四语）
-    // 官方 int8 用法：encoder.int8 + decoder.int8 + joiner.int8 + tokens，modelType=nemo_transducer
-    private const val PARAKEET_DIR = "nemo-parakeet-tdt-0.6b-v3-int8"
-
-    private val parakeetFiles = listOf(
-        f(PARAKEET_DIR, "encoder.int8.onnx", 600_000_000L),
-        f(PARAKEET_DIR, "decoder.int8.onnx", 10_000_000L),
-        f(PARAKEET_DIR, "joiner.int8.onnx", 5_000_000L),
-        f(PARAKEET_DIR, "tokens.txt", 50_000L)
-    )
+    // 为什么**不用** parakeet-tdt-0.6b-v3-int8（639MB）：
+    //  ① 体积过大，手机上下载体验极差、极易半途失败；
+    //  ② 它**只有 hf-mirror 一条「按文件」源**，而该源在真机上会返回 **401**——
+    //     设备实测日志：`encoder.int8.onnx HTTP 401` / `下载不完整：0 字节`
+    //     （同一 URL 在沙箱出口 IP 却是 206 → 说明 hf-mirror 按**出口 IP / 缓存命中**
+    //      区别对待，未命中就回源失败，属**不可靠源**）。
+    // 本模型为官方同门 NeMo FastConformer：**一个包覆盖 ru / de / es / fr**
+    // （另有 en / hr / it / pl / uk），整包 102MB、解压后 ≈132MB，
+    // 走 **GitHub releases**（实测可达且支持 Range，不依赖 hf-mirror 的按文件源）。
+    // 文件命名与 NeMo 规范一致（encoder/decoder/joiner.int8.onnx + tokens.txt），
+    // 用法同为 modelType = "nemo_transducer"。
+    private const val FASTCONF_DIR = "nemo-fast-conformer-20k-int8"
+    private const val FASTCONF_URL =
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" +
+            "sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8.tar.bz2"
 
     /** 四个语言键指向同一 [dirName] → 下载一次，四语通用（就绪状态也自动共享） */
-    private fun parakeet(key: String, labelResId: Int) = AsrExtModel(
+    private fun fastConformer(key: String, labelResId: Int) = AsrExtModel(
         key = key,
         labelResId = labelResId,
-        dirName = PARAKEET_DIR,
+        dirName = FASTCONF_DIR,
         modelType = "nemo_transducer",
         encoder = "encoder.int8.onnx",
         decoder = "decoder.int8.onnx",
         joiner = "joiner.int8.onnx",
         tokens = "tokens.txt",
-        sizeMb = 639,
-        files = parakeetFiles
+        sizeMb = 132,
+        files = emptyList(),
+        archive = AsrExtArchive(
+            url = FASTCONF_URL,
+            wanted = mapOf(
+                "encoder.int8.onnx" to 120_000_000L,
+                "decoder.int8.onnx" to 4_000_000L,
+                "joiner.int8.onnx" to 2_000_000L,
+                "tokens.txt" to 10_000L
+            ),
+            packageMb = 102
+        )
     )
 
-    val RUSSIAN = parakeet("ru", R.string.asr_lang_ru)
-    val FRENCH = parakeet("fr", R.string.asr_lang_fr)
-    val GERMAN = parakeet("de", R.string.asr_lang_de)
-    val SPANISH = parakeet("es", R.string.asr_lang_es)
+    val RUSSIAN = fastConformer("ru", R.string.asr_lang_ru)
+    val FRENCH = fastConformer("fr", R.string.asr_lang_fr)
+    val GERMAN = fastConformer("de", R.string.asr_lang_de)
+    val SPANISH = fastConformer("es", R.string.asr_lang_es)
 
     /**
      * 泰语 —— zipformer transducer（int8 encoder）。
