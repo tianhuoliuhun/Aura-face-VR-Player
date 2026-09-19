@@ -54,13 +54,14 @@ fun BatchTranscribeSection(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var modelReady by remember { mutableStateOf(SherpaAsrManager.isModelReady(context)) }
+    // v2.0.145：模型就绪状态按**所选语言**判断（扩展语言如越南语是独立模型，需单独下载）
+    var modelReady by remember { mutableStateOf(SherpaAsrManager.isModelReadyFor(context, sherpaLangCode)) }
     var downloadProgress by remember { mutableFloatStateOf(SherpaAsrManager.modelDownloadProgress) }
     // 下载状态在单例里，这里跟随同步以便重组
     var isDownloading by remember { mutableStateOf(SherpaAsrManager.isModelDownloading) }
 
-    LaunchedEffect(SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
-        modelReady = SherpaAsrManager.isModelReady(context)
+    LaunchedEffect(sherpaLangCode, SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
+        modelReady = SherpaAsrManager.isModelReadyFor(context, sherpaLangCode)
         downloadProgress = SherpaAsrManager.modelDownloadProgress
         isDownloading = SherpaAsrManager.isModelDownloading
     }
@@ -106,14 +107,18 @@ fun BatchTranscribeSection(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                         Text(
-                            "SenseVoice-Small",
+                            // v2.0.145：模型名随所选语言变化（扩展语言是独立模型）
+                            SherpaAsrManager.modelInfoFor(sherpaLangCode).first,
                             color = Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
                             // v2.0.127：模型内置，这里显示实际生效来源（下载版优先于内置版）
-                            text = if (modelReady) stringResource(R.string.asr_model_ready_source, SherpaAsrManager.activeModelSource(context))
+                            // v2.0.145：扩展语言无内置版，就绪即显示「已就绪」
+                            text = if (modelReady)
+                                if (SherpaAsrManager.modelInfoFor(sherpaLangCode).third) stringResource(R.string.asr_ready)
+                                else stringResource(R.string.asr_model_ready_source, SherpaAsrManager.activeModelSource(context))
                             else stringResource(R.string.asr_model_unavailable),
                             color = if (modelReady) accentColor.copy(alpha = 0.9f)
                             else Color(0xFFFFB74D),
@@ -131,7 +136,7 @@ fun BatchTranscribeSection(
                                 )
                                 .clickable {
                                     onUserInteraction()
-                                    SherpaAsrManager.startModelDownload(context)
+                                    SherpaAsrManager.startDownloadFor(context, sherpaLangCode)
                                 }
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
@@ -172,36 +177,43 @@ fun BatchTranscribeSection(
                 }
             }
 
-            // ===== 识别语言（直接透传给 SenseVoice）=====
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            // ===== 识别语言（SenseVoice 内置语言 + 扩展语言）=====
+            // v2.0.145：语言变多后单行放不下，改为每行 4 个自动换行
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                SherpaAsrManager.sherpaLanguages.forEach { lang ->
-                    val code = lang.code
-                    val label = stringResource(lang.labelResId)
-                    val sel = sherpaLangCode == code
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (sel) accentColor.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.08f))
-                            .clickable {
-                                onUserInteraction()
-                                onSherpaLangCodeChange(code)
-                            }
-                            .padding(vertical = 4.dp),
-                        contentAlignment = Alignment.Center
+                SherpaAsrManager.sherpaLanguages.chunked(4).forEach { rowLangs ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            label,
-                            color = if (sel) accentOnColor else Color.White.copy(alpha = 0.8f),
-                            fontSize = 8.sp,
-                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 1
-                        )
+                        rowLangs.forEach { lang ->
+                            val code = lang.code
+                            val label = stringResource(lang.labelResId)
+                            val sel = sherpaLangCode == code
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (sel) accentColor.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.08f))
+                                    .clickable {
+                                        onUserInteraction()
+                                        onSherpaLangCodeChange(code)
+                                    }
+                                    .padding(vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (sel) accentOnColor else Color.White.copy(alpha = 0.8f),
+                                    fontSize = 8.sp,
+                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        repeat(4 - rowLangs.size) {
+                            Box(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }

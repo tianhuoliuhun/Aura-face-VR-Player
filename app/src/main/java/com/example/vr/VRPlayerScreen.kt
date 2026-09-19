@@ -4439,48 +4439,59 @@ fun VRPlayerScreen(
                                     )
                                     // sherpa-onnx 引擎语言选择（v111；v127 含 SenseVoice CPU）
                                     run {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
+                                        // v2.0.145：语言变多（含越南语等扩展语言）后单行放不下，改为每行 4 个自动换行
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                                            SherpaAsrManager.sherpaLanguages.forEach { lang ->
-                                                val code = lang.code
-                                                val label = stringResource(lang.labelResId)
-                                                val sel = sherpaLangCode == code
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                        .clickable {
-                                                            keepUiAlight()
-                                                            changeAsrLanguage(code)
-                                                        }
-                                                        .padding(vertical = 5.dp),
-                                                    contentAlignment = Alignment.Center
+                                            SherpaAsrManager.sherpaLanguages.chunked(4).forEach { rowLangs ->
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
-                                                        fontSize = 9.sp,
-                                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                                        textAlign = TextAlign.Center
-                                                    )
+                                                    rowLangs.forEach { lang ->
+                                                        val code = lang.code
+                                                        val label = stringResource(lang.labelResId)
+                                                        val sel = sherpaLangCode == code
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
+                                                                .clickable {
+                                                                    keepUiAlight()
+                                                                    changeAsrLanguage(code)
+                                                                }
+                                                                .padding(vertical = 5.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text(
+                                                                text = label,
+                                                                color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
+                                                                fontSize = 9.sp,
+                                                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                                                                textAlign = TextAlign.Center
+                                                            )
+                                                        }
+                                                    }
+                                                    repeat(4 - rowLangs.size) {
+                                                        Spacer(modifier = Modifier.weight(1f))
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                     // sherpa-onnx 引擎：模型状态 + 下载
                                     run {
-                                        val sherpaReady = remember { mutableStateOf(SherpaAsrManager.isModelReady(context)) }
-                                        LaunchedEffect(asrEngineType, SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
-                                            sherpaReady.value = SherpaAsrManager.isModelReady(context)
+                                        // v2.0.145：模型信息与就绪状态随所选语言变化
+                                        // （扩展语言如越南语是独立模型，需单独下载，不能沿用 SenseVoice 的判断）
+                                        val langKey = sherpaLangCode
+                                        val modelInfo = SherpaAsrManager.modelInfoFor(langKey)
+                                        val sherpaReady = remember(langKey) { mutableStateOf(SherpaAsrManager.isModelReadyFor(context, langKey)) }
+                                        LaunchedEffect(langKey, SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
+                                            sherpaReady.value = SherpaAsrManager.isModelReadyFor(context, langKey)
                                         }
-                                        val modelName = "SenseVoice-Small INT8"
-                                        val modelDesc = stringResource(R.string.asr_sensevoice_tag)
-                                        val modelSizeMB = 229
+                                        val modelName = modelInfo.first
+                                        val modelDesc = if (modelInfo.third) stringResource(R.string.asr_ext_model_tag) else stringResource(R.string.asr_sensevoice_tag)
+                                        val modelSizeMB = modelInfo.second
                                         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                             // 模型信息
                                             Row(
@@ -4551,7 +4562,7 @@ fun VRPlayerScreen(
                                                     modifier = Modifier.fillMaxWidth()
                                                         .clip(RoundedCornerShape(6.dp))
                                                         .background(AccentColor.copy(alpha = 0.85f))
-                                                        .clickable { SherpaAsrManager.startModelDownload(context) }
+                                                        .clickable { SherpaAsrManager.startDownloadFor(context, sherpaLangCode) }
                                                         .padding(vertical = 7.dp)
                                                 )
                                             }

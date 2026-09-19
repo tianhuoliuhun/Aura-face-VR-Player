@@ -438,6 +438,9 @@
     <string name="asr_lang_ja">일본어</string>
     <string name="asr_lang_ko">한국어</string>
     <string name="asr_lang_yue">광둥어</string>
+    <string name="asr_lang_vi">베트남어</string>
+    <string name="asr_ext_model_unready">이 언어 모델이 아직 다운로드되지 않았습니다（약 %1$dMB）. 위에서 먼저 다운로드하세요.</string>
+    <string name="asr_ext_model_tag">sherpa-onnx 오프라인 모델 · 다운로드 필요</string>
     <string name="lut_classic_cyan_orange">클래식 시안-오렌지</string>
     <string name="lut_cinematic_dark">시네마틱 다크</string>
     <string name="lut_soft_film">소프트 필름</string>

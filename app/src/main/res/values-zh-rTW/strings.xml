@@ -480,6 +480,9 @@
     <string name="asr_lang_ja">日文</string>
     <string name="asr_lang_ko">韓文</string>
     <string name="asr_lang_yue">粵語</string>
+    <string name="asr_lang_vi">越南語</string>
+    <string name="asr_ext_model_unready">該語言的模型尚未下載（約 %1$dMB），請先在上方點擊下載</string>
+    <string name="asr_ext_model_tag">sherpa-onnx 離線模型 · 需下載</string>
     <string name="lut_classic_cyan_orange">經典青橙</string>
     <string name="lut_cinematic_dark">電影暗調</string>
     <string name="lut_soft_film">柔和膠片</string>

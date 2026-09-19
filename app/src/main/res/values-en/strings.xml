@@ -471,6 +471,9 @@
     <string name="asr_lang_ja">Japanese</string>
     <string name="asr_lang_ko">Korean</string>
     <string name="asr_lang_yue">Cantonese</string>
+    <string name="asr_lang_vi">Vietnamese</string>
+    <string name="asr_ext_model_unready">Model for this language is not downloaded (~%1$dMB). Download it above first.</string>
+    <string name="asr_ext_model_tag">sherpa-onnx offline model · download required</string>
     <string name="lut_classic_cyan_orange">Classic Cyan-Orange</string>
     <string name="lut_cinematic_dark">Cinematic Dark</string>
     <string name="lut_soft_film">Soft Film</string>

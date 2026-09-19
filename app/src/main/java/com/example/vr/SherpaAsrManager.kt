@@ -12,6 +12,7 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -125,8 +126,15 @@ object SherpaAsrManager {
         else -> context.getString(R.string.asr_source_unavailable)
     }
 
-    /** SenseVoice 支持的语言（语言标签直接透传给模型） */
+    /** ASR 语言/模型条目（code 同时作为 `sherpa_lang_code` 与扩展模型 key） */
     data class SherpaLang(val code: String, val labelResId: Int)
+
+    /**
+     * 可选语言列表 = SenseVoice 内置语言 + 扩展模型语言。
+     *
+     * v2.0.145：扩展语言（越南语等）由 [AsrExtModels] 注册表驱动，需按需下载，
+     * 不占用 APK 体积；选中后由 [createRecognizer] 自动分叉到 transducer 识别器。
+     */
     val sherpaLanguages = listOf(
         SherpaLang("auto", R.string.asr_lang_auto),
         SherpaLang("zh", R.string.asr_lang_zh),
@@ -134,7 +142,7 @@ object SherpaAsrManager {
         SherpaLang("ja", R.string.asr_lang_ja),
         SherpaLang("ko", R.string.asr_lang_ko),
         SherpaLang("yue", R.string.asr_lang_yue)
-    )
+    ) + AsrExtModels.ALL.map { SherpaLang(it.key, it.labelResId) }
 
     /** 模型是否就绪：下载版或内置版任一可用即可 */
     fun isModelReady(context: Context): Boolean =
@@ -351,6 +359,11 @@ object SherpaAsrManager {
         language: String = "auto",
         threads: Int = 0
     ): OfflineRecognizer? {
+        // v2.0.145：扩展语言（越南语等）走各自独立的离线 transducer 模型，
+        // 与内置 SenseVoice 完全隔离，互不影响。
+        AsrExtModels.byKey(language)?.let { ext ->
+            return createExtRecognizer(context, ext, threads)
+        }
         lastInitError = null
         if (!isModelReady(context)) {
             Log.w(TAG, "SenseVoice model not ready（内置缺失且无下载版）")
@@ -401,6 +414,140 @@ object SherpaAsrManager {
         } catch (e: Throwable) {
             // 用 Throwable：native 初始化失败可能抛 UnsatisfiedLinkError 等 Error 子类
             Log.e(TAG, "SenseVoice init failed: ${e.message}", e)
+            lastInitError = context.getString(R.string.asr_init_failed, e.message ?: e.javaClass.simpleName)
+            null
+        }
+    }
+
+    // ===== 扩展语言模型（v2.0.145：越南语样板）=====
+    //
+    // 这些模型**不内置进 APK**，由用户按需下载到 filesDir/sherpa_models/ext-<dirName>。
+    // 下载源与文件清单见 [AsrExtModels]（各模型文件名不统一，必须逐个写死）。
+
+    /** 扩展模型落盘目录 */
+    private fun extDir(context: Context, m: AsrExtModel): File =
+        File(context.filesDir, "sherpa_models/ext-${m.dirName}")
+
+    /** 扩展模型是否就绪（逐文件尺寸校验，防中断下载的残缺文件被误判） */
+    fun isExtModelReady(context: Context, m: AsrExtModel): Boolean {
+        val dir = extDir(context, m)
+        return m.files.all { f ->
+            val file = dir.resolve(f.name)
+            file.exists() && file.length() >= f.minBytes
+        }
+    }
+
+    /** 指定语言键的模型是否就绪（SenseVoice 语言 → 内置模型；扩展语言 → 对应扩展模型） */
+    fun isModelReadyFor(context: Context, langKey: String): Boolean {
+        val ext = AsrExtModels.byKey(langKey)
+        return if (ext != null) isExtModelReady(context, ext) else isModelReady(context)
+    }
+
+    /** 指定语言键的模型展示信息：名称 / 体积MB / 是否为需下载的扩展模型 */
+    fun modelInfoFor(langKey: String): Triple<String, Int, Boolean> {
+        val ext = AsrExtModels.byKey(langKey)
+        return if (ext != null) Triple(ext.dirName, ext.sizeMb, true)
+        else Triple("SenseVoice-Small INT8", SVC_MODEL_MB, false)
+    }
+
+    /** 按语言键下载对应模型（扩展语言 → 扩展模型；其余 → SenseVoice 兜底通道） */
+    fun startDownloadFor(context: Context, langKey: String) {
+        val ext = AsrExtModels.byKey(langKey)
+        if (ext != null) startExtModelDownload(context, ext) else startModelDownload(context)
+    }
+
+    fun startExtModelDownload(context: Context, m: AsrExtModel) {
+        if (isModelDownloading) return
+        downloadJob = CoroutineScope(Dispatchers.IO).launch {
+            downloadExtModel(context, m)
+        }
+    }
+
+    /** 下载扩展模型（多文件，逐个断点续传；进度按各文件最小字节数加权分配） */
+    private suspend fun downloadExtModel(context: Context, m: AsrExtModel): File? =
+        withContext(Dispatchers.IO) {
+            val dir = extDir(context, m)
+            if (isExtModelReady(context, m)) {
+                Log.i(TAG, "ext model cached: $dir")
+                return@withContext dir
+            }
+            dir.mkdirs()
+            withContextMain {
+                isModelDownloading = true
+                modelDownloadProgress = 0f
+                downloadStatus = context.getString(R.string.asr_preparing_download, m.sizeMb)
+            }
+            val totalMin = m.files.sumOf { it.minBytes }.coerceAtLeast(1L)
+            var doneMin = 0L
+            for (f in m.files) {
+                val ok = downloadFileWithResume(
+                    url = f.url,
+                    dest = dir.resolve(f.name),
+                    progressBase = doneMin.toFloat() / totalMin,
+                    progressSpan = f.minBytes.toFloat() / totalMin,
+                    expectMinBytes = f.minBytes,
+                    label = f.name
+                )
+                if (!ok) {
+                    withContextMain {
+                        isModelDownloading = false
+                        downloadStatus = context.getString(R.string.asr_model_download_failed)
+                    }
+                    return@withContext null
+                }
+                doneMin += f.minBytes
+            }
+            withContextMain {
+                isModelDownloading = false
+                modelDownloadProgress = 1f
+                downloadStatus = context.getString(R.string.asr_model_ready)
+            }
+            dir
+        }
+
+    /**
+     * 创建扩展语言识别器（离线 transducer：encoder/decoder/joiner + tokens）。
+     *
+     * 模型文件都在 filesDir，必须传绝对路径且 AssetManager 传 null
+     * （sherpa-onnx 对「绝对路径 + 非空 AssetManager」会判定冲突并终止进程）。
+     */
+    fun createExtRecognizer(
+        context: Context,
+        m: AsrExtModel,
+        threads: Int = 0
+    ): OfflineRecognizer? {
+        lastInitError = null
+        if (!isExtModelReady(context, m)) {
+            Log.w(TAG, "ext model not ready: ${m.key}")
+            lastInitError = context.getString(R.string.asr_ext_model_unready, m.sizeMb)
+            return null
+        }
+        val auto = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        val numThreads = if (threads in MIN_THREADS..MAX_THREADS) threads else auto
+        val dir = extDir(context, m)
+        Log.i(TAG, "ext ASR (${m.key}): dir=$dir type=${m.modelType} threads=$numThreads")
+        return try {
+            val config = OfflineRecognizerConfig(
+                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                modelConfig = OfflineModelConfig(
+                    transducer = OfflineTransducerModelConfig(
+                        encoder = dir.resolve(m.encoder).absolutePath,
+                        decoder = dir.resolve(m.decoder).absolutePath,
+                        joiner = dir.resolve(m.joiner).absolutePath,
+                    ),
+                    modelType = m.modelType,
+                    tokens = dir.resolve(m.tokens).absolutePath,
+                    numThreads = numThreads,
+                    debug = false,
+                    provider = "cpu",
+                ),
+                decodingMethod = "greedy_search",
+            )
+            OfflineRecognizer(null, config).also {
+                Log.i(TAG, "ext recognizer created: ${m.key}")
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "ext recognizer init failed: ${e.message}", e)
             lastInitError = context.getString(R.string.asr_init_failed, e.message ?: e.javaClass.simpleName)
             null
         }
