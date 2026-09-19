@@ -216,7 +216,9 @@ class SubtitleTranslator(private val context: Context) {
                     val key = line.substring(0, tab)
                     val value = unescapeCache(line.substring(tab + 1))
                     if (key.isNotBlank() && value.isNotBlank()) {
-                        translationCache[key] = value
+                        // v2.0.151：旧缓存的 key 未归一化，这里按新规则归一化后入库 ——
+                        // 升级后老词条仍能命中，同时自动去重
+                        translationCache[normalizeCacheKey(key)] = value
                         loaded++
                     }
                 }
@@ -279,6 +281,50 @@ class SubtitleTranslator(private val context: Context) {
         } catch (e: Exception) {
             Log.w("SubtitleTranslator", "翻译缓存重写失败：${e.message}")
         }
+    }
+
+    // ===== 缓存 key 归一化（v2.0.151：提升命中率）=====
+
+    /**
+     * 生成缓存 key：`目标语言 + 归一化后的原文`。
+     *
+     * 归一化只做「折叠空白 + 去首尾空白」。字幕里同一句话常因换行/多空格差异被当成两条
+     * （`"Hello  world"` vs `"Hello world"`），折叠后命中同一条缓存 —— **等效扩大词库、提升命中率**。
+     *
+     * ⚠️ **刻意不做**大小写折叠与标点归一：那会把语义不同的句子混到同一个 key
+     * （例如问句/陈述句、`12:30` 与 `1230`），返回不合适译文的代价比多翻一次更大。
+     */
+    private fun makeCacheKey(targetLang: String, text: String): String =
+        normalizeCacheKey(targetLang + ":" + text)
+
+    /**
+     * 对**已拼好的 key** 归一化（形如 `zh:文本`）。
+     *
+     * 单独抽出是因为加载旧磁盘缓存时也要走一遍：老文件里的 key 未归一化，
+     * 直接入库会导致升级后全部命中不到；归一化后入库即可**自动迁移并去重**。
+     */
+    private fun normalizeCacheKey(key: String): String {
+        val sep = key.indexOf(':')
+        if (sep <= 0) return key
+        return key.substring(0, sep + 1) + normalizeCacheText(key.substring(sep + 1))
+    }
+
+    /** 折叠连续空白（含全角空格 U+3000）为单个半角空格，并去掉首尾空白 */
+    private fun normalizeCacheText(text: String): String {
+        val sb = StringBuilder(text.length)
+        var pendingSpace = false
+        for (c in text) {
+            if (c.isWhitespace() || c == '\u3000') {
+                if (sb.isNotEmpty()) pendingSpace = true
+            } else {
+                if (pendingSpace) {
+                    sb.append(' ')
+                    pendingSpace = false
+                }
+                sb.append(c)
+            }
+        }
+        return sb.toString()
     }
 
     private fun escapeCache(s: String) = s.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
@@ -380,7 +426,7 @@ class SubtitleTranslator(private val context: Context) {
 
     private fun translateSingleLine(text: String, onTranslated: ((String) -> Unit)? = null): String {
         val targetLang = config.targetLanguage.code
-        val cacheKey = "$targetLang:$text"
+        val cacheKey = makeCacheKey(targetLang, text)
 
         val cached = translationCache[cacheKey]
         if (cached != null) {
@@ -474,7 +520,7 @@ class SubtitleTranslator(private val context: Context) {
      */
     private fun translateLineRaw(line: String, onRaw: ((String) -> Unit)?): String {
         val targetLang = config.targetLanguage.code
-        val cacheKey = "$targetLang:$line"
+        val cacheKey = makeCacheKey(targetLang, line)
 
         val cached = translationCache[cacheKey]
         if (cached != null) return cached
@@ -543,7 +589,7 @@ class SubtitleTranslator(private val context: Context) {
         val todo = cues.asSequence()
             .filter { it.startTimeMs >= cursorMs - 5_000L && it.startTimeMs <= cursorMs + lookaheadMs }
             .map { it.text.trim() }
-            .filter { it.isNotBlank() && !translationCache.containsKey("$targetLang:$it") }
+            .filter { it.isNotBlank() && !translationCache.containsKey(makeCacheKey(targetLang, it)) }
             .distinct()
             .take(maxItems)
             .toList()
@@ -553,7 +599,7 @@ class SubtitleTranslator(private val context: Context) {
         prefetchTranslationJob?.cancel()
         prefetchTranslationJob = scope.launch {
             for (text in todo) {
-                val key = "$targetLang:$text"
+                val key = makeCacheKey(targetLang, text)
                 if (translationCache.containsKey(key)) continue
                 try {
                     val translated = fetchTranslation(text, targetLang)
@@ -587,7 +633,7 @@ class SubtitleTranslator(private val context: Context) {
                 val text = cue.text.trim()
                 if (text.isBlank()) continue
 
-                val cacheKey = "$targetLang:$text"
+                val cacheKey = makeCacheKey(targetLang, text)
                 if (isSessionLimitReached) {
                     withContext(Dispatchers.Main) {
                         isTranslating = false
