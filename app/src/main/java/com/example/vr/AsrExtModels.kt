@@ -144,10 +144,23 @@ object AsrExtModels {
         )
     )
 
+    // 该包名 `…-be-de-en-es-fr-hr-it-pl-ru-uk-…` 共覆盖 **11 种**语言，
+    // 除下面四种外还有 be / hr / it / pl / uk（见后）。
+    // ⚠️ 全部条目共用同一 [dirName]：**下载一次，这 11 种语言全部可用**。
     val RUSSIAN = fastConformer("ru", R.string.asr_lang_ru)
     val FRENCH = fastConformer("fr", R.string.asr_lang_fr)
     val GERMAN = fastConformer("de", R.string.asr_lang_de)
     val SPANISH = fastConformer("es", R.string.asr_lang_es)
+
+    // 另有 5 种同包语言（SenseVoice 未覆盖）：
+    //   be 白俄罗斯语 · hr 克罗地亚语 · it 意大利语 · pl 波兰语 · uk 乌克兰语
+    // 注：en（英语）**未在此登记**——内置 SenseVoice 已覆盖，
+    //     再登记会出现两个「英语」条目造成歧义。
+    val BELARUSIAN = fastConformer("be", R.string.asr_lang_be)
+    val CROATIAN = fastConformer("hr", R.string.asr_lang_hr)
+    val ITALIAN = fastConformer("it", R.string.asr_lang_it)
+    val POLISH = fastConformer("pl", R.string.asr_lang_pl)
+    val UKRAINIAN = fastConformer("uk", R.string.asr_lang_uk)
 
     /**
      * 泰语 —— zipformer transducer（int8 encoder）。
@@ -187,8 +200,12 @@ object AsrExtModels {
      * 全部已接入的扩展模型（顺序即 UI 中的显示顺序）。
      * 语言键直接复用 `sherpa_lang_code` 取值空间。
      */
-    val ALL: List<AsrExtModel> =
-        listOf(VIETNAMESE, RUSSIAN, FRENCH, GERMAN, SPANISH, THAI)
+    val ALL: List<AsrExtModel> = listOf(
+        VIETNAMESE,
+        RUSSIAN, FRENCH, GERMAN, SPANISH,
+        BELARUSIAN, CROATIAN, ITALIAN, POLISH, UKRAINIAN,
+        THAI
+    )
 
     fun byKey(key: String): AsrExtModel? = ALL.firstOrNull { it.key == key }
 

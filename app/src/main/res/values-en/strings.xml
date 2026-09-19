@@ -477,6 +477,11 @@
     <string name="asr_lang_de">German</string>
     <string name="asr_lang_es">Spanish</string>
     <string name="asr_lang_th">Thai</string>
+    <string name="asr_lang_be">Belarusian</string>
+    <string name="asr_lang_hr">Croatian</string>
+    <string name="asr_lang_it">Italian</string>
+    <string name="asr_lang_pl">Polish</string>
+    <string name="asr_lang_uk">Ukrainian</string>
     <string name="asr_ext_archive_start">This language requires the full package (~%1$dMB); only the needed files are kept afterwards…</string>
     <string name="asr_ext_archive_extracting">Extracting model files…</string>
     <string name="asr_ext_model_unready">Model for this language is not downloaded (~%1$dMB). Download it above first.</string>

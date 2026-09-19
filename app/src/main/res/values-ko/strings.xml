@@ -444,6 +444,11 @@
     <string name="asr_lang_de">독일어</string>
     <string name="asr_lang_es">스페인어</string>
     <string name="asr_lang_th">태국어</string>
+    <string name="asr_lang_be">벨라루스어</string>
+    <string name="asr_lang_hr">크로아티아어</string>
+    <string name="asr_lang_it">이탈리아어</string>
+    <string name="asr_lang_pl">폴란드어</string>
+    <string name="asr_lang_uk">우크라이나어</string>
     <string name="asr_ext_archive_start">이 언어는 전체 패키지（약 %1$dMB）를 받아야 합니다. 완료 후 필요한 파일만 유지합니다…</string>
     <string name="asr_ext_archive_extracting">모델 파일 압축 해제 중…</string>
     <string name="asr_ext_model_unready">이 언어 모델이 아직 다운로드되지 않았습니다（약 %1$dMB）. 위에서 먼저 다운로드하세요.</string>

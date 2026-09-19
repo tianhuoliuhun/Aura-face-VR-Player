@@ -476,6 +476,11 @@
     <string name="asr_lang_de">德语</string>
     <string name="asr_lang_es">西班牙语</string>
     <string name="asr_lang_th">泰语</string>
+    <string name="asr_lang_be">白俄罗斯语</string>
+    <string name="asr_lang_hr">克罗地亚语</string>
+    <string name="asr_lang_it">意大利语</string>
+    <string name="asr_lang_pl">波兰语</string>
+    <string name="asr_lang_uk">乌克兰语</string>
     <string name="asr_ext_archive_start">该语言需下载整包（约 %1$dMB），完成后会自动只保留所需文件…</string>
     <string name="asr_ext_archive_extracting">正在解压并提取模型文件…</string>
     <string name="asr_ext_model_unready">该语言的模型尚未下载（约 %1$dMB），请先在上方点击下载</string>
