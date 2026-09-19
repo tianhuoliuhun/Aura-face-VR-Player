@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
@@ -428,12 +430,18 @@ object SherpaAsrManager {
     private fun extDir(context: Context, m: AsrExtModel): File =
         File(context.filesDir, "sherpa_models/ext-${m.dirName}")
 
+    /** 扩展模型的期望文件表：按文件下载用 [AsrExtModel.files]，整包回退用 [AsrExtArchive.wanted] */
+    private fun expectedFiles(m: AsrExtModel): Map<String, Long> =
+        if (m.files.isNotEmpty()) m.files.associate { it.name to it.minBytes }
+        else m.archive?.wanted ?: emptyMap()
+
     /** 扩展模型是否就绪（逐文件尺寸校验，防中断下载的残缺文件被误判） */
     fun isExtModelReady(context: Context, m: AsrExtModel): Boolean {
         val dir = extDir(context, m)
-        return m.files.all { f ->
-            val file = dir.resolve(f.name)
-            file.exists() && file.length() >= f.minBytes
+        val expect = expectedFiles(m)
+        return expect.isNotEmpty() && expect.all { (name, min) ->
+            val file = dir.resolve(name)
+            file.exists() && file.length() >= min
         }
     }
 
@@ -477,6 +485,20 @@ object SherpaAsrManager {
                 modelDownloadProgress = 0f
                 downloadStatus = context.getString(R.string.asr_preparing_download, m.sizeMb)
             }
+            // 整包回退（如泰语：没有可按文件下载的源，只能下 tar.bz2 再解出需要的文件）
+            m.archive?.let { arc ->
+                val ok = downloadTarBz2AndExtract(context, arc, dir, m)
+                withContextMain {
+                    isModelDownloading = false
+                    if (ok) {
+                        modelDownloadProgress = 1f
+                        downloadStatus = context.getString(R.string.asr_model_ready)
+                    } else {
+                        downloadStatus = context.getString(R.string.asr_model_download_failed)
+                    }
+                }
+                return@withContext if (ok) dir else null
+            }
             val totalMin = m.files.sumOf { it.minBytes }.coerceAtLeast(1L)
             var doneMin = 0L
             for (f in m.files) {
@@ -504,6 +526,86 @@ object SherpaAsrManager {
             }
             dir
         }
+
+    /**
+     * 下载 tar.bz2 **整包**并只解出需要的文件（整包兜底方案）。
+     *
+     * 用于「没有可按文件下载源」的模型（如泰语：hf-mirror 一律 401）。
+     * 整包几百 MB，但最终只保留 int8 组合；解压按 basename 匹配（忽略包内目录层级），
+     * 完成后删除整包，避免长期占用。进度：下载占 85%，解压按已解出文件数占 15%。
+     */
+    private suspend fun downloadTarBz2AndExtract(
+        context: Context,
+        arc: AsrExtArchive,
+        destDir: File,
+        m: AsrExtModel
+    ): Boolean {
+        val pkg = File(destDir, "__pkg.tar.bz2")
+        return try {
+            withContextMain {
+                downloadStatus = context.getString(R.string.asr_ext_archive_start, arc.packageMb)
+            }
+            val downloaded = downloadFileWithResume(
+                url = arc.url,
+                dest = pkg,
+                progressBase = 0f,
+                progressSpan = 0.85f,
+                // 包体积留点余量判定，避免把中断的半包当完整包
+                expectMinBytes = (arc.packageMb - 40L).coerceAtLeast(1L) * 1024L * 1024L,
+                label = m.dirName
+            )
+            if (!downloaded) return false
+            withContextMain {
+                downloadStatus = context.getString(R.string.asr_ext_archive_extracting)
+            }
+            var done = 0
+            var broken = false
+            pkg.inputStream().buffered(1 shl 20).use { fin ->
+                BZip2CompressorInputStream(fin).use { bz ->
+                    TarArchiveInputStream(bz).use { tar ->
+                        var entry = tar.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory) {
+                                val base = entry.name.substringAfterLast('/')
+                                val min = arc.wanted[base]
+                                if (min != null) {
+                                    val out = destDir.resolve(base)
+                                    out.outputStream().use { fos -> tar.copyTo(fos, 1 shl 20) }
+                                    if (out.length() < min) {
+                                        Log.w(TAG, "解压文件不完整：$base（${out.length()} < $min）")
+                                        out.delete()
+                                        broken = true
+                                        break
+                                    }
+                                    done++
+                                    val frac = 0.85f + 0.15f * done / arc.wanted.size
+                                    withContextMain { modelDownloadProgress = frac.coerceAtMost(1f) }
+                                }
+                            }
+                            entry = tar.nextEntry
+                        }
+                    }
+                }
+            }
+            if (broken) return false
+            val ok = arc.wanted.all { (name, min) ->
+                val f = destDir.resolve(name)
+                f.exists() && f.length() >= min
+            }
+            if (ok) Log.i(TAG, "整包解压完成：${m.key}（保留 ${arc.wanted.size} 个文件）")
+            ok
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "整包下载/解压失败：${e.message}")
+            false
+        } finally {
+            try {
+                pkg.delete()
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     /**
      * 创建扩展语言识别器（离线 transducer：encoder/decoder/joiner + tokens）。

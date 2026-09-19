@@ -472,6 +472,13 @@
     <string name="asr_lang_ko">Korean</string>
     <string name="asr_lang_yue">Cantonese</string>
     <string name="asr_lang_vi">Vietnamese</string>
+    <string name="asr_lang_ru">Russian</string>
+    <string name="asr_lang_fr">French</string>
+    <string name="asr_lang_de">German</string>
+    <string name="asr_lang_es">Spanish</string>
+    <string name="asr_lang_th">Thai</string>
+    <string name="asr_ext_archive_start">This language requires the full package (~%1$dMB); only the needed files are kept afterwards…</string>
+    <string name="asr_ext_archive_extracting">Extracting model files…</string>
     <string name="asr_ext_model_unready">Model for this language is not downloaded (~%1$dMB). Download it above first.</string>
     <string name="asr_ext_model_tag">sherpa-onnx offline model · download required</string>
     <string name="lut_classic_cyan_orange">Classic Cyan-Orange</string>

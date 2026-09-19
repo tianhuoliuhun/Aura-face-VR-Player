@@ -439,6 +439,13 @@
     <string name="asr_lang_ko">韓国語</string>
     <string name="asr_lang_yue">広東語</string>
     <string name="asr_lang_vi">ベトナム語</string>
+    <string name="asr_lang_ru">ロシア語</string>
+    <string name="asr_lang_fr">フランス語</string>
+    <string name="asr_lang_de">ドイツ語</string>
+    <string name="asr_lang_es">スペイン語</string>
+    <string name="asr_lang_th">タイ語</string>
+    <string name="asr_ext_archive_start">この言語は一括パッケージ（約 %1$dMB）のダウンロードが必要です。完了後は必要なファイルのみ保持します…</string>
+    <string name="asr_ext_archive_extracting">モデルファイルを展開中…</string>
     <string name="asr_ext_model_unready">この言語のモデルは未ダウンロードです（約 %1$dMB）。上から先にダウンロードしてください。</string>
     <string name="asr_ext_model_tag">sherpa-onnx オフラインモデル · 要ダウンロード</string>
     <string name="lut_classic_cyan_orange">クラシック青橙</string>

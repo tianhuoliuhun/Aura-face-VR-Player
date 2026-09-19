@@ -471,6 +471,13 @@
     <string name="asr_lang_ko">韩文</string>
     <string name="asr_lang_yue">粤语</string>
     <string name="asr_lang_vi">越南语</string>
+    <string name="asr_lang_ru">俄语</string>
+    <string name="asr_lang_fr">法语</string>
+    <string name="asr_lang_de">德语</string>
+    <string name="asr_lang_es">西班牙语</string>
+    <string name="asr_lang_th">泰语</string>
+    <string name="asr_ext_archive_start">该语言需下载整包（约 %1$dMB），完成后会自动只保留所需文件…</string>
+    <string name="asr_ext_archive_extracting">正在解压并提取模型文件…</string>
     <string name="asr_ext_model_unready">该语言的模型尚未下载（约 %1$dMB），请先在上方点击下载</string>
     <string name="asr_ext_model_tag">sherpa-onnx 离线模型 · 需下载</string>
     <string name="lut_classic_cyan_orange">经典青橙</string>

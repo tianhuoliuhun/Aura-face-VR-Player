@@ -45,7 +45,26 @@ data class AsrExtModel(
     val tokens: String,
     /** 展示用体积（MB，向上取整） */
     val sizeMb: Int,
-    val files: List<AsrExtFile>
+    val files: List<AsrExtFile>,
+    /**
+     * 整包回退方案：**仅在没有「可按文件下载」的源时使用**（如泰语）。
+     * 有 [files] 时优先走按文件下载。
+     */
+    val archive: AsrExtArchive? = null
+)
+
+/**
+ * tar.bz2 整包（GitHub releases）。
+ *
+ * 代价：必须把整包全部下完（几百 MB），再流式解压出需要的几个文件，最后删包——
+ * 下载量远大于最终占用。因此只作为**兜底**，能拿到按文件源时应优先用 [AsrExtFile]。
+ */
+data class AsrExtArchive(
+    val url: String,
+    /** 包内文件 basename -> 期望最小字节数（按 basename 匹配，忽略包内目录层级） */
+    val wanted: Map<String, Long>,
+    /** 整包体积（MB，仅用于提示文案） */
+    val packageMb: Int
 )
 
 object AsrExtModels {
@@ -83,11 +102,82 @@ object AsrExtModels {
         )
     )
 
+    // ===== ru / fr / de / es：四语**共用**一个 parakeet-tdt-0.6b-v3-int8 =====
+    //
+    // 源：`csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`（hf-mirror 按文件实测可达）
+    // 覆盖 25 种欧洲语言，含 fr / de / es / ru：
+    //   bg/hr/cs/da/nl/en/et/fi/fr/de/el/hu/it/lv/lt/mt/pl/pt/ro/sk/sl/es/sv/ru/uk
+    // 实测体积：encoder.int8 652,184,281 + decoder.int8 11,845,275 + joiner.int8 6,355,277
+    //           + tokens 93,939 ≈ **639MB**（体积偏大，但一个模型覆盖四语）
+    // 官方 int8 用法：encoder.int8 + decoder.int8 + joiner.int8 + tokens，modelType=nemo_transducer
+    private const val PARAKEET_DIR = "nemo-parakeet-tdt-0.6b-v3-int8"
+
+    private val parakeetFiles = listOf(
+        f(PARAKEET_DIR, "encoder.int8.onnx", 600_000_000L),
+        f(PARAKEET_DIR, "decoder.int8.onnx", 10_000_000L),
+        f(PARAKEET_DIR, "joiner.int8.onnx", 5_000_000L),
+        f(PARAKEET_DIR, "tokens.txt", 50_000L)
+    )
+
+    /** 四个语言键指向同一 [dirName] → 下载一次，四语通用（就绪状态也自动共享） */
+    private fun parakeet(key: String, labelResId: Int) = AsrExtModel(
+        key = key,
+        labelResId = labelResId,
+        dirName = PARAKEET_DIR,
+        modelType = "nemo_transducer",
+        encoder = "encoder.int8.onnx",
+        decoder = "decoder.int8.onnx",
+        joiner = "joiner.int8.onnx",
+        tokens = "tokens.txt",
+        sizeMb = 639,
+        files = parakeetFiles
+    )
+
+    val RUSSIAN = parakeet("ru", R.string.asr_lang_ru)
+    val FRENCH = parakeet("fr", R.string.asr_lang_fr)
+    val GERMAN = parakeet("de", R.string.asr_lang_de)
+    val SPANISH = parakeet("es", R.string.asr_lang_es)
+
     /**
-     * 全部已接入的扩展模型。
-     * 后续按同一结构追加 ru / th / fr / de / es（清单与源见 MEMORY.md 2026-09-19）。
+     * 泰语 —— zipformer transducer（int8 encoder）。
+     *
+     * ⚠️ 泰语**没有可按文件下载的源**（2026-09-19 实测）：
+     *  - `hf-mirror` 对 `csukuangfj/sherpa-onnx-zipformer-thai-2024-06-20` **一律 401**
+     *    （`resolve` / `raw` / `api`、`?download=true`、其他镜像域名全部不可用）
+     *  - ModelScope 上没有该模型；官方也只发 GitHub releases 的 tar.bz2
+     * → 只能走**整包兜底**：下 664MB 的 tar.bz2，流式解出 int8 组合（≈154MB）后删包。
+     *
+     * 官方 int8 用法：`encoder…int8.onnx` + **decoder 用 fp32**（decoder 不量化）+ `joiner…int8.onnx` + tokens.txt
      */
-    val ALL: List<AsrExtModel> = listOf(VIETNAMESE)
+    val THAI = AsrExtModel(
+        key = "th",
+        labelResId = R.string.asr_lang_th,
+        dirName = "zipformer-thai-2024-06-20",
+        modelType = "transducer",
+        encoder = "encoder-epoch-12-avg-5.int8.onnx",
+        decoder = "decoder-epoch-12-avg-5.onnx",
+        joiner = "joiner-epoch-12-avg-5.int8.onnx",
+        tokens = "tokens.txt",
+        sizeMb = 154,
+        files = emptyList(),
+        archive = AsrExtArchive(
+            url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-thai-2024-06-20.tar.bz2",
+            wanted = mapOf(
+                "encoder-epoch-12-avg-5.int8.onnx" to 130_000_000L,
+                "decoder-epoch-12-avg-5.onnx" to 4_000_000L,
+                "joiner-epoch-12-avg-5.int8.onnx" to 800_000L,
+                "tokens.txt" to 20_000L
+            ),
+            packageMb = 664
+        )
+    )
+
+    /**
+     * 全部已接入的扩展模型（顺序即 UI 中的显示顺序）。
+     * 语言键直接复用 `sherpa_lang_code` 取值空间。
+     */
+    val ALL: List<AsrExtModel> =
+        listOf(VIETNAMESE, RUSSIAN, FRENCH, GERMAN, SPANISH, THAI)
 
     fun byKey(key: String): AsrExtModel? = ALL.firstOrNull { it.key == key }
 
