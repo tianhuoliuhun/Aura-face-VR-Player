@@ -485,6 +485,15 @@
     <string name="subtitle_api_error">API エラー: HTTP %1$d</string>
     <string name="subtitle_translate_failed">翻訳失敗: %1$s</string>
     <string name="subtitle_cache_cleared">翻訳キャッシュをクリア</string>
+    <string name="subtitle_cache_stats">翻訳キャッシュ統計</string>
+    <string name="subtitle_cache_stats_refresh">更新</string>
+    <string name="subtitle_cache_stats_current">現在の言語 %1$s：%2$d 件</string>
+    <string name="subtitle_cache_stats_hit">ヒット率 %1$d%%（ヒット %2$d / ミス %3$d）</string>
+    <string name="subtitle_cache_stats_session">今回のセッションで翻訳 %1$d / %2$d 件</string>
+    <string name="subtitle_cache_stats_empty">ディスクキャッシュはまだありません</string>
+    <string name="subtitle_cache_stats_row">%1$d 件 · %2$d KB</string>
+    <string name="subtitle_cache_clear_current">現在の言語を消去</string>
+    <string name="subtitle_cache_clear_all">すべての言語を消去</string>
     <string name="rt_preparing">リアルタイム字幕エンジン準備中…</string>
     <string name="rt_unavailable">リアルタイム字幕利用不可：認識モデル未準備</string>
     <string name="rt_no_audio">この動画に利用可能な音声トラックがなく、リアルタイム字幕を生成できません</string>

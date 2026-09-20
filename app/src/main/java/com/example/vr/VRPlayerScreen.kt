@@ -656,7 +656,12 @@ fun VRPlayerScreen(
             Toast.makeText(context, context.getString(R.string.toast_no_subtitle_export), Toast.LENGTH_SHORT).show()
             return
         }
-        val f = SubtitleExporter.exportSrt(context, selectedMediaItem.title, cues)
+        val f = SubtitleExporter.exportSrt(
+            context,
+            selectedMediaItem.title,
+            cues,
+            SubtitleExporter.langSuffix(subtitleTranslator)
+        )
         Toast.makeText(
             context,
             if (f != null) context.getString(R.string.toast_subtitle_exported, cues.size, f.absolutePath) else context.getString(R.string.toast_subtitle_export_failed),
@@ -2104,7 +2109,13 @@ fun VRPlayerScreen(
         val savedFiles = candidateNames.flatMap { cand ->
             SubtitleExporter.listSavedSubtitles(context, cand)
         }.distinctBy { it.absolutePath }
-        val matchedFile: File? = savedFiles.firstOrNull { it.length() > 0 }
+        // v2.0.153：优先加载与当前目标语言匹配的译文文件（带语言后缀）；
+        // 没有再退回「最新的任意一份」—— 避免同一视频导出了多语言时加载到别的语言。
+        val preferSuffix = SubtitleExporter.langSuffix(subtitleTranslator)
+        val preferred = if (preferSuffix.isNotBlank())
+            savedFiles.firstOrNull { it.name.contains(preferSuffix) && it.length() > 0 } else null
+        val matchedFile: File? = preferred
+            ?: savedFiles.firstOrNull { it.length() > 0 }
             ?: srtFiles.firstOrNull { srt ->
                 val srtBase = srt.name.removeSuffix("_asr.srt").lowercase()
                 candidateNames.any { cand -> cand.lowercase() == srtBase }
@@ -2190,7 +2201,12 @@ fun VRPlayerScreen(
         if (cues.isEmpty()) return@LaunchedEffect
         realtimeAutoSaved = true
         val saved = withContext(Dispatchers.IO) {
-            SubtitleExporter.saveTimestamped(context, selectedMediaItem.title, cues)
+            SubtitleExporter.saveTimestamped(
+                context,
+                selectedMediaItem.title,
+                cues,
+                SubtitleExporter.langSuffix(subtitleTranslator)
+            )
         }
         if (saved != null) {
             Toast.makeText(

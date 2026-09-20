@@ -518,6 +518,15 @@
     <string name="subtitle_api_error">API error: HTTP %1$d</string>
     <string name="subtitle_translate_failed">Translation failed: %1$s</string>
     <string name="subtitle_cache_cleared">Translation cache cleared</string>
+    <string name="subtitle_cache_stats">Translation cache stats</string>
+    <string name="subtitle_cache_stats_refresh">Refresh</string>
+    <string name="subtitle_cache_stats_current">Current language %1$s: %2$d entries</string>
+    <string name="subtitle_cache_stats_hit">Hit rate %1$d%% (%2$d hits / %3$d misses)</string>
+    <string name="subtitle_cache_stats_session">Session translated %1$d / %2$d</string>
+    <string name="subtitle_cache_stats_empty">No on-disk cache yet</string>
+    <string name="subtitle_cache_stats_row">%1$d entries · %2$d KB</string>
+    <string name="subtitle_cache_clear_current">Clear current language</string>
+    <string name="subtitle_cache_clear_all">Clear all languages</string>
     <string name="rt_preparing">Preparing real-time subtitle engine…</string>
     <string name="rt_unavailable">Real-time subtitles unavailable: recognizer model not ready</string>
     <string name="rt_no_audio">This video has no usable audio track; real-time subtitles cannot be generated</string>

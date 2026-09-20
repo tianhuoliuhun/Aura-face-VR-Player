@@ -527,6 +527,15 @@
     <string name="subtitle_api_error">API 錯誤: HTTP %1$d</string>
     <string name="subtitle_translate_failed">翻譯失敗: %1$s</string>
     <string name="subtitle_cache_cleared">翻譯快取已清空</string>
+    <string name="subtitle_cache_stats">翻譯快取統計</string>
+    <string name="subtitle_cache_stats_refresh">重新整理</string>
+    <string name="subtitle_cache_stats_current">目前語言 %1$s：%2$d 筆</string>
+    <string name="subtitle_cache_stats_hit">命中率 %1$d%%（命中 %2$d / 未命中 %3$d）</string>
+    <string name="subtitle_cache_stats_session">本次工作階段已翻譯 %1$d / %2$d 筆</string>
+    <string name="subtitle_cache_stats_empty">尚無磁碟快取</string>
+    <string name="subtitle_cache_stats_row">%1$d 筆 · %2$d KB</string>
+    <string name="subtitle_cache_clear_current">清空目前語言</string>
+    <string name="subtitle_cache_clear_all">清空全部語言</string>
     <string name="rt_preparing">正在準備即時字幕引擎…</string>
     <string name="rt_unavailable">即時字幕不可用：辨識模型未就緒</string>
     <string name="rt_no_audio">該影片沒有可用的音軌，無法生成即時字幕</string>

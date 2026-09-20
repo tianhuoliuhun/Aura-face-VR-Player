@@ -485,6 +485,15 @@
     <string name="subtitle_api_error">API 오류: HTTP %1$d</string>
     <string name="subtitle_translate_failed">번역 실패: %1$s</string>
     <string name="subtitle_cache_cleared">번역 캐시 비움</string>
+    <string name="subtitle_cache_stats">번역 캐시 통계</string>
+    <string name="subtitle_cache_stats_refresh">새로 고침</string>
+    <string name="subtitle_cache_stats_current">현재 언어 %1$s: %2$d개</string>
+    <string name="subtitle_cache_stats_hit">적중률 %1$d%% (적중 %2$d / 실패 %3$d)</string>
+    <string name="subtitle_cache_stats_session">이번 세션 번역 %1$d / %2$d개</string>
+    <string name="subtitle_cache_stats_empty">디스크 캐시가 아직 없습니다</string>
+    <string name="subtitle_cache_stats_row">%1$d개 · %2$d KB</string>
+    <string name="subtitle_cache_clear_current">현재 언어 비우기</string>
+    <string name="subtitle_cache_clear_all">모든 언어 비우기</string>
     <string name="rt_preparing">실시간 자막 엔진 준비 중…</string>
     <string name="rt_unavailable">실시간 자막 사용 불가: 인식 모델 미준비</string>
     <string name="rt_no_audio">이 영상에는 사용 가능한 오디오 트랙이 없어 실시간 자막을 생성할 수 없습니다</string>

@@ -25,7 +25,12 @@ object SubtitleExporter {
      * 导出为 SRT。
      * @return 写出的文件；[cues] 为空时返回 null
      */
-    fun exportSrt(context: Context, title: String?, cues: List<SubtitleCue>): File? {
+    fun exportSrt(
+        context: Context,
+        title: String?,
+        cues: List<SubtitleCue>,
+        langSuffix: String = ""
+    ): File? {
         val sorted = cues
             .filter { it.text.isNotBlank() }
             .sortedBy { it.startTimeMs }
@@ -34,19 +39,42 @@ object SubtitleExporter {
         val baseName = safeBaseName(title)
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         dir.mkdirs()
-        val file = File(dir, "${baseName}.srt")
+        val file = File(dir, "$baseName$langSuffix.srt")
         return writeSrt(file, sorted)
+    }
+
+    /**
+     * v2.0.153：按「目标语言 + 显示模式」生成文件名后缀，让**翻译字幕按语言分文件**。
+     *
+     * 例：仅译文导出 → `_zh`；双语导出 → `_zh_bi`；未启用翻译 → 空串（保持原命名）。
+     * 这样同一部片子导出中文与英文译文不会互相覆盖，历史字幕也能按语言区分。
+     */
+    fun langSuffix(translator: SubtitleTranslator?): String {
+        val t = translator ?: return ""
+        if (!t.config.isEnabled) return ""
+        val code = t.config.targetLanguage.code
+        return when (t.config.displayMode) {
+            TranslationDisplayMode.TARGET_ONLY -> "_$code"
+            TranslationDisplayMode.DUAL_LANGUAGE -> "_${code}_bi"
+        }
     }
 
     /**
      * v2.0.136：实时字幕全片生成完成后**自动保存**。
      * 落点：`Android/data/<pkg>/files/subtitles/`（应用专属 data 目录，免权限）。
-     * 命名：`<视频名>_<yyyyMMdd-HHmmss>.srt`（时间戳后缀，多次生成互不覆盖，
-     * 字典序即时间序）。打开同一视频时可按名匹配自动加载。
+     * 命名：`<视频名>_<yyyyMMdd-HHmmss><语言后缀>.srt`（时间戳后缀，多次生成互不覆盖，
+     * 字典序即时间序；v2.0.153 起带语言后缀，见 [langSuffix]）。
+     * 打开同一视频时可按名匹配自动加载。
      *
+     * @param langSuffix 语言/模式后缀，如 `_zh`（仅译文）、`_zh_bi`（双语）；不翻译时传空串
      * @return 写出的文件；[cues] 为空或写入失败时返回 null
      */
-    fun saveTimestamped(context: Context, title: String?, cues: List<SubtitleCue>): File? {
+    fun saveTimestamped(
+        context: Context,
+        title: String?,
+        cues: List<SubtitleCue>,
+        langSuffix: String = ""
+    ): File? {
         val sorted = cues
             .filter { it.text.isNotBlank() }
             .sortedBy { it.startTimeMs }
@@ -57,7 +85,7 @@ object SubtitleExporter {
             .format(java.util.Date())
         val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "subtitles")
         dir.mkdirs()
-        val file = File(dir, "${baseName}_${stamp}.srt")
+        val file = File(dir, "${baseName}_${stamp}${langSuffix}.srt")
         return writeSrt(file, sorted)
     }
 

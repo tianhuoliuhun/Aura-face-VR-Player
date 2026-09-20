@@ -67,8 +67,8 @@
   - 优先补当前播放点（**含前 5 秒回补**）及其后内容，再回头补齐其余；跳转后可即时命中已生成部分
   - 推理线程数可调（1–10，推荐 4–6）；字幕悬浮窗支持一键「重新生成」
   - Realtime subtitles generated while playing — independent audio decode + Silero VAD, priority-based global generation
-- **字幕导出**：一键导出 SRT（直接由内存字幕缓存生成）
-  - One-tap SRT export from the in-memory subtitle cache
+- **字幕导出**：一键导出 SRT（直接由内存字幕缓存生成）；启用翻译时文件名**带语言后缀**（如 `影片_20260920-110000_zh.srt`，双语再加 `_bi`），同一部片子的多语言字幕互不覆盖
+  - One-tap SRT export from the in-memory subtitle cache; when translation is on the filename carries a **language suffix** (e.g. `movie_20260920-110000_zh.srt`, plus `_bi` for bilingual) so multiple languages never overwrite each other
 - 整片转写：后台生成带时间轴的 SRT 字幕（静音断句 + 标点断句 + 14 字智能换行）
   - Full-video transcription to timed SRT (silence/punctuation segmentation, 14-char line wrap)
 - 转写策略：离线模型按**语音段整段识别**（Silero VAD 断句：静音 0.5s 或单段满 8s）
@@ -105,8 +105,12 @@
   - Bing translation inspired by [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api) (MIT; self-written Kotlin HTTP, npm package NOT bundled)
 - **引擎 / 目标语言 / API Key / Base URL / 模型名 / 显示模式全部持久化**（重启不丢）
   - Engine, target language, API key, base URL, model and display mode are all persisted
-- **本地翻译词库（缓存）**：内存 + 磁盘双层，磁盘上限 **32MB（约 20 万条）**，跨视频、跨重启都命中，因此同一句话只翻一次；缓存键做**空白归一化**（多余空格/换行差异视为同一句）以进一步提高命中率
-  - Local translation memory: in-memory + on-disk (32MB / ~200k entries), survives video switches and app restarts; cache keys are whitespace-normalized for a higher hit rate
+- **本地翻译词库（缓存）**：内存 + 磁盘双层，**按目标语言分文件**（`translation/cache_<语言>.tsv`，启动只加载当前语言），单语言上限 **32MB（约 20 万条）**，跨视频、跨重启都命中，因此同一句话只翻一次
+- **缓存失效策略**：条目带「最近使用时间 + 命中次数」→ 压缩时按 **LRU** 淘汰（低频且久未用优先，替代原先的随机淘汰）+ **TTL 180 天**过期；文件头带**版本号**，译文口径变更时可整份作废（旧文件改名 `.stale` 留档）
+- 缓存键做**空白归一化**（多余空格/换行差异视为同一句）；设置里可看**缓存统计**（各语言条目数/体积、命中率、会话用量）并**按语言清空**
+  - Local translation memory: in-memory + on-disk, **one file per target language** (`translation/cache_<lang>.tsv`; only the current language is loaded at startup), 32MB / ~200k entries per language, survives restarts
+  - Invalidation: each entry stores last-used time + hit count → **LRU eviction** (least-used & least-recent first, replacing the old random drop) + **180-day TTL**; the file header carries a **version tag** so a change in translation convention can invalidate the cache wholesale (renamed `.stale`, kept for reference)
+  - Cache keys are whitespace-normalized; Settings shows **cache stats** (per-language entries/size, hit rate, session usage) with per-language clearing
 
 ### 📁 局域网与远程播放 / LAN & Remote Playback
 - SMB 协议（jcifs-ng）：浏览局域网共享、直连播放 NAS/PC 视频
@@ -390,6 +394,7 @@ All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo 
 | **v2.0.150** | **翻译缓存优化（增大本地词库）**：① 磁盘缓存压缩阈值 **4MB → 32MB**（约可存 20 万条）—— 原值偏小，稍长的剧集就会把缓存文件顶到阈值以上，而原实现重写后文件仍大于阈值，**导致此后每次翻译都要做一次全量重写写盘**（几 MB/次，既慢又费电），这是个真问题；② `rewriteDiskCache` 增加**软上限裁剪**（重写前把内存缓存裁到 20 万条），使重写后文件回落到阈值以下，写入恢复为 O(1) 追加；③ 启动加载改用 `readLine` 循环并加**最大行数保护**（60 万行），避免超大缓存拖慢首屏；④ 加载/重写日志补充条数与 MB/KB，便于观察词库规模 · Translation cache: threshold 4MB→32MB, soft-cap trim on rewrite (fixes repeated full rewrites), load-time line cap, richer logs |
 | **v2.0.151** | **翻译缓存命中率优化（缓存键归一化）**：字幕里同一句话常因**多余空格 / 换行**差异被当成两条（`"Hello  world"` vs `"Hello world"`），从而重复调用翻译接口。现所有缓存键统一经 `makeCacheKey()` **折叠连续空白（含全角空格）并去首尾空白**后再入库/查找，**5 处 key 构造点全部收口**；加载旧磁盘缓存时也按新规则归一化，**升级后老词条仍能命中并自动去重**。⚠️ 刻意**不做**大小写折叠与标点归一：那会把语义不同的句子混到同一 key（问句/陈述句、`12:30` 与 `1230`），返回不合适译文的代价比多翻一次更大 · Translation cache hit-rate: keys are whitespace-normalized via a single `makeCacheKey()` choke point (5 call sites), legacy on-disk entries migrated on load; case/punctuation intentionally NOT normalized to avoid false hits |
 | **v2.0.152** | **撤回 v2.0.149 的泰语改动（保留 v2.0.150 / v2.0.151）**：v2.0.149 曾把泰语从 `sherpa-onnx-zipformer-thai-2024-06-20`（整包 664MB）改为 Whisper-tiny（≈99MB、按文件下载），本次**整体撤回**该改动 —— 泰语恢复为**专用 zipformer + 整包兜底**方案（`AsrExtModels.kt` / `SherpaAsrManager.kt` 回到 v2.0.148 状态，含移除 `whisperLanguage` 字段与 Whisper 识别分支）。v2.0.150（翻译缓存 32MB / 软上限裁剪）与 v2.0.151（缓存键空白归一化）**不受影响，完整保留** · Revert the Thai change from v2.0.149 (Whisper-tiny → back to the dedicated Thai zipformer with tar.bz2 fallback); v2.0.150/v2.0.151 caching work kept intact |
+| **v2.0.153** | **翻译缓存重构 + 缓存统计面板**：① **按目标语言分文件**落盘（`filesDir/translation/cache_<lang>.tsv`，启动只加载当前语言 → 首屏更快、可单独清空），旧单文件自动按语言前缀拆分迁移（原文件改名 `.migrated` 留档）；② **失效策略升级**：条目记录「最近使用时间 + 命中次数」→ 压缩时按 **LRU** 淘汰（低频且久未用优先，替换原先按 HashMap 迭代序的随机淘汰）+ **TTL 180 天**过期 + 文件头**版本号**（译文口径变更时可整份作废，改名 `.stale`）；③ 修复 `clearCache()` **只清内存不清磁盘**（清空后重启缓存"复活"，等于没清）；④ **修复目标语言选择器只显示前 5 种**（fr / de / es / ru 在 UI 上根本选不到），改为每行 5 个自动换行；⑤ **导出字幕按语言命名**（`_zh` / `_zh_bi`），历史字幕加载优先匹配当前语言；⑥ 新增**缓存统计面板**（各语言条目数与体积、命中率、会话用量、按语言/全部清空） · Translation cache rebuilt: per-language files, LRU + TTL + version invalidation, stats panel, language-suffixed SRT export |
 
 ---
 

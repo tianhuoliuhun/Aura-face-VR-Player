@@ -163,6 +163,31 @@ class SubtitleTranslator(private val context: Context) {
         /** 启动时最多加载多少行（超大文件保护，避免首屏被 IO 拖住） */
         private const val CACHE_MAX_LOAD_LINES = 600_000
 
+        // ===== v2.0.153：按语言分文件 + 失效策略（LRU / TTL / 版本）=====
+
+        /** 缓存文件结构版本（写入文件头）。不匹配则整份作废（改名为 .stale 留档）。 */
+        private const val CACHE_FORMAT_VERSION = 2
+
+        /**
+         * 缓存**内容**版本：译文口径发生不兼容变化时递增，旧缓存整体作废。
+         * 用途：修正了系统性误译、或换了质量明显不同的模型后，不让旧译文继续被命中。
+         */
+        private const val CACHE_CONTENT_VERSION = 1
+
+        /** TTL：超过这么久没被命中的条目，在压缩时淘汰（180 天）。 */
+        private const val CACHE_TTL_MS = 180L * 24 * 60 * 60 * 1000
+
+        /** 命中元数据攒够这么多条就落盘一次，避免「每命中一次就写一次盘」。 */
+        private const val META_FLUSH_DIRTY_THRESHOLD = 500
+
+        /** 缓存目录与文件命名：`filesDir/translation/cache_<lang>.tsv` */
+        private const val CACHE_DIR_NAME = "translation"
+        private const val CACHE_FILE_PREFIX = "cache_"
+        private const val CACHE_FILE_SUFFIX = ".tsv"
+
+        /** 旧版单文件缓存（迁移源）：`filesDir/translation_cache.tsv` */
+        private const val LEGACY_CACHE_FILE = "translation_cache.tsv"
+
         /** 预读翻译的前瞻窗口（秒）与单轮条数上限 */
         private const val PREFETCH_LOOKAHEAD_MS = 60_000L
         private const val PREFETCH_MAX_ITEMS = 20
@@ -188,60 +213,225 @@ class SubtitleTranslator(private val context: Context) {
     // Translation cache: key = "$targetLangCode:$sourceText" -> translated text
     private val translationCache = ConcurrentHashMap<String, String>()
 
-    // v127：翻译结果磁盘缓存。原先只有内存缓存，换个视频或重启应用就要把同样的
-    // 句子重翻一遍——既费流量/API 额度，也拖慢首屏。这里按 TSV 落盘：
-    // 每行 "key<TAB>译文"，key 已含目标语言前缀，因此换语言不会串味。
-    // 放 filesDir（而非 cacheDir）是因为系统可能清理 cache，而翻译结果值得留存。
-    private val diskCacheFile by lazy { java.io.File(context.filesDir, "translation_cache.tsv") }
+    /**
+     * v2.0.153：命中元数据 `key -> [lastUsedMs, hitCount]`，供 **LRU 淘汰**与统计使用。
+     *
+     * 刻意放进**独立**的 map（而不是改造 translationCache 的 value 类型）：
+     * 这样全项目 10 余处 `translationCache[...]` 读写点一行都不用动，改动面最小、风险最低。
+     */
+    private val cacheMeta = ConcurrentHashMap<String, LongArray>()
+
+    /** 自上次落盘以来被"命中"更新过的元数据条数（攒够阈值才重写文件） */
+    private val metaDirty = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** 缓存命中 / 未命中计数（本次进程内累计，供统计面板展示命中率） */
+    private val cacheHits = java.util.concurrent.atomic.AtomicInteger(0)
+    private val cacheMisses = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** 当前已加载进内存的目标语言（懒加载：切换语言时卸载旧语言、加载新语言） */
+    @Volatile
+    private var loadedLangTag: String? = null
+    private val langLoadLock = Any()
+
+    /**
+     * v2.0.153：翻译缓存改为**按目标语言分文件**落盘。
+     *
+     * 目录 `filesDir/translation/`，文件 `cache_<lang>.tsv`（如 `cache_zh.tsv`）。
+     * 好处：① 启动只加载当前语言，首屏更快；② 可单独查看/清空某语言词库；
+     * ③ 单文件体积更小，压缩重写更快。放 filesDir（而非 cacheDir）是因为
+     * 系统可能清理 cache，而翻译结果值得留存。
+     */
+    private val cacheDir by lazy { java.io.File(context.filesDir, CACHE_DIR_NAME) }
+
+    private fun cacheFileFor(langTag: String) =
+        java.io.File(cacheDir, "$CACHE_FILE_PREFIX${langTag.replace('/', '_')}$CACHE_FILE_SUFFIX")
+
+    /** v2.0.153 之前的单文件缓存（迁移后改名保留，不直接删） */
+    private val legacyCacheFile by lazy { java.io.File(context.filesDir, LEGACY_CACHE_FILE) }
+
     private val diskWriteLock = Any()
+
+    /** 文件头：`#v2|1`（结构版本 | 内容版本） */
+    private fun cacheHeader() = "#v$CACHE_FORMAT_VERSION|$CACHE_CONTENT_VERSION\n"
 
     /** 磁盘缓存在 scope 就绪后异步加载（scope 声明在下方，故此处不做前向引用） */
     private fun startDiskCacheLoad() {
-        scope.launch { loadDiskCache() }
-    }
-
-    private fun loadDiskCache() {
-        try {
-            if (!diskCacheFile.exists()) return
-            val fileMb = diskCacheFile.length() / 1048576.0
-            var loaded = 0
-            var lines = 0
-            // 用 readLine 循环而非 forEachLine：便于在超大文件上**提前收手**
-            diskCacheFile.bufferedReader(Charsets.UTF_8).use { reader ->
-                while (loaded < CACHE_MAX_LOAD_LINES) {
-                    val line = reader.readLine() ?: break
-                    lines++
-                    val tab = line.indexOf('\t')
-                    if (tab <= 0) continue
-                    val key = line.substring(0, tab)
-                    val value = unescapeCache(line.substring(tab + 1))
-                    if (key.isNotBlank() && value.isNotBlank()) {
-                        // v2.0.151：旧缓存的 key 未归一化，这里按新规则归一化后入库 ——
-                        // 升级后老词条仍能命中，同时自动去重
-                        translationCache[normalizeCacheKey(key)] = value
-                        loaded++
-                    }
-                }
-            }
-            Log.i(
-                "SubtitleTranslator",
-                "翻译缓存加载完成：$loaded 条（读取 $lines 行 / 文件 ${"%.1f".format(fileMb)}MB）"
-            )
-        } catch (e: Exception) {
-            Log.w("SubtitleTranslator", "翻译缓存加载失败：${e.message}")
+        val lang = config.targetLanguage.code
+        loadedLangTag = lang
+        scope.launch {
+            migrateLegacyCacheIfNeeded()
+            loadDiskCache(lang)
         }
     }
 
-    /** 追加一条到磁盘缓存（TSV；译文里的换行/制表符转义后写入） */
+    /** 解析结果（v2.0.153：key/value + LRU 元数据） */
+    private data class ParsedCacheEntry(
+        val key: String,
+        val value: String,
+        val lastUsedMs: Long,
+        val hitCount: Long
+    )
+
+    /**
+     * 解析一行缓存。兼容两代格式：
+     *  - v2：`key<TAB>译文<TAB>lastUsedMs<TAB>hitCount`
+     *  - v1：`key<TAB>译文`（无时间信息 → lastUsed 记作"现在"，避免升级后老词条立刻被 TTL 清掉）
+     */
+    private fun parseCacheLine(line: String, now: Long): ParsedCacheEntry? {
+        if (line.isBlank() || line.startsWith("#")) return null
+        val parts = line.split('\t')
+        if (parts.size < 2) return null
+        val rawKey = parts[0]
+        val value = unescapeCache(parts[1])
+        if (rawKey.isBlank() || value.isBlank()) return null
+        return ParsedCacheEntry(
+            key = normalizeCacheKey(rawKey),
+            value = value,
+            lastUsedMs = parts.getOrNull(2)?.toLongOrNull() ?: now,
+            hitCount = parts.getOrNull(3)?.toLongOrNull() ?: 0L
+        )
+    }
+
+    private fun putEntry(e: ParsedCacheEntry) {
+        translationCache[e.key] = e.value
+        cacheMeta[e.key] = longArrayOf(e.lastUsedMs, e.hitCount)
+    }
+
+    /** 文件头版本不匹配：改名 `.stale` 留档后作废（不删，便于排查） */
+    private fun markStale(file: java.io.File) {
+        try {
+            val stale = java.io.File(file.parentFile, file.name + ".stale")
+            if (stale.exists()) stale.delete()
+            file.renameTo(stale)
+            Log.w("SubtitleTranslator", "缓存版本不匹配，已作废：${file.name} → ${stale.name}")
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "缓存作废失败：${e.message}")
+        }
+    }
+
+    private fun loadDiskCache(langTag: String) {
+        val file = cacheFileFor(langTag)
+        if (!file.exists()) return
+        val now = System.currentTimeMillis()
+        val fileMb = file.length() / 1048576.0
+        var loaded = 0
+        var lines = 0
+        var headerCompatible = true
+        try {
+            file.bufferedReader(Charsets.UTF_8).use { reader ->
+                // 首行可能是文件头（#v2|1），也可能是老格式的数据行
+                val first = reader.readLine()
+                if (first != null && first.startsWith("#")) {
+                    val seg = first.substring(1).split('|')
+                    val fmt = seg.getOrNull(0)?.removePrefix("v")
+                    val content = seg.getOrNull(1)
+                    if (fmt != CACHE_FORMAT_VERSION.toString() || content != CACHE_CONTENT_VERSION.toString()) {
+                        headerCompatible = false
+                    }
+                } else if (first != null) {
+                    lines++
+                    parseCacheLine(first, now)?.let { putEntry(it); loaded++ }
+                }
+                if (!headerCompatible) return@use
+                // 用 readLine 循环而非 forEachLine：便于在超大文件上**提前收手**
+                while (loaded < CACHE_MAX_LOAD_LINES) {
+                    val line = reader.readLine() ?: break
+                    lines++
+                    parseCacheLine(line, now)?.let { putEntry(it); loaded++ }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "翻译缓存加载失败：${e.message}")
+            return
+        }
+        if (!headerCompatible) {
+            markStale(file)
+            return
+        }
+        Log.i(
+            "SubtitleTranslator",
+            "翻译缓存加载完成 [$langTag]：$loaded 条（读取 $lines 行 / 文件 ${"%.1f".format(fileMb)}MB）"
+        )
+    }
+
+    /**
+     * v2.0.153：把旧版单文件缓存 `translation_cache.tsv` 按目标语言前缀**拆分**到
+     * `translation/cache_<lang>.tsv`，完成后把旧文件改名 `.migrated` 留档（不删）。
+     *
+     * 幂等：① 旧文件不存在 → 直接返回；② 迁移中途失败 → 下次启动重做（重复行按 key 覆盖，无害）。
+     * 先改名为 `.migrating` 再拆分，避免迁移中被并发重复触发。
+     */
+    private fun migrateLegacyCacheIfNeeded() {
+        if (!legacyCacheFile.exists()) return
+        try {
+            val migrating = java.io.File(legacyCacheFile.parentFile, LEGACY_CACHE_FILE + ".migrating")
+            if (migrating.exists()) migrating.delete()
+            if (!legacyCacheFile.renameTo(migrating)) {
+                Log.w("SubtitleTranslator", "旧缓存迁移：改名失败，跳过")
+                return
+            }
+            cacheDir.mkdirs()
+            val buckets = HashMap<String, StringBuilder>()
+            var total = 0
+            migrating.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    val tab = line.indexOf('\t')
+                    if (tab <= 0) continue
+                    val rawKey = line.substring(0, tab)
+                    val sep = rawKey.indexOf(':')
+                    if (sep <= 0) continue
+                    val lang = rawKey.substring(0, sep)
+                    val value = line.substring(tab + 1)
+                    if (value.isBlank()) continue
+                    buckets.getOrPut(lang) { StringBuilder() }
+                        .append(normalizeCacheKey(rawKey)).append('\t').append(value).append('\n')
+                    total++
+                }
+            }
+            var written = 0
+            for ((lang, sb) in buckets) {
+                val target = cacheFileFor(lang)
+                if (target.exists()) {
+                    target.appendText(sb.toString(), Charsets.UTF_8)
+                } else {
+                    target.writeText(cacheHeader() + sb.toString(), Charsets.UTF_8)
+                }
+                written++
+            }
+            val done = java.io.File(legacyCacheFile.parentFile, LEGACY_CACHE_FILE + ".migrated")
+            if (done.exists()) done.delete()
+            migrating.renameTo(done)
+            Log.i("SubtitleTranslator", "旧缓存已迁移：$total 条 → $written 个语言文件（原文件改名 .migrated）")
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "旧缓存迁移失败：${e.message}")
+        }
+    }
+
+    /**
+     * 追加一条到磁盘缓存（TSV 4 列；译文里的换行/制表符转义后写入）。
+     *
+     * v2.0.153：**按 key 里的目标语言前缀路由到对应文件** —— 即使正在切换语言，
+     * 也不会把译文写进错误的文件。
+     */
     private fun appendDiskCache(key: String, value: String) {
         try {
+            val langTag = key.substringBefore(':')
+            val file = cacheFileFor(langTag)
             synchronized(diskWriteLock) {
-                // 体积保护：超过压缩阈值才整体重写（去重 + 裁剪），其余情况只追加一行
-                if (diskCacheFile.exists() && diskCacheFile.length() > DISK_CACHE_COMPACT_THRESHOLD_BYTES) {
-                    rewriteDiskCache()
+                cacheDir.mkdirs()
+                // 体积保护：超过压缩阈值才整体重写（去重 + TTL/LRU 淘汰），其余情况只追加一行
+                if (file.exists() && file.length() > DISK_CACHE_COMPACT_THRESHOLD_BYTES) {
+                    rewriteDiskCache(langTag)
                     return
                 }
-                diskCacheFile.appendText("$key\t${escapeCache(value)}\n", Charsets.UTF_8)
+                if (!file.exists()) {
+                    file.writeText(cacheHeader(), Charsets.UTF_8)
+                }
+                file.appendText(
+                    "$key\t${escapeCache(value)}\t${System.currentTimeMillis()}\t0\n",
+                    Charsets.UTF_8
+                )
             }
         } catch (e: Exception) {
             Log.w("SubtitleTranslator", "翻译缓存写入失败：${e.message}")
@@ -249,38 +439,208 @@ class SubtitleTranslator(private val context: Context) {
     }
 
     /**
-     * 整体重写磁盘缓存：**去重 + 按软上限裁剪**。
+     * 重写某个语言的缓存文件：**去重 + TTL 过期 + LRU 淘汰到软上限**。
      *
-     * v2.0.150：原实现只去重，重写后文件大小 ≈ 内存缓存全量，很可能仍高于压缩阈值，
-     * 于是**后续每次写入都会再触发一次全量重写**（性能退化）。现在重写前先把内存缓存
-     * 裁剪到 [CACHE_SOFT_MAX_ENTRIES]，重写后文件明显小于阈值，写入恢复为追加。
+     * v2.0.150 修的是「重写后文件仍大于阈值 → 此后每次写入都全量重写」；
+     * v2.0.153 在此基础上把淘汰策略由「随机砍」换成**真 LRU**：
+     *  1. 先剔除超过 [CACHE_TTL_MS] 未被命中的条目；
+     *  2. 仍超 [CACHE_SOFT_MAX_ENTRIES] 时，按 **(命中次数升序, 最近使用时间升序)** 淘汰
+     *     —— 优先丢弃「用得少且久未用」的，而不是按 HashMap 迭代序随机砍（旧行为可能
+     *     把最常用的句子淘汰掉）。
      */
-    private fun rewriteDiskCache() {
+    private fun rewriteDiskCache(langTag: String) {
         try {
-            val overflow = translationCache.size - CACHE_SOFT_MAX_ENTRIES
-            if (overflow > 0) {
-                var removed = 0
-                val it = translationCache.keys.iterator()
-                while (it.hasNext() && removed < overflow) {
-                    it.next()
-                    it.remove()
-                    removed++
+            val now = System.currentTimeMillis()
+            val prefix = "$langTag:"
+
+            // 1) TTL 过期
+            var expired = 0
+            for (k in translationCache.keys.filter { it.startsWith(prefix) }) {
+                val meta = cacheMeta[k] ?: continue
+                if (now - meta[0] > CACHE_TTL_MS) {
+                    translationCache.remove(k)
+                    cacheMeta.remove(k)
+                    expired++
                 }
-                Log.i("SubtitleTranslator", "翻译缓存超软上限，淘汰 $removed 条")
             }
-            val sb = StringBuilder(translationCache.size * 96 + 64)
-            for ((k, v) in translationCache) {
-                if (k.isBlank() || v.isBlank()) continue
-                sb.append(k).append('\t').append(escapeCache(v)).append('\n')
+
+            // 2) 仍超软上限 → LRU（低频 + 久未用优先淘汰）
+            val remain = translationCache.keys.filter { it.startsWith(prefix) }
+            var evicted = 0
+            if (remain.size > CACHE_SOFT_MAX_ENTRIES) {
+                val victims = remain
+                    .sortedWith(
+                        compareBy(
+                            { cacheMeta[it]?.get(1) ?: 0L },
+                            { cacheMeta[it]?.get(0) ?: 0L }
+                        )
+                    )
+                    .take(remain.size - CACHE_SOFT_MAX_ENTRIES)
+                for (k in victims) {
+                    translationCache.remove(k)
+                    cacheMeta.remove(k)
+                    evicted++
+                }
             }
-            diskCacheFile.writeText(sb.toString(), Charsets.UTF_8)
+
+            // 3) 写文件（只写该语言的条目）
+            val file = cacheFileFor(langTag)
+            var count = 0
+            synchronized(diskWriteLock) {
+                cacheDir.mkdirs()
+                val sb = StringBuilder(2048)
+                sb.append(cacheHeader())
+                for ((k, v) in translationCache) {
+                    if (!k.startsWith(prefix)) continue
+                    if (k.isBlank() || v.isBlank()) continue
+                    val meta = cacheMeta[k]
+                    sb.append(k).append('\t').append(escapeCache(v)).append('\t')
+                        .append(meta?.get(0) ?: now).append('\t').append(meta?.get(1) ?: 0L)
+                        .append('\n')
+                    count++
+                }
+                file.writeText(sb.toString(), Charsets.UTF_8)
+            }
             Log.i(
                 "SubtitleTranslator",
-                "翻译缓存已重写：${translationCache.size} 条 / ${sb.length / 1024}KB"
+                "缓存已重写 [$langTag]：$count 条 / ${file.length() / 1024}KB（TTL 过期 $expired / LRU 淘汰 $evicted）"
             )
         } catch (e: Exception) {
             Log.w("SubtitleTranslator", "翻译缓存重写失败：${e.message}")
         }
+    }
+
+    // ===== v2.0.153：命中记录 / 语言切换 / 统计 / 清理 =====
+
+    /**
+     * 命中缓存：更新 LRU 元数据（最近使用时间 + 命中次数）。
+     *
+     * 元数据**攒够 [META_FLUSH_DIRTY_THRESHOLD] 条才落盘**（后台重写当前语言文件），
+     * 否则每翻一句字幕都要写一次盘 —— 那正是 v2.0.150 修掉的问题。
+     */
+    private fun touchCache(key: String) {
+        val now = System.currentTimeMillis()
+        val meta = cacheMeta.getOrPut(key) { longArrayOf(now, 0L) }
+        meta[0] = now
+        meta[1] = meta[1] + 1
+        cacheHits.incrementAndGet()
+        if (metaDirty.incrementAndGet() >= META_FLUSH_DIRTY_THRESHOLD) {
+            metaDirty.set(0)
+            loadedLangTag?.let { lang -> scope.launch { rewriteDiskCache(lang) } }
+        }
+    }
+
+    /** 未命中缓存（即将发请求）：仅计数，供命中率统计 */
+    private fun noteCacheMiss() {
+        cacheMisses.incrementAndGet()
+    }
+
+    /**
+     * 确保内存里装的是**当前目标语言**的缓存（语言切换时懒加载）。
+     *
+     * 切走时先把旧语言的元数据落盘，再清空内存、加载新语言 —— 否则内存里会越攒越多语言，
+     * 「启动只加载当前语言」也就失去意义。
+     */
+    private fun ensureLanguageLoaded(langTag: String) {
+        if (loadedLangTag == langTag) return
+        synchronized(langLoadLock) {
+            if (loadedLangTag == langTag) return
+            val prev = loadedLangTag
+            loadedLangTag = langTag
+            scope.launch {
+                try {
+                    if (prev != null) rewriteDiskCache(prev)
+                    translationCache.clear()
+                    cacheMeta.clear()
+                    metaDirty.set(0)
+                    loadDiskCache(langTag)
+                } catch (e: Exception) {
+                    Log.w("SubtitleTranslator", "切换语言缓存失败：${e.message}")
+                }
+            }
+        }
+    }
+
+    /** 单语言缓存统计（供设置面板展示） */
+    data class LangCacheStat(val langTag: String, val entries: Int, val bytes: Long)
+
+    val cacheHitCount: Int get() = cacheHits.get()
+    val cacheMissCount: Int get() = cacheMisses.get()
+
+    /** 命中率 0f~1f；一次都没查过时为 0 */
+    val cacheHitRate: Float
+        get() {
+            val h = cacheHits.get()
+            val m = cacheMisses.get()
+            val t = h + m
+            return if (t == 0) 0f else h.toFloat() / t
+        }
+
+    /** 当前语言已加载进内存的条目数 */
+    val currentLangEntryCount: Int
+        get() = loadedLangTag?.let { p -> translationCache.keys.count { it.startsWith("$p:") } } ?: 0
+
+    /** 当前语言标签（zh / zh-TW / en …） */
+    val currentLangTag: String get() = loadedLangTag ?: config.targetLanguage.code
+
+    /** 扫描缓存目录，统计各语言的条目数与文件体积（**IO 操作，请后台线程调用**） */
+    fun scanCacheStats(): List<LangCacheStat> {
+        if (!cacheDir.exists()) return emptyList()
+        val list = cacheDir.listFiles { f ->
+            f.isFile && f.name.startsWith(CACHE_FILE_PREFIX) && f.name.endsWith(CACHE_FILE_SUFFIX)
+        } ?: return emptyList()
+        return list.map { f ->
+            val lang = f.name.removePrefix(CACHE_FILE_PREFIX).removeSuffix(CACHE_FILE_SUFFIX)
+            LangCacheStat(lang, countCacheLines(f), f.length())
+        }.sortedByDescending { it.entries }
+    }
+
+    /** 数一个缓存文件里的有效条目数（跳过文件头） */
+    private fun countCacheLines(f: java.io.File): Int {
+        var n = 0
+        try {
+            f.bufferedReader(Charsets.UTF_8).use { r ->
+                while (true) {
+                    val line = r.readLine() ?: break
+                    if (line.isBlank() || line.startsWith("#")) continue
+                    n++
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "统计缓存条目失败：${e.message}")
+        }
+        return n
+    }
+
+    /** 清空**指定语言**的缓存（内存 + 磁盘；`.migrated` / `.stale` 归档文件不动） */
+    fun clearCacheFor(langTag: String) {
+        val prefix = "$langTag:"
+        for (k in translationCache.keys.filter { it.startsWith(prefix) }) {
+            translationCache.remove(k)
+            cacheMeta.remove(k)
+        }
+        metaDirty.set(0)
+        try {
+            cacheFileFor(langTag).delete()
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "删除缓存文件失败：${e.message}")
+        }
+        Log.i("SubtitleTranslator", "已清空 [$langTag] 的翻译缓存")
+    }
+
+    /** 清空**全部语言**的缓存（内存 + 磁盘） */
+    fun clearAllCaches() {
+        translationCache.clear()
+        cacheMeta.clear()
+        metaDirty.set(0)
+        try {
+            cacheDir.listFiles()?.forEach { f ->
+                if (f.name.startsWith(CACHE_FILE_PREFIX) && f.name.endsWith(CACHE_FILE_SUFFIX)) f.delete()
+            }
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "清空缓存目录失败：${e.message}")
+        }
+        Log.i("SubtitleTranslator", "已清空全部翻译缓存")
     }
 
     // ===== 缓存 key 归一化（v2.0.151：提升命中率）=====
@@ -416,6 +776,8 @@ class SubtitleTranslator(private val context: Context) {
      */
     fun translateOrOriginal(text: String, onTranslated: ((String) -> Unit)? = null): String {
         if (!config.isEnabled || text.isBlank()) return text
+        // v2.0.153：目标语言变了就懒加载对应语言的缓存文件（旧的先落盘再切）
+        ensureLanguageLoaded(config.targetLanguage.code)
 
         val lines = text.split("\n")
         if (lines.size > 1) {
@@ -430,8 +792,10 @@ class SubtitleTranslator(private val context: Context) {
 
         val cached = translationCache[cacheKey]
         if (cached != null) {
+            touchCache(cacheKey)
             return formatOutput(text, cached)
         }
+        noteCacheMiss()
 
         // Deduplicate: if a request for this exact text is already in flight, only
         // register the listener and return the original text without starting a new request.
@@ -523,7 +887,11 @@ class SubtitleTranslator(private val context: Context) {
         val cacheKey = makeCacheKey(targetLang, line)
 
         val cached = translationCache[cacheKey]
-        if (cached != null) return cached
+        if (cached != null) {
+            touchCache(cacheKey)
+            return cached
+        }
+        noteCacheMiss()
 
         synchronized(pendingTranslations) {
             val existing = pendingTranslations[cacheKey]
@@ -1076,8 +1444,14 @@ class SubtitleTranslator(private val context: Context) {
         else -> code
     }
 
+    /**
+     * 清空**当前语言**的缓存（内存 + 磁盘）。
+     *
+     * v2.0.153：原实现只 clear() 了内存，磁盘文件原封不动 —— 重启后缓存"复活"，
+     * 用户以为清了其实没清。
+     */
     fun clearCache() {
-        translationCache.clear()
+        clearCacheFor(currentLangTag)
         statusMessage = context.getString(R.string.subtitle_cache_cleared)
     }
 

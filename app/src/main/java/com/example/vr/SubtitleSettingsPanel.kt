@@ -76,6 +76,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.vector.ImageVector
 import java.io.File
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -558,30 +561,35 @@ fun SubtitleSettingsPanel(
                     // Target Language Selector
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(stringResource(R.string.subtitle_translate_target_lang), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            for (lang in TranslationTargetLanguage.values().take(5)) {
-                                val isSel = translator.config.targetLanguage == lang
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(if (isSel) accentColor else Color.White.copy(alpha = 0.1f))
-                                        .clickable {
-                                            translator.config = translator.config.copy(targetLanguage = lang)
-                                            onUserActivity()
-                                        }
-                                        .padding(vertical = 4.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = stringResource(lang.nameResId),
-                                        color = if (isSel) accentOnColor else Color.White,
-                                        fontSize = 8.sp,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                                    )
+                        // v2.0.153 修复：原先 `.take(5)` 导致其余 4 种目标语言（fr / de / es / ru）
+                        // 在 UI 上**根本选不到**（枚举里有、界面没入口）。改为每行 5 个自动换行。
+                        for (langRow in TranslationTargetLanguage.values().toList().chunked(5)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                for (lang in langRow) {
+                                    val isSel = translator.config.targetLanguage == lang
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (isSel) accentColor else Color.White.copy(alpha = 0.1f))
+                                            .clickable {
+                                                translator.config = translator.config.copy(targetLanguage = lang)
+                                                onUserActivity()
+                                            }
+                                            .padding(vertical = 4.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = stringResource(lang.nameResId),
+                                            color = if (isSel) accentOnColor else Color.White,
+                                            fontSize = 8.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -751,6 +759,127 @@ fun SubtitleSettingsPanel(
                             }
                         }
                     }
+
+                    // ===== v2.0.153：翻译缓存统计（按语言分文件 / 命中率 / 单语言清空）=====
+                    val tr = translator
+                    val cacheStats = remember { mutableStateOf<List<SubtitleTranslator.LangCacheStat>>(emptyList()) }
+                    val statsTick = remember { mutableStateOf(0) }
+                    LaunchedEffect(tr, statsTick.value) {
+                        cacheStats.value = withContext(Dispatchers.IO) { tr.scanCacheStats() }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                stringResource(R.string.subtitle_cache_stats),
+                                color = accentColor,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                stringResource(R.string.subtitle_cache_stats_refresh),
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 8.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.White.copy(alpha = 0.1f))
+                                    .clickable {
+                                        statsTick.value++
+                                        onUserActivity()
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Text(
+                            stringResource(
+                                R.string.subtitle_cache_stats_current,
+                                tr.currentLangTag,
+                                tr.currentLangEntryCount
+                            ),
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 8.sp
+                        )
+                        Text(
+                            stringResource(
+                                R.string.subtitle_cache_stats_hit,
+                                (tr.cacheHitRate * 100).toInt(),
+                                tr.cacheHitCount,
+                                tr.cacheMissCount
+                            ),
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 8.sp
+                        )
+                        Text(
+                            stringResource(
+                                R.string.subtitle_cache_stats_session,
+                                tr.sessionUsage,
+                                SubtitleTranslator.MAX_SESSION_TRANSLATIONS
+                            ),
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 8.sp
+                        )
+                        if (cacheStats.value.isEmpty()) {
+                            Text(
+                                stringResource(R.string.subtitle_cache_stats_empty),
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 8.sp
+                            )
+                        } else {
+                            cacheStats.value.forEach { s ->
+                                Row(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        s.langTag,
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        fontSize = 8.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        stringResource(
+                                            R.string.subtitle_cache_stats_row,
+                                            s.entries,
+                                            (s.bytes / 1024).toInt()
+                                        ),
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        fontSize = 8.sp
+                                    )
+                                }
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    tr.clearCacheFor(tr.currentLangTag)
+                                    statsTick.value++
+                                    onUserActivity()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    stringResource(R.string.subtitle_cache_clear_current),
+                                    fontSize = 8.sp,
+                                    maxLines = 1
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    tr.clearAllCaches()
+                                    statsTick.value++
+                                    onUserActivity()
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    stringResource(R.string.subtitle_cache_clear_all),
+                                    fontSize = 8.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
                 }
             }
         }
