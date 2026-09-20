@@ -423,6 +423,10 @@ fun VRPlayerScreen(
     var isSubtitleEnabled by remember {
         mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("is_subtitle_enabled", true) else true)
     }
+    // v2.0.154：显示与导出字幕时是否去除标点（默认开启；只影响显示层与导出，不改内部原文）
+    var isStripSubtitlePunctuation by remember {
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("subtitle_strip_punct", true) else true)
+    }
     var loadedSubtitleFileName by remember { mutableStateOf("") }
     var loadedSubtitleCues by remember { mutableStateOf<List<SubtitleCue>>(emptyList()) }
     var subtitleFont by remember {
@@ -660,7 +664,8 @@ fun VRPlayerScreen(
             context,
             selectedMediaItem.title,
             cues,
-            SubtitleExporter.langSuffix(subtitleTranslator)
+            SubtitleExporter.langSuffix(subtitleTranslator),
+            isStripSubtitlePunctuation
         )
         Toast.makeText(
             context,
@@ -887,6 +892,7 @@ fun VRPlayerScreen(
                 putBoolean("is_software_decoding", isSoftwareDecoding)
                 putInt("decoder_engine_id", decoderEngine.id)
                 putBoolean("is_subtitle_enabled", isSubtitleEnabled)
+                putBoolean("subtitle_strip_punct", isStripSubtitlePunctuation)
                 putInt("subtitle_font_id", subtitleFont.id)
                 putInt("subtitle_font_size", subtitleFontSizeSp)
                 putInt("subtitle_font_weight", subtitleFontWeightVal)
@@ -945,6 +951,7 @@ fun VRPlayerScreen(
                 remove("is_software_decoding")
                 remove("decoder_engine_id")
                 remove("is_subtitle_enabled")
+                remove("subtitle_strip_punct")
                 remove("subtitle_font_id")
                 remove("subtitle_font_size")
                 remove("subtitle_font_weight")
@@ -2205,7 +2212,8 @@ fun VRPlayerScreen(
                 context,
                 selectedMediaItem.title,
                 cues,
-                SubtitleExporter.langSuffix(subtitleTranslator)
+                SubtitleExporter.langSuffix(subtitleTranslator),
+                isStripSubtitlePunctuation
             )
         }
         if (saved != null) {
@@ -2435,6 +2443,7 @@ fun VRPlayerScreen(
                                     isSplitScreenVR = isSplitScreenVR,
                                     vrIpdOffsetRatio = vrIpdOffsetRatio,
                                     exoCueText = exoCueText,
+                                    stripPunctuation = isStripSubtitlePunctuation,
                                     modifier = Modifier.fillMaxSize()
                                 )
         AnimatedVisibility(
@@ -4603,6 +4612,8 @@ fun VRPlayerScreen(
                                             prefs.edit().putBoolean("subtitle_user_disabled", !it).apply()
                                         }
                                     },
+                                    stripPunctuation = isStripSubtitlePunctuation,
+                                    onStripPunctuationChange = { isStripSubtitlePunctuation = it },
                                     loadedSubtitleFileName = loadedSubtitleFileName,
                                     loadedCueCount = loadedSubtitleCues.size,
                                     onPickSubtitleFile = {

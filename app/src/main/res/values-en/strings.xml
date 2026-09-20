@@ -27,6 +27,8 @@
     <string name="subtitle_enabled">Subtitles on</string>
     <string name="subtitle_disabled">Subtitles off</string>
     <string name="subtitle_off_hint">Subtitles are off. Turn them on to load external SRT/VTT files and customize VR/flat rendering styles</string>
+    <string name="subtitle_strip_punct">Remove punctuation</string>
+    <string name="subtitle_strip_punct_hint">Subtitles on screen and in exports omit punctuation (source text unchanged)</string>
     <string name="subtitle_section_file">Subtitle file &amp; realtime speech</string>
     <string name="subtitle_current_file">Current: %1$s</string>
     <string name="subtitle_no_file">No external subtitle loaded</string>

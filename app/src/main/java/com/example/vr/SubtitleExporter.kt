@@ -29,7 +29,8 @@ object SubtitleExporter {
         context: Context,
         title: String?,
         cues: List<SubtitleCue>,
-        langSuffix: String = ""
+        langSuffix: String = "",
+        stripPunct: Boolean = true
     ): File? {
         val sorted = cues
             .filter { it.text.isNotBlank() }
@@ -40,7 +41,7 @@ object SubtitleExporter {
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         dir.mkdirs()
         val file = File(dir, "$baseName$langSuffix.srt")
-        return writeSrt(file, sorted)
+        return writeSrt(file, sorted, stripPunct)
     }
 
     /**
@@ -73,7 +74,8 @@ object SubtitleExporter {
         context: Context,
         title: String?,
         cues: List<SubtitleCue>,
-        langSuffix: String = ""
+        langSuffix: String = "",
+        stripPunct: Boolean = true
     ): File? {
         val sorted = cues
             .filter { it.text.isNotBlank() }
@@ -86,7 +88,7 @@ object SubtitleExporter {
         val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "subtitles")
         dir.mkdirs()
         val file = File(dir, "${baseName}_${stamp}${langSuffix}.srt")
-        return writeSrt(file, sorted)
+        return writeSrt(file, sorted, stripPunct)
     }
 
     /**
@@ -108,12 +110,15 @@ object SubtitleExporter {
             .ifBlank { "subtitles" }
             .replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
-    private fun writeSrt(file: File, sorted: List<SubtitleCue>): File? {
+    private fun writeSrt(file: File, sorted: List<SubtitleCue>, stripPunct: Boolean): File? {
         val sb = StringBuilder()
         sorted.forEachIndexed { i, cue ->
             sb.append(i + 1).append('\n')
             sb.append(formatTime(cue.startTimeMs)).append(" --> ").append(formatTime(cue.endTimeMs)).append('\n')
-            sb.append(wrapText(cue.text, CHARS_PER_LINE)).append("\n\n")
+            // v2.0.154：在「写文件」这一层净化标点 —— 不动内存中的字幕文本，
+            // 因此关闭开关后重新导出即可恢复带标点的版本
+            val body = if (stripPunct) SubtitlePunctuation.strip(cue.text) else cue.text
+            sb.append(wrapText(body, CHARS_PER_LINE)).append("\n\n")
         }
         return try {
             file.writeText(sb.toString(), Charsets.UTF_8)

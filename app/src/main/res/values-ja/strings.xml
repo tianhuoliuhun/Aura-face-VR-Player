@@ -21,6 +21,8 @@
     <string name="subtitle_enabled">字幕はオンです</string>
     <string name="subtitle_disabled">字幕はオフです</string>
     <string name="subtitle_off_hint">字幕はオフです。オンにすると外部 SRT/VTT を読み込み、VR/平面レンダリングのスタイルをカスタマイズできます</string>
+    <string name="subtitle_strip_punct">句読点を除去</string>
+    <string name="subtitle_strip_punct_hint">画面表示と書き出しの字幕から句読点を除きます（原文は変更しません）</string>
     <string name="subtitle_section_file">字幕ファイルとリアルタイム音声</string>
     <string name="subtitle_current_file">現在：%1$s</string>
     <string name="subtitle_no_file">外部字幕が読み込まれていません</string>

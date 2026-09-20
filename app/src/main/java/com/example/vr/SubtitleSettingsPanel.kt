@@ -125,6 +125,10 @@ fun SubtitleSettingsPanel(
     onSubtitleSearchApiKeyChange: (String) -> Unit = {},
     defaultSearchQuery: String = "",
     onSubtitleFileLoaded: (File) -> Unit = {},
+    // v2.0.154：字幕去标点开关（默认开）。只影响「屏幕显示」与「导出 SRT」，
+    // 内部原文保持带标点，断句与翻译质量不受影响
+    stripPunctuation: Boolean = true,
+    onStripPunctuationChange: (Boolean) -> Unit = {},
     translator: SubtitleTranslator? = null,
     onTranslateFileRequested: () -> Unit = {},
     // v2.0.127：翻译开关的持久化回调。面板本身不持有 prefs，
@@ -206,6 +210,39 @@ fun SubtitleSettingsPanel(
             // 注：外层已改为 BoxWithConstraints（非 inline），这里不能再写裸 return，
             // 否则编译报 "'return' is prohibited here"。用标签从 Column 内容返回，语义一致。
             return@Column
+        }
+
+        // v2.0.154：字幕去标点（屏幕显示 + 导出 SRT 都生效；内部原文保持带标点，
+        // 因此断句与翻译质量不受影响）
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.subtitle_strip_punct),
+                    color = Color.White,
+                    fontSize = 11.sp
+                )
+                Text(
+                    text = stringResource(R.string.subtitle_strip_punct_hint),
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 9.sp
+                )
+            }
+            Switch(
+                checked = stripPunctuation,
+                onCheckedChange = {
+                    onStripPunctuationChange(it)
+                    onUserActivity()
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = accentOnColor,
+                    checkedTrackColor = accentColor
+                ),
+                modifier = Modifier.height(24.dp)
+            )
         }
 
         // ===== Section: 字幕文件与实时语音 =====

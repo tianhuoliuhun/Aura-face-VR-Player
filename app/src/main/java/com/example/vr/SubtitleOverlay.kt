@@ -78,11 +78,9 @@ private val AsrHighlight = Color(0xFFFFD54F)
 /** Accent for the characters that changed in the latest translation. */
 private val DiffHighlight = Color(0xFF69F0AE)
 
-/** Punctuation stripped from subtitle translations. */
-private val PUNCT_REGEX = Regex("[,，。;；:：!！?？…~～·、()（）\\[\\]【】《》\"\\\"“”‘’'-]")
-
-/** Subtitle translations are rendered without punctuation marks. */
-private fun stripPunctuation(s: String): String = s.replace(PUNCT_REGEX, "")
+// v2.0.154：标点净化统一到 SubtitlePunctuation。
+// 原先这里的 PUNCT_REGEX / stripPunctuation 是**死代码**（有定义、全项目无调用点）——
+// 译文去标点的功能在某次重构中丢失了，本次一并修复并改为对「原文 + 译文」统一生效。
 
 /** Length of the longest common prefix of two strings. */
 private fun commonPrefixLen(a: String, b: String): Int {
@@ -221,6 +219,8 @@ fun SubtitleOverlay(
     isSplitScreenVR: Boolean = false,
     vrIpdOffsetRatio: Float = 0.0f,
     exoCueText: String? = null, // Fallback for ExoPlayer embedded cues
+    /** v2.0.154：显示时去除标点（原文与译文都去；内部原始文本不受影响） */
+    stripPunctuation: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     if (!isSubtitleEnabled) return
@@ -282,7 +282,11 @@ fun SubtitleOverlay(
             translatedText = rawCueText
         }
     }
-    val activeCueText = translatedText ?: rawCueText
+    val mergedCueText = translatedText ?: rawCueText
+    // v2.0.154：只在「即将渲染」时去标点 —— rawCueText 保持原样，
+    // SubtitledText 的智能断行与翻译流程仍使用带标点的原文
+    val activeCueText =
+        if (stripPunctuation) SubtitlePunctuation.strip(mergedCueText) else mergedCueText
 
     // In bilingual mode the output is "source block + translated block", so the
     // translated block keeps exactly as many lines as the source.

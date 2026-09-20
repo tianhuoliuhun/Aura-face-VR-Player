@@ -27,6 +27,8 @@
     <string name="subtitle_enabled">字幕已开启</string>
     <string name="subtitle_disabled">字幕已关闭</string>
     <string name="subtitle_off_hint">字幕功能处于关闭状态，开启后可加载外部 SRT/VTT 文件并自定义 VR/平面渲染样式</string>
+    <string name="subtitle_strip_punct">去除标点</string>
+    <string name="subtitle_strip_punct_hint">显示与导出的字幕都不带标点（不改动原始文本）</string>
     <string name="subtitle_section_file">字幕文件与实时语音</string>
     <string name="subtitle_current_file">当前字幕：%1$s</string>
     <string name="subtitle_no_file">未加载外部字幕</string>
