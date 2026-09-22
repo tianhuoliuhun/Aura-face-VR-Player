@@ -670,51 +670,36 @@ fun SubtitleSettingsPanel(
                         Text(stringResource(R.string.subtitle_translate_engine), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             val engines = TranslationEngine.values()
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                for (eng in engines.take(3)) {
-                                    val isSel = translator.config.engine == eng
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(if (isSel) accentColor else Color.White.copy(alpha = 0.1f))
-                                            .clickable {
-                                                translator.config = translator.config.copy(engine = eng)
-                                                onUserActivity()
-                                            }
-                                            .padding(vertical = 4.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = stringResource(eng.displayNameResId),
-                                            color = if (isSel) accentOnColor else Color.White,
-                                            fontSize = 8.sp,
-                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                                        )
+                            // v2.0.157：引擎已增至 10 个，原先写死的 take(3)/drop(3) 两行放不下
+                            // → 改为每行 3 个自动换行；末行不足 3 个时用等宽 Spacer 补位，保持列宽一致。
+                            val engineRows = engines.toList().chunked(3)
+                            for (engRow in engineRows) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    for (eng in engRow) {
+                                        val isSel = translator.config.engine == eng
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(if (isSel) accentColor else Color.White.copy(alpha = 0.1f))
+                                                .clickable {
+                                                    translator.config = translator.config.copy(engine = eng)
+                                                    onUserActivity()
+                                                }
+                                                .padding(vertical = 4.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = stringResource(eng.displayNameResId),
+                                                color = if (isSel) accentOnColor else Color.White,
+                                                fontSize = 8.sp,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                maxLines = 1
+                                            )
+                                        }
                                     }
-                                }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                for (eng in engines.drop(3)) {
-                                    val isSel = translator.config.engine == eng
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(if (isSel) accentColor else Color.White.copy(alpha = 0.1f))
-                                            .clickable {
-                                                translator.config = translator.config.copy(engine = eng)
-                                                onUserActivity()
-                                            }
-                                            .padding(vertical = 4.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = stringResource(eng.displayNameResId),
-                                            color = if (isSel) accentOnColor else Color.White,
-                                            fontSize = 8.sp,
-                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                                        )
+                                    repeat(3 - engRow.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
                             }
@@ -723,8 +708,14 @@ fun SubtitleSettingsPanel(
 
                     // API Key & Base URL Inputs for engines that require a key.
                     // 另外 LibreTranslate 允许自托管，因此也展示（用于填私有实例地址 / key）。
-                    if (translator.config.engine.requiresApiKey || translator.config.engine == TranslationEngine.LIBRETRANSLATE) {
+                    if (translator.config.engine.requiresApiKey ||
+                        translator.config.engine == TranslationEngine.LIBRETRANSLATE ||
+                        translator.config.engine == TranslationEngine.GOOGLE_FREE) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // v2.0.157：免密端点（Google clients5）不需要 API Key，隐藏该输入框避免误导；
+                            // LibreTranslate 的 key 用于自托管实例，保留。
+                            if (translator.config.engine.requiresApiKey ||
+                                translator.config.engine == TranslationEngine.LIBRETRANSLATE) {
                             OutlinedTextField(
                                 value = translator.config.apiKey,
                                 onValueChange = { key ->
@@ -745,6 +736,7 @@ fun SubtitleSettingsPanel(
                                     unfocusedTextColor = Color.White
                                 )
                             )
+                            } // end API Key：免密端点不显示
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

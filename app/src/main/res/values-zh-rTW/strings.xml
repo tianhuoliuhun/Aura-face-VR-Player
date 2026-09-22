@@ -466,6 +466,7 @@
     <string name="engine_custom">自定義 LLM / API</string>
     <string name="engine_mymemory">MyMemory 翻譯</string>
     <string name="engine_libretranslate">LibreTranslate</string>
+    <string name="engine_google_free">Google 翻譯（免密）</string>
     <string name="translate_mymemory_cooldown">MyMemory 已達免費額度，約 %1$d 分鐘後自動恢復</string>
     <string name="lang_zh">簡體中文</string>
     <string name="lang_en">英語</string>

@@ -424,6 +424,7 @@
     <string name="engine_custom">カスタム LLM / API</string>
     <string name="engine_mymemory">MyMemory 翻訳</string>
     <string name="engine_libretranslate">LibreTranslate</string>
+    <string name="engine_google_free">Google 翻訳（キー不要）</string>
     <string name="translate_mymemory_cooldown">MyMemory の無料枠を使い切りました。約 %1$d 分後に再開します</string>
     <string name="lang_zh">簡体字中国語</string>
     <string name="lang_en">英語</string>

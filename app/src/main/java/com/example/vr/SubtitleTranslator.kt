@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -99,6 +100,15 @@ enum class TranslationEngine(
         id = 8,
         displayNameResId = R.string.engine_libretranslate,
         defaultBaseUrl = "https://libretranslate.com",
+        defaultModel = "",
+        requiresApiKey = false
+    ),
+    // 免费翻译：Google 免密端点（clients5）。
+    // 无需 API Key / 无需登录，**实测（2026-09-22）可直连**并返回 JSON —— 见 translateViaGoogleFree。
+    GOOGLE_FREE(
+        id = 9,
+        displayNameResId = R.string.engine_google_free,
+        defaultBaseUrl = "https://clients5.google.com",
         defaultModel = "",
         requiresApiKey = false
     )
@@ -1101,6 +1111,7 @@ class SubtitleTranslator(private val context: Context) {
                     TranslationEngine.BING -> translateViaBing(text, targetLangCode)
                     TranslationEngine.MYMEMORY -> translateViaMyMemory(text, targetLangCode)
                     TranslationEngine.LIBRETRANSLATE -> translateViaLibreTranslate(text, targetLangCode)
+                    TranslationEngine.GOOGLE_FREE -> translateViaGoogleFree(text, targetLangCode)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -1111,7 +1122,10 @@ class SubtitleTranslator(private val context: Context) {
         // v127：所有翻译路径的统一出口——内存缓存 + 磁盘缓存都在这里落一次，
         // 调用方不必各自处理（display 路径、预读路径、批量路径共用）。
         if (result.isNotBlank()) {
-            val key = "$targetLangCode:$text"
+            // v2.0.157 修复：这里原先用 `"$targetLangCode:$text"` 裸拼接写缓存，**没走归一化**，
+            // 而读取端一律经 makeCacheKey() 折叠空白 —— 只要原文含连续空格/全角空格差异，
+            // 写入的 key 与读取的 key 就永远对不上，该条缓存形同虚设（每次都重翻）。
+            val key = makeCacheKey(targetLangCode, text)
             translationCache[key] = result
             appendDiskCache(key, result)
             sessionTranslated.incrementAndGet()
@@ -1472,6 +1486,96 @@ class SubtitleTranslator(private val context: Context) {
                 ""
             }
         }
+    }
+
+    /**
+     * Google 免密端点（clients5，v2.0.157）。
+     *
+     * `GET https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=<tgt>&q=<text>`
+     * 无需 API Key、无需登录；**实测（2026-09-22）可直连**并返回 JSON。
+     *
+     * ⚠️ 返回格式**随 `sl` 参数变化**：
+     *  - `sl=auto` → `[["你好世界","en"]]`（每项是 `[译文, 检测到的源语言]`）
+     *  - `sl=en`   → `["你好世界"]`（每项就是译文字符串）
+     * 所以统一用「取每项里的第一个字符串」解析，两种格式都能吃。
+     * （另一常见端点 `translate.googleapis.com/translate_a/single?client=gtx` 在同环境返回 429，故不采用。）
+     */
+    private suspend fun translateViaGoogleFree(text: String, targetLangCode: String): String {
+        val base = getActiveBaseUrl().trim().trimEnd('/')
+        val target = mapGoogleFreeLang(targetLangCode)
+        val url = (if (base.endsWith("/translate_a/t")) base else "$base/translate_a/t")
+            .toHttpUrlOrNull()
+            ?.newBuilder()
+            ?.addQueryParameter("client", "dict-chrome-ex")
+            ?.addQueryParameter("sl", "auto")
+            ?.addQueryParameter("tl", target)
+            ?.addQueryParameter("q", text)
+            ?.build()
+            ?: return ""
+        val request = Request.Builder()
+            .url(url)
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36"
+            )
+            .get()
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e("SubtitleTranslator", "Google 免密端点 HTTP ${response.code} ${response.message}")
+                        withContext(Dispatchers.Main) {
+                            statusMessage = context.getString(R.string.subtitle_api_error, response.code)
+                        }
+                        return@withContext ""
+                    }
+                    extractGoogleFreeTranslation(response.body?.string().orEmpty())
+                }
+            } catch (e: Exception) {
+                Log.e("SubtitleTranslator", "Google 免密端点请求异常", e)
+                withContext(Dispatchers.Main) {
+                    statusMessage = context.getString(R.string.subtitle_translate_failed, e.localizedMessage ?: "")
+                }
+                ""
+            }
+        }
+    }
+
+    /**
+     * 解析 clients5 的返回。顶层是数组，元素有两种形态：
+     *  - 字符串：`["译文"]`       → 直接取
+     *  - 数组：`[["译文","en"]]`  → 取第 0 个字符串
+     * 多项（一次传多个 q）时逐条成行拼接，便于调用方按行使用。
+     */
+    private fun extractGoogleFreeTranslation(body: String): String {
+        val arr = try {
+            JSONArray(body)
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "Google 免密端点返回不是 JSON：${body.take(120)}")
+            return ""
+        }
+        val sb = StringBuilder()
+        for (i in 0 until arr.length()) {
+            val piece = when (val item = arr.opt(i)) {
+                is String -> item
+                is JSONArray -> item.optString(0, "")
+                else -> ""
+            }.trim()
+            if (piece.isEmpty()) continue
+            if (sb.isNotEmpty()) sb.append('\n')
+            sb.append(piece)
+        }
+        return sb.toString()
+    }
+
+    /** Google 免密端点目标语言码映射：简中→zh-CN，繁中→zh-TW，其余直接用 code */
+    private fun mapGoogleFreeLang(code: String): String = when (code) {
+        "zh" -> "zh-CN"
+        "zh-TW" -> "zh-TW"
+        else -> code
     }
 
     /** MyMemory 目标语言码映射：简中→zh-CN，繁中→zh-TW，其余直接用 code */

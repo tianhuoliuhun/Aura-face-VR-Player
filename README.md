@@ -1,10 +1,10 @@
 # 🎬 Aura美颜VR播放器 / Aura face VR Player
 
 > 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体视频，
-> 内置实时 AI 人脸美颜、3D LUT 电影调色、**17 种语言的离线语音转字幕**、9 引擎在线翻译与局域网 SMB 播放。
+> 内置实时 AI 人脸美颜、3D LUT 电影调色、**17 种语言的离线语音转字幕**、10 引擎在线翻译与局域网 SMB 播放。
 >
 > A professional mobile VR player with real-time AI beauty filters, 3D LUT color grading,
-> offline ASR subtitles (**17 languages**), 9-engine online translation and LAN (SMB) playback.
+> offline ASR subtitles (**17 languages**), 10-engine online translation and LAN (SMB) playback.
 
 ![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
@@ -97,14 +97,16 @@
 | 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
 
 ### 🌐 字幕在线翻译 / Online Translation
-- **9 种引擎**：必应翻译（免费） / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
-  - 9 engines: Bing (free) / MyMemory (free) / LibreTranslate (free, self-hostable) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
+- **10 种引擎**：必应翻译（免费） / **Google 免密** / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
+  - 10 engines: Bing (free) / Google keyless / MyMemory (free) / LibreTranslate (free, self-hostable) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
 - 显示模式：**双语（原文+译文）** 与 **仅译文** 一键切换，选择**已持久化**
   - Display modes: bilingual / translation-only, both persisted
 - MyMemory：匿名额度 **5000 字符/天**，程序内置**串行限速 + 错误文案识别 + 配额冷却 10 分钟 + 超长句跳过**，避免触发其限流
   - MyMemory: built-in pacing, error-text detection and 10-min cooldown to respect its quota limits
 - LibreTranslate：标准 `/translate` 协议，设置面板可填 Base URL 指向**私有实例**
   - LibreTranslate follows the standard protocol; Base URL configurable for a private instance
+- **Google 免密端点**（clients5）：`GET https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=…&q=…`，**无需 API Key、无需登录**；返回格式随 `sl` 变化（`sl=auto` → `[["译文","en"]]`，显式指定源语言 → `["译文"]`），解析统一取「每项里的第一个字符串」，两种都兼容；Base URL 可改为镜像
+  - **Google keyless endpoint** (clients5): no API key or sign-in required; the response shape depends on `sl` (`sl=auto` → `[["text","en"]]`, explicit `sl` → `["text"]`), so the parser takes the first string of each item; Base URL is configurable for mirrors
 - 必应翻译参考 [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api)（MIT，自研 Kotlin HTTP 实现，未直接引入 npm 包）
   - Bing translation inspired by [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api) (MIT; self-written Kotlin HTTP, npm package NOT bundled)
 - **引擎 / 目标语言 / API Key / Base URL / 模型名 / 显示模式全部持久化**（重启不丢）
@@ -145,7 +147,7 @@
 │  智能模块 / Intelligence                             │
 │  MediaPipe Face Landmarker（人脸关键点 468 点）      │
 │  SenseVoice + 多语言 transducer + Silero VAD        │
-│  9 引擎字幕翻译                                       │
+│  10 引擎字幕翻译                                      │
 │  Room 持久化（设置记忆/字幕缓存）                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -166,7 +168,7 @@
 | `RealtimeSubtitleEngine.kt` | 自研 | 实时字幕引擎：独立音频解码 + Silero VAD + 优先级调度 + seek 处理 |
 | `SubtitleCache.kt` | 自研 | 字幕稀疏时间索引（TreeMap + 二分查找，O(log n)） |
 | `SubtitleExporter.kt` | 自研 | SRT 导出（由内存字幕缓存生成） |
-| `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（**9 种引擎**可切换，含 MyMemory 限速与配额冷却） |
+| `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（**10 种引擎**可切换，含 MyMemory 限速与配额冷却、Google 免密端点） |
 | `LutUtils.kt` | 自研 | .cube 解析 + 三线性重采样 + 512×512 网格打包 |
 | `SchemeRoutingDataSource.kt` | 自研 | 按 scheme 分流数据源（`smb://` → jcifs，其余 → HTTP + 缓存） |
 
@@ -402,6 +404,7 @@ All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo 
 | **v2.0.154** | **字幕去除标点（开关，默认开）**：屏幕显示与导出 SRT 都不带标点。① 新增 `SubtitlePunctuation.strip()` 统一净化 —— 删除中英常见标点 + **智能去句尾句点**（仅当 `.` 后跟空白或位于行尾，故 `3.14` / `U.S.` / `192.168.1.1` 不受影响）+ 折叠标点删后残留的空格；② **只在「渲染前」与「写 SRT 前」净化，内部原文一字不改** → `SubtitledText` 的智能断行与翻译质量不受影响；③ 设置 → 字幕与样式设置新增开关（prefs `subtitle_strip_punct`，受记忆模式门控）；④ 顺带**修复一个丢失的功能**：`SubtitleOverlay` 里原有的 `stripPunctuation()` / `PUNCT_REGEX` 实为**死代码**（有定义、全项目无调用点 —— 译文去标点在早前重构中掉了），本次清理并改为对「原文 + 译文」统一生效 · Per-subtitle punctuation stripping (toggle, on by default) applied at render/export only, with smart sentence-end dot handling so decimals and abbreviations survive |
 | **v2.0.155** | **修复字幕 / 翻译链路 4 处问题**（代码审计后集中修复）：① 🔴 **导出 SRT 内容与文件名不符** —— 开启翻译后导出 `_zh.srt`，写进去的却是原文（译文只活在显示层的局部状态里）；现在导出经 `SubtitleTranslator.exportTextFor()` 取**已有译文**（按显示模式输出「仅译文」或「原文+译文」），未命中回退原文并**在提示里告知未翻译条数**；② 🟠 **自动加载的历史字幕不批量翻译**（此前只有「导入文件 / 在线搜索 / 点按钮」三处触发）→ 补上 `translateCuesBatch`，消除「字幕先原文、后译文」的闪烁；③ 🟠 **会话翻译上限改为按引擎区分**：MyMemory 保持 600（匿名仅 5000 字符/天），其余引擎 **600 → 2000** —— 长片字幕常有 800~1500 条，原先后半段永远翻不到；④ 🟡 `SubtitleOverlay` 的翻译 effect key 从整个 `config` 收敛为 5 个真正相关字段，避免改任何设置都重翻当前条；⑤ 清理 `SubtitleOverlay` 中 6 个未使用的历史残留（`TypewriterText` / `commonPrefixLen` / `commonSuffixLen` / `AppearingRow` / `AsrHighlight` / `DiffHighlight`，共 122 行死代码） · Fix subtitle & translation chain: export content now matches its language-suffixed filename, auto-loaded subtitles get batch translation, session limit is per-engine (2000 vs 600 for MyMemory), tighter effect keys, dead code removed |
 | **v2.0.156** | **修复美颜链路 8 处问题**（代码审计后集中修复）：① 🔴 **坐标空间混用** —— MediaPipe 在「屏幕中心 512×512 采样裁剪图」上算坐标，却被当作**整幅画面 UV** 直接使用 → 脸一偏离中心，妆容与变形就整体错位（1080p 下最大偏差约 ±0.27 屏宽）；现统一经 `mapCropX/YToViewport()` 换算回视口 UV（含 y 轴翻转 —— `glReadPixels` 行序被按行直接填进 Bitmap，导致图像上下颠倒），并把着色器里 `fUnit` 的 clamp 由 `0.05~0.35` 调整为 `0.02~0.25`；② 🟠 **采样缓冲每 8 帧新建 2MB**（1MB DirectByteBuffer + 1MB ByteArray）→ 改为 ByteBuffer 复用 + 数组池归还；③ 🟠 **`glReadPixels` 无条件回读** → 改为**仅在开启依赖人脸的效果时采样**（只用磨皮/美白、或处于「对比原图」模式时完全跳过；本项目是 GLES2 无 PBO，故以此控制同步回读代价）；④ 🟡 **MediaPipe 在 GL 线程同步创建**（首帧卡顿）→ 移到独立后台线程，就绪前自动走 FaceDetector 兜底；⑤ 🟡 **分屏 VR 不采样**（人脸跟踪冻结在最后一次结果）→ 改为在单眼视口内采样；⑥ 🟡 **`beautyPreset` 存本地化名 + 11 处硬编码中文 `"自定义"`**（切界面语言即高亮失配）→ 全面改用稳定 id（`BEAUTY_PRESET_*`），本地化只发生在 `BeautyPresetRow` 内部；⑦ 🟡 **磨皮半径过小**（3×3 双边滤波步长仅 2 像素，靠 0.9 混合强度硬拉、观感发糊）→ 步长提到 3 像素扩大等效半径；⑧ ⚪ 清理小瑕疵：`FaceResult.detault()` 拼写、FaceDetector 与结果数组复用、冗余局部变量 · Fix 8 beauty-pipeline issues: crop→viewport coordinate mapping (cosmetics no longer drift), buffer reuse, sampling only when a face effect is on, off-thread MediaPipe init, split-screen tracking, stable preset ids, wider smoothing radius |
+| **v2.0.157** | **翻译引擎新增 Google 免密端点（clients5）**：`GET https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=…&q=…`，**无需 API Key、无需登录**，实测可直连（另一常见端点 `translate.googleapis.com/…/single?client=gtx` 在同环境返回 429，故未采用）。解析兼容两种返回形态 —— `sl=auto` 时是 `[["译文","en"]]`、显式 `sl` 时是 `["译文"]`，统一取每项里的第一个字符串；语言码映射简中→`zh-CN`、繁中→`zh-TW`。UI 侧：引擎列表由写死的 `take(3)/drop(3)` 两行改为**每行 3 个自动换行**（末行用等宽占位保持列宽一致），免密引擎**隐藏无意义的 API Key 输入框**、保留 Base URL 便于填镜像。另修复一处**缓存 key 未归一化的写入路径**：`fetchTranslation` 里用裸拼接 `"$lang:$text"` 落缓存，而读取端一律经 `makeCacheKey()` 折叠空白 → 原文含连续空格/全角空格差异时该条缓存永不命中、每次都重翻 · Add Google keyless (clients5) engine; fix a cache-key normalization hole in the write path |
 
 ---
 
