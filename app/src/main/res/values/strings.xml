@@ -513,6 +513,7 @@
     <string name="subtitle_translate_ready">字幕翻译就绪</string>
     <string name="subtitle_batch_start">开始批量翻译字幕文件 (%1$d 条)...</string>
     <string name="subtitle_session_limit">已达到本次会话翻译上限（%1$d 条），已停止翻译</string>
+    <string name="toast_subtitle_exported_untranslated">已导出 %1$d 条字幕（其中 %2$d 条尚未翻译，已按原文写入）：\n%3$s</string>
     <string name="subtitle_translate_progress">字幕翻译进度: %1$d/%2$d</string>
     <string name="subtitle_batch_done">字幕全片翻译完成 (%1$d 条)</string>
     <string name="translate_please_set_api_key">请先设置 %1$s 的 API Key</string>

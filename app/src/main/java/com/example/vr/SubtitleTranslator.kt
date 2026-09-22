@@ -142,6 +142,15 @@ class SubtitleTranslator(private val context: Context) {
         /** 单次播放会话最多翻译多少条（超出后不再发起新请求，已翻译的照常显示） */
         const val MAX_SESSION_TRANSLATIONS = 600
 
+        /**
+         * v2.0.155：会话上限**按引擎区分**（见 [sessionLimit]）。
+         *
+         * [MAX_SESSION_TRANSLATIONS]（600）继续作为 **MyMemory** 的上限 —— 它匿名额度最小
+         * （5000 字符/天），保守值有必要；其余引擎放宽到 2000 条。
+         * 原先一律 600，而长片字幕常有 800~1500 条 → 后半段永远翻不到，用户也不知道原因。
+         */
+        const val SESSION_LIMIT_DEFAULT = 2000
+
         // ===== 翻译缓存容量（v2.0.150 上调）=====
 
         /**
@@ -740,18 +749,25 @@ class SubtitleTranslator(private val context: Context) {
      *
      * 现实问题是两条路一起放大用量：整片批量翻译（一条不落）+ 预读翻译（每 90 秒
      * 窗口再来一轮）。这里做三层约束：
-     *  1. [MAX_SESSION_TRANSLATIONS]：单次播放会话的翻译总条数上限，达到即停止新增请求；
+     *  1. [sessionLimit]：单次播放会话的翻译总条数上限，达到即停止新增请求；
      *  2. 预读窗口收敛为 [PREFETCH_LOOKAHEAD_MS]，单轮条数上限 [PREFETCH_MAX_ITEMS]；
      *  3. 命中内存/磁盘缓存的条目不计入用量，也不会发请求。
      */
     private val sessionTranslated = java.util.concurrent.atomic.AtomicInteger(0)
-    private val maxSessionTranslations = MAX_SESSION_TRANSLATIONS
+
+    /**
+     * 本次会话的翻译条数上限（v2.0.155：**按引擎区分**）。
+     * MyMemory 走保守值 600（匿名仅 5000 字符/天），其余引擎 2000。
+     */
+    val sessionLimit: Int
+        get() = if (config.engine == TranslationEngine.MYMEMORY) MAX_SESSION_TRANSLATIONS
+        else SESSION_LIMIT_DEFAULT
 
     /** 已翻译条数（供 UI 展示用量） */
     val sessionUsage: Int get() = sessionTranslated.get()
 
     /** 是否已触及本次会话的翻译上限 */
-    val isSessionLimitReached: Boolean get() = sessionTranslated.get() >= maxSessionTranslations
+    val isSessionLimitReached: Boolean get() = sessionTranslated.get() >= sessionLimit
 
     init {
         // scope 已就绪，异步加载磁盘缓存（文件可能上千行，不能阻塞构造）
@@ -1005,7 +1021,7 @@ class SubtitleTranslator(private val context: Context) {
                 if (isSessionLimitReached) {
                     withContext(Dispatchers.Main) {
                         isTranslating = false
-                        statusMessage = context.getString(R.string.subtitle_session_limit, maxSessionTranslations)
+                        statusMessage = context.getString(R.string.subtitle_session_limit, sessionLimit)
                     }
                     return@launch
                 }
@@ -1044,6 +1060,34 @@ class SubtitleTranslator(private val context: Context) {
             TranslationDisplayMode.TARGET_ONLY -> translatedText
             TranslationDisplayMode.DUAL_LANGUAGE -> "$originalText\n$translatedText"
         }
+    }
+
+    /**
+     * v2.0.155：**只查缓存、不发起请求**，取某条原文的译文（原始译文，未做显示格式化）。
+     *
+     * 多行文本按显示层的口径逐行查（显示层本就是逐行翻译），且**要求每行都命中**才返回，
+     * 否则整体回退 —— 避免导出出现「半句译文 + 半句原文」的拼接。
+     */
+    fun cachedTranslationOf(text: String): String? {
+        if (text.isBlank()) return null
+        val lang = config.targetLanguage.code
+        val parts = text.split("\n").map { translationCache[makeCacheKey(lang, it)] }
+        if (parts.any { it == null }) return null
+        return parts.joinToString("\n") { it!! }
+    }
+
+    /**
+     * v2.0.155：**导出用文本**。命中缓存 → 按当前显示模式返回译文（或「原文+译文」双语）；
+     * 未命中 → 原样返回原文。
+     *
+     * 存在的意义：导出的文件内容必须与文件名（语言后缀）一致。此前导出直接写 cue 原文，
+     * 于是「开启翻译 → 导出 `_zh.srt`」拿到的却是外文原文，文件名在误导用户。
+     * 这里**刻意不发起网络请求**（导出必须同步、耗时可控），因此只吃已有缓存。
+     */
+    fun exportTextFor(text: String): String {
+        if (!config.isEnabled || text.isBlank()) return text
+        val translated = cachedTranslationOf(text) ?: return text
+        return formatOutput(text, translated)
     }
 
     /**

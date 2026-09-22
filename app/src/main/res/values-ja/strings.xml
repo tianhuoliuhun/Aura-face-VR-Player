@@ -481,6 +481,7 @@
     <string name="subtitle_translate_ready">字幕翻訳準備完了</string>
     <string name="subtitle_batch_start">字幕ファイル一括翻訳開始（%1$d 件）...</string>
     <string name="subtitle_session_limit">セッション翻訳上限に達しました（%1$d）、停止</string>
+    <string name="toast_subtitle_exported_untranslated">%1$d 件を書き出しました（うち %2$d 件は未翻訳のため原文のまま）：\n%3$s</string>
     <string name="subtitle_translate_progress">翻訳進捗: %1$d/%2$d</string>
     <string name="subtitle_batch_done">字幕全体翻訳完了（%1$d 件）</string>
     <string name="translate_please_set_api_key">%1$s の API Key を設定してください</string>

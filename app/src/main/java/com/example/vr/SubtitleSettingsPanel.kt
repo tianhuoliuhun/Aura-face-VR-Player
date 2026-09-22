@@ -853,7 +853,7 @@ fun SubtitleSettingsPanel(
                             stringResource(
                                 R.string.subtitle_cache_stats_session,
                                 tr.sessionUsage,
-                                SubtitleTranslator.MAX_SESSION_TRANSLATIONS
+                                tr.sessionLimit
                             ),
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 8.sp

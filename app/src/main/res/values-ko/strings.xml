@@ -480,7 +480,8 @@
     <string name="asr_init_failed">초기화 실패: %1$s</string>
     <string name="subtitle_translate_ready">자막 번역 준비 완료</string>
     <string name="subtitle_batch_start">자막 파일 일괄 번역 시작（%1$d 개）...</string>
-    <string name="subtitle_session_limit">이번 세션 번역 한도（%1$d）에 도달, 번역 중지</string>
+    <string name="subtitle_session_limit">이번 세션 번역 한도(%1$d)에 도달, 번역 중지</string>
+    <string name="toast_subtitle_exported_untranslated">%1$d개를 내보냈습니다(%2$d개는 미번역이라 원문으로 저장):\n%3$s</string>
     <string name="subtitle_translate_progress">번역 진행: %1$d/%2$d</string>
     <string name="subtitle_batch_done">자막 전체 번역 완료（%1$d 개）</string>
     <string name="translate_please_set_api_key">%1$s의 API Key를 먼저 설정하세요</string>

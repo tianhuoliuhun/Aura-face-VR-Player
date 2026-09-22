@@ -514,6 +514,7 @@
     <string name="subtitle_translate_ready">Subtitle translation ready</string>
     <string name="subtitle_batch_start">Starting batch translation of subtitles (%1$d cues)...</string>
     <string name="subtitle_session_limit">Reached session translation limit (%1$d), stopped</string>
+    <string name="toast_subtitle_exported_untranslated">Exported %1$d cues (%2$d not translated yet, written as source):\n%3$s</string>
     <string name="subtitle_translate_progress">Translation progress: %1$d/%2$d</string>
     <string name="subtitle_batch_done">Full subtitle translation complete (%1$d cues)</string>
     <string name="translate_please_set_api_key">Please set the API Key for %1$s</string>

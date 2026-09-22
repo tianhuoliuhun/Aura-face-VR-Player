@@ -30,7 +30,8 @@ object SubtitleExporter {
         title: String?,
         cues: List<SubtitleCue>,
         langSuffix: String = "",
-        stripPunct: Boolean = true
+        stripPunct: Boolean = true,
+        textMapper: ((String) -> String)? = null
     ): File? {
         val sorted = cues
             .filter { it.text.isNotBlank() }
@@ -41,7 +42,7 @@ object SubtitleExporter {
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         dir.mkdirs()
         val file = File(dir, "$baseName$langSuffix.srt")
-        return writeSrt(file, sorted, stripPunct)
+        return writeSrt(file, sorted, stripPunct, textMapper)
     }
 
     /**
@@ -75,7 +76,8 @@ object SubtitleExporter {
         title: String?,
         cues: List<SubtitleCue>,
         langSuffix: String = "",
-        stripPunct: Boolean = true
+        stripPunct: Boolean = true,
+        textMapper: ((String) -> String)? = null
     ): File? {
         val sorted = cues
             .filter { it.text.isNotBlank() }
@@ -88,7 +90,7 @@ object SubtitleExporter {
         val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "subtitles")
         dir.mkdirs()
         val file = File(dir, "${baseName}_${stamp}${langSuffix}.srt")
-        return writeSrt(file, sorted, stripPunct)
+        return writeSrt(file, sorted, stripPunct, textMapper)
     }
 
     /**
@@ -110,14 +112,22 @@ object SubtitleExporter {
             .ifBlank { "subtitles" }
             .replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
-    private fun writeSrt(file: File, sorted: List<SubtitleCue>, stripPunct: Boolean): File? {
+    private fun writeSrt(
+        file: File,
+        sorted: List<SubtitleCue>,
+        stripPunct: Boolean,
+        textMapper: ((String) -> String)?
+    ): File? {
         val sb = StringBuilder()
         sorted.forEachIndexed { i, cue ->
             sb.append(i + 1).append('\n')
             sb.append(formatTime(cue.startTimeMs)).append(" --> ").append(formatTime(cue.endTimeMs)).append('\n')
+            // v2.0.155：先经 textMapper 取「导出文本」—— 命中翻译缓存则输出译文/双语，
+            // 未命中回退原文（不发起请求）。这样文件内容与文件名（_zh / _zh_bi）保持一致。
+            val mapped = textMapper?.invoke(cue.text) ?: cue.text
             // v2.0.154：在「写文件」这一层净化标点 —— 不动内存中的字幕文本，
             // 因此关闭开关后重新导出即可恢复带标点的版本
-            val body = if (stripPunct) SubtitlePunctuation.strip(cue.text) else cue.text
+            val body = if (stripPunct) SubtitlePunctuation.strip(mapped) else mapped
             sb.append(wrapText(body, CHARS_PER_LINE)).append("\n\n")
         }
         return try {

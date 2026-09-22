@@ -660,16 +660,32 @@ fun VRPlayerScreen(
             Toast.makeText(context, context.getString(R.string.toast_no_subtitle_export), Toast.LENGTH_SHORT).show()
             return
         }
+        // v2.0.155：先统计有多少条还没译文 —— 导出**只吃缓存、不发起请求**，
+        // 未翻译的条目会以原文写入，必须如实告知，否则用户会以为导出坏了。
+        val untranslated =
+            if (subtitleTranslator.config.isEnabled) {
+                cues.count { subtitleTranslator.cachedTranslationOf(it.text) == null }
+            } else 0
         val f = SubtitleExporter.exportSrt(
             context,
             selectedMediaItem.title,
             cues,
             SubtitleExporter.langSuffix(subtitleTranslator),
-            isStripSubtitlePunctuation
+            isStripSubtitlePunctuation,
+            { subtitleTranslator.exportTextFor(it) }
         )
         Toast.makeText(
             context,
-            if (f != null) context.getString(R.string.toast_subtitle_exported, cues.size, f.absolutePath) else context.getString(R.string.toast_subtitle_export_failed),
+            when {
+                f == null -> context.getString(R.string.toast_subtitle_export_failed)
+                untranslated > 0 -> context.getString(
+                    R.string.toast_subtitle_exported_untranslated,
+                    cues.size,
+                    untranslated,
+                    f.absolutePath
+                )
+                else -> context.getString(R.string.toast_subtitle_exported, cues.size, f.absolutePath)
+            },
             Toast.LENGTH_LONG
         ).show()
     }
@@ -2144,6 +2160,12 @@ fun VRPlayerScreen(
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, context.getString(R.string.toast_subtitle_autoloaded, matchedFile.name, cues.size), Toast.LENGTH_SHORT).show()
                     }
+                    // v2.0.155：自动加载的历史字幕也走批量翻译。此前只有「导入文件 / 在线搜索 /
+                    // 点翻译按钮」三处会触发 batch，自动加载路径只能等显示层逐条翻，
+                    // 表现为字幕先显示原文、过一会儿才变译文（观感是闪烁跳动）。
+                    if (subtitleTranslator.config.isEnabled) {
+                        subtitleTranslator.translateCuesBatch(cues)
+                    }
                 }
             } catch (e: Exception) {
                 Log.w("VRPlayerScreen", "Auto-load generated subtitle failed: ${e.message}")
@@ -2208,12 +2230,15 @@ fun VRPlayerScreen(
         if (cues.isEmpty()) return@LaunchedEffect
         realtimeAutoSaved = true
         val saved = withContext(Dispatchers.IO) {
+            // v2.0.155：自动保存同样走译文映射 —— 否则文件名带 _zh 但内容是原文，
+            // 与手动导出行为不一致
             SubtitleExporter.saveTimestamped(
                 context,
                 selectedMediaItem.title,
                 cues,
                 SubtitleExporter.langSuffix(subtitleTranslator),
-                isStripSubtitlePunctuation
+                isStripSubtitlePunctuation,
+                { subtitleTranslator.exportTextFor(it) }
             )
         }
         if (saved != null) {

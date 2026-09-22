@@ -72,128 +72,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-/** Accent used for the ▶ current-line marker and the character-sync highlight. */
-private val AsrHighlight = Color(0xFFFFD54F)
-
-/** Accent for the characters that changed in the latest translation. */
-private val DiffHighlight = Color(0xFF69F0AE)
-
-// v2.0.154：标点净化统一到 SubtitlePunctuation。
-// 原先这里的 PUNCT_REGEX / stripPunctuation 是**死代码**（有定义、全项目无调用点）——
-// 译文去标点的功能在某次重构中丢失了，本次一并修复并改为对「原文 + 译文」统一生效。
-
-/** Length of the longest common prefix of two strings. */
-private fun commonPrefixLen(a: String, b: String): Int {
-    val n = minOf(a.length, b.length)
-    var i = 0
-    while (i < n && a[i] == b[i]) i++
-    return i
-}
-
-/** Length of the longest common suffix (not overlapping the common prefix). */
-private fun commonSuffixLen(a: String, b: String, prefixLen: Int): Int {
-    val maxS = minOf(a.length, b.length) - prefixLen
-    var s = 0
-    while (s < maxS && a[a.length - 1 - s] == b[b.length - 1 - s]) s++
-    return s
-}
-
-/**
- * A row that gently slides up and fades in the first time it is composed
- * (smooth roll-in of new subtitle lines without jumping).
- */
-@Composable
-private fun AppearingRow(content: @Composable () -> Unit) {
-    var shown by remember { mutableStateOf(false) }
-    val appear by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(450, easing = FastOutSlowInEasing),
-        label = "asrRowAppear"
-    )
-    LaunchedEffect(Unit) { shown = true }
-    Box(
-        modifier = Modifier.graphicsLayer {
-            alpha = appear
-            translationY = (1f - appear) * 24f * density
-        }
-    ) { content() }
-}
-
-/**
- * Typewriter animation for the live caption / translation line: the displayed
- * text eases toward [text] one character at a time — characters backspace out
- * (edit/delete) and new characters appear in sequence, exactly like typing.
- * The character typed most recently is tinted with [diffColor] (optional).
- * State survives text updates (same composition slot), so partial updates flow
- * seamlessly instead of re-flashing.
- */
-@Composable
-private fun TypewriterText(
-    text: String,
-    diffColor: Color? = null,
-    charDelayMs: Long = 26L,
-    modifier: Modifier = Modifier,
-    fontFamily: FontFamily = FontFamily.Default,
-    fontSizeSp: Int = 22,
-    fontWeightVal: Int = 400,
-    isItalic: Boolean = false,
-    textColor: Color = Color.White,
-    textAlpha: Float = 1.0f,
-    strokeColor: Color = Color.Black,
-    strokeWidthDp: Float = 2.0f,
-    backgroundColor: Color = Color.Black,
-    backgroundAlpha: Float = 0.5f,
-    textAlign: TextAlign = TextAlign.Center,
-    maxLines: Int = 2,
-    maxCharsPerLine: Int = 25
-) {
-    if (text.isEmpty()) return
-    var shown by remember { mutableStateOf("") }
-    LaunchedEffect(text) {
-        val cur = shown
-        if (cur == text) return@LaunchedEffect
-        var common = 0
-        while (common < cur.length && common < text.length && cur[common] == text[common]) common++
-        // If the common prefix is short relative to the longer string, the text is
-        // completely different (e.g. switched languages). Jump directly instead of
-        // animating a slow backspace+retype across the whole string.
-        val longerLen = maxOf(cur.length, text.length)
-        if (longerLen > 4 && common * 2 < longerLen) {
-            shown = text
-            return@LaunchedEffect
-        }
-        while (shown.length > common) {
-            shown = shown.dropLast(1)
-            delay(charDelayMs / 2)
-        }
-        while (shown.length < text.length) {
-            shown = text.substring(0, shown.length + 1)
-            delay(charDelayMs)
-        }
-    }
-    val lastCharRange = if (diffColor != null && shown.isNotEmpty()) {
-        (shown.length - 1)..(shown.length - 1)
-    } else null
-    SubtitledText(
-        text = shown,
-        modifier = modifier,
-        fontFamily = fontFamily,
-        fontSizeSp = fontSizeSp,
-        fontWeightVal = fontWeightVal,
-        isItalic = isItalic,
-        textColor = textColor,
-        textAlpha = textAlpha,
-        strokeColor = strokeColor,
-        strokeWidthDp = strokeWidthDp,
-        backgroundColor = backgroundColor,
-        backgroundAlpha = backgroundAlpha,
-        textAlign = textAlign,
-        maxLines = maxLines,
-        maxCharsPerLine = maxCharsPerLine,
-        highlightRange = lastCharRange,
-        highlightColor = diffColor ?: textColor
-    )
-}
 
 @Composable
 fun SubtitleOverlay(
@@ -272,7 +150,16 @@ fun SubtitleOverlay(
 
     // Apply translation if enabled.
     var translatedText by remember(rawCueText) { mutableStateOf<String?>(null) }
-    LaunchedEffect(rawCueText, translator?.config) {
+    // v2.0.155：key 精确到「真正影响翻译结果」的字段。
+    // 原先以整个 config（data class）为 key —— 任何设置改动都会重启本 effect，
+    // 把当前这条字幕重新翻一遍（哪怕改的只是与翻译无关的项）。
+    LaunchedEffect(
+        rawCueText,
+        translator?.config?.isEnabled,
+        translator?.config?.engine,
+        translator?.config?.targetLanguage,
+        translator?.config?.displayMode
+    ) {
         if (translator != null) {
             translatedText = translator.translateOrOriginal(
                 rawCueText,
