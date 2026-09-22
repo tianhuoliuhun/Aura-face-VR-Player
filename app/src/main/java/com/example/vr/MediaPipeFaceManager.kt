@@ -27,6 +27,14 @@ class MediaPipeFaceManager(private val context: Context) {
     private var isInitialized = false
     private var lastTimestampMs = 0L
 
+    // v2.0.156：MediaPipe 不可用时会走 FaceDetector 兜底（x86 模拟器等），
+    // 该路径下每次检测都 new 一个 FaceDetector 是没必要的开销 —— 实例与结果数组都复用，
+    // 只在输入尺寸变化时重建。（FaceDetector 自 API 31 起标记废弃，但仍是唯一的内置兜底。）
+    private var fallbackDetector: android.media.FaceDetector? = null
+    private var fallbackDetectorW = 0
+    private var fallbackDetectorH = 0
+    private var fallbackFaces: Array<android.media.FaceDetector.Face?>? = null
+
     init {
         initializeFaceLandmarker()
     }
@@ -164,8 +172,20 @@ class MediaPipeFaceManager(private val context: Context) {
                 bitmap
             }
 
-            val detector = android.media.FaceDetector(bitmap.width, bitmap.height, 1)
-            val faces = arrayOfNulls<android.media.FaceDetector.Face>(1)
+            val detector = if (fallbackDetector == null ||
+                fallbackDetectorW != bitmap.width || fallbackDetectorH != bitmap.height
+            ) {
+                android.media.FaceDetector(bitmap.width, bitmap.height, 1).also {
+                    fallbackDetector = it
+                    fallbackDetectorW = bitmap.width
+                    fallbackDetectorH = bitmap.height
+                }
+            } else {
+                fallbackDetector!!
+            }
+            val faces = fallbackFaces
+                ?: arrayOfNulls<android.media.FaceDetector.Face>(1).also { fallbackFaces = it }
+            faces[0] = null
             val count = detector.findFaces(rgb565Bmp, faces)
 
             if (rgb565Bmp != bitmap) {
@@ -187,7 +207,7 @@ class MediaPipeFaceManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Fallback FaceDetector failed", e)
         }
-        return FaceResult.detault()
+        return FaceResult.default()
     }
 
     fun release() {
@@ -198,6 +218,11 @@ class MediaPipeFaceManager(private val context: Context) {
         }
         faceLandmarker = null
         isInitialized = false
+        // v2.0.156：兜底检测器与结果数组一并释放
+        fallbackDetector = null
+        fallbackFaces = null
+        fallbackDetectorW = 0
+        fallbackDetectorH = 0
     }
 
     data class FaceResult(
@@ -217,7 +242,7 @@ class MediaPipeFaceManager(private val context: Context) {
         val hasDetailedLandmarks: Boolean = false
     ) {
         companion object {
-            fun detault(): FaceResult = FaceResult(
+            fun default(): FaceResult = FaceResult(
                 detected = false,
                 centerX = 0.5f,
                 centerY = 0.45f,

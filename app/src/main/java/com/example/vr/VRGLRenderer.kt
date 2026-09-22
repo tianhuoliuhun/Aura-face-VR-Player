@@ -120,7 +120,33 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val faceSampleArea = 256 * 256
     private val faceReadSize = 512
 
+    // ===== v2.0.156：美颜链路的坐标与开销修复 =====
+
+    /** 采样间隔（帧）：每 N 帧回读一次屏幕内容做人脸检测 */
+    private val faceSampleInterval = 8
+
+    /**
+     * 采样窗口相对**单个视口**的缩放比例（`rw/vpW`、`rh/vpH`）。
+     *
+     * 用途：把 MediaPipe 在裁剪图上算出的归一化坐标换算回视口 UV —— 见 [mapCropXToViewport]。
+     * 采样区只占视口中央一小块，不做这层换算就会「脸越靠边、妆容越跑偏」。
+     */
+    @Volatile
+    private var faceCropScaleX = 1f
+
+    @Volatile
+    private var faceCropScaleY = 1f
+
+    /** GL 线程私有的回读缓冲（复用，避免每 8 帧新建 1MB DirectByteBuffer） */
+    private var faceReadBuffer: java.nio.ByteBuffer? = null
+
+    /** 待检测帧的数组池：GL 线程生产、faceExecutor 消费，用完归还（避免每帧 1MB 垃圾） */
+    private var faceFramePool: ByteArray? = null
+
     private val faceExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /** v2.0.156：MediaPipe 实例改为后台创建（原先在 GL 线程同步创建，会造成首帧明显卡顿） */
+    private val faceInitExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val isDetectingFace = java.util.concurrent.atomic.AtomicBoolean(false)
     private var faceFrameCounter = 0
 
@@ -531,7 +557,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 float fUnit = 0.14;
                 if (uFaceDetected == 1) {
                     fCenter = uFaceCenter;
-                    fUnit = clamp(uEyeDistance, 0.05, 0.35);
+                    // v2.0.156：uEyeDistance 现在是**视口 UV 空间**的尺度（此前误用采样裁剪图空间，
+                    // 数值偏大约 3.7 倍、总被下面的 clamp 顶到上限），故上下限整体下移。
+                    fUnit = clamp(uEyeDistance, 0.02, 0.25);
                 }
 
                 // Derive facial feature anchors. When MediaPipe 468-point landmarks are
@@ -619,8 +647,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 vec4 sum = color;
                 float totalWeight = 1.0;
                 
-                vec2 stepX = vec2(uTexelSize.x * 2.0, 0.0);
-                vec2 stepY = vec2(0.0, uTexelSize.y * 2.0);
+                // v2.0.156：步长由 2 像素提到 3 像素 —— 原来只覆盖 ±2 像素，对 1080p 的皮肤面积
+                // 而言半径太小，只能靠 0.9 的混合强度硬拉（观感发糊）。加大步长等于扩大滤波半径，
+                // 同样 8 次邻域采样能把皮肤纹理抹得更干净。
+                vec2 stepX = vec2(uTexelSize.x * 3.0, 0.0);
+                vec2 stepY = vec2(0.0, uTexelSize.y * 3.0);
                 
                 // Read 8-connected neighbor pixels
                 vec4 n1 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepX) : texture2D(uSamplerImage, tc + stepX);
@@ -663,7 +694,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 float fUnit = 0.14;
                 if (uFaceDetected == 1) {
                     fCenter = uFaceCenter;
-                    fUnit = clamp(uEyeDistance, 0.05, 0.35);
+                    // v2.0.156：uEyeDistance 现在是**视口 UV 空间**的尺度（此前误用采样裁剪图空间，
+                    // 数值偏大约 3.7 倍、总被下面的 clamp 顶到上限），故上下限整体下移。
+                    fUnit = clamp(uEyeDistance, 0.02, 0.25);
                 }
 
                 // Derive facial feature anchors (MediaPipe 468-point aware)
@@ -882,12 +915,25 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // Note: catch Throwable — MediaPipe ships no x86_64 native library, so on
         // x86_64 emulators loading it throws UnsatisfiedLinkError (an Error), which
         // must not kill the renderer thread.
+        // v2.0.156：MediaPipe 的创建挪到后台线程 —— 它要打开 assets 里的 478 点模型并初始化
+        // native 会话，在 GL 线程同步做会让首帧明显卡顿。创建完成前 mediaPipeManager 为 null，
+        // 人脸检测会自动走 FaceDetector 兜底，功能不会因此不可用。
+        val previousManager = mediaPipeManager
+        mediaPipeManager = null
         try {
-            mediaPipeManager?.release()
-            mediaPipeManager = MediaPipeFaceManager(context)
-            Log.i(TAG, "Successfully initialized Google MediaPipe face landmarking engine.")
+            previousManager?.release()
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to instantiate Google MediaPipe beauty engine", e)
+            Log.w(TAG, "释放上一个美颜人脸管理器失败：${e.message}")
+        }
+        faceInitExecutor.execute {
+            try {
+                mediaPipeManager = MediaPipeFaceManager(context)
+                Log.i(TAG, "Successfully initialized Google MediaPipe face landmarking engine.")
+            } catch (e: Throwable) {
+                // MediaPipe 不含 x86_64 native 库，x86_64 模拟器上会抛 UnsatisfiedLinkError（Error），
+                // 不能让它把初始化线程整个带走
+                Log.e(TAG, "Failed to instantiate Google MediaPipe beauty engine", e)
+            }
         }
     }
 
@@ -1066,43 +1112,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             uniform1i(prog.hLeftEye, monoEyePreference) // default side center or user segment choose for dome
             drawActiveGeometry(prog)
 
-            // Periodically extract a thumbnail of the displayed region for real-time face
-            // landmark tracking. Only runs in planar (2D) modes where shader beauty effects
-            // consume the landmarks; 3D/panorama modes skip it to save CPU/GPU.
-            faceFrameCounter++
-            val isPlanarFaceMode = projectionMode == ProjectionMode.STANDARD ||
-                projectionMode == ProjectionMode.FISHEYE
-            if (faceFrameCounter >= 8 && isPlanarFaceMode) {
-                faceFrameCounter = 0
-                val glW = displayWidth.coerceAtLeast(1)
-                val glH = displayHeight.coerceAtLeast(1)
-                val rw = minOf(faceReadSize, glW)
-                val rh = minOf(faceReadSize, glH)
-                try {
-                    val bufferTemp = java.nio.ByteBuffer.allocateDirect(rw * rh * 4).order(java.nio.ByteOrder.nativeOrder())
-                    GLES20.glReadPixels(
-                        (glW - rw) / 2,
-                        (glH - rh) / 2,
-                        rw,
-                        rh,
-                        GLES20.GL_RGBA,
-                        GLES20.GL_UNSIGNED_BYTE,
-                        bufferTemp
-                    )
-                    bufferTemp.rewind()
-                    val frame = ByteArray(rw * rh * 4)
-                    bufferTemp.get(frame)
-                    synchronized(faceFrameLock) {
-                        pendingFaceFrame = frame
-                        pendingFaceFrameW = rw
-                        pendingFaceFrameH = rh
-                    }
-                    triggerBackgroundFaceDetection()
-                } catch (e: Exception) {
-                    // Ignore transient surface resizing safety errors
-                }
-            }
         }
+
+        // v2.0.156：人脸采样统一在绘制完成后调度，**分屏与全屏都要**（旧实现只在全屏分支里做，
+        // 于是分屏 VR 下的人脸跟踪会冻在最后一次结果上）。仅平面投影需要 —— shader 里的
+        // 面部效果（瘦脸/大眼/妆容等）只在 `uProjectionMode == 0` 时生效。
+        val isPlanarFaceMode = projectionMode == ProjectionMode.STANDARD ||
+            projectionMode == ProjectionMode.FISHEYE
+        if (isPlanarFaceMode) maybeScheduleFaceSampling()
     }
 
     private fun calculateAndApplyMatrices(isLeft: Boolean, aspect: Float, mvpLoc: Int) {
@@ -1405,6 +1422,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         videoSurfaceTexture = null
         try {
             faceExecutor.shutdownNow()
+            faceInitExecutor.shutdownNow()
             mediaPipeManager?.release()
             mediaPipeManager = null
             if (lutTextureId != -1) {
@@ -1413,6 +1431,105 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             }
         } catch (e: Throwable) {
             // ignore
+        }
+    }
+
+    /**
+     * 是否真的需要人脸检测（v2.0.156）。
+     *
+     * 只有**依赖面部坐标**的效果才需要它：瘦脸 / 大眼 / 鼻 / 嘴 / 牙 / 口红 / 腮红 /
+     * 眉毛 / 黑眼圈 / 长腿 / 小头。磨皮、美白、亮度、对比度都与人脸位置无关，
+     * 因此不开这些效果的用户**完全不必付出**每 8 帧回读 1MB 的代价。
+     * 「对比原图」模式下 shader 会强制 `uFaceDetected = 0`，同样无需检测。
+     */
+    private fun isBeautyActive(): Boolean {
+        if (beautyCompareEnabled) return false
+        return beautyFaceSlimming > 0.001f || beautyBigEyes > 0.001f ||
+            beautyDarkCircles > 0.001f || beautyNoseSlimming > 0.001f ||
+            beautyMouth > 0.001f || beautyTeethWhitening > 0.001f ||
+            beautyLipstick > 0.001f || beautyBlush > 0.001f ||
+            beautyEyebrows > 0.001f || beautyLongLegs > 0.001f ||
+            beautySmallHead > 0.001f
+    }
+
+    /**
+     * 把 MediaPipe 在「采样裁剪图」上的归一化 x 换算成**视口 UV**。
+     *
+     * 采样区是视口中央的 `rw×rh` 像素，而 shader 的 `tc` 覆盖整个视口 ——
+     * 此前直接把裁剪图坐标当视口 UV 用，人脸偏离画面中心时妆容/变形就整体错位
+     * （1080p 下最大偏差约 ±0.27 屏宽）。因为采样区**居中且对称**，换算就是
+     * 「以 0.5 为中心按比例缩放」。
+     */
+    private fun mapCropXToViewport(cx: Float): Float = 0.5f + (cx - 0.5f) * faceCropScaleX
+
+    /**
+     * 同上，y 方向**额外翻转一次**：
+     * `glReadPixels` 的行序是自下而上，却被按行直接填进 Bitmap（自上而下），
+     * 于是 Bitmap 相对屏幕上下颠倒 —— MediaPipe 报上来的 y 与屏幕方向相反。
+     * 采样区垂直居中，故翻转与缩放合并为 `0.5 - (cy - 0.5) * scaleY`。
+     */
+    private fun mapCropYToViewport(cy: Float): Float = 0.5f - (cy - 0.5f) * faceCropScaleY
+
+    /** 长度量（如眼距）按水平比例缩放：眼距主要是水平距离，见 [mapCropXToViewport] */
+    private fun mapCropLenToViewport(len: Float): Float = len * faceCropScaleX
+
+    /**
+     * 视情况采一帧屏幕内容交给后台做人脸检测（v2.0.156 重构）。
+     *
+     * 与旧实现的区别：
+     *  1. **仅在有面部效果时采样** —— 不再让「只用磨皮 / 不开美颜」的用户白付回读开销；
+     *  2. **分屏 VR 模式也采样**，但只在**单眼视口**内取中心区域
+     *     （跨两眼取样会得到两张脸拼在一起，无法检测）；
+     *  3. 采样窗口相对视口的比例记进 [faceCropScaleX] / [faceCropScaleY] 供坐标换算；
+     *  4. 回读缓冲与帧数组**复用**，不再每 8 帧产生 2MB 垃圾。
+     *
+     * 注：`glReadPixels` 是同步回读，在 GLES2 下无法用 PBO 异步化
+     * （本项目 `setEGLContextClientVersion(2)`），故通过「减少无谓采样 + 复用缓冲」控制代价。
+     */
+    private fun maybeScheduleFaceSampling() {
+        if (!isBeautyActive()) {
+            faceFrameCounter = 0
+            return
+        }
+        faceFrameCounter++
+        if (faceFrameCounter < faceSampleInterval) return
+        faceFrameCounter = 0
+
+        val vpW = if (isSplitScreenVR) (displayWidth / 2) else displayWidth
+        val w = vpW.coerceAtLeast(1)
+        val h = displayHeight.coerceAtLeast(1)
+        val rw = minOf(faceReadSize, w)
+        val rh = minOf(faceReadSize, h)
+        val x0 = (w - rw) / 2
+        val y0 = (h - rh) / 2
+        faceCropScaleX = rw.toFloat() / w
+        faceCropScaleY = rh.toFloat() / h
+
+        try {
+            val need = rw * rh * 4
+            val buf = faceReadBuffer?.takeIf { it.capacity() >= need }
+                ?: java.nio.ByteBuffer.allocateDirect(need)
+                    .order(java.nio.ByteOrder.nativeOrder())
+                    .also { faceReadBuffer = it }
+            buf.clear()
+            GLES20.glReadPixels(x0, y0, rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+            buf.rewind()
+
+            // 从池里取一块装这一帧（所有权转移给后台线程，用完后归还）
+            val recycled = synchronized(faceFrameLock) {
+                faceFramePool?.takeIf { it.size >= need }?.also { faceFramePool = null }
+            }
+            val frame = recycled ?: ByteArray(need)
+            buf.get(frame, 0, need)
+
+            synchronized(faceFrameLock) {
+                pendingFaceFrame = frame
+                pendingFaceFrameW = rw
+                pendingFaceFrameH = rh
+            }
+            triggerBackgroundFaceDetection()
+        } catch (e: Exception) {
+            // Ignore transient surface resizing safety errors
         }
     }
 
@@ -1433,8 +1550,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         isDetectingFace.set(true)
         faceExecutor.execute {
-            var bmp: Bitmap? = null
-            var scaledBmp: Bitmap? = null
             try {
                 // v84 性能优化：复用 Bitmap/数组缓冲（faceExecutor 单线程，安全）
                 val area = fw * fh
@@ -1452,16 +1567,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     faceBmp?.recycle()
                     faceBmp = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
                 }
-                bmp = faceBmp
-                bmp!!.setPixels(argb, 0, fw, 0, 0, fw, fh)
+                val srcBmp = faceBmp!!
+                srcBmp.setPixels(argb, 0, fw, 0, 0, fw, fh)
                 // Downscale the larger sampled region to the landmarker input size
                 if (faceScaledBmp == null) {
                     faceScaledBmp = Bitmap.createBitmap(faceSampleSize, faceSampleSize, Bitmap.Config.ARGB_8888)
                 }
-                scaledBmp = faceScaledBmp
-                val canvas = android.graphics.Canvas(scaledBmp!!)
+                val scaledBmp = faceScaledBmp!!
+                val canvas = android.graphics.Canvas(scaledBmp)
                 canvas.drawBitmap(
-                    bmp!!,
+                    srcBmp,
                     android.graphics.Rect(0, 0, fw, fh),
                     android.graphics.Rect(0, 0, faceSampleSize, faceSampleSize),
                     null
@@ -1472,23 +1587,29 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 if (manager != null) {
                     val result = manager.detectFace(scaledBmp)
                     if (result.detected) {
+                        // v2.0.156：MediaPipe 给的是「采样裁剪图」空间的坐标，必须换算成视口 UV
+                        // 再喂给 shader —— 否则人脸一偏离画面中心，妆容与变形就整体错位
+                        // （采样区只覆盖视口中央一小块，不换算相当于把局部坐标当成全屏坐标用）。
+                        val cxUv = mapCropXToViewport(result.centerX)
+                        val cyUv = mapCropYToViewport(result.centerY)
+                        val eyeDistUv = mapCropLenToViewport(result.eyeDistance)
                         // Smooth tracking updates using low-pass lerp filter to eliminate jitter
                         faceDetectedUniform = 1
-                        faceCenterXUniform = faceCenterXUniform * 0.75f + result.centerX * 0.25f
-                        faceCenterYUniform = faceCenterYUniform * 0.75f + result.centerY * 0.25f
-                        eyeDistanceUniform = eyeDistanceUniform * 0.75f + result.eyeDistance * 0.25f
+                        faceCenterXUniform = faceCenterXUniform * 0.75f + cxUv * 0.25f
+                        faceCenterYUniform = faceCenterYUniform * 0.75f + cyUv * 0.25f
+                        eyeDistanceUniform = eyeDistanceUniform * 0.75f + eyeDistUv * 0.25f
 
                         // Sync the precise MediaPipe 468-point features when available
                         if (result.hasDetailedLandmarks) {
                             hasDetailedLandmarks = 1
-                            eyeLeftXUniform = eyeLeftXUniform * 0.75f + result.eyeLeftX * 0.25f
-                            eyeLeftYUniform = eyeLeftYUniform * 0.75f + result.eyeLeftY * 0.25f
-                            eyeRightXUniform = eyeRightXUniform * 0.75f + result.eyeRightX * 0.25f
-                            eyeRightYUniform = eyeRightYUniform * 0.75f + result.eyeRightY * 0.25f
-                            mouthXUniform = mouthXUniform * 0.75f + result.mouthX * 0.25f
-                            mouthYUniform = mouthYUniform * 0.75f + result.mouthY * 0.25f
-                            chinXUniform = chinXUniform * 0.75f + result.chinX * 0.25f
-                            chinYUniform = chinYUniform * 0.75f + result.chinY * 0.25f
+                            eyeLeftXUniform = eyeLeftXUniform * 0.75f + mapCropXToViewport(result.eyeLeftX) * 0.25f
+                            eyeLeftYUniform = eyeLeftYUniform * 0.75f + mapCropYToViewport(result.eyeLeftY) * 0.25f
+                            eyeRightXUniform = eyeRightXUniform * 0.75f + mapCropXToViewport(result.eyeRightX) * 0.25f
+                            eyeRightYUniform = eyeRightYUniform * 0.75f + mapCropYToViewport(result.eyeRightY) * 0.25f
+                            mouthXUniform = mouthXUniform * 0.75f + mapCropXToViewport(result.mouthX) * 0.25f
+                            mouthYUniform = mouthYUniform * 0.75f + mapCropYToViewport(result.mouthY) * 0.25f
+                            chinXUniform = chinXUniform * 0.75f + mapCropXToViewport(result.chinX) * 0.25f
+                            chinYUniform = chinYUniform * 0.75f + mapCropYToViewport(result.chinY) * 0.25f
                         } else {
                             // Fallback tracker: derive rough feature positions from center/eye distance
                             hasDetailedLandmarks = 0
@@ -1506,6 +1627,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             } catch (e: Throwable) {
                 Log.e(TAG, "Background Google MediaPipe face tracking failed", e)
             } finally {
+                // v2.0.156：把这一帧的数组还给池，下一次采样即可复用（省掉每 8 帧 1MB 的分配）
+                synchronized(faceFrameLock) { faceFramePool = rgbaData }
                 isDetectingFace.set(false)
             }
         }

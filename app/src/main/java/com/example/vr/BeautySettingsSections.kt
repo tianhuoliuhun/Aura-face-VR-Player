@@ -420,33 +420,49 @@ fun BeautyCompareSwitch(
     }
 }
 
+/** 美颜预设的稳定 id（v2.0.156）：与界面语言无关 —— 内存状态、选中高亮、落盘映射都用它 */
+const val BEAUTY_PRESET_NATURAL = "natural"
+const val BEAUTY_PRESET_LIGHT = "light"
+const val BEAUTY_PRESET_HEAVY = "heavy"
+const val BEAUTY_PRESET_CUSTOM = "custom"
+
 /** 美颜预设：自然 / 淡妆 / 浓妆 / 自定义 */
 @Composable
 fun BeautyPresetRow(
-    preset: String,
+    presetId: String,
     onPresetChange: (String) -> Unit,
     accentColor: Color,
-    presets: List<String> = listOf(stringResource(R.string.beauty_preset_natural), stringResource(R.string.beauty_preset_light), stringResource(R.string.beauty_preset_heavy), stringResource(R.string.beauty_preset_custom)),
     modifier: Modifier = Modifier
 ) {
+    // v2.0.156：改用**稳定 id**（natural / light / heavy / custom）而不是本地化显示名。
+    // 原先内存里存的是本地化字符串、选中判断靠 `preset == 显示名`，于是切界面语言会让
+    // 高亮失配（"自定义" 对不上 "Custom"）；各处硬编码的中文 "自定义" 同理。
+    // 现在只有这里做本地化，状态与落盘一律用 id。
+    val presets = listOf(
+        BEAUTY_PRESET_NATURAL to stringResource(R.string.beauty_preset_natural),
+        BEAUTY_PRESET_LIGHT to stringResource(R.string.beauty_preset_light),
+        BEAUTY_PRESET_HEAVY to stringResource(R.string.beauty_preset_heavy),
+        BEAUTY_PRESET_CUSTOM to stringResource(R.string.beauty_preset_custom)
+    )
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        presets.forEach { p ->
+        presets.forEach { (id, label) ->
+            val selected = presetId == id
             Surface(
-                color = if (preset == p) accentColor else Color.White.copy(alpha = 0.10f),
+                color = if (selected) accentColor else Color.White.copy(alpha = 0.10f),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { onPresetChange(p) }
+                    .clickable { onPresetChange(id) }
             ) {
                 Text(
-                    text = p,
+                    text = label,
                     textAlign = TextAlign.Center,
-                    color = if (preset == p) Color(0xFF1A1A2E) else Color.White.copy(alpha = 0.85f),
+                    color = if (selected) Color(0xFF1A1A2E) else Color.White.copy(alpha = 0.85f),
                     fontSize = 10.sp,
-                    fontWeight = if (preset == p) FontWeight.Bold else FontWeight.Normal,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     modifier = Modifier.padding(vertical = 5.dp).fillMaxWidth()
                 )
             }

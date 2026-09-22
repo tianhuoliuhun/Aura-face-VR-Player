@@ -154,18 +154,19 @@ fun VRPlayerScreen(
 
     // Beauty and picture adjustments
     // 预设：自然/淡妆/浓妆/自定义。
-    // v2.0.144 固化：用稳定 id 落盘（0自然/1淡妆/2浓妆/3自定义），恢复时按当前语言
-    // 映射回本地化名——避免把本地化字符串直接存盘后、切语言导致高亮失配。
+    // v2.0.156：内存状态改用**稳定 id**（BEAUTY_PRESET_*）—— 此前存本地化名，切界面语言就会
+    // 高亮失配；各滑块回调里硬编码的中文 "自定义" 在非中文界面同样匹配不上。
+    // 落盘仍是 0/1/2/3，映射集中在「这里」与「写回」两处。
     var beautyPreset by remember {
         mutableStateOf(
             if (isMemoryModeEnabled) {
                 when (prefs.getInt("beauty_preset_id", 3)) {
-                    0 -> context.getString(R.string.beauty_preset_natural)
-                    1 -> context.getString(R.string.beauty_preset_light)
-                    2 -> context.getString(R.string.beauty_preset_heavy)
-                    else -> context.getString(R.string.beauty_preset_custom)
+                    0 -> BEAUTY_PRESET_NATURAL
+                    1 -> BEAUTY_PRESET_LIGHT
+                    2 -> BEAUTY_PRESET_HEAVY
+                    else -> BEAUTY_PRESET_CUSTOM
                 }
-            } else context.getString(R.string.beauty_preset_custom)
+            } else BEAUTY_PRESET_CUSTOM
         )
     }
     var beautyCompareEnabled by remember { mutableStateOf(false) } // 对比原图开关
@@ -863,10 +864,10 @@ fun VRPlayerScreen(
         // 名称无法识别（如切语言后残留旧语言名）时返回 -1，此时**不改动已存值**，
         // 避免把预设误写成「自定义」。
         val beautyPresetId = when (beautyPreset) {
-            context.getString(R.string.beauty_preset_natural) -> 0
-            context.getString(R.string.beauty_preset_light) -> 1
-            context.getString(R.string.beauty_preset_heavy) -> 2
-            context.getString(R.string.beauty_preset_custom) -> 3
+            BEAUTY_PRESET_NATURAL -> 0
+            BEAUTY_PRESET_LIGHT -> 1
+            BEAUTY_PRESET_HEAVY -> 2
+            BEAUTY_PRESET_CUSTOM -> 3
             else -> -1
         }
         prefs.edit().apply {
@@ -4736,12 +4737,12 @@ BatchTranscribeSection(
                                 @Composable
                                 fun SettingsColumn2() {
                                 // 应用美颜预设（13 项参数，顺序与下方滑块一致）
-                                fun applyBeautyPreset(name: String) {
-                                    beautyPreset = name
-                                    val p = when (name) {
-                                        context.getString(R.string.beauty_preset_natural) -> floatArrayOf(0.4f, 0.3f, 0.2f, 0.15f, 0.15f, 0.1f, 0.1f, 0.2f, 0.15f, 0.15f, 0.3f, 0.1f, 0.1f)
-                                        context.getString(R.string.beauty_preset_light) -> floatArrayOf(0.6f, 0.5f, 0.4f, 0.3f, 0.3f, 0.2f, 0.2f, 0.3f, 0.35f, 0.35f, 0.45f, 0.2f, 0.2f)
-                                        context.getString(R.string.beauty_preset_heavy) -> floatArrayOf(0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.35f, 0.35f, 0.5f, 0.6f, 0.6f, 0.7f, 0.4f, 0.35f)
+                                fun applyBeautyPreset(presetId: String) {
+                                    beautyPreset = presetId
+                                    val p = when (presetId) {
+                                        BEAUTY_PRESET_NATURAL -> floatArrayOf(0.4f, 0.3f, 0.2f, 0.15f, 0.15f, 0.1f, 0.1f, 0.2f, 0.15f, 0.15f, 0.3f, 0.1f, 0.1f)
+                                        BEAUTY_PRESET_LIGHT -> floatArrayOf(0.6f, 0.5f, 0.4f, 0.3f, 0.3f, 0.2f, 0.2f, 0.3f, 0.35f, 0.35f, 0.45f, 0.2f, 0.2f)
+                                        BEAUTY_PRESET_HEAVY -> floatArrayOf(0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.35f, 0.35f, 0.5f, 0.6f, 0.6f, 0.7f, 0.4f, 0.35f)
                                         else -> return
                                     }
                                     beautyLevel = p[0]; beautyWhitening = p[1]; beautyFaceSlimming = p[2]; beautyBigEyes = p[3]
@@ -4772,7 +4773,7 @@ BatchTranscribeSection(
                                 )
 
                                 BeautyPresetRow(
-                                    preset = beautyPreset,
+                                    presetId = beautyPreset,
                                     onPresetChange = { applyBeautyPreset(it) },
                                     accentColor = AccentColor
                                 )
@@ -4781,13 +4782,13 @@ BatchTranscribeSection(
                                 GeneralBeautySection(
                                     accentColor = AccentColor,
                                     beautyLevel = beautyLevel,
-                                    onBeautyLevelChange = { beautyLevel = it; beautyPreset = "自定义"; keepUiAlight() },
+                                    onBeautyLevelChange = { beautyLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
                                     brightnessLevel = brightnessLevel,
-                                    onBrightnessLevelChange = { brightnessLevel = it; beautyPreset = "自定义"; keepUiAlight() },
+                                    onBrightnessLevelChange = { brightnessLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
                                     contrastLevel = contrastLevel,
-                                    onContrastLevelChange = { contrastLevel = it; beautyPreset = "自定义"; keepUiAlight() },
+                                    onContrastLevelChange = { contrastLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
                                     whiteningLevel = beautyWhitening,
-                                    onWhiteningLevelChange = { beautyWhitening = it; beautyPreset = "自定义"; keepUiAlight() }
+                                    onWhiteningLevelChange = { beautyWhitening = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
                                 )
 
                                 LutFilterSection(
@@ -4807,17 +4808,17 @@ BatchTranscribeSection(
                                     accentColor = AccentColor,
                                     enabled = is2DBeautyMode,
                                     params = listOf(
-                                        PortraitParam(stringResource(R.string.beauty_face_slim), beautyFaceSlimming) { beautyFaceSlimming = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_big_eyes), beautyBigEyes) { beautyBigEyes = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_dark_circles), beautyDarkCircles) { beautyDarkCircles = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_nose_slim), beautyNoseSlimming) { beautyNoseSlimming = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_mouth), beautyMouth) { beautyMouth = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_teeth), beautyTeethWhitening) { beautyTeethWhitening = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_lipstick), beautyLipstick) { beautyLipstick = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_blush), beautyBlush) { beautyBlush = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_eyebrows), beautyEyebrows) { beautyEyebrows = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_long_legs), beautyLongLegs) { beautyLongLegs = it; beautyPreset = "自定义"; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_small_head), beautySmallHead) { beautySmallHead = it; beautyPreset = "自定义"; keepUiAlight() }
+                                        PortraitParam(stringResource(R.string.beauty_face_slim), beautyFaceSlimming) { beautyFaceSlimming = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_big_eyes), beautyBigEyes) { beautyBigEyes = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_dark_circles), beautyDarkCircles) { beautyDarkCircles = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_nose_slim), beautyNoseSlimming) { beautyNoseSlimming = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_mouth), beautyMouth) { beautyMouth = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_teeth), beautyTeethWhitening) { beautyTeethWhitening = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_lipstick), beautyLipstick) { beautyLipstick = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_blush), beautyBlush) { beautyBlush = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_eyebrows), beautyEyebrows) { beautyEyebrows = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_long_legs), beautyLongLegs) { beautyLongLegs = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                        PortraitParam(stringResource(R.string.beauty_small_head), beautySmallHead) { beautySmallHead = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
                                     )
                                 )
                                 }
