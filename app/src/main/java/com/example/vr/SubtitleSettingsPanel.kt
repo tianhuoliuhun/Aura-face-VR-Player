@@ -41,15 +41,18 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import com.example.R
@@ -138,17 +141,47 @@ fun SubtitleSettingsPanel(
     accentOnColor: Color,
     onUserActivity: () -> Unit
 ) {
-    // v2.0.127：本面板内容很长（字幕开关/文件 / 字体字号样式 / 颜色描边背景 /
-    // 位置偏移延迟 / 翻译…），在设置弹窗里放不下时会被直接裁掉且无法滚动。
-    // 改为「限高 + 竖向滚动」，并在右侧画一条滚动条（内容未超出时不显示）。
+    // v2.0.158：原先这里是「限高 420dp + 内部滚动 + 自绘滚动条」（v2.0.127 加的）。
+    // 但设置弹窗**自身**就在滚动，于是形成嵌套滚动 —— 在面板内滑动时手势容易与外层打架，
+    // 用户也难判断到底该滚哪一层。
+    // 现在改为「不再限高、跟随外层滚动」，面板长度交给各区块的折叠状态控制（见 SubtitleSection）。
+    // 注：外层 BoxWithConstraints 必须保留 —— 下面有 `return@Column`，它依赖这个非 inline 作用域。
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val panelScroll = rememberScrollState()
-        val density = LocalDensity.current
+        // v2.0.158：各区块（Section）的展开状态提升到这里 ——
+        //  ① 跨会话记忆：写进 prefs，下次打开设置保持上次的展开情况；
+        //  ② 便于用「全部展开 / 全部折叠」一次性控制。
+        // 默认值：字幕文件与实时翻译展开（高频），显示样式与布局折叠。
+        val context = LocalContext.current
+        val sectionPrefs = remember(context) {
+            context.getSharedPreferences("vr_player_prefs", Context.MODE_PRIVATE)
+        }
+        var secFileExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("subtitle_section_expanded_file", true))
+        }
+        var secTranslateExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("subtitle_section_expanded_translate", true))
+        }
+        var secStyleExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("subtitle_section_expanded_style", false))
+        }
+        var secLayoutExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("subtitle_section_expanded_layout", false))
+        }
+        fun setSectionExpanded(id: String, value: Boolean) {
+            when (id) {
+                "file" -> secFileExpanded = value
+                "translate" -> secTranslateExpanded = value
+                "style" -> secStyleExpanded = value
+                "layout" -> secLayoutExpanded = value
+            }
+            sectionPrefs.edit().putBoolean("subtitle_section_expanded_$id", value).apply()
+        }
+        fun setAllSectionsExpanded(value: Boolean) {
+            listOf("file", "translate", "style", "layout").forEach { setSectionExpanded(it, value) }
+        }
+
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 420.dp)
-                .verticalScroll(panelScroll),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
         // Section Header: 字幕与样式设置
@@ -245,12 +278,68 @@ fun SubtitleSettingsPanel(
             )
         }
 
+        // v2.0.158：区块展开快捷键（各区块的展开状态会记忆到 prefs，下次打开保持不变）
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // 注：这里刻意不用 `listOf(...).forEach { }` —— 那样包一层普通 lambda 后，
+            // 其中的 `Text` 会报 "@Composable invocations can only happen from the context
+            // of a @Composable function"。两个按钮直接写开更清楚，也免掉这个坑。
+            Surface(
+                color = Color.White.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                        setAllSectionsExpanded(true)
+                        onUserActivity()
+                    }
+            ) {
+                Text(
+                    text = stringResource(R.string.subtitle_expand_all),
+                    textAlign = TextAlign.Center,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(vertical = 5.dp).fillMaxWidth()
+                )
+            }
+            Surface(
+                color = Color.White.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                        setAllSectionsExpanded(false)
+                        onUserActivity()
+                    }
+            ) {
+                Text(
+                    text = stringResource(R.string.subtitle_collapse_all),
+                    textAlign = TextAlign.Center,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(vertical = 5.dp).fillMaxWidth()
+                )
+            }
+        }
+
         // ===== Section: 字幕文件与实时语音 =====
+        // 摘要先在语句位置算好再传：Compose 对「实参里嵌 lambda / if 再调 @Composable」支持不稳定
+        // （见上方按钮处的编译错误说明）
+        val fileSectionSummary = if (loadedSubtitleFileName.isNotBlank()) {
+            loadedSubtitleFileName
+        } else {
+            stringResource(R.string.subtitle_no_file)
+        }
         SubtitleSection(
+            id = "file",
             title = stringResource(R.string.subtitle_section_file),
             icon = Icons.Default.FileOpen,
             accentColor = accentColor,
-            initiallyExpanded = true
+            expanded = secFileExpanded,
+            onToggle = { setSectionExpanded("file", !secFileExpanded) },
+            summary = fileSectionSummary
         ) {
         // Subtitle File Import Row
         Column(
@@ -482,11 +571,21 @@ fun SubtitleSettingsPanel(
 
         // ===== Section: 实时翻译 =====
         } // end section 字幕文件与实时语音
+        // 折叠时也能一眼看到「当前用什么引擎翻成什么语言」—— 同样先在语句位置算好
+        val translateSectionSummary = if (translator?.config?.isEnabled == true) {
+            stringResource(translator.config.engine.displayNameResId) + " · " +
+                stringResource(translator.config.targetLanguage.nameResId)
+        } else {
+            stringResource(R.string.subtitle_translate_off)
+        }
         SubtitleSection(
+            id = "translate",
             title = stringResource(R.string.subtitle_section_translate),
             icon = Icons.Default.Translate,
             accentColor = accentColor,
-            initiallyExpanded = false
+            expanded = secTranslateExpanded,
+            onToggle = { setSectionExpanded("translate", !secTranslateExpanded) },
+            summary = translateSectionSummary
         ) {
         // Subtitle Translation Control Panel (Bing / LLM API)
         if (translator != null) {
@@ -916,10 +1015,13 @@ fun SubtitleSettingsPanel(
         // ===== Section: 显示样式 =====
         } // end section 实时翻译
         SubtitleSection(
+            id = "style",
             title = stringResource(R.string.subtitle_section_style),
             icon = Icons.Default.TextFields,
             accentColor = accentColor,
-            initiallyExpanded = true
+            expanded = secStyleExpanded,
+            onToggle = { setSectionExpanded("style", !secStyleExpanded) },
+            summary = "${fontSizeSp}sp"
         ) {
         // Realtime Preview Panel
         Column(
@@ -1230,10 +1332,13 @@ fun SubtitleSettingsPanel(
         // ===== Section: 布局与时间 =====
         } // end section 显示样式
         SubtitleSection(
+            id = "layout",
             title = stringResource(R.string.subtitle_section_layout),
             icon = Icons.Default.Tune,
             accentColor = accentColor,
-            initiallyExpanded = false
+            expanded = secLayoutExpanded,
+            onToggle = { setSectionExpanded("layout", !secLayoutExpanded) },
+            summary = "${delayMs} ms"
         ) {
         // 5. Alignment（字号已上移到「显示样式」区、字重正下方）
         Row(
@@ -1483,67 +1588,42 @@ fun SubtitleSettingsPanel(
         }
         } // end section 布局与时间
     }
-
-        // 右侧滚动条：仅当内容超出限高时才出现
-        if (panelScroll.maxValue > 0) {
-            // 可视高度 = 上面的限高（420.dp），内容超过它时才会走到这里
-            val viewH = with(density) { 420.dp.toPx() }
-            val totalH = panelScroll.maxValue + viewH
-            val thumbRatio = (viewH / totalH).coerceIn(0.15f, 1f)
-            val progress = panelScroll.value.toFloat() /
-                panelScroll.maxValue.toFloat().coerceAtLeast(1f)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight()
-                    .padding(vertical = 6.dp, horizontal = 2.dp)
-                    .width(7.dp),
-                contentAlignment = Alignment.TopEnd
-            ) {
-                // 轨道
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.10f))
-                )
-                // 滑块
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .fillMaxHeight(thumbRatio)
-                        .offset {
-                            IntOffset(0, ((1f - thumbRatio) * progress * viewH).roundToInt())
-                        }
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(accentColor.copy(alpha = 0.75f))
-                )
-            }
-        }
     }
 }
 
 /**
  * Collapsible section header used to group the subtitle settings into tidy,
  * foldable blocks instead of one long scrolling list.
+ *
+ * v2.0.158：改为**受控组件** —— 展开状态由调用方持有并持久化到 prefs（原先内部是
+ * `remember { mutableStateOf(initiallyExpanded) }`，关闭设置再打开就回到默认值，
+ * 用户每次都得重新展开自己关心的块）。同时折叠时在标题右侧显示**当前值摘要**，
+ * 展开/收起带过渡动画，不再瞬间跳变。
+ *
+ * @param id      稳定标识（仅用于 testTag，便于 UI 自动化定位）
+ * @param expanded 是否展开（受控）
+ * @param onToggle 点击标题的回调
+ * @param summary  折叠时显示的摘要，如「Google 免密 · 简体中文」
  */
 @Composable
 private fun SubtitleSection(
+    id: String,
     title: String,
     icon: ImageVector,
     accentColor: Color,
-    initiallyExpanded: Boolean = false,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    summary: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    var expanded by remember { mutableStateOf(initiallyExpanded) }
     Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 6.dp, vertical = 8.dp),
+                .clickable { onToggle() }
+                .padding(horizontal = 6.dp, vertical = 8.dp)
+                .testTag("subtitle_section_$id"),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -1558,8 +1638,24 @@ private fun SubtitleSection(
                 color = Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
+                maxLines = 1,
+                modifier = Modifier.weight(1f, fill = false)
             )
+            // 折叠状态下把「当前值」显示在标题右侧，不用展开就能看到现状
+            if (!expanded && !summary.isNullOrBlank()) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = summary,
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
             Icon(
                 imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                 contentDescription = null,
@@ -1572,8 +1668,13 @@ private fun SubtitleSection(
             color = Color.White.copy(alpha = 0.08f),
             modifier = Modifier.padding(horizontal = 6.dp)
         )
-        if (expanded) {
-            content()
+        // v2.0.158：展开/收起加动画，避免长列表瞬间跳变（手感更稳）
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column { content() }
         }
     }
 }
