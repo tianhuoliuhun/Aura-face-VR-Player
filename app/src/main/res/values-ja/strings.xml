@@ -270,8 +270,15 @@
     <string name="beauty_3d_disabled">3D では無効</string>
     <string name="beauty_status_2d">2D モード（%1$s）：すべての美顔が利用可能。ポートレート加工（小顔/大きな目/リップ等）には顔検出が必要</string>
     <string name="beauty_status_3d">3D モード（%1$s）：美肌/美白など共通効果のみ有効。小顔/大きな目/リップなどの 2D 加工は無効（2D に戻すと自動復帰）</string>
-    <string name="beauty_compare_original">元画像と比較</string>
-    <string name="beauty_compare_desc">オンにすると一時的に美顔をすべて外し、効果を比較できます</string>
+    <string name="beauty_compare_original">美顔スイッチ</string>
+    <string name="beauty_compare_desc">オフの間は美顔処理を行いません</string>
+    <string name="beauty_engine_title">美顔エンジン</string>
+    <string name="beauty_engine_glsl">GLSL（内蔵）</string>
+    <string name="beauty_engine_gpupixel">GPUPixel</string>
+    <string name="beauty_engine_unavailable">GPUPixel はこの端末で利用できません。GLSL エンジンを維持します</string>
+    <string name="beauty_gp_sharpen">シャープ化</string>
+    <string name="beauty_gp_vr_face">VR 映像の顔美顔</string>
+    <string name="beauty_gp_vr_face_desc">VR / 全景モードでも顔美顔を適用します（負荷が大きいため既定はオフ）</string>
     <string name="beauty_preset_custom">カスタム</string>
     <string name="cd_gyro_on">ジャイロオン</string>
     <string name="cd_gyro_off">ジャイロオフ</string>

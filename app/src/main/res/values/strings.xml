@@ -292,8 +292,15 @@
     <string name="beauty_3d_disabled">3D 停用</string>
     <string name="beauty_status_2d">当前 2D 模式（%1$s）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸</string>
     <string name="beauty_status_3d">当前 3D 模式（%1$s）：仅磨皮/美白等通用效果生效；瘦脸/大眼/口红等 2D 人像精修已停用，切换 2D 模式后自动恢复</string>
-    <string name="beauty_compare_original">对比原图</string>
-    <string name="beauty_compare_desc">开启后临时关闭全部美颜，直观对比效果</string>
+    <string name="beauty_compare_original">美颜开关</string>
+    <string name="beauty_compare_desc">关闭后画面不做任何美颜处理</string>
+    <string name="beauty_engine_title">美颜方案</string>
+    <string name="beauty_engine_glsl">GLSL（内置）</string>
+    <string name="beauty_engine_gpupixel">GPUPixel</string>
+    <string name="beauty_engine_unavailable">GPUPixel 不可用（当前设备不支持），已保持 GLSL 引擎</string>
+    <string name="beauty_gp_sharpen">锐化</string>
+    <string name="beauty_gp_vr_face">VR 视频人脸美颜</string>
+    <string name="beauty_gp_vr_face_desc">在 VR / 全景模式下也应用人脸美颜（性能开销较大，默认关闭）</string>
     <string name="beauty_preset_custom">自定义</string>
 
     <!-- ===== batch ===== -->

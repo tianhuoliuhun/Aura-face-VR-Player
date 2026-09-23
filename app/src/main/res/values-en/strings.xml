@@ -293,8 +293,15 @@
     <string name="beauty_3d_disabled">Disabled in 3D</string>
     <string name="beauty_status_2d">2D mode (%1$s): all effects available; portrait retouch needs a detected face</string>
     <string name="beauty_status_3d">3D mode (%1$s): only general effects apply; portrait retouch is off until you switch to 2D</string>
-    <string name="beauty_compare_original">Compare with original</string>
-    <string name="beauty_compare_desc">Temporarily disables all beauty effects for an A/B view</string>
+    <string name="beauty_compare_original">Beauty Switch</string>
+    <string name="beauty_compare_desc">When off, no beauty processing is applied</string>
+    <string name="beauty_engine_title">Beauty Engine</string>
+    <string name="beauty_engine_glsl">GLSL (built-in)</string>
+    <string name="beauty_engine_gpupixel">GPUPixel</string>
+    <string name="beauty_engine_unavailable">GPUPixel is unavailable on this device; staying on the GLSL engine</string>
+    <string name="beauty_gp_sharpen">Sharpen</string>
+    <string name="beauty_gp_vr_face">VR face beauty</string>
+    <string name="beauty_gp_vr_face_desc">Also apply face beauty in VR / panoramic mode (heavier on performance, off by default)</string>
     <string name="beauty_preset_custom">Custom</string>
 
     <!-- ===== batch ===== -->

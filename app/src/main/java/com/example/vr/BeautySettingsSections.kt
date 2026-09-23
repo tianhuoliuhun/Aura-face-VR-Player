@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -401,6 +403,127 @@ fun BeautyModeHintBar(
 }
 
 /** 对比原图开关：开启后临时关闭全部美颜 */
+/**
+ * v2.0.160：美颜方案选择（GLSL / GPUPixel 双引擎）+ GPUPixel 专属参数区。
+ * 两套引擎的参数完全独立（GLSL 走 beauty_* prefs，GPUPixel 走 beauty_gp_* prefs），
+ * UI 上按当前引擎只显示该引擎支持的滑块 —— 满足「细分选项可不同、分别配置」。
+ */
+@Composable
+fun BeautyEngineSection(
+    accentColor: Color,
+    engineType: Int,
+    gpuPixelAvailable: Boolean,
+    onEngineChange: (Int) -> Unit,
+    gpSmooth: Float,
+    onGpSmoothChange: (Float) -> Unit,
+    gpWhite: Float,
+    onGpWhiteChange: (Float) -> Unit,
+    gpSharpen: Float,
+    onGpSharpenChange: (Float) -> Unit,
+    gpSlim: Float,
+    onGpSlimChange: (Float) -> Unit,
+    gpEyeZoom: Float,
+    onGpEyeZoomChange: (Float) -> Unit,
+    vrFace: Boolean,
+    onVrFaceChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        SectionTitle(stringResource(R.string.beauty_engine_title), accentColor)
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            EngineButton(
+                label = stringResource(R.string.beauty_engine_glsl),
+                selected = engineType == BEAUTY_ENGINE_GLSL,
+                enabled = true,
+                onClick = { onEngineChange(BEAUTY_ENGINE_GLSL) },
+                accentColor = accentColor,
+                modifier = Modifier.weight(1f)
+            )
+            EngineButton(
+                label = stringResource(R.string.beauty_engine_gpupixel),
+                selected = engineType == BEAUTY_ENGINE_GPUPIXEL,
+                enabled = gpuPixelAvailable,
+                onClick = { onEngineChange(BEAUTY_ENGINE_GPUPIXEL) },
+                accentColor = accentColor,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        if (!gpuPixelAvailable) {
+            Text(
+                text = "arm64-v8a / armeabi-v7a only",
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 9.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+
+        if (engineType == BEAUTY_ENGINE_GPUPIXEL) {
+            BeautySliderItem(stringResource(R.string.beauty_smooth), gpSmooth, onGpSmoothChange, accentColor = accentColor)
+            BeautySliderItem(stringResource(R.string.beauty_whitening), gpWhite, onGpWhiteChange, accentColor = accentColor)
+            BeautySliderItem(stringResource(R.string.beauty_gp_sharpen), gpSharpen, onGpSharpenChange, accentColor = accentColor)
+            BeautySliderItem(stringResource(R.string.beauty_face_slim), gpSlim, onGpSlimChange, accentColor = accentColor)
+            BeautySliderItem(stringResource(R.string.beauty_big_eyes), gpEyeZoom, onGpEyeZoomChange, accentColor = accentColor)
+
+            // v2.0.160（P3）：VR 视频人脸美颜 —— 屏幕空间后处理，默认关
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.beauty_gp_vr_face),
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.beauty_gp_vr_face_desc),
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 9.sp
+                    )
+                }
+                Switch(
+                    checked = vrFace,
+                    onCheckedChange = onVrFaceChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = accentColor
+                    )
+                )
+            }
+        }
+    }
+}
+
+/** 引擎选择按钮（选中 = accent 底 + 深色字；未选中 = 半透明白底） */
+@Composable
+private fun EngineButton(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) accentColor else Color.White.copy(alpha = 0.08f))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = if (selected) Color.Black else Color.White.copy(alpha = if (enabled) 0.85f else 0.35f),
+            fontSize = 10.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+        )
+    }
+}
+
 @Composable
 fun BeautyCompareSwitch(
     checked: Boolean,

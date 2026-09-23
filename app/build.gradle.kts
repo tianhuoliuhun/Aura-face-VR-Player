@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 159
-    versionName = "2.0.159"
+    versionCode = 160
+    versionName = "2.0.160"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -138,7 +138,11 @@ tasks.register("dumpDependencies") {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
-  // v102：GPUPixel 原生美颜引擎已移除（删除 aar），改用内置 GLSL shader 美颜方案
+  // v102 曾移除 GPUPixel；v2.0.160 按双引擎规划重新引入为「可选方案」（默认仍是 GLSL）。
+  // AAR 取自官方 Release v1.3.1：自带 arm64-v8a / armeabi-v7a 两个 ABI 的 .so，
+  // 以及 Mars-Face 模型（face_det / face_align .mars_model）与妆容素材（AAR assets 自动合并）。
+  // 注意：官方预编译包**不含 x86_64** —— 模拟器上会初始化失败，运行时自动回退 GLSL 引擎。
+  implementation(files("libs/gpupixel-release.aar"))
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)

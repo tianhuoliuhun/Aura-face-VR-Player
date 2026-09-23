@@ -169,7 +169,33 @@ fun VRPlayerScreen(
             } else BEAUTY_PRESET_CUSTOM
         )
     }
-    var beautyCompareEnabled by remember { mutableStateOf(false) } // 对比原图开关
+    // v2.0.160：原「对比原图」改为「美颜总开关」（默认开；关闭 = 直通原图，等价旧对比模式）
+    var beautyMasterEnabled by remember {
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_master_enabled", true) else true)
+    }
+    // v2.0.160：美颜引擎（0 = GLSL 内置，1 = GPUPixel）。两套引擎的检测与参数完全独立
+    var beautyEngineType by remember {
+        mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("beauty_engine_type", BEAUTY_ENGINE_GLSL) else BEAUTY_ENGINE_GLSL)
+    }
+    var beautyGpSmooth by remember {
+        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_smooth", 0.7f) else 0.7f)
+    }
+    var beautyGpWhite by remember {
+        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_white", 0.4f) else 0.4f)
+    }
+    var beautyGpSharpen by remember {
+        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_sharpen", 0.3f) else 0.3f)
+    }
+    var beautyGpSlim by remember {
+        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_slim", 0.4f) else 0.4f)
+    }
+    var beautyGpEyeZoom by remember {
+        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_eye_zoom", 0.3f) else 0.3f)
+    }
+    // v2.0.160（P3）：GPUPixel 方案下把人脸美颜也应用到 VR/全景视频（屏幕空间后处理，默认关）
+    var gpuPixelVrFaceBeauty by remember {
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_gp_vr_face", false) else false)
+    }
     var beautyLevel by remember {
         mutableFloatStateOf(
             if (isMemoryModeEnabled) prefs.getFloat("beauty_level", 0.65f) else 0.65f
@@ -883,6 +909,15 @@ fun VRPlayerScreen(
                 putInt("stereo_mode", stereoMode.id)
                 putFloat("beauty_level", beautyLevel)
                 putFloat("beauty_texture_detail", beautyTextureDetail)
+                // v2.0.160：双引擎相关
+                putBoolean("beauty_master_enabled", beautyMasterEnabled)
+                putInt("beauty_engine_type", beautyEngineType)
+                putFloat("beauty_gp_smooth", beautyGpSmooth)
+                putFloat("beauty_gp_white", beautyGpWhite)
+                putFloat("beauty_gp_sharpen", beautyGpSharpen)
+                putFloat("beauty_gp_slim", beautyGpSlim)
+                putFloat("beauty_gp_eye_zoom", beautyGpEyeZoom)
+                putBoolean("beauty_gp_vr_face", gpuPixelVrFaceBeauty)
                 putFloat("brightness_level", brightnessLevel)
                 putFloat("contrast_level", contrastLevel)
                 putFloat("beauty_whitening", beautyWhitening)
@@ -2394,7 +2429,14 @@ fun VRPlayerScreen(
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel
                 view.renderer.beautyTextureDetail = beautyTextureDetail
-                view.renderer.beautyCompareEnabled = beautyCompareEnabled
+                view.renderer.beautyMasterEnabled = beautyMasterEnabled
+                view.renderer.beautyEngineType = beautyEngineType
+                view.renderer.beautyGpSmooth = beautyGpSmooth
+                view.renderer.beautyGpWhite = beautyGpWhite
+                view.renderer.beautyGpSharpen = beautyGpSharpen
+                view.renderer.beautyGpSlim = beautyGpSlim
+                view.renderer.beautyGpEyeZoom = beautyGpEyeZoom
+                view.renderer.gpuPixelVrFaceBeauty = gpuPixelVrFaceBeauty
                 view.renderer.brightnessLevel = brightnessLevel
                 view.renderer.contrastLevel = contrastLevel
                 view.renderer.beautyWhitening = beautyWhitening
@@ -4773,12 +4815,50 @@ BatchTranscribeSection(
                                 // v120 拆分：模式提示条 / 对比原图 / 美颜预设 → BeautySettingsSections.kt
                                 BeautyModeHintBar(is2DMode = is2DBeautyMode, modeName = stringResource(projectionMode.labelRes))
 
+                                // v2.0.160：对比原图 → 美颜总开关（默认开；关闭 = 直通原图）
                                 BeautyCompareSwitch(
-                                    checked = beautyCompareEnabled,
-                                    onCheckedChange = { beautyCompareEnabled = it; keepUiAlight() },
+                                    checked = beautyMasterEnabled,
+                                    onCheckedChange = { beautyMasterEnabled = it; keepUiAlight() },
                                     accentColor = AccentColor,
                                     accentOnColor = AccentOnColor
                                 )
+
+                                // v2.0.160：美颜方案选择（GLSL / GPUPixel 双引擎）。
+                                // GPUPixel 不可用（ABI 不支持 / init 失败）时弹提示并自动保持 GLSL。
+                                val engineContext = LocalContext.current
+                                BeautyEngineSection(
+                                    accentColor = AccentColor,
+                                    engineType = beautyEngineType,
+                                    gpuPixelAvailable = GpuPixelBeauty.available,
+                                    onEngineChange = { type ->
+                                        // 具名参数 lambda 没有 return@ 标签，这里用 if/else 分支代替提前 return
+                                        if (type == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available && !GpuPixelBeauty.init(engineContext)) {
+                                            Toast.makeText(
+                                                engineContext,
+                                                engineContext.getString(R.string.beauty_engine_unavailable),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            beautyEngineType = type
+                                            keepUiAlight()
+                                        }
+                                    },
+                                    gpSmooth = beautyGpSmooth,
+                                    onGpSmoothChange = { beautyGpSmooth = it; keepUiAlight() },
+                                    gpWhite = beautyGpWhite,
+                                    onGpWhiteChange = { beautyGpWhite = it; keepUiAlight() },
+                                    gpSharpen = beautyGpSharpen,
+                                    onGpSharpenChange = { beautyGpSharpen = it; keepUiAlight() },
+                                    gpSlim = beautyGpSlim,
+                                    onGpSlimChange = { beautyGpSlim = it; keepUiAlight() },
+                                    gpEyeZoom = beautyGpEyeZoom,
+                                    onGpEyeZoomChange = { beautyGpEyeZoom = it; keepUiAlight() },
+                                    vrFace = gpuPixelVrFaceBeauty,
+                                    onVrFaceChange = { gpuPixelVrFaceBeauty = it; keepUiAlight() }
+                                )
+
+                                // v2.0.160：GLSL 专属参数区（GPUPixel 模式下显示其自带参数区，避免混淆）
+                                if (beautyEngineType == BEAUTY_ENGINE_GLSL) {
 
                                 BeautyPresetRow(
                                     presetId = beautyPreset,
@@ -4800,6 +4880,7 @@ BatchTranscribeSection(
                                     whiteningLevel = beautyWhitening,
                                     onWhiteningLevelChange = { beautyWhitening = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
                                 )
+                                } // v2.0.160：end if GLSL（通用美颜参数区，LUT 调色不受引擎影响）
 
                                 LutFilterSection(
                                     accentColor = AccentColor,
@@ -4814,6 +4895,7 @@ BatchTranscribeSection(
                                     onUserInteraction = { keepUiAlight() }
                                 )
 
+                                if (beautyEngineType == BEAUTY_ENGINE_GLSL) {
                                 PortraitRetouchSection(
                                     accentColor = AccentColor,
                                     enabled = is2DBeautyMode,
@@ -4831,6 +4913,7 @@ BatchTranscribeSection(
                                         PortraitParam(stringResource(R.string.beauty_small_head), beautySmallHead) { beautySmallHead = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
                                     )
                                 )
+                                } // v2.0.160：end if GLSL（人像精修区，瘦脸/大眼等由 GPUPixel 滑块替代）
                                 }
                                 /** 设置面板底部：记忆模式开关 + 确认并应用按钮 */
                                 @Composable

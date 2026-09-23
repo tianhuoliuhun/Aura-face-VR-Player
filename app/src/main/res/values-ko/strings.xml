@@ -270,8 +270,15 @@
     <string name="beauty_3d_disabled">3D에서는 사용 안 함</string>
     <string name="beauty_status_2d">2D 모드(%1$s): 모든 미용 사용 가능. 인물 보정(얼굴 축소/큰 눈/립스틱 등)은 얼굴 인식 필요</string>
     <string name="beauty_status_3d">3D 모드(%1$s): 매끄러운 피부/미백 등 공통 효과만 적용. 2D 인물 보정은 꺼지며 2D로 전환하면 자동 복구</string>
-    <string name="beauty_compare_original">원본과 비교</string>
-    <string name="beauty_compare_desc">켜면 모든 미용 효과를 일시적으로 끄고 비교할 수 있습니다</string>
+    <string name="beauty_compare_original">미용 스위치</string>
+    <string name="beauty_compare_desc">꺼진 동안에는 미용 처리를 하지 않습니다</string>
+    <string name="beauty_engine_title">미용 엔진</string>
+    <string name="beauty_engine_glsl">GLSL(내장)</string>
+    <string name="beauty_engine_gpupixel">GPUPixel</string>
+    <string name="beauty_engine_unavailable">GPUPixel 을 이 기기에서 사용할 수 없어 GLSL 엔진을 유지합니다</string>
+    <string name="beauty_gp_sharpen">선명화</string>
+    <string name="beauty_gp_vr_face">VR 영상 얼굴 미용</string>
+    <string name="beauty_gp_vr_face_desc">VR / 파노라마 모드에서도 얼굴 미용을 적용합니다(부하가 커서 기본 꺼짐)</string>
     <string name="beauty_preset_custom">사용자 지정</string>
     <string name="cd_gyro_on">자이로 켜짐</string>
     <string name="cd_gyro_off">자이로 꺼짐</string>

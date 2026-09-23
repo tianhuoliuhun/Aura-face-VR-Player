@@ -261,7 +261,33 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var placeholderTextureId = -1
 
     // ===== 美颜对比模式（v102：GPUPixel 已移除，纯 shader 美颜）=====
-    @Volatile var beautyCompareEnabled = false // 对比模式：关闭全部美颜显示原图（VRPlayerScreen 控制）
+    /** v2.0.160：美颜总开关（由原「对比原图」改造而来；false = 直通原图） */
+    @Volatile var beautyMasterEnabled = true
+    /** v2.0.160：美颜引擎。0 = GLSL（内置），1 = GPUPixel（独立 Mars-Face 检测 + 人脸区域处理） */
+    @Volatile var beautyEngineType = BEAUTY_ENGINE_GLSL
+    // ---- GPUPixel 引擎参数（与 GLSL 参数独立，prefs 前缀 beauty_gp_*）----
+    @Volatile var beautyGpSmooth = 0.7f
+    @Volatile var beautyGpWhite = 0.4f
+    @Volatile var beautyGpSharpen = 0.3f
+    @Volatile var beautyGpSlim = 0.4f
+    @Volatile var beautyGpEyeZoom = 0.3f
+    /** v2.0.160（P3）：GPUPixel 方案下把人脸美颜也应用到 VR/全景视频（屏幕空间后处理）。默认关 */
+    @Volatile var gpuPixelVrFaceBeauty = false
+    // GPUPixel 处理结果（faceExecutor 产出 → GL 线程贴回 FBO）
+    @Volatile private var gpRegionPending: ByteArray? = null
+    private var gpRegionW = 0
+    private var gpRegionH = 0
+    private var lastSampleX0 = 0
+    private var lastSampleY0 = 0
+    // GPUPixel 模式的离屏渲染目标（画到 FBO → 区域处理贴回 → blit 上屏）
+    private var gpFboId = 0
+    private var gpFboTexId = 0
+    private var gpFboW = 0
+    private var gpFboH = 0
+    private var gpBlitProgram = 0
+    private var gpBlitPosLoc = 0
+    private var gpBlitTexLoc = 0
+    private var gpBlitQuad: java.nio.FloatBuffer? = null
 
     // ===== v104 LUT 视频滤镜 =====
     @Volatile var lutMix = 0f                  // 0=关闭 ~ 1=完全应用（VRPlayerScreen 控制）
@@ -733,7 +759,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     // 非皮肤：只做轻微降噪，避免背景与边缘被过度处理
                     color.rgb = mix(color.rgb, smoothed, uBeautyStrength * 0.25);
                 }
-                }
             }
             
             // Apply advanced fine cosmetics
@@ -1085,6 +1110,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
 
         // Clear screen
+        // v2.0.160：GPUPixel 引擎激活时先画到离屏 FBO（绘制完做「人脸区域处理 + 贴回」再上屏）。
+        // 惰性初始化 GPUPixel：失败一次即标记不可用，UI 据此弹提示并自动回退 GLSL。
+        if (beautyEngineType == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available) {
+            GpuPixelBeauty.init(context)
+        }
+        val gpActive = isGpuPixelActive()
+        if (gpActive) {
+            ensureGpFbo(displayWidth, displayHeight)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, gpFboId)
+        }
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
         // v102：视频/图片统一走主程序 shader（美颜在片元着色器内实时计算）
@@ -1137,7 +1172,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         
         // Sync beauty filter state with GL pipeline
         // 对比模式：所有美颜 uniform 归零，仅保留亮度/对比度等调色
-        val bc = if (beautyCompareEnabled) 0f else 1f
+        // v2.0.160：原「对比原图」改为「美颜总开关」；且 GLSL 美颜只在 GLSL 引擎下生效
+        // （GPUPixel 引擎下由其独立滤镜负责，避免双重磨皮/美白叠加）
+        val bc = if (beautyMasterEnabled && beautyEngineType == BEAUTY_ENGINE_GLSL) 1f else 0f
         uniform1f(prog.hBeautyStrength, beautyLevel * bc)
         // v2.0.159：磨皮的高频保留度。刻意不随对比模式归零 —— 对比模式下磨皮本身不执行（
         // uBeautyStrength = 0），这个值不会被用到。
@@ -1161,7 +1198,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform1f(prog.hEyebrows, beautyEyebrows * bc)
         uniform1f(prog.hLongLegs, beautyLongLegs * bc)
         uniform1f(prog.hSmallHead, beautySmallHead * bc)
-        uniform1i(prog.hFaceDetected, if (beautyCompareEnabled) 0 else faceDetectedUniform)
+        uniform1i(prog.hFaceDetected, if (bc > 0f) faceDetectedUniform else 0)
         uniform2f(prog.hFaceCenter, faceCenterXUniform, faceCenterYUniform)
         uniform1f(prog.hEyeDistance, eyeDistanceUniform)
 
@@ -1209,7 +1246,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 面部效果（瘦脸/大眼/妆容等）只在 `uProjectionMode == 0` 时生效。
         val isPlanarFaceMode = projectionMode == ProjectionMode.STANDARD ||
             projectionMode == ProjectionMode.FISHEYE
-        if (isPlanarFaceMode) maybeScheduleFaceSampling()
+        // v2.0.160：GPUPixel 的「VR 视频人脸美颜」开启时，非平面模式也采样（屏幕空间后处理）
+        if (isPlanarFaceMode || (gpActive && gpuPixelVrFaceBeauty)) maybeScheduleFaceSampling()
+
+        // v2.0.160：GPUPixel 链路收尾 —— 把后台处理完的人脸区域写回 FBO，再将整帧 blit 到屏幕
+        if (gpActive) {
+            uploadPendingGpRegion()
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            blitToScreen()
+        }
     }
 
     private fun calculateAndApplyMatrices(isLeft: Boolean, aspect: Float, mvpLoc: Int) {
@@ -1533,7 +1578,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 「对比原图」模式下 shader 会强制 `uFaceDetected = 0`，同样无需检测。
      */
     private fun isBeautyActive(): Boolean {
-        if (beautyCompareEnabled) return false
+        if (!beautyMasterEnabled) return false
+        // v2.0.160：GPUPixel 引擎激活时（含 VR 人脸美颜），区域处理本身也需要采样
+        if (isGpuPixelActive()) return true
         return beautyFaceSlimming > 0.001f || beautyBigEyes > 0.001f ||
             beautyDarkCircles > 0.001f || beautyNoseSlimming > 0.001f ||
             beautyMouth > 0.001f || beautyTeethWhitening > 0.001f ||
@@ -1576,6 +1623,124 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 注：`glReadPixels` 是同步回读，在 GLES2 下无法用 PBO 异步化
      * （本项目 `setEGLContextClientVersion(2)`），故通过「减少无谓采样 + 复用缓冲」控制代价。
      */
+    // ===== v2.0.160：GPUPixel 双引擎支持 =====
+
+    /** GPUPixel 链路是否激活：总开关 + 引擎选择 + 初始化成功 +（平面模式 或 VR 人脸美颜开） */
+    private fun isGpuPixelActive(): Boolean {
+        if (!beautyMasterEnabled || beautyEngineType != BEAUTY_ENGINE_GPUPIXEL) return false
+        if (!GpuPixelBeauty.available) return false
+        return isPlanarProjection() || gpuPixelVrFaceBeauty
+    }
+
+    private fun isPlanarProjection(): Boolean =
+        projectionMode == ProjectionMode.STANDARD || projectionMode == ProjectionMode.FISHEYE
+
+    /** 创建（或按尺寸重建）GPUPixel 模式的离屏 FBO */
+    private fun ensureGpFbo(w: Int, h: Int) {
+        if (gpFboId != 0 && gpFboW == w && gpFboH == h) return
+        releaseGpFbo()
+        val tex = IntArray(1)
+        val fbo = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glGenFramebuffers(1, fbo, 0)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex[0], 0)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        gpFboTexId = tex[0]
+        gpFboId = fbo[0]
+        gpFboW = w
+        gpFboH = h
+        ensureBlitProgram()
+    }
+
+    private fun releaseGpFbo() {
+        if (gpFboTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpFboTexId), 0)
+        if (gpFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpFboId), 0)
+        gpFboTexId = 0; gpFboId = 0; gpFboW = 0; gpFboH = 0
+    }
+
+    /** 极简上屏 pass：把 FBO 纹理 1:1 画回屏幕（FBO 与屏幕同为 GL 左下原点约定，直接对应即可） */
+    private fun ensureBlitProgram() {
+        if (gpBlitProgram != 0) return
+        val vs = "attribute vec2 aPos;attribute vec2 aTex;varying vec2 vTex;" +
+            "void main(){gl_Position=vec4(aPos,0.0,1.0);vTex=aTex;}"
+        val fs = "precision mediump float;varying vec2 vTex;uniform sampler2D uTex;" +
+            "void main(){gl_FragColor=texture2D(uTex,vTex);}"
+        val vsId = compileGpuShader(GLES20.GL_VERTEX_SHADER, vs)
+        val fsId = compileGpuShader(GLES20.GL_FRAGMENT_SHADER, fs)
+        if (vsId == 0 || fsId == 0) return
+        val prog = GLES20.glCreateProgram()
+        GLES20.glAttachShader(prog, vsId)
+        GLES20.glAttachShader(prog, fsId)
+        GLES20.glLinkProgram(prog)
+        gpBlitProgram = prog
+        gpBlitPosLoc = GLES20.glGetAttribLocation(prog, "aPos")
+        gpBlitTexLoc = GLES20.glGetUniformLocation(prog, "uTex")
+        if (gpBlitQuad == null) {
+            // TRIANGLE_STRIP：左下、右下、左上、右上（pos x,y + tex u,v）
+            gpBlitQuad = java.nio.ByteBuffer.allocateDirect(4 * 4 * 4)
+                .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer().apply {
+                    put(floatArrayOf(
+                        -1f, -1f, 0f, 0f,
+                        1f, -1f, 1f, 0f,
+                        -1f, 1f, 0f, 1f,
+                        1f, 1f, 1f, 1f
+                    ))
+                    position(0)
+                }
+        }
+    }
+
+    private fun compileGpuShader(type: Int, src: String): Int {
+        val id = GLES20.glCreateShader(type)
+        GLES20.glShaderSource(id, src)
+        GLES20.glCompileShader(id)
+        return id
+    }
+
+    private fun blitToScreen() {
+        if (gpBlitProgram == 0 || gpBlitQuad == null) return
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glViewport(0, 0, gpFboW, gpFboH)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glUseProgram(gpBlitProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gpFboTexId)
+        GLES20.glUniform1i(gpBlitTexLoc, 0)
+        val q = gpBlitQuad!!
+        q.position(0)
+        GLES20.glVertexAttribPointer(gpBlitPosLoc, 2, GLES20.GL_FLOAT, false, 16, q)
+        GLES20.glEnableVertexAttribArray(gpBlitPosLoc)
+        val texAttr = GLES20.glGetAttribLocation(gpBlitProgram, "aTex")
+        q.position(2)
+        GLES20.glVertexAttribPointer(texAttr, 2, GLES20.GL_FLOAT, false, 16, q)
+        GLES20.glEnableVertexAttribArray(texAttr)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(gpBlitPosLoc)
+        GLES20.glDisableVertexAttribArray(texAttr)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+    }
+
+    /** 把后台 GPUPixel 处理完的人脸区域像素写回 FBO 纹理（区域与回读时一致） */
+    private fun uploadPendingGpRegion() {
+        val bytes = gpRegionPending ?: return
+        gpRegionPending = null
+        if (gpFboTexId == 0 || gpRegionW <= 0 || gpRegionH <= 0) return
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gpFboTexId)
+        GLES20.glTexSubImage2D(
+            GLES20.GL_TEXTURE_2D, 0, lastSampleX0, lastSampleY0, gpRegionW, gpRegionH,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, java.nio.ByteBuffer.wrap(bytes)
+        )
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+    }
+
     private fun maybeScheduleFaceSampling() {
         if (!isBeautyActive()) {
             faceFrameCounter = 0
@@ -1594,6 +1759,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val y0 = (h - rh) / 2
         faceCropScaleX = rw.toFloat() / w
         faceCropScaleY = rh.toFloat() / h
+        // v2.0.160：记录回读区域（窗口坐标）—— GPUPixel 的处理结果要贴回同一区域
+        lastSampleX0 = x0
+        lastSampleY0 = y0
 
         try {
             val need = rw * rh * 4
@@ -1641,6 +1809,21 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         isDetectingFace.set(true)
         faceExecutor.execute {
             try {
+                // v2.0.160：GPUPixel 引擎分支 —— 独立检测（Mars-Face）+ 局部处理，不碰 MediaPipe。
+                // 一次回读的像素可以同时作为两套引擎的输入（共享的是像素，不是检测结果）。
+                if (isGpuPixelActive()) {
+                    val out = GpuPixelBeauty.getOrCreatePipeline().process(
+                        rgbaData, fw, fh, fw * 4,
+                        beautyGpSmooth, beautyGpWhite, beautyGpSharpen, beautyGpSlim, beautyGpEyeZoom
+                    )
+                    if (out != null) {
+                        gpRegionW = fw
+                        gpRegionH = fh
+                        // GPUPixel 内部可能复用输出 buffer，必须拷贝出一份再交 GL 线程贴回
+                        gpRegionPending = out.copyOf()
+                    }
+                    return@execute
+                }
                 // v84 性能优化：复用 Bitmap/数组缓冲（faceExecutor 单线程，安全）
                 val area = fw * fh
                 if (faceArgBuffer == null || faceArgBuffer!!.size < area) {
