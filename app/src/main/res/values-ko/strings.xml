@@ -275,7 +275,7 @@
     <string name="beauty_engine_title">미용 엔진</string>
     <string name="beauty_engine_glsl">GLSL(내장)</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
-    <string name="beauty_engine_unavailable">GPUPixel 을 이 기기에서 사용할 수 없어 GLSL 엔진을 유지합니다</string>
+    <string name="beauty_engine_unavailable">GPUPixel 초기화 실패, GLSL 엔진을 유지합니다</string>
     <string name="beauty_gp_sharpen">선명화</string>
     <string name="beauty_gp_vr_face">VR 영상 얼굴 미용</string>
     <string name="beauty_gp_vr_face_desc">VR / 파노라마 모드에서도 얼굴 미용을 적용합니다(부하가 커서 기본 꺼짐)</string>

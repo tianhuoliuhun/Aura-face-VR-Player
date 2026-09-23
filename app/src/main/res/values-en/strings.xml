@@ -298,7 +298,7 @@
     <string name="beauty_engine_title">Beauty Engine</string>
     <string name="beauty_engine_glsl">GLSL (built-in)</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
-    <string name="beauty_engine_unavailable">GPUPixel is unavailable on this device; staying on the GLSL engine</string>
+    <string name="beauty_engine_unavailable">GPUPixel failed to initialize; staying on the GLSL engine</string>
     <string name="beauty_gp_sharpen">Sharpen</string>
     <string name="beauty_gp_vr_face">VR face beauty</string>
     <string name="beauty_gp_vr_face_desc">Also apply face beauty in VR / panoramic mode (heavier on performance, off by default)</string>

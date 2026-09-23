@@ -1,7 +1,6 @@
 package com.example.vr
 
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import com.pixpark.gpupixel.FaceDetector
 import com.pixpark.gpupixel.GPUPixel
@@ -40,14 +39,10 @@ const val BEAUTY_ENGINE_GPUPIXEL = 1
 object GpuPixelBeauty {
     private const val TAG = "GpuPixelBeauty"
 
-    /** init 成功且 ABI 受支持时为 true；否则上层必须回退 GLSL 并提示 */
+    /** init 成功时为 true；失败由上层提示并保持 GLSL（v2.0.163 起不再做 ABI 门槛） */
     @Volatile
     var available: Boolean = false
         private set
-
-    /** 设备 ABI 不在官方包覆盖内（永久失败，不再尝试） */
-    @Volatile
-    private var abiUnsupported = false
 
     /** 上次 init 失败的时刻（自动重试的 60s 冷却；UI 主动点击可跳过） */
     @Volatile
@@ -55,42 +50,34 @@ object GpuPixelBeauty {
 
     private var pipeline: Pipeline? = null
 
-    /** 当前设备 ABI 是否在官方预编译包的覆盖范围内 */
-    fun isAbiSupported(): Boolean =
-        Build.SUPPORTED_ABIS.any { it == "arm64-v8a" || it == "armeabi-v7a" }
-
     /**
      * 初始化（幂等、绝不抛异常）。
      *
-     * v2.0.161：重试语义修正 —— 之前「失败一次永久锁死」（initTried），
-     * 现在只有 **ABI 不支持是永久失败**（官方包没有对应 .so，重试无意义）；
-     * 其他失败（loadLibrary 失败等）允许重试：UI 主动点击传 [force]=true 立即重试，
-     * onDrawFrame 的自动兜底走 60s 冷却（避免每帧重试 loadLibrary）。
+     * v2.0.163：按用户决策**取消 ABI 门槛** —— 任何设备都允许尝试 GPUPixel
+     * （MuMu 的 houdini 转译环境实测也能运行 mars 库，之前的闪退根因是
+     * 错误的 property key + 空 landmarks，已修复）。初始化失败时 [available] 保持
+     * false，上层 Toast 提示并保持 GLSL 引擎。
+     *
+     * 失败重试：UI 主动点击传 [force]=true 立即重试；onDrawFrame 自动兜底走 60s 冷却
+     * （避免每帧重试 loadLibrary）。
      *
      * @param force 用户主动点击引擎按钮时传 true
      */
     @Synchronized
     fun init(context: Context, force: Boolean = false): Boolean {
         if (available) return true
-        if (abiUnsupported) return false
-        if (!isAbiSupported()) {
-            abiUnsupported = true
-            Log.w(TAG, "GPUPixel unavailable: ABIs=${Build.SUPPORTED_ABIS.contentToString()}")
-            return false
-        }
         if (!force && lastFailedMs != 0L &&
             android.os.SystemClock.uptimeMillis() - lastFailedMs < 60_000L
         ) {
             return false
         }
         return try {
-            // GPUPixel.Init 会把 AAR assets 里的 Mars-Face 模型拷到应用目录
+            // GPUPixel.Init 会把 AAR assets 里的 Mars-Face 模型拷到应用外部目录
             GPUPixel.Init(context.applicationContext)
             available = true
-            Log.i(TAG, "GPUPixel initialized (arm64-v8a/armeabi-v7a)")
+            Log.i(TAG, "GPUPixel initialized")
             true
         } catch (e: Throwable) {
-            // UnsatisfiedLinkError（so 缺失/损坏）等：冷却后自动重试，或用户点击强制重试
             lastFailedMs = android.os.SystemClock.uptimeMillis()
             Log.e(TAG, "GPUPixel init failed", e)
             false
@@ -154,16 +141,22 @@ object GpuPixelBeauty {
                 beauty?.SetProperty("blur_alpha", smooth)
                 beauty?.SetProperty("white", white)
                 beauty?.SetProperty("sharpen", sharpen)
-                // 独立检测：Mars-Face（不复用 MediaPipe）
+                // 独立检测：Mars-Face（不复用 MediaPipe）。
+                // ⚠️ 参数顺序：Java 签名 detect(data, w, h, stride, format(MODE_FMT), frameType(FRAME_TYPE))
+                // —— v2.0.160 曾把两者传反（侥幸两个常量都是 0 没出错），这里摆正。
                 val det = detector ?: FaceDetector.Create().also { detector = it }
                 val landmarks = det.detect(
                     rgba, w, h, stride,
-                    FaceDetector.GPUPIXEL_FRAME_TYPE_RGBA,
-                    FaceDetector.GPUPIXEL_MODE_FMT_VIDEO
+                    FaceDetector.GPUPIXEL_MODE_FMT_VIDEO,
+                    FaceDetector.GPUPIXEL_FRAME_TYPE_RGBA
                 )
-                reshape?.SetProperty("face_landmarks", landmarks ?: FloatArray(0))
-                reshape?.SetProperty("thin_face_delta", slim)
-                reshape?.SetProperty("big_eye_delta", eyeZoom)
+                // 官方 demo 的 key 是 **face_landmark**（单数）—— 之前写成 face_landmarks 属于未知 key；
+                // 且 detect 返回空时**不喂** native（空 FloatArray 对未验证的 native 路径有风险）
+                if (landmarks != null && landmarks.isNotEmpty()) {
+                    reshape?.SetProperty("face_landmark", landmarks)
+                    reshape?.SetProperty("thin_face_delta", slim)
+                    reshape?.SetProperty("big_eye_delta", eyeZoom)
+                }
                 source?.ProcessData(
                     rgba, w, h, stride,
                     GPUPixelSourceRawData.FRAME_TYPE_RGBA

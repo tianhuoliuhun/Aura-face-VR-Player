@@ -4829,7 +4829,6 @@ BatchTranscribeSection(
                                 BeautyEngineSection(
                                     accentColor = AccentColor,
                                     engineType = beautyEngineType,
-                                    gpuPixelAvailable = GpuPixelBeauty.available,
                                     onEngineChange = { type ->
                                         // 具名参数 lambda 没有 return@ 标签，这里用 if/else 分支代替提前 return
                                         // 用户主动点击：force=true 跳过失败冷却，立即重试

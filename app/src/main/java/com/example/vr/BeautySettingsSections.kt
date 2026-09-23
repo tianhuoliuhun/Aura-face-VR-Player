@@ -412,7 +412,6 @@ fun BeautyModeHintBar(
 fun BeautyEngineSection(
     accentColor: Color,
     engineType: Int,
-    gpuPixelAvailable: Boolean,
     onEngineChange: (Int) -> Unit,
     gpSmooth: Float,
     onGpSmoothChange: (Float) -> Unit,
@@ -451,14 +450,6 @@ fun BeautyEngineSection(
                 onClick = { onEngineChange(BEAUTY_ENGINE_GPUPIXEL) },
                 accentColor = accentColor,
                 modifier = Modifier.weight(1f)
-            )
-        }
-        if (!gpuPixelAvailable) {
-            Text(
-                text = "arm64-v8a / armeabi-v7a only",
-                color = Color.White.copy(alpha = 0.4f),
-                fontSize = 9.sp,
-                modifier = Modifier.padding(top = 2.dp)
             )
         }
 

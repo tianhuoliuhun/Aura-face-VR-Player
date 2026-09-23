@@ -297,7 +297,7 @@
     <string name="beauty_engine_title">美颜方案</string>
     <string name="beauty_engine_glsl">GLSL（内置）</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
-    <string name="beauty_engine_unavailable">GPUPixel 不可用（当前设备不支持），已保持 GLSL 引擎</string>
+    <string name="beauty_engine_unavailable">GPUPixel 初始化失败，已保持 GLSL 引擎</string>
     <string name="beauty_gp_sharpen">锐化</string>
     <string name="beauty_gp_vr_face">VR 视频人脸美颜</string>
     <string name="beauty_gp_vr_face_desc">在 VR / 全景模式下也应用人脸美颜（性能开销较大，默认关闭）</string>

@@ -275,7 +275,7 @@
     <string name="beauty_engine_title">美顔エンジン</string>
     <string name="beauty_engine_glsl">GLSL（内蔵）</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
-    <string name="beauty_engine_unavailable">GPUPixel はこの端末で利用できません。GLSL エンジンを維持します</string>
+    <string name="beauty_engine_unavailable">GPUPixel の初期化に失敗しました。GLSL エンジンを維持します</string>
     <string name="beauty_gp_sharpen">シャープ化</string>
     <string name="beauty_gp_vr_face">VR 映像の顔美顔</string>
     <string name="beauty_gp_vr_face_desc">VR / 全景モードでも顔美顔を適用します（負荷が大きいため既定はオフ）</string>
