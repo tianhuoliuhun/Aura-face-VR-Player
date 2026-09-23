@@ -257,6 +257,7 @@
     <string name="action_decline">拒否</string>
     <string name="beauty_section_common">共通の美顔・2D/3D 両方で有効</string>
     <string name="beauty_smooth">美顔の強度（肌をなめらかに）</string>
+    <string name="beauty_texture_detail">肌の質感（ディテール）</string>
     <string name="beauty_brightness">露出（明るさ）</string>
     <string name="beauty_contrast">輪郭形成（コントラスト）</string>
     <string name="beauty_whitening">美白</string>

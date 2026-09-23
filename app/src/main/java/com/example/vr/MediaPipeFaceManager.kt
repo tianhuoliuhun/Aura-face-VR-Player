@@ -128,6 +128,18 @@ class MediaPipeFaceManager(private val context: Context) {
                     val mouthX = (mouthLeft.x() + mouthRight.x() + mouthTop.x() + mouthBottom.x()) / 4f
                     val mouthY = (mouthLeft.y() + mouthRight.y() + mouthTop.y() + mouthBottom.y()) / 4f
 
+                    // v2.0.159：嘴部形状 —— 半宽用嘴角左右缘（61 / 291），
+                    // 半高用**外**唇上下缘（0 = 上唇顶、17 = 下唇底；13/14 是内唇，偏小），
+                    // 倾角用嘴角连线。这些值让 shader 能画一个贴合唇形的椭圆而不是正圆。
+                    val mouthUpperLip = landmarks[0]
+                    val mouthLowerLip = landmarks[17]
+                    val mouthHalfWidth = Math.abs(mouthRight.x() - mouthLeft.x()) / 2f
+                    val mouthHalfHeight = Math.abs(mouthLowerLip.y() - mouthUpperLip.y()) / 2f
+                    val mouthAngle = Math.atan2(
+                        (mouthRight.y() - mouthLeft.y()).toDouble(),
+                        (mouthRight.x() - mouthLeft.x()).toDouble()
+                    ).toFloat()
+
                     // Face center: horizontal center of the jaw/cheeks blended with the nose,
                     // vertical center between the eye line and the chin.
                     val centerX = ((leftCheek.x() + rightCheek.x()) / 2f + noseTip.x()) * 0.5f
@@ -147,6 +159,9 @@ class MediaPipeFaceManager(private val context: Context) {
                         mouthY = mouthY,
                         chinX = chin.x(),
                         chinY = chin.y(),
+                        mouthHalfWidth = mouthHalfWidth,
+                        mouthHalfHeight = mouthHalfHeight,
+                        mouthAngle = mouthAngle,
                         // v117 修复：此前漏传该字段（默认 false），于是 shader 里 uHasDetailed 恒为 0，
                         // MediaPipe 算出的眼/嘴/下巴精细点位全部被丢弃，只能退回粗略中心锚点。
                         hasDetailedLandmarks = true
@@ -239,6 +254,12 @@ class MediaPipeFaceManager(private val context: Context) {
         val mouthY: Float = 0f,
         val chinX: Float = 0f,
         val chinY: Float = 0f,
+        // v2.0.159：嘴部形状（归一化到采样图，与 eyeDistance 同尺度）。
+        // 供 shader 做「椭圆软遮罩」，取代原先「以嘴中心为圆心的正圆」——
+        // 嘴唇是横向长条，用正圆必然「圆小涂不到嘴角、圆大溢出到下巴」。
+        val mouthHalfWidth: Float = 0f,
+        val mouthHalfHeight: Float = 0f,
+        val mouthAngle: Float = 0f,
         val hasDetailedLandmarks: Boolean = false
     ) {
         companion object {

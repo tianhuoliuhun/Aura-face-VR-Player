@@ -279,6 +279,7 @@
     <!-- ===== batch ===== -->
     <string name="beauty_section_common">通用美颜 · 2D/3D 均生效</string>
     <string name="beauty_smooth">美颜强度 (磨皮)</string>
+    <string name="beauty_texture_detail">皮肤质感 (细节保留)</string>
     <string name="beauty_brightness">画面曝光 (亮度)</string>
     <string name="beauty_contrast">五官轮廓塑形 (对比度)</string>
     <string name="beauty_whitening">美白</string>

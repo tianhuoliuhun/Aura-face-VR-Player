@@ -280,6 +280,7 @@
     <!-- ===== batch ===== -->
     <string name="beauty_section_common">General beauty - works in 2D &amp; 3D</string>
     <string name="beauty_smooth">Smoothing</string>
+    <string name="beauty_texture_detail">Skin Texture</string>
     <string name="beauty_brightness">Exposure (brightness)</string>
     <string name="beauty_contrast">Contour (contrast)</string>
     <string name="beauty_whitening">Whitening</string>

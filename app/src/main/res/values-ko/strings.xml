@@ -257,6 +257,7 @@
     <string name="action_decline">거부</string>
     <string name="beauty_section_common">공통 미용 · 2D/3D 모두 적용</string>
     <string name="beauty_smooth">미용 강도 (매끄러운 피부)</string>
+    <string name="beauty_texture_detail">피부 질감 (디테일)</string>
     <string name="beauty_brightness">노출 (밝기)</string>
     <string name="beauty_contrast">윤곽 형성 (대비)</string>
     <string name="beauty_whitening">미백</string>

@@ -37,6 +37,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var beautyEyebrows = 0.4f
     @Volatile var beautyLongLegs = 0.4f
     @Volatile var beautySmallHead = 0.3f
+    /**
+     * v2.0.159：磨皮「高频保留度」。频域分离后，高频层（毛孔 / 纹理）按此系数叠回：
+     * < 1.0 更平滑，> 1.0 相当于 USM 锐化（找回通透感）。默认 0.88 略偏平滑。
+     */
+    @Volatile var beautyTextureDetail = 0.88f
     @Volatile var isSplitScreenVR = false // Cardboard mode
     @Volatile var gyroEnabled = true
     @Volatile var isVideoActive = false
@@ -112,6 +117,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var mouthYUniform = 0f
     @Volatile var chinXUniform = 0f
     @Volatile var chinYUniform = 0f
+    // v2.0.159：嘴部形状参数（供椭圆 mask 取代正圆）—— 由 MediaPipe 唇部关键点算出，0 = 未取到
+    @Volatile var mouthHalfWidthUniform = 0f
+    @Volatile var mouthHalfHeightUniform = 0f
+    @Volatile var mouthAngleUniform = 0f
 
     // Face detection sampling resolution. The GL thread reads a larger center
     // region (512) so faces off-center are still captured, then it is downscaled
@@ -208,6 +217,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val hStereoMode: Int,
         val hLeftEye: Int,
         val hBeautyStrength: Int,
+        val hTextureDetail: Int,
         val hBrightness: Int,
         val hContrast: Int,
         val hTexelSize: Int,
@@ -233,6 +243,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val hEyeLeft: Int,
         val hEyeRight: Int,
         val hMouthPos: Int,
+        val hMouthHalfW: Int,
+        val hMouthHalfH: Int,
+        val hMouthAngle: Int,
         val hChin: Int,
         val hWarpDualCenter: Int,
         val hLutTexture: Int,
@@ -358,6 +371,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform vec2 uTexelSize;
         
         // Detailed cosmetics uniforms
+        // v2.0.159：磨皮「高频保留度」—— 频域分离后的纹理叠回系数（<1 更平滑，>1 相当于 USM 锐化）
+        uniform float uTextureDetail;
         uniform float uWhitening;
         uniform float uFaceSlimming;
         uniform float uBigEyes;
@@ -381,6 +396,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform vec2 uEyeLeft;
         uniform vec2 uEyeRight;
         uniform vec2 uMouthPos;
+        // v2.0.159：嘴部形状参数（由 MediaPipe 唇部关键点算出）—— 供椭圆 mask 使用，
+        // 取代原先「以嘴中心为圆心的正圆」。值为 0 表示未取到（shader 内回退到 fUnit 比例）。
+        uniform float uMouthHalfW;
+        uniform float uMouthHalfH;
+        uniform float uMouthAngle;
         uniform vec2 uChin;
         uniform int uWarpDualCenter;
         
@@ -417,7 +437,29 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             float b = rgb.b;
             return (r > 0.35 && g > 0.15 && b > 0.08 && r > g && r > b && (r - g) > 0.05);
         }
-        
+
+        // v2.0.159：soft-light 混合 —— 用于腮红 / 口红等妆容。
+        // 相比原来的「纯加法」，它能保留底层皮肤的明暗层次，不会把脸颊糊成一片纯色，
+        // 也不会把高光区顶到溢出。
+        vec3 softLight(vec3 base, vec3 blend) {
+            vec3 lo = 2.0 * base * blend + base * base * (1.0 - 2.0 * blend);
+            vec3 hi = sqrt(max(base, vec3(0.0))) * (2.0 * blend - 1.0) + 2.0 * base * (1.0 - blend);
+            return clamp(mix(lo, hi, step(vec3(0.5), blend)), 0.0, 1.0);
+        }
+
+        // v2.0.159：带倾角的椭圆软遮罩，返回 0~1 权重（1 = 中心，0 = 边界外）。
+        // 取代原来「以关键点为圆心的正圆」判定 —— 嘴唇是横向长条、腮红是椭圆、眉是斜长条，
+        // 正圆必然「圆小涂不到嘴角、圆大溢出到下巴」。softness 控制边界羽化宽度（0.2~0.4 效果自然）。
+        // 参数名刻意避开 center / scale —— main() 里有同名局部变量，免得遮蔽后看代码犯迷糊
+        float ellipseMask(vec2 p, vec2 ctr, vec2 rad, float angle, float softness) {
+            float ca = cos(angle);
+            float sa = sin(angle);
+            vec2 d = p - ctr;
+            vec2 q = vec2(ca * d.x - sa * d.y, sa * d.x + ca * d.y);
+            float rr = length(q / max(rad, vec2(1e-4)));
+            return 1.0 - smoothstep(1.0 - softness, 1.0, rr);
+        }
+
         void main() {
             vec2 tc = vTextureCoord;
             
@@ -644,27 +686,28 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             
             // Realtime Skin-Smoothing Bilateral bilateral filter 3x3
             if (uBeautyStrength > 0.01) {
-                vec4 sum = color;
-                float totalWeight = 1.0;
-                
-                // v2.0.156：步长由 2 像素提到 3 像素 —— 原来只覆盖 ±2 像素，对 1080p 的皮肤面积
-                // 而言半径太小，只能靠 0.9 的混合强度硬拉（观感发糊）。加大步长等于扩大滤波半径，
-                // 同样 8 次邻域采样能把皮肤纹理抹得更干净。
-                vec2 stepX = vec2(uTexelSize.x * 3.0, 0.0);
-                vec2 stepY = vec2(0.0, uTexelSize.y * 3.0);
-                
-                // Read 8-connected neighbor pixels
-                vec4 n1 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepX) : texture2D(uSamplerImage, tc + stepX);
-                vec4 n2 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepX) : texture2D(uSamplerImage, tc - stepX);
-                vec4 n3 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepY) : texture2D(uSamplerImage, tc + stepY);
-                vec4 n4 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepY) : texture2D(uSamplerImage, tc - stepY);
-                
-                vec4 n5 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepX + stepY) : texture2D(uSamplerImage, tc + stepX + stepY);
-                vec4 n6 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepX - stepY) : texture2D(uSamplerImage, tc - stepX - stepY);
-                vec4 n7 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepX - stepY) : texture2D(uSamplerImage, tc + stepX - stepY);
-                vec4 n8 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepX + stepY) : texture2D(uSamplerImage, tc - stepX + stepY);
-                
-                float deltaThres = 0.20;
+                // ===== v2.0.159：磨皮改为「频域分离」 =====
+                // 把画面拆成两层：
+                //   低频 = 大半径**保边**均值 → 色块与光影（痘印 / 色斑就住在这层）
+                //   高频 = 原图 − 低频        → 毛孔、发丝、五官边缘
+                // 只平滑低频、再按 uTextureDetail 把高频叠回去 —— 于是「磨皮强度」与「纹理保留度」
+                // 解耦：既能抹平色块，又不会变成塑料脸。
+                // （旧实现是单尺度双边 + 0.90 强混合：半径不足只能靠混合硬拉，观感是"糊"不是"净"。）
+                vec2 stepF = vec2(uTexelSize.x * 6.0, uTexelSize.y * 6.0);
+
+                // 8 个远邻域（±6 像素）
+                vec4 n1 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepF) : texture2D(uSamplerImage, tc + stepF);
+                vec4 n2 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepF) : texture2D(uSamplerImage, tc - stepF);
+                vec4 n3 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + vec2(stepF.x, 0.0)) : texture2D(uSamplerImage, tc + vec2(stepF.x, 0.0));
+                vec4 n4 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - vec2(stepF.x, 0.0)) : texture2D(uSamplerImage, tc - vec2(stepF.x, 0.0));
+                vec4 n5 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + vec2(0.0, stepF.y)) : texture2D(uSamplerImage, tc + vec2(0.0, stepF.y));
+                vec4 n6 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - vec2(0.0, stepF.y)) : texture2D(uSamplerImage, tc - vec2(0.0, stepF.y));
+                vec4 n7 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + vec2(stepF.x, -stepF.y)) : texture2D(uSamplerImage, tc + vec2(stepF.x, -stepF.y));
+                vec4 n8 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - vec2(stepF.x, -stepF.y)) : texture2D(uSamplerImage, tc - vec2(stepF.x, -stepF.y));
+
+                // 保边权重：邻域色差越大权重越低。大半径下阈值放宽到 0.30 ——
+                // 否则远邻域会被整片判成"边缘"，权重全 0，低频层退化成原图、磨皮等于没做。
+                float deltaThres = 0.30;
                 float w1 = max(0.0, 1.0 - distance(color.rgb, n1.rgb) / deltaThres);
                 float w2 = max(0.0, 1.0 - distance(color.rgb, n2.rgb) / deltaThres);
                 float w3 = max(0.0, 1.0 - distance(color.rgb, n3.rgb) / deltaThres);
@@ -673,17 +716,23 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 float w6 = max(0.0, 1.0 - distance(color.rgb, n6.rgb) / deltaThres);
                 float w7 = max(0.0, 1.0 - distance(color.rgb, n7.rgb) / deltaThres);
                 float w8 = max(0.0, 1.0 - distance(color.rgb, n8.rgb) / deltaThres);
-                
-                sum += n1 * w1 + n2 * w2 + n3 * w3 + n4 * w4 + n5 * w5 + n6 * w6 + n7 * w7 + n8 * w8;
-                totalWeight += w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8;
-                
-                vec4 blurred = sum / totalWeight;
-                
-                // Selective skin smoothing
+
+                vec4 low = (color + n1 * w1 + n2 * w2 + n3 * w3 + n4 * w4
+                    + n5 * w5 + n6 * w6 + n7 * w7 + n8 * w8)
+                    / (1.0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8);
+
+                // 高频层：纹理 + 边缘
+                vec3 detail = color.rgb - low.rgb;
+
+                // 低频 + 高频×保留度：uTextureDetail < 1 更平滑，> 1 相当于 USM 锐化（找回通透感）
+                vec3 smoothed = low.rgb + detail * uTextureDetail;
+
                 if (isSkin(color.rgb)) {
-                    color.rgb = mix(color.rgb, blurred.rgb, uBeautyStrength * 0.90);
+                    color.rgb = mix(color.rgb, smoothed, uBeautyStrength);
                 } else {
-                    color.rgb = mix(color.rgb, blurred.rgb, uBeautyStrength * 0.30); // light noise suppression
+                    // 非皮肤：只做轻微降噪，避免背景与边缘被过度处理
+                    color.rgb = mix(color.rgb, smoothed, uBeautyStrength * 0.25);
+                }
                 }
             }
             
@@ -710,8 +759,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 }
 
                 // 1. Skin Whitening (美白)
+                // v2.0.159：纯加法 → 「保高光提亮」：越接近白色的通道加得越少，
+                // 避免鼻尖/额头等高光区直接溢出成白块（系数上调以补偿整体减弱）。
                 if (isSkin(color.rgb)) {
-                    color.rgb += vec3(uWhitening * 0.12);
+                    color.rgb += vec3(uWhitening * 0.14) * (1.0 - color.rgb);
                 }
                 
                 // 2. Dark Circles removal (黑眼圈) just below the tracked eyes
@@ -719,8 +770,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 vec2 bagR = eyeR + vec2(0.0, 0.3 * fUnit);
                 float distBagL = distance(tc, bagL);
                 float distBagR = distance(tc, bagR);
-                if ((distBagL < 0.35 * fUnit || distBagR < 0.35 * fUnit) && isSkin(color.rgb)) {
-                    color.rgb += vec3(uDarkCircles * 0.13);
+                // v2.0.159：正圆 → 横向椭圆（眼袋是横卧在眼下的月牙形），并保留「保高光提亮」
+                vec2 bagRadius = vec2(0.28 * fUnit, 0.13 * fUnit);
+                float bagMask = max(
+                    ellipseMask(tc, bagL, bagRadius, 0.0, 0.55),
+                    ellipseMask(tc, bagR, bagRadius, 0.0, 0.55)
+                );
+                if (bagMask > 0.001 && isSkin(color.rgb)) {
+                    color.rgb += vec3(uDarkCircles * 0.15) * (1.0 - color.rgb) * bagMask;
                 }
                 
                 // 3. Eyebrows definitions (眉毛) darkening directly above the eyes
@@ -728,20 +785,34 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 vec2 browR = eyeR + vec2(0.0, -0.5 * fUnit);
                 float distBrowL = distance(tc, browL);
                 float distBrowR = distance(tc, browR);
-                if (distBrowL < 0.32 * fUnit) {
-                    color.rgb = mix(color.rgb, color.rgb * 0.55, (1.0 - distBrowL / (0.32 * fUnit)) * uEyebrows * 0.65);
+                // v2.0.159：正圆 → **横向椭圆**（眉是斜长条，正圆只会涂成一团）。
+                // 倾角用固定 ±0.14 rad（≈8°）近似眉毛走向。
+                vec2 browRadius = vec2(0.30 * fUnit, 0.115 * fUnit);
+                float browMaskL = ellipseMask(tc, browL, browRadius, -0.14, 0.45);
+                if (browMaskL > 0.001) {
+                    color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskL * uEyebrows * 0.70);
                 }
-                if (distBrowR < 0.32 * fUnit) {
-                    color.rgb = mix(color.rgb, color.rgb * 0.55, (1.0 - distBrowR / (0.32 * fUnit)) * uEyebrows * 0.65);
+                float browMaskR = ellipseMask(tc, browR, browRadius, 0.14, 0.45);
+                if (browMaskR > 0.001) {
+                    color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskR * uEyebrows * 0.70);
                 }
                 
                 // 4. Lipstick coloring (口红) around the tracked mouth
                 float distLip = distance(tc, mouthC);
-                if (distLip < 0.35 * fUnit) {
-                    float f = (1.0 - distLip / (0.35 * fUnit)) * uLipstick * 0.35;
-                    color.r = mix(color.r, 0.9, f);
-                    color.g = mix(color.g, 0.15, f * 0.8);
-                    color.b = mix(color.b, 0.3, f * 0.5);
+                // v2.0.159：正圆 → **贴合唇形的椭圆**。宽/高/倾角来自 MediaPipe 唇部关键点
+                // （uMouthHalfW 为 0 表示未取到，回退按 fUnit 估算，兼容 FaceDetector 兜底路径）。
+                // 采样图 y 与视口 UV 的 y 方向相反，所以倾角取负。
+                vec2 mouthRadius = (uMouthHalfW > 0.0001)
+                    ? vec2(uMouthHalfW * 1.18, max(uMouthHalfH, uMouthHalfW * 0.30) * 1.60)
+                    : vec2(0.34 * fUnit, 0.13 * fUnit);
+                float lipMask = ellipseMask(tc, mouthC, mouthRadius, -uMouthAngle, 0.35);
+                if (lipMask > 0.001) {
+                    // soft-light 上色：保留唇部原有明暗与高光（不再三通道硬拉）
+                    color.rgb = mix(
+                        color.rgb,
+                        softLight(color.rgb, vec3(0.74, 0.16, 0.26)),
+                        lipMask * uLipstick * 0.70
+                    );
                 }
                 
                 // 5. Cheek Blush coloring (腮红) on the cheeks outside the eyes
@@ -749,20 +820,28 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 vec2 blushR = eyeR + vec2(0.55 * fUnit, 0.55 * fUnit);
                 float distBlushL = distance(tc, blushL);
                 float distBlushR = distance(tc, blushR);
-                if (distBlushL < 0.55 * fUnit && isSkin(color.rgb)) {
-                    color.rgb += vec3(0.12, 0.04, 0.05) * (1.0 - distBlushL / (0.55 * fUnit)) * uBlush * 1.1;
+                // v2.0.159：正圆 → 椭圆（腮红是沿脸颊斜向下的大椭圆），并保留 soft-light 上色
+                vec2 blushRadius = vec2(0.46 * fUnit, 0.30 * fUnit);
+                float blushMaskL = ellipseMask(tc, blushL, blushRadius, -0.28, 0.50);
+                if (blushMaskL > 0.001 && isSkin(color.rgb)) {
+                    color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskL * uBlush * 0.75);
                 }
-                if (distBlushR < 0.55 * fUnit && isSkin(color.rgb)) {
-                    color.rgb += vec3(0.12, 0.04, 0.05) * (1.0 - distBlushR / (0.55 * fUnit)) * uBlush * 1.1;
+                float blushMaskR = ellipseMask(tc, blushR, blushRadius, 0.28, 0.50);
+                if (blushMaskR > 0.001 && isSkin(color.rgb)) {
+                    color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskR * uBlush * 0.75);
                 }
                 
                 // 6. Teeth Whitening (白牙) inside the lip cavity
                 float distTeethSpace = distance(tc, mouthC);
-                if (distTeethSpace < 0.22 * fUnit) {
-                    float weight = uTeethWhitening * (1.0 - distTeethSpace / (0.22 * fUnit));
+                // v2.0.159：正圆 → 细长椭圆（牙齿在嘴腔里是横条），并跟随嘴的倾角
+                vec2 teethRadius = (uMouthHalfW > 0.0001)
+                    ? vec2(uMouthHalfW * 0.72, max(uMouthHalfH, uMouthHalfW * 0.30) * 0.55)
+                    : vec2(0.20 * fUnit, 0.075 * fUnit);
+                float teethMask = ellipseMask(tc, mouthC, teethRadius, -uMouthAngle, 0.40);
+                if (teethMask > 0.001) {
                     float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
                     if (luma > 0.45) {
-                        color.rgb = mix(color.rgb, vec3(luma + 0.12), weight * 0.75);
+                        color.rgb = mix(color.rgb, vec3(luma + 0.12), teethMask * uTeethWhitening * 0.75);
                     }
                 }
             }
@@ -811,6 +890,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 hStereoMode = GLES20.glGetUniformLocation(progId, "uStereoMode"),
                 hLeftEye = GLES20.glGetUniformLocation(progId, "uLeftEye"),
                 hBeautyStrength = GLES20.glGetUniformLocation(progId, "uBeautyStrength"),
+                hTextureDetail = GLES20.glGetUniformLocation(progId, "uTextureDetail"),
                 hBrightness = GLES20.glGetUniformLocation(progId, "uBrightness"),
                 hContrast = GLES20.glGetUniformLocation(progId, "uContrast"),
                 hTexelSize = GLES20.glGetUniformLocation(progId, "uTexelSize"),
@@ -836,6 +916,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 hEyeLeft = GLES20.glGetUniformLocation(progId, "uEyeLeft"),
                 hEyeRight = GLES20.glGetUniformLocation(progId, "uEyeRight"),
                 hMouthPos = GLES20.glGetUniformLocation(progId, "uMouthPos"),
+                hMouthHalfW = GLES20.glGetUniformLocation(progId, "uMouthHalfW"),
+                hMouthHalfH = GLES20.glGetUniformLocation(progId, "uMouthHalfH"),
+                hMouthAngle = GLES20.glGetUniformLocation(progId, "uMouthAngle"),
                 hChin = GLES20.glGetUniformLocation(progId, "uChin"),
                 hWarpDualCenter = GLES20.glGetUniformLocation(progId, "uWarpDualCenter"),
                 hLutTexture = GLES20.glGetUniformLocation(progId, "uLutTexture"),
@@ -1056,6 +1139,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 对比模式：所有美颜 uniform 归零，仅保留亮度/对比度等调色
         val bc = if (beautyCompareEnabled) 0f else 1f
         uniform1f(prog.hBeautyStrength, beautyLevel * bc)
+        // v2.0.159：磨皮的高频保留度。刻意不随对比模式归零 —— 对比模式下磨皮本身不执行（
+        // uBeautyStrength = 0），这个值不会被用到。
+        uniform1f(prog.hTextureDetail, beautyTextureDetail)
         
         uniform1f(prog.hBrightness, brightnessLevel)
         uniform1f(prog.hContrast, contrastLevel)
@@ -1084,6 +1170,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform2f(prog.hEyeLeft, eyeLeftXUniform, eyeLeftYUniform)
         uniform2f(prog.hEyeRight, eyeRightXUniform, eyeRightYUniform)
         uniform2f(prog.hMouthPos, mouthXUniform, mouthYUniform)
+        // v2.0.159：嘴形参数（0 表示尚未取到，shader 会回退到按 fUnit 估算）
+        uniform1f(prog.hMouthHalfW, mouthHalfWidthUniform)
+        uniform1f(prog.hMouthHalfH, mouthHalfHeightUniform)
+        uniform1f(prog.hMouthAngle, mouthAngleUniform)
         uniform2f(prog.hChin, chinXUniform, chinYUniform)
         uniform1i(prog.hWarpDualCenter, if (warpDualCenter) 1 else 0)
 
@@ -1610,6 +1700,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                             mouthYUniform = mouthYUniform * 0.75f + mapCropYToViewport(result.mouthY) * 0.25f
                             chinXUniform = chinXUniform * 0.75f + mapCropXToViewport(result.chinX) * 0.25f
                             chinYUniform = chinYUniform * 0.75f + mapCropYToViewport(result.chinY) * 0.25f
+                            // v2.0.159：嘴形（宽按水平比例、高按垂直比例缩放；角度不平滑，
+                            // 避免在 ±π 附近来回抖动）
+                            mouthHalfWidthUniform = mouthHalfWidthUniform * 0.75f +
+                                mapCropLenToViewport(result.mouthHalfWidth) * 0.25f
+                            mouthHalfHeightUniform = mouthHalfHeightUniform * 0.75f +
+                                (result.mouthHalfHeight * faceCropScaleY) * 0.25f
+                            mouthAngleUniform = result.mouthAngle
                         } else {
                             // Fallback tracker: derive rough feature positions from center/eye distance
                             hasDetailedLandmarks = 0

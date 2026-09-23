@@ -66,6 +66,8 @@ fun GeneralBeautySection(
     accentColor: Color,
     beautyLevel: Float,
     onBeautyLevelChange: (Float) -> Unit,
+    textureDetail: Float,
+    onTextureDetailChange: (Float) -> Unit,
     brightnessLevel: Float,
     onBrightnessLevelChange: (Float) -> Unit,
     contrastLevel: Float,
@@ -79,6 +81,16 @@ fun GeneralBeautySection(
 
         BeautySliderItem(
             stringResource(R.string.beauty_smooth), beautyLevel, onBeautyLevelChange, accentColor = accentColor
+        )
+
+        // v2.0.159：磨皮「皮肤质感」—— 频域分离后高频层（毛孔 / 纹理）的叠回系数：
+        // 偏左更平滑（色块抹得更干净），偏右相当于 USM 锐化（找回通透感）。
+        BeautySliderItem(
+            label = stringResource(R.string.beauty_texture_detail),
+            value = textureDetail,
+            onValueChange = onTextureDetailChange,
+            valueRange = 0.5f..1.3f,
+            accentColor = accentColor
         )
 
         // 曝光：值域 -0.3~0.3，显示带正负号，故未复用 BeautySliderItem

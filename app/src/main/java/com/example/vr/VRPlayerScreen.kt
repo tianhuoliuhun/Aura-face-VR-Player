@@ -175,6 +175,12 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getFloat("beauty_level", 0.65f) else 0.65f
         )
     }
+    // v2.0.159：磨皮「皮肤质感」= 频域分离的高频保留度（0.5~1.3；> 1 相当于 USM 锐化）
+    var beautyTextureDetail by remember {
+        mutableFloatStateOf(
+            if (isMemoryModeEnabled) prefs.getFloat("beauty_texture_detail", 0.88f) else 0.88f
+        )
+    }
     var brightnessLevel by remember {
         mutableFloatStateOf(
             if (isMemoryModeEnabled) prefs.getFloat("brightness_level", 0.0f) else 0.0f
@@ -876,6 +882,7 @@ fun VRPlayerScreen(
                 putInt("projection_mode", projectionMode.id)
                 putInt("stereo_mode", stereoMode.id)
                 putFloat("beauty_level", beautyLevel)
+                putFloat("beauty_texture_detail", beautyTextureDetail)
                 putFloat("brightness_level", brightnessLevel)
                 putFloat("contrast_level", contrastLevel)
                 putFloat("beauty_whitening", beautyWhitening)
@@ -2386,6 +2393,7 @@ fun VRPlayerScreen(
                 view.renderer.projectionMode = projectionMode
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel
+                view.renderer.beautyTextureDetail = beautyTextureDetail
                 view.renderer.beautyCompareEnabled = beautyCompareEnabled
                 view.renderer.brightnessLevel = brightnessLevel
                 view.renderer.contrastLevel = contrastLevel
@@ -4783,6 +4791,8 @@ BatchTranscribeSection(
                                     accentColor = AccentColor,
                                     beautyLevel = beautyLevel,
                                     onBeautyLevelChange = { beautyLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
+                                    textureDetail = beautyTextureDetail,
+                                    onTextureDetailChange = { beautyTextureDetail = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
                                     brightnessLevel = brightnessLevel,
                                     onBrightnessLevelChange = { brightnessLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
                                     contrastLevel = contrastLevel,
