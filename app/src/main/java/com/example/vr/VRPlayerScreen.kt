@@ -4832,7 +4832,8 @@ BatchTranscribeSection(
                                     gpuPixelAvailable = GpuPixelBeauty.available,
                                     onEngineChange = { type ->
                                         // 具名参数 lambda 没有 return@ 标签，这里用 if/else 分支代替提前 return
-                                        if (type == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available && !GpuPixelBeauty.init(engineContext)) {
+                                        // 用户主动点击：force=true 跳过失败冷却，立即重试
+                                        if (type == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available && !GpuPixelBeauty.init(engineContext, force = true)) {
                                             Toast.makeText(
                                                 engineContext,
                                                 engineContext.getString(R.string.beauty_engine_unavailable),

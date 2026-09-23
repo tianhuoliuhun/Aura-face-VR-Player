@@ -440,10 +440,14 @@ fun BeautyEngineSection(
                 accentColor = accentColor,
                 modifier = Modifier.weight(1f)
             )
+            // v2.0.161：GPUPixel 按钮**始终可点** —— 点击时才惰性初始化（ABI 检测 + loadLibrary），
+            // 失败由 onEngineChange 弹 Toast 并保持 GLSL（见 VRPlayerScreen）。
+            // 修复：之前绑 `enabled = gpuPixelAvailable` 造成死锁 —— available 只有 init 成功才为 true，
+            // 而 init 又要靠点这个按钮触发（onDrawFrame 的兜底初始化也被 engineType 挡住）→ 永远置灰。
             EngineButton(
                 label = stringResource(R.string.beauty_engine_gpupixel),
                 selected = engineType == BEAUTY_ENGINE_GPUPIXEL,
-                enabled = gpuPixelAvailable,
+                enabled = true,
                 onClick = { onEngineChange(BEAUTY_ENGINE_GPUPIXEL) },
                 accentColor = accentColor,
                 modifier = Modifier.weight(1f)

@@ -45,8 +45,13 @@ object GpuPixelBeauty {
     var available: Boolean = false
         private set
 
+    /** 设备 ABI 不在官方包覆盖内（永久失败，不再尝试） */
     @Volatile
-    private var initTried = false
+    private var abiUnsupported = false
+
+    /** 上次 init 失败的时刻（自动重试的 60s 冷却；UI 主动点击可跳过） */
+    @Volatile
+    private var lastFailedMs = 0L
 
     private var pipeline: Pipeline? = null
 
@@ -55,26 +60,38 @@ object GpuPixelBeauty {
         Build.SUPPORTED_ABIS.any { it == "arm64-v8a" || it == "armeabi-v7a" }
 
     /**
-     * 初始化（幂等、绝不抛异常）。失败时 [available] 保持 false，
-     * 上层据此弹「GPUPixel 不可用，已切回 GLSL」并自动切换。
+     * 初始化（幂等、绝不抛异常）。
+     *
+     * v2.0.161：重试语义修正 —— 之前「失败一次永久锁死」（initTried），
+     * 现在只有 **ABI 不支持是永久失败**（官方包没有对应 .so，重试无意义）；
+     * 其他失败（loadLibrary 失败等）允许重试：UI 主动点击传 [force]=true 立即重试，
+     * onDrawFrame 的自动兜底走 60s 冷却（避免每帧重试 loadLibrary）。
+     *
+     * @param force 用户主动点击引擎按钮时传 true
      */
     @Synchronized
-    fun init(context: Context): Boolean {
+    fun init(context: Context, force: Boolean = false): Boolean {
         if (available) return true
-        if (initTried) return false
-        initTried = true
+        if (abiUnsupported) return false
         if (!isAbiSupported()) {
+            abiUnsupported = true
             Log.w(TAG, "GPUPixel unavailable: ABIs=${Build.SUPPORTED_ABIS.contentToString()}")
             return false
         }
+        if (!force && lastFailedMs != 0L &&
+            android.os.SystemClock.uptimeMillis() - lastFailedMs < 60_000L
+        ) {
+            return false
+        }
         return try {
-            // GPUPixel.Init 会把 AAR assets 里的 Mars-Face 模型拷到应用目录（copyResource 同理）
+            // GPUPixel.Init 会把 AAR assets 里的 Mars-Face 模型拷到应用目录
             GPUPixel.Init(context.applicationContext)
             available = true
             Log.i(TAG, "GPUPixel initialized (arm64-v8a/armeabi-v7a)")
             true
         } catch (e: Throwable) {
-            // UnsatisfiedLinkError（x86_64 / so 缺失）等一律归为「不可用」
+            // UnsatisfiedLinkError（so 缺失/损坏）等：冷却后自动重试，或用户点击强制重试
+            lastFailedMs = android.os.SystemClock.uptimeMillis()
             Log.e(TAG, "GPUPixel init failed", e)
             false
         }
