@@ -148,6 +148,14 @@
     <string name="panorama_note">補足：360°/180° パノラマはジャイロまたはスワイプでスムーズに見回せます。</string>
     <string name="settings_group_floating_ball">3. フローティングボールと再生速度</string>
     <string name="floating_ball_enable">フローティングボールを有効化</string>
+    <string name="cd_vflip_on">上下反転を解除</string>
+    <string name="cd_vflip_off">上下反転</string>
+    <string name="seek_ball_forward_enable">早送りボール</string>
+    <string name="seek_ball_backward_enable">巻き戻しボール</string>
+    <string name="seek_ball_desc">タップでシーク · ダブルタップで秒数切替 · 長押しでドラッグ</string>
+    <string name="seek_forward_hud">%1$d 秒早送り</string>
+    <string name="seek_backward_hud">%1$d 秒巻き戻し</string>
+    <string name="seek_step_switched">ステップを %1$d 秒に変更</string>
     <string name="floating_ball_desc">長押しで早送り、ドラッグで自由に配置できます</string>
     <string name="floating_ball_speed">長押し時の速度</string>
     <string name="base_playback_speed">通常の再生速度</string>

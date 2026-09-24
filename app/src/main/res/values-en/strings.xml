@@ -161,6 +161,14 @@
     <string name="panorama_note">Note: 360°/180° panoramas support gyro or drag for fluid looking around.</string>
     <string name="settings_group_floating_ball">3. Floating ball &amp; speed</string>
     <string name="floating_ball_enable">Enable floating ball</string>
+    <string name="cd_vflip_on">Disable vertical flip</string>
+    <string name="cd_vflip_off">Flip vertically</string>
+    <string name="seek_ball_forward_enable">Forward ball</string>
+    <string name="seek_ball_backward_enable">Rewind ball</string>
+    <string name="seek_ball_desc">Tap to seek · Double-tap to change step · Long-press to drag</string>
+    <string name="seek_forward_hud">Fast forward %1$d s</string>
+    <string name="seek_backward_hud">Rewind %1$d s</string>
+    <string name="seek_step_switched">Step changed to %1$d s</string>
     <string name="floating_ball_desc">Long-press to fast-forward; drag freely to reposition</string>
     <string name="floating_ball_speed">Long-press speed</string>
     <string name="base_playback_speed">Normal playback speed</string>

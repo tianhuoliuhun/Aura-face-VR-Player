@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,6 +58,9 @@ fun PlayerControlButtons(
     onToggleViewLock: () -> Unit,
     isLandscape: Boolean,
     onToggleOrientation: () -> Unit,
+    /** v2.0.165：界面上下翻转 —— 与横竖屏按钮同款样式与联动逻辑（isActive 高亮 + onUserInteraction 点亮 UI） */
+    isVerticallyFlipped: Boolean,
+    onToggleVerticalFlip: () -> Unit,
     isSplitScreenVR: Boolean,
     onToggleSplitScreen: () -> Unit,
     isSubtitlePanelOpen: Boolean,
@@ -98,6 +102,17 @@ fun PlayerControlButtons(
                     onClick = { onToggleOrientation(); onUserInteraction() },
                     icon = Icons.Default.ScreenRotation,
                     isActive = !isLandscape
+                )
+                // v2.0.165：界面上下反转（紧邻横竖屏按钮，样式与联动逻辑一致）
+                TooltipIconButton(
+                    tooltip = if (isVerticallyFlipped) {
+                        stringResource(R.string.cd_vflip_on)
+                    } else {
+                        stringResource(R.string.cd_vflip_off)
+                    },
+                    onClick = { onToggleVerticalFlip(); onUserInteraction() },
+                    icon = Icons.Default.SwapVert,
+                    isActive = isVerticallyFlipped
                 )
             }
         }
@@ -172,7 +187,8 @@ fun PlayerControlButtons(
             }
         }
 
-        if ((3 * 40 + 2 * 8 + 40 + 54 + 40 + 2 * 12 + 6 * 40 + 5 * 8 + 32).dp > maxWidth) {
+        // v2.0.165：左侧图标按钮由 3 个增至 4 个（新增「上下反转」），窄屏判定同步更新
+        if ((4 * 40 + 3 * 8 + 40 + 54 + 40 + 2 * 12 + 6 * 40 + 5 * 8 + 32).dp > maxWidth) {
             // 窄屏：控制组上下排列
             Column(
                 modifier = Modifier.fillMaxWidth(),

@@ -21,6 +21,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     // Volatile settings accessible from Compose UI
     @Volatile var projectionMode = ProjectionMode.STANDARD
+    /**
+     * v2.0.165：界面上下反转的**画面部分**。
+     *
+     * ⚠️ 实测结论（MuMu 截图验证）：GLSurfaceView 是 SurfaceView，拥有**独立合成层**，
+     * 父容器的 `graphicsLayer(scaleY = -1)` 只会翻转 Compose 内容（UI），**画面不会跟着翻**。
+     * 因此画面必须在投影矩阵里单独再翻一次；两者作用于不同图层，**不构成双重翻转**。
+     */
+    @Volatile var verticalFlip = false
     @Volatile var stereoMode = StereoMode.MONO
     @Volatile var beautyLevel = 0.5f // 0.0f (off) to 1.0f (max smoothing)
     @Volatile var brightnessLevel = 0.0f // -0.5f to 0.5f
@@ -1271,6 +1279,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             Matrix.perspectiveM(projectionMatrix, 0, fovDeg, aspect, 0.1f, 100.0f)
         }
 
+        // v2.0.165：界面上下反转的**画面部分** —— 对投影矩阵做 y 轴镜像（平面 ortho 与全景
+        // perspective 均生效，且不影响后续视角/立体矩阵）。UI 部分由 VRPlayerScreen 根容器的
+        // graphicsLayer 负责；SurfaceView 独立合成、不跟随 Compose 图层变换，故两边都要做。
+        if (verticalFlip) {
+            Matrix.scaleM(projectionMatrix, 0, 1f, -1f, 1f)
+        }
+
         // Setup standard eye look matrix looking inside the 3D dome / box
         if (projectionMode == ProjectionMode.VR_360 || projectionMode == ProjectionMode.VR_180 ||
             projectionMode == ProjectionMode.BOX
@@ -1814,7 +1829,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 if (isGpuPixelActive()) {
                     val out = GpuPixelBeauty.getOrCreatePipeline().process(
                         rgbaData, fw, fh, fw * 4,
-                        beautyGpSmooth, beautyGpWhite, beautyGpSharpen, beautyGpSlim, beautyGpEyeZoom
+                        beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom
                     )
                     if (out != null) {
                         gpRegionW = fw

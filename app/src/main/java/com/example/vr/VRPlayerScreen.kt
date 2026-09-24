@@ -115,6 +115,12 @@ fun VRPlayerScreen(
 
     // Screen Layout orientation states (Lock to Landscape manually as requested)
     var isLandscape by remember { mutableStateOf(true) }
+    // v2.0.165：界面上下反转（播控栏按钮，与横竖屏按钮并排；默认关）
+    var isVerticallyFlipped by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_vertically_flipped", false) else false
+        )
+    }
     var isUserTouching by remember { mutableStateOf(false) }
 
     // Media and projection states
@@ -384,6 +390,26 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("is_floating_ball_enabled", true) else true
         )
     }
+    // v2.0.165：快进 / 后退悬浮球 —— 各自独立开关，默认均为**关**（不影响现有交互）
+    var isSeekForwardBallEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_seek_forward_ball_enabled", false) else false
+        )
+    }
+    var isSeekBackwardBallEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_seek_backward_ball_enabled", false) else false
+        )
+    }
+    // 步长（秒），双击循环 5 → 10 → 15 → 30
+    var seekForwardStep by remember {
+        mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("seek_forward_step", 5) else 5)
+    }
+    var seekBackwardStep by remember {
+        mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("seek_backward_step", 5) else 5)
+    }
+    // 快进/后退/步长切换的提示文案（null = 不显示）
+    var seekHudText by remember { mutableStateOf<String?>(null) }
     var floatingBallSpeed by remember {
         mutableFloatStateOf(
             if (isMemoryModeEnabled) prefs.getFloat("floating_ball_speed", 2.0f) else 2.0f
@@ -945,6 +971,12 @@ fun VRPlayerScreen(
                 putFloat("video_curvature", videoCurvature)
                 putInt("max_resolution_id", maxResolution.id)
                 putBoolean("is_floating_ball_enabled", isFloatingBallEnabled)
+                // v2.0.165：界面上下翻转 + 快进/后退悬浮球
+                putBoolean("is_vertically_flipped", isVerticallyFlipped)
+                putBoolean("is_seek_forward_ball_enabled", isSeekForwardBallEnabled)
+                putBoolean("is_seek_backward_ball_enabled", isSeekBackwardBallEnabled)
+                putInt("seek_forward_step", seekForwardStep)
+                putInt("seek_backward_step", seekBackwardStep)
                 putFloat("floating_ball_speed", floatingBallSpeed)
                 putFloat("base_playback_speed", basePlaybackSpeed)
                 putInt("max_fps", maxFps)
@@ -2372,6 +2404,14 @@ fun VRPlayerScreen(
             .fillMaxSize()
             .background(Color(0xFF1C1B1F)) // High Density Theme deep background color
             .testTag("player_root_container")
+            // v2.0.165：界面上下反转 —— 对整个**界面树**做 y 轴镜像。
+            // 放在根容器（而不是 renderer 的投影矩阵）的原因：这个功能的场景是「屏幕颠倒后使用」，
+            // 需要**画面与所有 UI 控件同步翻转**（否则画面翻了、按钮还是正的，等于没法用）；
+            // 用 graphicsLayer 还能让 Compose 一并变换触摸坐标 —— 点哪里就命中哪里。
+            // 注：renderer 侧不再做翻转，避免双重翻转。
+            .graphicsLayer {
+                scaleY = if (isVerticallyFlipped) -1f else 1f
+            }
     ) {
         // Liquid glass backdrop：捕获视频层 + 主题底色，供玻璃面板绘制（Backdrop 库，Android 12+）
         val isLiquidGlass = glassMode == 1 && Build.VERSION.SDK_INT >= 31
@@ -2426,6 +2466,9 @@ fun VRPlayerScreen(
                 view.isUiLocked = isUiLocked
                 view.isViewLocked = isViewLocked
                 view.renderer.projectionMode = projectionMode
+                // v2.0.165：画面翻转（SurfaceView 不跟随 Compose 图层变换，需单独翻；
+                // UI 翻转由根容器的 graphicsLayer 负责 —— 两者作用层不同，不会互相抵消）
+                view.renderer.verticalFlip = isVerticallyFlipped
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel
                 view.renderer.beautyTextureDetail = beautyTextureDetail
@@ -3020,6 +3063,8 @@ fun VRPlayerScreen(
                                 onToggleViewLock = { isViewLocked = !isViewLocked },
                                 isLandscape = isLandscape,
                                 onToggleOrientation = { isLandscape = !isLandscape },
+                                isVerticallyFlipped = isVerticallyFlipped,
+                                onToggleVerticalFlip = { isVerticallyFlipped = !isVerticallyFlipped },
                                 isSplitScreenVR = isSplitScreenVR,
                                 onToggleSplitScreen = { isSplitScreenVR = !isSplitScreenVR },
                                 isSubtitlePanelOpen = isSubtitleQuickPanelOpen,
@@ -4266,6 +4311,45 @@ fun VRPlayerScreen(
                                 @Composable
                                 fun SettingsSection3() {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    /** v2.0.165：悬浮球开关行（加速球 / 快进球 / 后退球共用同一布局样式） */
+                                    @Composable
+                                    fun BallSwitchRow(
+                                        title: String,
+                                        desc: String?,
+                                        checked: Boolean,
+                                        onChange: (Boolean) -> Unit,
+                                        tag: String
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(10.dp))
+                                                .clickable { onChange(!checked); keepUiAlight() }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                // ⚠️ 不用 desc?.let{} —— @Composable 调用嵌进普通 lambda 会丢作用域
+                                                if (desc != null) {
+                                                    Text(desc, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                                }
+                                            }
+                                            Switch(
+                                                checked = checked,
+                                                onCheckedChange = { onChange(it); keepUiAlight() },
+                                                colors = SwitchDefaults.colors(
+                                                    checkedThumbColor = AccentOnColor,
+                                                    checkedTrackColor = AccentColor,
+                                                    uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
+                                                    uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                                                ),
+                                                modifier = Modifier.scale(0.8f).testTag(tag)
+                                            )
+                                        }
+                                    }
+
                                     Text(
                                         text = stringResource(R.string.settings_group_floating_ball),
                                         color = AccentColor,
@@ -4304,6 +4388,22 @@ fun VRPlayerScreen(
                                             modifier = Modifier.scale(0.8f).testTag("floating_ball_switch")
                                         )
                                     }
+
+                                    // v2.0.165：快进 / 后退悬浮球 —— 各自独立开关，默认均为**关**
+                                    BallSwitchRow(
+                                        title = stringResource(R.string.seek_ball_forward_enable),
+                                        desc = stringResource(R.string.seek_ball_desc),
+                                        checked = isSeekForwardBallEnabled,
+                                        onChange = { isSeekForwardBallEnabled = it },
+                                        tag = "seek_forward_ball_switch"
+                                    )
+                                    BallSwitchRow(
+                                        title = stringResource(R.string.seek_ball_backward_enable),
+                                        desc = stringResource(R.string.seek_ball_desc),
+                                        checked = isSeekBackwardBallEnabled,
+                                        onChange = { isSeekBackwardBallEnabled = it },
+                                        tag = "seek_backward_ball_switch"
+                                    )
 
                                     if (isFloatingBallEnabled) {
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -5558,6 +5658,125 @@ BatchTranscribeSection(
                         )
                     }
                 }
+            }
+        }
+
+        // 13. v2.0.165：快进 / 后退悬浮球 + 提示条
+        // 层级说明：与加速球同在**最外层 Box**（绘制顺序在播控组件之后）→ 恒位于播控组件之上，
+        // 拖到播控栏区域时小球仍可点击/拖动，不会被播控栏抢走事件。
+        val ballPx = with(LocalDensity.current) { 54.dp.toPx() }
+        val seekMaxX = constraints.maxWidth.toFloat() - ballPx
+        val seekMaxY = constraints.maxHeight.toFloat() - ballPx
+        // 提示文案在语句位置取好（@Composable 调用不能塞进普通 lambda）
+        val fwdHudLabel = stringResource(R.string.seek_forward_hud, seekForwardStep)
+        val bwdHudLabel = stringResource(R.string.seek_backward_hud, seekBackwardStep)
+        val fwdStepSwitched = stringResource(R.string.seek_step_switched, nextSeekStep(seekForwardStep))
+        val bwdStepSwitched = stringResource(R.string.seek_step_switched, nextSeekStep(seekBackwardStep))
+
+        if (isSeekForwardBallEnabled) {
+            SeekFloatingBall(
+                forward = true,
+                stepSeconds = seekForwardStep,
+                maxX = seekMaxX,
+                maxY = seekMaxY,
+                accentColor = AccentColor,
+                accentOnColor = AccentOnColor,
+                initialYRatio = 0.28f,
+                onStepCycle = {
+                    seekForwardStep = nextSeekStep(seekForwardStep)
+                    seekHudText = fwdStepSwitched
+                },
+                onTrigger = { step ->
+                    val p = playerInstance
+                    if (p != null) {
+                        val dur = if (p.duration > 0) p.duration else Long.MAX_VALUE
+                        p.seekTo((p.currentPosition + step * 1000L).coerceIn(0L, dur))
+                    }
+                    seekHudText = fwdHudLabel
+                },
+                onFeedback = { seekHudText = it },
+                isLiquidGlass = isLiquidGlass,
+                glassModifier = if (isLiquidGlass) Modifier.drawBackdrop(
+                    backdrop = liquidBackdrop,
+                    shape = { CircleShape },
+                    effects = {
+                        vibrancy()
+                        blur(12f.dp.toPx())
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            lens(8f.dp.toPx(), 16f.dp.toPx())
+                        }
+                    },
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
+                ) else Modifier
+            )
+        }
+
+        if (isSeekBackwardBallEnabled) {
+            SeekFloatingBall(
+                forward = false,
+                stepSeconds = seekBackwardStep,
+                maxX = seekMaxX,
+                maxY = seekMaxY,
+                accentColor = AccentColor,
+                accentOnColor = AccentOnColor,
+                initialYRatio = 0.68f,
+                onStepCycle = {
+                    seekBackwardStep = nextSeekStep(seekBackwardStep)
+                    seekHudText = bwdStepSwitched
+                },
+                onTrigger = { step ->
+                    val p = playerInstance
+                    if (p != null) {
+                        p.seekTo((p.currentPosition - step * 1000L).coerceAtLeast(0L))
+                    }
+                    seekHudText = bwdHudLabel
+                },
+                onFeedback = { seekHudText = it },
+                isLiquidGlass = isLiquidGlass,
+                glassModifier = if (isLiquidGlass) Modifier.drawBackdrop(
+                    backdrop = liquidBackdrop,
+                    shape = { CircleShape },
+                    effects = {
+                        vibrancy()
+                        blur(12f.dp.toPx())
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            lens(8f.dp.toPx(), 16f.dp.toPx())
+                        }
+                    },
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
+                ) else Modifier
+            )
+        }
+
+        // 快进 / 后退 / 步长切换提示条（复用速度提示条的样式，1.2 秒后自动隐藏）
+        LaunchedEffect(seekHudText) {
+            if (seekHudText != null) {
+                delay(1200L)
+                seekHudText = null
+            }
+        }
+        AnimatedVisibility(
+            visible = seekHudText != null,
+            enter = fadeIn() + scaleIn(initialScale = 0.8f),
+            exit = fadeOut() + scaleOut(targetScale = 0.8f),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 28.dp)
+                .testTag("seek_ball_hud")
+        ) {
+            Surface(
+                color = Color(0xEE18171C),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, AccentColor.copy(alpha = 0.6f)),
+                shadowElevation = 8.dp
+            ) {
+                Text(
+                    text = seekHudText ?: "",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
             }
         }
     }
