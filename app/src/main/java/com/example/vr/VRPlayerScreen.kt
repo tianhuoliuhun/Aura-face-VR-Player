@@ -115,10 +115,11 @@ fun VRPlayerScreen(
 
     // Screen Layout orientation states (Lock to Landscape manually as requested)
     var isLandscape by remember { mutableStateOf(true) }
-    // v2.0.165：界面上下反转（播控栏按钮，与横竖屏按钮并排；默认关）
-    var isVerticallyFlipped by remember {
+    // v2.0.166：**画面旋转 180°**（播控栏按钮，紧邻屏幕旋转；默认关）
+    // 场景：屏幕倒置使用时，把画面与 UI 一起转 180° 恢复正向
+    var isRotated180 by remember {
         mutableStateOf(
-            if (isMemoryModeEnabled) prefs.getBoolean("is_vertically_flipped", false) else false
+            if (isMemoryModeEnabled) prefs.getBoolean("is_rotated_180", false) else false
         )
     }
     var isUserTouching by remember { mutableStateOf(false) }
@@ -971,8 +972,8 @@ fun VRPlayerScreen(
                 putFloat("video_curvature", videoCurvature)
                 putInt("max_resolution_id", maxResolution.id)
                 putBoolean("is_floating_ball_enabled", isFloatingBallEnabled)
-                // v2.0.165：界面上下翻转 + 快进/后退悬浮球
-                putBoolean("is_vertically_flipped", isVerticallyFlipped)
+                // v2.0.166：画面旋转 180° + 快进/后退悬浮球
+                putBoolean("is_rotated_180", isRotated180)
                 putBoolean("is_seek_forward_ball_enabled", isSeekForwardBallEnabled)
                 putBoolean("is_seek_backward_ball_enabled", isSeekBackwardBallEnabled)
                 putInt("seek_forward_step", seekForwardStep)
@@ -2404,13 +2405,13 @@ fun VRPlayerScreen(
             .fillMaxSize()
             .background(Color(0xFF1C1B1F)) // High Density Theme deep background color
             .testTag("player_root_container")
-            // v2.0.165：界面上下反转 —— 对整个**界面树**做 y 轴镜像。
-            // 放在根容器（而不是 renderer 的投影矩阵）的原因：这个功能的场景是「屏幕颠倒后使用」，
-            // 需要**画面与所有 UI 控件同步翻转**（否则画面翻了、按钮还是正的，等于没法用）；
-            // 用 graphicsLayer 还能让 Compose 一并变换触摸坐标 —— 点哪里就命中哪里。
-            // 注：renderer 侧不再做翻转，避免双重翻转。
+            // v2.0.166：画面旋转 180° 的 **UI 部分** —— 对整个界面树绕 z 轴转 180°。
+            // 为什么在这里做：场景是「屏幕倒置使用」，画面与 UI 必须**同向转**，
+            // 否则画面转了、按钮还是反的就没法操作；graphicsLayer 还会让 Compose
+            // 一并变换触摸坐标（点哪里就命中哪里）。
+            // 画面（SurfaceView）不跟随此变换，故 renderer 里另做一次（不同图层，不冲突）。
             .graphicsLayer {
-                scaleY = if (isVerticallyFlipped) -1f else 1f
+                rotationZ = if (isRotated180) 180f else 0f
             }
     ) {
         // Liquid glass backdrop：捕获视频层 + 主题底色，供玻璃面板绘制（Backdrop 库，Android 12+）
@@ -2466,9 +2467,9 @@ fun VRPlayerScreen(
                 view.isUiLocked = isUiLocked
                 view.isViewLocked = isViewLocked
                 view.renderer.projectionMode = projectionMode
-                // v2.0.165：画面翻转（SurfaceView 不跟随 Compose 图层变换，需单独翻；
-                // UI 翻转由根容器的 graphicsLayer 负责 —— 两者作用层不同，不会互相抵消）
-                view.renderer.verticalFlip = isVerticallyFlipped
+                // v2.0.166：画面旋转 180°（SurfaceView 不跟随 Compose 图层变换，需单独转；
+                // UI 旋转由根容器的 graphicsLayer 负责 —— 两者作用层不同，不会互相抵消）
+                view.renderer.rotate180 = isRotated180
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel
                 view.renderer.beautyTextureDetail = beautyTextureDetail
@@ -3063,8 +3064,8 @@ fun VRPlayerScreen(
                                 onToggleViewLock = { isViewLocked = !isViewLocked },
                                 isLandscape = isLandscape,
                                 onToggleOrientation = { isLandscape = !isLandscape },
-                                isVerticallyFlipped = isVerticallyFlipped,
-                                onToggleVerticalFlip = { isVerticallyFlipped = !isVerticallyFlipped },
+                                isRotated180 = isRotated180,
+                                onToggleRotate180 = { isRotated180 = !isRotated180 },
                                 isSplitScreenVR = isSplitScreenVR,
                                 onToggleSplitScreen = { isSplitScreenVR = !isSplitScreenVR },
                                 isSubtitlePanelOpen = isSubtitleQuickPanelOpen,
