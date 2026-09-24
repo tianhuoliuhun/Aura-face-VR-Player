@@ -160,8 +160,6 @@
     <string name="panorama_note">说明：360°与180°全景支持陀螺仪或滑动实现多视角流畅环顾。</string>
     <string name="settings_group_floating_ball">3. 悬浮球控速与播放倍速</string>
     <string name="floating_ball_enable">启用屏幕悬浮球</string>
-    <string name="cd_rotate180_on">取消旋转 180°</string>
-    <string name="cd_rotate180_off">画面旋转 180°</string>
     <string name="seek_ball_forward_enable">快进悬浮球</string>
     <string name="seek_ball_backward_enable">后退悬浮球</string>
     <string name="seek_ball_desc">单击快进/后退 · 双击切换秒数 · 长按拖动</string>

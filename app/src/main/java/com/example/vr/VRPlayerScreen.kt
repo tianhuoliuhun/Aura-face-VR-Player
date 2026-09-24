@@ -115,13 +115,6 @@ fun VRPlayerScreen(
 
     // Screen Layout orientation states (Lock to Landscape manually as requested)
     var isLandscape by remember { mutableStateOf(true) }
-    // v2.0.166：**画面旋转 180°**（播控栏按钮，紧邻屏幕旋转；默认关）
-    // 场景：屏幕倒置使用时，把画面与 UI 一起转 180° 恢复正向
-    var isRotated180 by remember {
-        mutableStateOf(
-            if (isMemoryModeEnabled) prefs.getBoolean("is_rotated_180", false) else false
-        )
-    }
     var isUserTouching by remember { mutableStateOf(false) }
 
     // Media and projection states
@@ -972,8 +965,6 @@ fun VRPlayerScreen(
                 putFloat("video_curvature", videoCurvature)
                 putInt("max_resolution_id", maxResolution.id)
                 putBoolean("is_floating_ball_enabled", isFloatingBallEnabled)
-                // v2.0.166：画面旋转 180° + 快进/后退悬浮球
-                putBoolean("is_rotated_180", isRotated180)
                 putBoolean("is_seek_forward_ball_enabled", isSeekForwardBallEnabled)
                 putBoolean("is_seek_backward_ball_enabled", isSeekBackwardBallEnabled)
                 putInt("seek_forward_step", seekForwardStep)
@@ -1164,16 +1155,6 @@ fun VRPlayerScreen(
         } else {
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
-    }
-
-    // v2.0.170：旋转 180° 的 **UI 部分** —— 对窗口根 View 设置 `rotation`（View 层）。
-    // 保留此方案（用户澄清：问题不是「UI 不该转」，而是「触摸与旋转冲突」）：
-    //   · UI 走 View 层 rotation —— View 系统会用逆矩阵映射触摸，UI 上的点击位置正确；
-    //   · 画面走 renderer 投影矩阵（SurfaceView 独立合成、不跟随 View 变换）—— 所以
-    //     **GLSurfaceView 的触摸要在 VRGLSurfaceView.onTouchEvent 里另行反向映射**，
-    //     这才是本次修复的核心（见该文件的 rotate180 字段）。
-    LaunchedEffect(isRotated180) {
-        activity?.window?.decorView?.rotation = if (isRotated180) 180f else 0f
     }
 
     // Automatically hide status bar and navigation bar (the white bar) for immersive playback
@@ -2473,12 +2454,6 @@ fun VRPlayerScreen(
                 view.isUiLocked = isUiLocked
                 view.isViewLocked = isViewLocked
                 view.renderer.projectionMode = projectionMode
-                // v2.0.169：画面旋转 180°（SurfaceView 不跟随 View/Compose 层的旋转，需在投影矩阵单独做；
-                // UI 旋转由窗口根 View 的 rotation 负责 —— 分属不同图层，不会互相抵消）
-                view.renderer.rotate180 = isRotated180
-                // v2.0.170：把同一个状态同步给 SurfaceView —— 它的 onTouchEvent 需要据此把触摸坐标
-                // 做同样的 180° 反向映射（画面层旋转不经过 View 系统，否则手势方向与画面冲突）
-                view.rotate180 = isRotated180
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel
                 view.renderer.beautyTextureDetail = beautyTextureDetail
@@ -3073,8 +3048,6 @@ fun VRPlayerScreen(
                                 onToggleViewLock = { isViewLocked = !isViewLocked },
                                 isLandscape = isLandscape,
                                 onToggleOrientation = { isLandscape = !isLandscape },
-                                isRotated180 = isRotated180,
-                                onToggleRotate180 = { isRotated180 = !isRotated180 },
                                 isSplitScreenVR = isSplitScreenVR,
                                 onToggleSplitScreen = { isSplitScreenVR = !isSplitScreenVR },
                                 isSubtitlePanelOpen = isSubtitleQuickPanelOpen,

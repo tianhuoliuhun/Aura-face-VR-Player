@@ -21,14 +21,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     // Volatile settings accessible from Compose UI
     @Volatile var projectionMode = ProjectionMode.STANDARD
-    /**
-     * v2.0.169：**画面旋转 180°**（播控栏「旋转 180°」按钮的画面部分）。
-     *
-     * ⚠️ 实测结论：GLSurfaceView 是 SurfaceView，**拥有独立合成层** —— Compose 的
-     * graphicsLayer 变换与窗口 View 的 rotation 都**不会带动画面**，因此画面必须在这里
-     * 对投影矩阵单独处理；UI 侧由窗口根 View 的 rotation 负责（不同图层，不冲突）。
-     */
-    @Volatile var rotate180 = false
     @Volatile var stereoMode = StereoMode.MONO
     @Volatile var beautyLevel = 0.5f // 0.0f (off) to 1.0f (max smoothing)
     @Volatile var brightnessLevel = 0.0f // -0.5f to 0.5f
@@ -1279,13 +1271,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             Matrix.perspectiveM(projectionMatrix, 0, fovDeg, aspect, 0.1f, 100.0f)
         }
 
-        // v2.0.169：画面**旋转 180°** —— x、y 同时取反（≡ 绕 z 轴转 180°），平面与全景均生效，
-        // 且不影响后续视角/立体矩阵。UI 由窗口根 View 的 rotation 负责（SurfaceView 独立合成，
-        // 不跟随 View/Compose 变换，故两边都要做，且不会互相抵消）。
-        if (rotate180) {
-            Matrix.scaleM(projectionMatrix, 0, -1f, -1f, 1f)
-        }
-
         // Setup standard eye look matrix looking inside the 3D dome / box
         if (projectionMode == ProjectionMode.VR_360 || projectionMode == ProjectionMode.VR_180 ||
             projectionMode == ProjectionMode.BOX
@@ -1352,11 +1337,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             projectionMode == ProjectionMode.BOX
         val gyroActive = isPanorama && gyroEnabled
 
-        // v2.0.170：旋转 180° 时，传感器姿态与拖动偏移都按「设备倒置」处理 ——
-        // 否则画面转了、头部动作仍按正向映射，表现为陀螺仪方向相反（用户反馈「反转后陀螺仪不对」）。
-        // 数学上「设备倒置」= 姿态矩阵**右乘**绕自身 z 轴（屏幕法线）的 180° 旋转。
-        val userOffsetYaw = if (rotate180) -manualYaw else manualYaw
-        val userOffsetPitch = if (rotate180) -manualPitch else manualPitch
 
         if (gyroActive) {
             val currentGyro = FloatArray(16)
@@ -1378,29 +1358,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 currentGyro
             }
 
-            // v2.0.170：「设备倒置」等价变换 gyro' = gyro · Rz(180)（绕设备自身 z 轴 = 屏幕法线）
-            val effectiveGyro = if (rotate180) {
-                val rz = FloatArray(16)
-                Matrix.setIdentityM(rz, 0)
-                Matrix.rotateM(rz, 0, 180f, 0.0f, 0.0f, 1.0f)
-                val out = FloatArray(16)
-                Matrix.multiplyMM(out, 0, gyroMat, 0, rz, 0)
-                out
-            } else {
-                gyroMat
-            }
 
             // model = gyro * manualOffset * scale
             val manualMat = FloatArray(16)
             Matrix.setIdentityM(manualMat, 0)
-            Matrix.rotateM(manualMat, 0, userOffsetPitch, 1.0f, 0.0f, 0.0f)
-            Matrix.rotateM(manualMat, 0, userOffsetYaw, 0.0f, 1.0f, 0.0f)
+            Matrix.rotateM(manualMat, 0, manualPitch, 1.0f, 0.0f, 0.0f)
+            Matrix.rotateM(manualMat, 0, manualYaw, 0.0f, 1.0f, 0.0f)
             Matrix.multiplyMM(modelMatrix, 0, manualMat, 0, modelMatrix, 0)
-            Matrix.multiplyMM(modelMatrix, 0, effectiveGyro, 0, modelMatrix, 0)
+            Matrix.multiplyMM(modelMatrix, 0, gyroMat, 0, modelMatrix, 0)
         } else if (projectionMode != ProjectionMode.STANDARD) {
             // Apply touch swipes manual rotational overrides for all projection modes except standard 2D
-            Matrix.rotateM(modelMatrix, 0, userOffsetPitch, 1.0f, 0.0f, 0.0f)
-            Matrix.rotateM(modelMatrix, 0, userOffsetYaw, 0.0f, 1.0f, 0.0f)
+            Matrix.rotateM(modelMatrix, 0, manualPitch, 1.0f, 0.0f, 0.0f)
+            Matrix.rotateM(modelMatrix, 0, manualYaw, 0.0f, 1.0f, 0.0f)
         }
 
         // Combine MVP matrix

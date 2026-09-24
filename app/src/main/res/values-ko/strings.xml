@@ -148,8 +148,6 @@
     <string name="panorama_note">참고: 360°/180° 파노라마는 자이로 또는 드래그로 자유롭게 둘러볼 수 있습니다.</string>
     <string name="settings_group_floating_ball">3. 플로팅 볼과 재생 속도</string>
     <string name="floating_ball_enable">플로팅 볼 사용</string>
-    <string name="cd_rotate180_on">180° 회전 해제</string>
-    <string name="cd_rotate180_off">180° 회전</string>
     <string name="seek_ball_forward_enable">앞으로 감기 볼</string>
     <string name="seek_ball_backward_enable">뒤로 감기 볼</string>
     <string name="seek_ball_desc">탭하여 이동 · 더블 탭으로 초 변경 · 길게 눌러 드래그</string>
