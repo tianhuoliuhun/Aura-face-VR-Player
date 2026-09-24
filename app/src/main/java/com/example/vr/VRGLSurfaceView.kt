@@ -24,6 +24,12 @@ class VRGLSurfaceView @JvmOverloads constructor(
     private var hasMovedSinceDown = false
     var onSingleTap: (() -> Unit)? = null
     var onDoubleTap: (() -> Unit)? = null
+    /**
+     * v2.0.170：画面是否被 renderer 用投影矩阵旋转了 180°。
+     * 画面层旋转**不经过 View 系统**（SurfaceView 独立合成），故触摸坐标需在这里**同样反向映射**，
+     * 否则画面上的拖动 / 双击 / 缩放手势会与看到的画面方向冲突。
+     */
+    var rotate180: Boolean = false
 
     private var previousX = 0f
     private var previousY = 0f
@@ -92,6 +98,14 @@ class VRGLSurfaceView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // v2.0.170：画面由 renderer 的投影矩阵旋转 180° —— SurfaceView 独立合成、不跟随 View 层旋转，
+        // 所以这里必须把触摸坐标做**同样的 180° 反向映射**，否则画面上的拖动 / 双击 / 缩放手势
+        // 与看到的画面方向对不上（用户反馈的「触摸的旋转冲突」）。
+        if (rotate180) {
+            val m = android.graphics.Matrix()
+            m.setRotate(180f, width / 2f, height / 2f)
+            event.transform(m)
+        }
         if (event.action == MotionEvent.ACTION_DOWN) {
             android.util.Log.d("VRGLSurfaceView", "touch down at x=${event.x} y=${event.y}")
         }

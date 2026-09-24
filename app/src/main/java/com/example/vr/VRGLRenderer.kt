@@ -1351,6 +1351,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val isPanorama = projectionMode == ProjectionMode.VR_360 || projectionMode == ProjectionMode.VR_180 ||
             projectionMode == ProjectionMode.BOX
         val gyroActive = isPanorama && gyroEnabled
+
+        // v2.0.170：旋转 180° 时，传感器姿态与拖动偏移都按「设备倒置」处理 ——
+        // 否则画面转了、头部动作仍按正向映射，表现为陀螺仪方向相反（用户反馈「反转后陀螺仪不对」）。
+        // 数学上「设备倒置」= 姿态矩阵**右乘**绕自身 z 轴（屏幕法线）的 180° 旋转。
+        val userOffsetYaw = if (rotate180) -manualYaw else manualYaw
+        val userOffsetPitch = if (rotate180) -manualPitch else manualPitch
+
         if (gyroActive) {
             val currentGyro = FloatArray(16)
             synchronized(gyroSyncLock) {
@@ -1371,17 +1378,29 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 currentGyro
             }
 
+            // v2.0.170：「设备倒置」等价变换 gyro' = gyro · Rz(180)（绕设备自身 z 轴 = 屏幕法线）
+            val effectiveGyro = if (rotate180) {
+                val rz = FloatArray(16)
+                Matrix.setIdentityM(rz, 0)
+                Matrix.rotateM(rz, 0, 180f, 0.0f, 0.0f, 1.0f)
+                val out = FloatArray(16)
+                Matrix.multiplyMM(out, 0, gyroMat, 0, rz, 0)
+                out
+            } else {
+                gyroMat
+            }
+
             // model = gyro * manualOffset * scale
             val manualMat = FloatArray(16)
             Matrix.setIdentityM(manualMat, 0)
-            Matrix.rotateM(manualMat, 0, manualPitch, 1.0f, 0.0f, 0.0f)
-            Matrix.rotateM(manualMat, 0, manualYaw, 0.0f, 1.0f, 0.0f)
+            Matrix.rotateM(manualMat, 0, userOffsetPitch, 1.0f, 0.0f, 0.0f)
+            Matrix.rotateM(manualMat, 0, userOffsetYaw, 0.0f, 1.0f, 0.0f)
             Matrix.multiplyMM(modelMatrix, 0, manualMat, 0, modelMatrix, 0)
-            Matrix.multiplyMM(modelMatrix, 0, gyroMat, 0, modelMatrix, 0)
+            Matrix.multiplyMM(modelMatrix, 0, effectiveGyro, 0, modelMatrix, 0)
         } else if (projectionMode != ProjectionMode.STANDARD) {
             // Apply touch swipes manual rotational overrides for all projection modes except standard 2D
-            Matrix.rotateM(modelMatrix, 0, manualPitch, 1.0f, 0.0f, 0.0f)
-            Matrix.rotateM(modelMatrix, 0, manualYaw, 0.0f, 1.0f, 0.0f)
+            Matrix.rotateM(modelMatrix, 0, userOffsetPitch, 1.0f, 0.0f, 0.0f)
+            Matrix.rotateM(modelMatrix, 0, userOffsetYaw, 0.0f, 1.0f, 0.0f)
         }
 
         // Combine MVP matrix

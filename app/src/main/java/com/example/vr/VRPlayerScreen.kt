@@ -1166,14 +1166,12 @@ fun VRPlayerScreen(
         }
     }
 
-    // v2.0.169：旋转 180° 的 **UI 部分** —— 对**窗口根 View** 设置 `rotation`（View 层）。
-    //
-    // 为什么换掉前两种方案（都实测过）：
-    //   · Compose `graphicsLayer(rotationZ = 180f)`（含参数版）：变换只在**绘制阶段**生效、
-    //     **不参与命中测试（hit test）** → 旋转后所有控件都点不中（v2.0.166/167）；
-    //   · 系统 `SCREEN_ORIENTATION_REVERSE_LANDSCAPE`：模拟器上实测画面不转（v2.0.168）。
-    // View 层的 `rotation` 由 View 系统保证**触摸坐标一并旋转**（所见即所得），确定性最高。
-    // 画面（SurfaceView）不跟随此旋转，故 renderer 里对投影矩阵另做一次（不同图层，不冲突）。
+    // v2.0.170：旋转 180° 的 **UI 部分** —— 对窗口根 View 设置 `rotation`（View 层）。
+    // 保留此方案（用户澄清：问题不是「UI 不该转」，而是「触摸与旋转冲突」）：
+    //   · UI 走 View 层 rotation —— View 系统会用逆矩阵映射触摸，UI 上的点击位置正确；
+    //   · 画面走 renderer 投影矩阵（SurfaceView 独立合成、不跟随 View 变换）—— 所以
+    //     **GLSurfaceView 的触摸要在 VRGLSurfaceView.onTouchEvent 里另行反向映射**，
+    //     这才是本次修复的核心（见该文件的 rotate180 字段）。
     LaunchedEffect(isRotated180) {
         activity?.window?.decorView?.rotation = if (isRotated180) 180f else 0f
     }
@@ -2478,6 +2476,9 @@ fun VRPlayerScreen(
                 // v2.0.169：画面旋转 180°（SurfaceView 不跟随 View/Compose 层的旋转，需在投影矩阵单独做；
                 // UI 旋转由窗口根 View 的 rotation 负责 —— 分属不同图层，不会互相抵消）
                 view.renderer.rotate180 = isRotated180
+                // v2.0.170：把同一个状态同步给 SurfaceView —— 它的 onTouchEvent 需要据此把触摸坐标
+                // 做同样的 180° 反向映射（画面层旋转不经过 View 系统，否则手势方向与画面冲突）
+                view.rotate180 = isRotated180
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel
                 view.renderer.beautyTextureDetail = beautyTextureDetail
