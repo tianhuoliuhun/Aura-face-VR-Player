@@ -1166,6 +1166,18 @@ fun VRPlayerScreen(
         }
     }
 
+    // v2.0.169：旋转 180° 的 **UI 部分** —— 对**窗口根 View** 设置 `rotation`（View 层）。
+    //
+    // 为什么换掉前两种方案（都实测过）：
+    //   · Compose `graphicsLayer(rotationZ = 180f)`（含参数版）：变换只在**绘制阶段**生效、
+    //     **不参与命中测试（hit test）** → 旋转后所有控件都点不中（v2.0.166/167）；
+    //   · 系统 `SCREEN_ORIENTATION_REVERSE_LANDSCAPE`：模拟器上实测画面不转（v2.0.168）。
+    // View 层的 `rotation` 由 View 系统保证**触摸坐标一并旋转**（所见即所得），确定性最高。
+    // 画面（SurfaceView）不跟随此旋转，故 renderer 里对投影矩阵另做一次（不同图层，不冲突）。
+    LaunchedEffect(isRotated180) {
+        activity?.window?.decorView?.rotation = if (isRotated180) 180f else 0f
+    }
+
     // Automatically hide status bar and navigation bar (the white bar) for immersive playback
     LaunchedEffect(activity) {
         val window = activity?.window
@@ -2404,15 +2416,11 @@ fun VRPlayerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF1C1B1F)) // High Density Theme deep background color
+            // v2.0.168：此处**不再做 Compose 图层旋转** —— 旋转 180° 已改为系统级
+            // 反向屏幕方向（见上方 LaunchedEffect 的 SCREEN_ORIENTATION_REVERSE_*）。
+            // 原因：graphicsLayer 的变换只在绘制阶段生效、**不参与命中测试**，
+            // 用它旋转会让所有控件都点不中（v2.0.166/167 的「旋转后不能触摸」）。
             .testTag("player_root_container")
-            // v2.0.166：画面旋转 180° 的 **UI 部分** —— 对整个界面树绕 z 轴转 180°。
-            // 为什么在这里做：场景是「屏幕倒置使用」，画面与 UI 必须**同向转**，
-            // 否则画面转了、按钮还是反的就没法操作；graphicsLayer 还会让 Compose
-            // 一并变换触摸坐标（点哪里就命中哪里）。
-            // 画面（SurfaceView）不跟随此变换，故 renderer 里另做一次（不同图层，不冲突）。
-            .graphicsLayer {
-                rotationZ = if (isRotated180) 180f else 0f
-            }
     ) {
         // Liquid glass backdrop：捕获视频层 + 主题底色，供玻璃面板绘制（Backdrop 库，Android 12+）
         val isLiquidGlass = glassMode == 1 && Build.VERSION.SDK_INT >= 31
@@ -2467,8 +2475,8 @@ fun VRPlayerScreen(
                 view.isUiLocked = isUiLocked
                 view.isViewLocked = isViewLocked
                 view.renderer.projectionMode = projectionMode
-                // v2.0.166：画面旋转 180°（SurfaceView 不跟随 Compose 图层变换，需单独转；
-                // UI 旋转由根容器的 graphicsLayer 负责 —— 两者作用层不同，不会互相抵消）
+                // v2.0.169：画面旋转 180°（SurfaceView 不跟随 View/Compose 层的旋转，需在投影矩阵单独做；
+                // UI 旋转由窗口根 View 的 rotation 负责 —— 分属不同图层，不会互相抵消）
                 view.renderer.rotate180 = isRotated180
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel

@@ -22,11 +22,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // Volatile settings accessible from Compose UI
     @Volatile var projectionMode = ProjectionMode.STANDARD
     /**
-     * v2.0.166：**画面旋转 180°**（播控栏「旋转 180°」按钮）。
+     * v2.0.169：**画面旋转 180°**（播控栏「旋转 180°」按钮的画面部分）。
      *
-     * ⚠️ 实测结论（MuMu 截图验证）：GLSurfaceView 是 SurfaceView，拥有**独立合成层**，
-     * 父容器的 graphicsLayer 变换**不会带动画面** —— 所以画面必须在投影矩阵里单独处理；
-     * 两者作用于不同图层，**不构成双重变换**。
+     * ⚠️ 实测结论：GLSurfaceView 是 SurfaceView，**拥有独立合成层** —— Compose 的
+     * graphicsLayer 变换与窗口 View 的 rotation 都**不会带动画面**，因此画面必须在这里
+     * 对投影矩阵单独处理；UI 侧由窗口根 View 的 rotation 负责（不同图层，不冲突）。
      */
     @Volatile var rotate180 = false
     @Volatile var stereoMode = StereoMode.MONO
@@ -1279,9 +1279,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             Matrix.perspectiveM(projectionMatrix, 0, fovDeg, aspect, 0.1f, 100.0f)
         }
 
-        // v2.0.166：画面**旋转 180°** —— x、y 同时取反等价于绕 z 轴转 180°（平面与全景均生效，
-        // 且不影响后续视角/立体矩阵）。UI 部分由 VRPlayerScreen 根容器的 graphicsLayer 负责；
-        // SurfaceView 独立合成、不跟随 Compose 图层变换，故两边都要做。
+        // v2.0.169：画面**旋转 180°** —— x、y 同时取反（≡ 绕 z 轴转 180°），平面与全景均生效，
+        // 且不影响后续视角/立体矩阵。UI 由窗口根 View 的 rotation 负责（SurfaceView 独立合成，
+        // 不跟随 View/Compose 变换，故两边都要做，且不会互相抵消）。
         if (rotate180) {
             Matrix.scaleM(projectionMatrix, 0, -1f, -1f, 1f)
         }
