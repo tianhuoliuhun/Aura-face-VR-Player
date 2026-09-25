@@ -163,11 +163,12 @@
     <string name="floating_ball_enable">Enable floating ball</string>
     <string name="seek_ball_forward_enable">Forward ball</string>
     <string name="seek_ball_backward_enable">Rewind ball</string>
-    <string name="seek_ball_desc">Tap to seek · Double-tap to change step · Long-press to drag</string>
+    <string name="seek_ball_desc">Tap to seek · Double-tap to change step · Long-press to drag · Switches are remembered</string>
     <string name="seek_forward_hud">Fast forward %1$d s</string>
     <string name="seek_backward_hud">Rewind %1$d s</string>
     <string name="seek_step_switched">Step changed to %1$d s</string>
-    <string name="floating_ball_desc">Long-press to fast-forward; drag freely to reposition</string>
+    <string name="ball_speed_switched">Boost speed changed to %1$s</string>
+    <string name="floating_ball_desc">Hold to boost · Double-tap to cycle speed steps · Drag to reposition · Switch is remembered</string>
     <string name="floating_ball_speed">Long-press speed</string>
     <string name="base_playback_speed">Normal playback speed</string>
     <string name="settings_group_decoder">4. Decoder core &amp; FPS limit</string>
@@ -300,7 +301,7 @@
     <string name="beauty_status_2d">2D mode (%1$s): all effects available; portrait retouch needs a detected face</string>
     <string name="beauty_status_3d">3D mode (%1$s): only general effects apply; portrait retouch is off until you switch to 2D</string>
     <string name="beauty_compare_original">Beauty Switch</string>
-    <string name="beauty_compare_desc">When off, no beauty processing is applied</string>
+    <string name="beauty_compare_desc">Beauty applies to the entire playback area · No processing when off · State is remembered</string>
     <string name="beauty_engine_title">Beauty Engine</string>
     <string name="beauty_engine_glsl">GLSL (built-in)</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>

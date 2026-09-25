@@ -162,11 +162,12 @@
     <string name="floating_ball_enable">启用屏幕悬浮球</string>
     <string name="seek_ball_forward_enable">快进悬浮球</string>
     <string name="seek_ball_backward_enable">后退悬浮球</string>
-    <string name="seek_ball_desc">单击快进/后退 · 双击切换秒数 · 长按拖动</string>
+    <string name="seek_ball_desc">单击快进/后退 · 双击切换秒数 · 长按拖动 · 开关自动记忆</string>
     <string name="seek_forward_hud">快进 %1$d 秒</string>
     <string name="seek_backward_hud">后退 %1$d 秒</string>
     <string name="seek_step_switched">步长已切换为 %1$d 秒</string>
-    <string name="floating_ball_desc">长按悬浮球快进，支持自由拖动放置</string>
+    <string name="ball_speed_switched">加速倍速已切换为 %1$s</string>
+    <string name="floating_ball_desc">按住加速 · 双击循环切换倍速档位 · 拖动调整位置 · 开关自动记忆</string>
     <string name="floating_ball_speed">悬浮球长按倍速</string>
     <string name="base_playback_speed">基础常规播放倍速</string>
     <string name="settings_group_decoder">4. 解码内核与帧率限制</string>
@@ -299,7 +300,7 @@
     <string name="beauty_status_2d">当前 2D 模式（%1$s）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸</string>
     <string name="beauty_status_3d">当前 3D 模式（%1$s）：仅磨皮/美白等通用效果生效；瘦脸/大眼/口红等 2D 人像精修已停用，切换 2D 模式后自动恢复</string>
     <string name="beauty_compare_original">美颜开关</string>
-    <string name="beauty_compare_desc">关闭后画面不做任何美颜处理</string>
+    <string name="beauty_compare_desc">美颜对整个播放画面生效 · 关闭后不做任何美颜处理 · 状态自动记忆</string>
     <string name="beauty_engine_title">美颜方案</string>
     <string name="beauty_engine_glsl">GLSL（内置）</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>

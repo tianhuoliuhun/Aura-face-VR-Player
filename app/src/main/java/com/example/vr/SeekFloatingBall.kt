@@ -52,6 +52,21 @@ fun nextSeekStep(current: Int): Int {
     }
 }
 
+/** v2.0.172：加速球可循环的倍速档位 —— 双击在 1.5X → 2.0X → 3.0X → 1.5X 之间循环 */
+val BALL_SPEED_OPTIONS = floatArrayOf(1.5f, 2.0f, 3.0f)
+
+/** 把当前加速倍速推进到下一个档位（与设置页「悬浮球倍速」选项一致；异常值回落到 1.5X） */
+fun nextBallSpeed(current: Float): Float {
+    // 注意：这里刻意不用 FloatArray.indexOf 扩展（本项目 K2 编译环境下解析失败，
+    // IntArray.indexOf 正常——原因不明；手写循环 100% 可靠）
+    for (i in BALL_SPEED_OPTIONS.indices) {
+        if (BALL_SPEED_OPTIONS[i] == current) {
+            return BALL_SPEED_OPTIONS[(i + 1) % BALL_SPEED_OPTIONS.size]
+        }
+    }
+    return BALL_SPEED_OPTIONS[0]
+}
+
 /**
  * v2.0.165：快进 / 后退悬浮球。
  *

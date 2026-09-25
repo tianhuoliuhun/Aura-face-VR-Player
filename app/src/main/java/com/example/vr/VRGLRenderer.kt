@@ -134,6 +134,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /** 采样间隔（帧）：每 N 帧回读一次屏幕内容做人脸检测 */
     private val faceSampleInterval = 8
 
+    /** v2.0.173：人脸检测连续失败计数 —— 连续 3 次失败才把 faceDetectedUniform 置 0（防妆容闪烁） */
+    private var faceMissStreak = 0
+
     /**
      * 采样窗口相对**单个视口**的缩放比例（`rw/vpW`、`rh/vpH`）。
      *
@@ -261,8 +264,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var placeholderTextureId = -1
 
     // ===== 美颜对比模式（v102：GPUPixel 已移除，纯 shader 美颜）=====
-    /** v2.0.160：美颜总开关（由原「对比原图」改造而来；false = 直通原图） */
-    @Volatile var beautyMasterEnabled = true
+    /** v2.0.160：美颜总开关（由原「对比原图」改造而来；false = 直通原图）。v2.0.172：默认改为关 */
+    @Volatile var beautyMasterEnabled = false
     /** v2.0.160：美颜引擎。0 = GLSL（内置），1 = GPUPixel（独立 Mars-Face 检测 + 人脸区域处理） */
     @Volatile var beautyEngineType = BEAUTY_ENGINE_GLSL
     // ---- GPUPixel 引擎参数（与 GLSL 参数独立，prefs 前缀 beauty_gp_*）----
@@ -762,7 +765,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             }
             
             // Apply advanced fine cosmetics
-            if (uProjectionMode == 0) {
+            // v2.0.173：妆容/局部效果 gate 到 uFaceDetected == 1 —— 检测丢失时完全不画
+            // （否则会按默认中心 (0.5,0.45) 把口红/腮红画到画面中央，产生跳变）。
+            // 与 Kotlin 侧的「连续 3 次失败才置 0」防抖配合，短暂检测失败不再闪。
+            if (uProjectionMode == 0 && uFaceDetected == 1) {
                 // Initialize landmarks
                 vec2 fCenter = vec2(0.5, 0.45);
                 float fUnit = 0.14;
@@ -1749,15 +1755,30 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             faceFrameCounter = 0
             return
         }
+        // v2.0.173：GPUPixel 全屏路径**每帧**采样处理 —— 贴回间隔 > 1 帧时，显示内容在
+        // 「整幅美颜帧 / 原始帧」之间交替，全屏尺度下就是肉眼可见的闪烁；
+        // 每帧处理则屏幕恒为「上一帧的美颜帧」，只有整体 1~2 帧延迟（不可感知）。
+        // GLSL 检测路径维持 8 帧节奏（它只消费人脸坐标，磨皮/美白是 shader 实时全帧）。
+        val gpFullFrame = isGpuPixelActive()
+        val interval = if (gpFullFrame) 1 else faceSampleInterval
         faceFrameCounter++
-        if (faceFrameCounter < faceSampleInterval) return
+        if (faceFrameCounter < interval) return
         faceFrameCounter = 0
+
+        // v2.0.173：后台仍在处理上一帧时跳过本次回读（全帧 8MB+，白回读只制造 GC 压力），
+        // 贴回间隔自适应 = max(1 帧, 实际处理耗时)
+        if (gpFullFrame && isDetectingFace.get()) return
 
         val vpW = if (isSplitScreenVR) (displayWidth / 2) else displayWidth
         val w = vpW.coerceAtLeast(1)
         val h = displayHeight.coerceAtLeast(1)
-        val rw = minOf(faceReadSize, w)
-        val rh = minOf(faceReadSize, h)
+        // v2.0.172：GPUPixel 引擎把美颜作用范围从「视口中央 512×512 人脸区域」扩到
+        // **整个播放视口**（用户要求全屏生效）—— 回读整帧交 GPUPixel 全帧处理：
+        // 磨皮/美白作用于全部画面，瘦脸/大眼由其内部 Mars-Face 检测定位人脸。
+        // GLSL 引擎仍用中央 512×512 小图做人脸检测（它只消费人脸坐标，
+        // 磨皮/美白在 shader 里本就是全屏皮肤色判定，无需大图）。
+        val rw = if (gpFullFrame) w else minOf(faceReadSize, w)
+        val rh = if (gpFullFrame) h else minOf(faceReadSize, h)
         val x0 = (w - rw) / 2
         val y0 = (h - rh) / 2
         faceCropScaleX = rw.toFloat() / w
@@ -1870,6 +1891,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         val cyUv = mapCropYToViewport(result.centerY)
                         val eyeDistUv = mapCropLenToViewport(result.eyeDistance)
                         // Smooth tracking updates using low-pass lerp filter to eliminate jitter
+                        // v2.0.173：检测成功 → 立即置 1 并清零失败计数（见下方失败分支的防抖说明）
+                        faceMissStreak = 0
                         faceDetectedUniform = 1
                         faceCenterXUniform = faceCenterXUniform * 0.75f + cxUv * 0.25f
                         faceCenterYUniform = faceCenterYUniform * 0.75f + cyUv * 0.25f
@@ -1898,12 +1921,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                             hasDetailedLandmarks = 0
                         }
                     } else {
-                        // Decay smoothly back to default screen center coordinates
-                        faceDetectedUniform = 0
-                        hasDetailedLandmarks = 0
-                        faceCenterXUniform = faceCenterXUniform * 0.92f + 0.50f * 0.08f
-                        faceCenterYUniform = faceCenterYUniform * 0.92f + 0.45f * 0.08f
-                        eyeDistanceUniform = eyeDistanceUniform * 0.92f + 0.14f * 0.08f
+                        // v2.0.173：防抖 —— 检测按 8 帧节奏进行，单次失败（遮挡/侧脸/运动模糊）
+                        // 就硬切 0 会让妆容与变形在「出现/消失」间高频跳变（表现为闪烁）。
+                        // 连续 3 次失败（≈半秒）才判定真正丢失；期间保持最后位置不漂移。
+                        faceMissStreak++
+                        if (faceMissStreak >= 3) {
+                            faceDetectedUniform = 0
+                            hasDetailedLandmarks = 0
+                            // Decay smoothly back to default screen center coordinates
+                            faceCenterXUniform = faceCenterXUniform * 0.92f + 0.50f * 0.08f
+                            faceCenterYUniform = faceCenterYUniform * 0.92f + 0.45f * 0.08f
+                            eyeDistanceUniform = eyeDistanceUniform * 0.92f + 0.14f * 0.08f
+                        }
                     }
                 }
                 // v84：复用缓冲，不 recycle（仅尺寸变化时才重建）

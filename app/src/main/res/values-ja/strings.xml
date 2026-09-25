@@ -150,11 +150,12 @@
     <string name="floating_ball_enable">フローティングボールを有効化</string>
     <string name="seek_ball_forward_enable">早送りボール</string>
     <string name="seek_ball_backward_enable">巻き戻しボール</string>
-    <string name="seek_ball_desc">タップでシーク · ダブルタップで秒数切替 · 長押しでドラッグ</string>
+    <string name="seek_ball_desc">タップでシーク · ダブルタップで秒数切替 · 長押しでドラッグ · スイッチは記憶されます</string>
     <string name="seek_forward_hud">%1$d 秒早送り</string>
     <string name="seek_backward_hud">%1$d 秒巻き戻し</string>
     <string name="seek_step_switched">ステップを %1$d 秒に変更</string>
-    <string name="floating_ball_desc">長押しで早送り、ドラッグで自由に配置できます</string>
+    <string name="ball_speed_switched">ブースト速度を %1$s に変更</string>
+    <string name="floating_ball_desc">押し続けで加速 · ダブルタップで速度段を切替 · ドラッグで配置 · スイッチは記憶されます</string>
     <string name="floating_ball_speed">長押し時の速度</string>
     <string name="base_playback_speed">通常の再生速度</string>
     <string name="settings_group_decoder">4. デコーダとフレームレート制限</string>
@@ -277,7 +278,7 @@
     <string name="beauty_status_2d">2D モード（%1$s）：すべての美顔が利用可能。ポートレート加工（小顔/大きな目/リップ等）には顔検出が必要</string>
     <string name="beauty_status_3d">3D モード（%1$s）：美肌/美白など共通効果のみ有効。小顔/大きな目/リップなどの 2D 加工は無効（2D に戻すと自動復帰）</string>
     <string name="beauty_compare_original">美顔スイッチ</string>
-    <string name="beauty_compare_desc">オフの間は美顔処理を行いません</string>
+    <string name="beauty_compare_desc">美顔は再生画面全体に適用 · オフの間は美顔処理を行いません · スイッチは記憶されます</string>
     <string name="beauty_engine_title">美顔エンジン</string>
     <string name="beauty_engine_glsl">GLSL（内蔵）</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>

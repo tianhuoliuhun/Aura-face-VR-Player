@@ -456,7 +456,8 @@ fun BeautyEngineSection(
         if (engineType == BEAUTY_ENGINE_GPUPIXEL) {
             BeautySliderItem(stringResource(R.string.beauty_smooth), gpSmooth, onGpSmoothChange, accentColor = accentColor)
             BeautySliderItem(stringResource(R.string.beauty_whitening), gpWhite, onGpWhiteChange, accentColor = accentColor)
-            BeautySliderItem(stringResource(R.string.beauty_gp_sharpen), gpSharpen, onGpSharpenChange, accentColor = accentColor)
+            // v2.0.164：BeautyFaceFilter 未注册 sharpen property（SetProperty 会被静默忽略），
+            // 故移除该滑块；需要「锐化」可用 GLSL 引擎的「皮肤质感」滑块（> 1 即 USM 锐化）。
             BeautySliderItem(stringResource(R.string.beauty_face_slim), gpSlim, onGpSlimChange, accentColor = accentColor)
             BeautySliderItem(stringResource(R.string.beauty_big_eyes), gpEyeZoom, onGpEyeZoomChange, accentColor = accentColor)
 

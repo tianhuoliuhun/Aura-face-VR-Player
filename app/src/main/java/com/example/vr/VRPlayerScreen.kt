@@ -169,9 +169,10 @@ fun VRPlayerScreen(
             } else BEAUTY_PRESET_CUSTOM
         )
     }
-    // v2.0.160：原「对比原图」改为「美颜总开关」（默认开；关闭 = 直通原图，等价旧对比模式）
+    // v2.0.160：原「对比原图」改为「美颜总开关」；v2.0.172：默认改为**关**，开关状态记忆
+    // （记忆模式下重启恢复上次状态；未设置时默认关）
     var beautyMasterEnabled by remember {
-        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_master_enabled", true) else true)
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_master_enabled", false) else false)
     }
     // v2.0.160：美颜引擎（0 = GLSL 内置，1 = GPUPixel）。两套引擎的检测与参数完全独立
     var beautyEngineType by remember {
@@ -384,7 +385,9 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("is_floating_ball_enabled", true) else true
         )
     }
-    // v2.0.165：快进 / 后退悬浮球 —— 各自独立开关，默认均为**关**（不影响现有交互）
+    // v2.0.165：快进 / 后退悬浮球 —— 各自独立开关，默认均为**关**（不影响现有交互）。
+    // v2.0.172：开关与步长状态的记忆已修复（此前这 4 个状态不在写回 LaunchedEffect 的
+    // key 列表里，切换后 prefs 从未落盘，重启即丢）→ 现为真正的记忆开关。
     var isSeekForwardBallEnabled by remember {
         mutableStateOf(
             if (isMemoryModeEnabled) prefs.getBoolean("is_seek_forward_ball_enabled", false) else false
@@ -402,7 +405,7 @@ fun VRPlayerScreen(
     var seekBackwardStep by remember {
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("seek_backward_step", 5) else 5)
     }
-    // 快进/后退/步长切换的提示文案（null = 不显示）
+    // 快进/后退/步长切换/加速球双击切档的提示文案（null = 不显示）
     var seekHudText by remember { mutableStateOf<String?>(null) }
     var floatingBallSpeed by remember {
         mutableFloatStateOf(
@@ -852,11 +855,23 @@ fun VRPlayerScreen(
     var isBallPositionInitialized by remember { mutableStateOf(false) }
 
     // Dynamic Reactive Settings Memory Auto-Persistence Task
+    // v2.0.172：补齐此前缺失的 key —— 快进/后退悬浮球开关与步长、美颜总开关/引擎/GPUPixel
+    // 参数、磨皮质感、ASR 线程数、字幕去标点。这些状态此前**不在 key 列表里**，只改它们
+    // 不触发写回 effect → prefs 从未落盘，重启后丢失（表现为"开关不记忆"）。
     LaunchedEffect(
         isMemoryModeEnabled,
         projectionMode,
         stereoMode,
         beautyLevel,
+        beautyTextureDetail,
+        beautyMasterEnabled,
+        beautyEngineType,
+        beautyGpSmooth,
+        beautyGpWhite,
+        beautyGpSharpen,
+        beautyGpSlim,
+        beautyGpEyeZoom,
+        gpuPixelVrFaceBeauty,
         brightnessLevel,
         contrastLevel,
         beautyWhitening,
@@ -873,6 +888,7 @@ fun VRPlayerScreen(
         beautySmallHead,
         isSplitScreenVR,
         isGyroEnabled,
+        asrThreads,
         gyroInverted,
         fovDeg,
         isVideoMirrored,
@@ -882,12 +898,17 @@ fun VRPlayerScreen(
         videoCurvature,
         maxResolution,
         isFloatingBallEnabled,
+        isSeekForwardBallEnabled,
+        isSeekBackwardBallEnabled,
+        seekForwardStep,
+        seekBackwardStep,
         floatingBallSpeed,
         basePlaybackSpeed,
         maxFps,
         isSoftwareDecoding,
         decoderEngine,
         isSubtitleEnabled,
+        isStripSubtitlePunctuation,
         subtitleFont,
         subtitleFontSizeSp,
         subtitleFontWeightVal,
@@ -5494,6 +5515,15 @@ BatchTranscribeSection(
                 "${floatingBallSpeed}X"
             }
 
+            // v2.0.172：双击循环切换加速档位的提示文案（下一档倍速；@Composable 调用须在语句位置取好）
+            val nextSpeedVal = nextBallSpeed(floatingBallSpeed)
+            val nextSpeedLabel = if (nextSpeedVal == nextSpeedVal.toInt().toFloat()) {
+                "${nextSpeedVal.toInt()}X"
+            } else {
+                "${nextSpeedVal}X"
+            }
+            val ballSpeedSwitchedLabel = stringResource(R.string.ball_speed_switched, nextSpeedLabel)
+
             Box(
                 modifier = Modifier
                     .offset {
@@ -5552,6 +5582,11 @@ BatchTranscribeSection(
                         shape = CircleShape
                     )
                     .pointerInput(floatingBallSpeed, basePlaybackSpeed) {
+                        val touchSlop = viewConfiguration.touchSlop
+                        // v2.0.172：双击在 1.5X / 2.0X / 3.0X 间循环切换（280ms 窗口，与快进/后退球一致）。
+                        // lastTapUpTime 持有在 pointerInput 块内：key（含 floatingBallSpeed）变化时块重启、归零，
+                        // 单击无独立动作（按住即加速），故双击无需延迟判定。
+                        var lastTapUpTime = 0L
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             // v103：点按/拖动悬浮球不点亮其他 UI（不再调用 keepUiAlight）
@@ -5559,6 +5594,7 @@ BatchTranscribeSection(
                             showSpeedHud = true
 
                             var pointer = down.id
+                            var dragDetected = false
                             while (true) {
                                 val event = awaitPointerEvent()
                                 val change = event.changes.firstOrNull { it.id == pointer }
@@ -5568,11 +5604,29 @@ BatchTranscribeSection(
                                     break
                                 }
                                 val dragAmount = change.positionChange()
-                                if (dragAmount != Offset.Zero) {
+                                // 位移超过 touchSlop 才算拖动（微抖不算，否则双击永远无法成立）
+                                if (!dragDetected && dragAmount.getDistance() > touchSlop) {
+                                    dragDetected = true
+                                }
+                                if (dragDetected && dragAmount != Offset.Zero) {
                                     ballOffsetX = (ballOffsetX + dragAmount.x).coerceIn(0f, maxXPx.coerceAtLeast(0f))
                                     ballOffsetY = (ballOffsetY + dragAmount.y).coerceIn(0f, maxYPx.coerceAtLeast(0f))
                                     change.consume()
                                 }
+                            }
+
+                            // 未拖动的快速连击 = 双击 → 循环切换加速档位（按住加速照常生效）
+                            if (!dragDetected) {
+                                val now = System.currentTimeMillis()
+                                if (now - lastTapUpTime <= DOUBLE_TAP_WINDOW_MS) {
+                                    lastTapUpTime = 0L
+                                    floatingBallSpeed = nextBallSpeed(floatingBallSpeed)
+                                    seekHudText = ballSpeedSwitchedLabel
+                                } else {
+                                    lastTapUpTime = now
+                                }
+                            } else {
+                                lastTapUpTime = 0L
                             }
                         }
                     }

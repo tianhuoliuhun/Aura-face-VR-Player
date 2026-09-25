@@ -62,7 +62,7 @@ class MediaPipeFaceManager(private val context: Context) {
                 .setMinFaceDetectionConfidence(0.5f)
                 .setMinTrackingConfidence(0.5f)
                 .setMinFacePresenceConfidence(0.5f)
-                .setNumFaces(1)
+                .setNumFaces(3) // v2.0.164：多人脸（最多 3 张），主脸取尺度最大的一张
                 .setRunningMode(RunningMode.VIDEO)
 
             faceLandmarker = FaceLandmarker.createFromOptions(context, optionsBuilder.build())
@@ -95,7 +95,19 @@ class MediaPipeFaceManager(private val context: Context) {
 
             val landmarksList = result.faceLandmarks()
             if (!landmarksList.isNullOrEmpty()) {
-                val landmarks = landmarksList[0] // Get first detected face
+                // v2.0.164：多人脸 —— 上面 setNumFaces(3)，这里从最多 3 张脸里选**尺度最大**的一张
+                // 作为「主脸」交给 GLSL 管线（两眼距离最长者 ≈ 最近/最大的脸）。
+                // ⚠️ GLSL 的面部效果只有一组锚点 uniform，真正的多脸渲染需把 uniform 改成
+                // 数组 + shader 内循环，属结构性改造，另行排期；GPUPixel 引擎的 landmarks 是
+                // **全量透传**，多脸由库内部处理，不受此限制。
+                val candidates = landmarksList.filter { it.size > 454 }
+                val landmarks = candidates.maxByOrNull { lmk ->
+                    val lx = (lmk[33].x() + lmk[133].x()) / 2f
+                    val ly = (lmk[33].y() + lmk[133].y()) / 2f
+                    val rx = (lmk[263].x() + lmk[362].x()) / 2f
+                    val ry = (lmk[263].y() + lmk[362].y()) / 2f
+                    Math.hypot((rx - lx).toDouble(), (ry - ly).toDouble())
+                } ?: return fallbackDetect(bitmap)
 
                 if (landmarks.size > 454) {
                     // Eye corners
@@ -162,6 +174,7 @@ class MediaPipeFaceManager(private val context: Context) {
                         mouthHalfWidth = mouthHalfWidth,
                         mouthHalfHeight = mouthHalfHeight,
                         mouthAngle = mouthAngle,
+                        faceCount = candidates.size,
                         // v117 修复：此前漏传该字段（默认 false），于是 shader 里 uHasDetailed 恒为 0，
                         // MediaPipe 算出的眼/嘴/下巴精细点位全部被丢弃，只能退回粗略中心锚点。
                         hasDetailedLandmarks = true
@@ -190,7 +203,7 @@ class MediaPipeFaceManager(private val context: Context) {
             val detector = if (fallbackDetector == null ||
                 fallbackDetectorW != bitmap.width || fallbackDetectorH != bitmap.height
             ) {
-                android.media.FaceDetector(bitmap.width, bitmap.height, 1).also {
+                android.media.FaceDetector(bitmap.width, bitmap.height, 3).also {
                     fallbackDetector = it
                     fallbackDetectorW = bitmap.width
                     fallbackDetectorH = bitmap.height
@@ -199,7 +212,7 @@ class MediaPipeFaceManager(private val context: Context) {
                 fallbackDetector!!
             }
             val faces = fallbackFaces
-                ?: arrayOfNulls<android.media.FaceDetector.Face>(1).also { fallbackFaces = it }
+                ?: arrayOfNulls<android.media.FaceDetector.Face>(3).also { fallbackFaces = it }
             faces[0] = null
             val count = detector.findFaces(rgb565Bmp, faces)
 
@@ -207,8 +220,20 @@ class MediaPipeFaceManager(private val context: Context) {
                 rgb565Bmp.recycle()
             }
 
-            if (count > 0 && faces[0] != null) {
-                val face = faces[0]!!
+            if (count > 0) {
+                // v2.0.164：兜底检测同样支持多脸（最多 3 张），与 MediaPipe 路径一致，
+                // 取**眼睛距离最大**的一张作为主脸
+                var best: android.media.FaceDetector.Face? = null
+                var bestDist = 0f
+                for (i in 0 until minOf(count, faces.size)) {
+                    val f = faces[i] ?: continue
+                    val d = f.eyesDistance()
+                    if (d > bestDist) {
+                        bestDist = d
+                        best = f
+                    }
+                }
+                val face = best ?: return FaceResult.default()
                 val pt = android.graphics.PointF()
                 face.getMidPoint(pt)
                 val dist = face.eyesDistance()
@@ -217,7 +242,7 @@ class MediaPipeFaceManager(private val context: Context) {
                 val centerY = pt.y / bitmap.height.toFloat()
                 val eyeDistance = dist / bitmap.width.toFloat()
 
-                return FaceResult(true, centerX, centerY, eyeDistance)
+                return FaceResult(true, centerX, centerY, eyeDistance, faceCount = count)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Fallback FaceDetector failed", e)
@@ -260,6 +285,8 @@ class MediaPipeFaceManager(private val context: Context) {
         val mouthHalfWidth: Float = 0f,
         val mouthHalfHeight: Float = 0f,
         val mouthAngle: Float = 0f,
+        /** v2.0.164：本次检测到的人脸数量（最多 3），供日志/调试与后续多脸渲染使用 */
+        val faceCount: Int = 1,
         val hasDetailedLandmarks: Boolean = false
     ) {
         companion object {

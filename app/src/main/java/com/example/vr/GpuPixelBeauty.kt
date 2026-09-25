@@ -111,14 +111,30 @@ object GpuPixelBeauty {
             beauty = GPUPixelFilter.Create(GPUPixelFilter.BEAUTY_FACE_FILTER)
             reshape = GPUPixelFilter.Create(GPUPixelFilter.FACE_RESHAPE_FILTER)
             sink = GPUPixelSinkRawData.Create()
-            // 串联滤镜链：source → beauty → reshape → sink
-            source?.AddSink(beauty)
-            beauty?.AddSink(reshape)
-            reshape?.AddSink(sink)
+            // v2.0.164：按官方文档的链顺序 —— source → reshape → beauty → sink
+            // （官方示例里美型在美颜之前，之前接反了）
+            source?.AddSink(reshape)
+            reshape?.AddSink(beauty)
+            beauty?.AddSink(sink)
         }
 
         /**
          * 对一帧 RGBA 做独立检测 + 美颜。
+         *
+         * ⚠️⚠️ property 名必须是 C++ 端 `RegisterProperty` **注册的名字**，
+         * 不是内部字段名 —— 传错 key 时 native 静默忽略，表现就是「美颜完全不生效」
+         * （v2.0.160~163 踩过：blur_alpha / white / thin_face_delta / big_eye_delta 全是错的）。
+         *
+         * | 目标 | 正确 key | 对应 C++ setter |
+         * |---|---|---|
+         * | 磨皮 | `skin_smoothing` | `BeautyFaceFilter::SetBlurAlpha` |
+         * | 美白 | `whiteness` | `BeautyFaceFilter::SetWhite` |
+         * | 瘦脸 | `thin_face` | `FaceReshapeFilter::SetFaceSlimLevel` |
+         * | 大眼 | `big_eye` | `FaceReshapeFilter::SetEyeZoomLevel` |
+         * | 关键点 | `face_landmark` | `FaceReshapeFilter::SetFaceLandmarks` |
+         *
+         * 取值范围（官方文档）：磨皮 / 美白 / 瘦脸 / 大眼 均 0~1（0 = 不生效）。
+         * 注：`BeautyFaceFilter` 未注册 sharpen / radius，故不提供锐化。
          *
          * @param stride 每行字节数（= w * 4）
          * @return 处理后的 RGBA（同尺寸）；任何失败返回 null（上层保持原帧不变）
@@ -131,31 +147,27 @@ object GpuPixelBeauty {
             stride: Int,
             smooth: Float,
             white: Float,
-            sharpen: Float,
             slim: Float,
             eyeZoom: Float
         ): ByteArray? {
             if (!GpuPixelBeauty.available) return null
             return try {
                 ensure()
-                beauty?.SetProperty("blur_alpha", smooth)
-                beauty?.SetProperty("white", white)
-                beauty?.SetProperty("sharpen", sharpen)
+                beauty?.SetProperty("skin_smoothing", smooth)
+                beauty?.SetProperty("whiteness", white)
                 // 独立检测：Mars-Face（不复用 MediaPipe）。
                 // ⚠️ 参数顺序：Java 签名 detect(data, w, h, stride, format(MODE_FMT), frameType(FRAME_TYPE))
-                // —— v2.0.160 曾把两者传反（侥幸两个常量都是 0 没出错），这里摆正。
                 val det = detector ?: FaceDetector.Create().also { detector = it }
                 val landmarks = det.detect(
                     rgba, w, h, stride,
                     FaceDetector.GPUPIXEL_MODE_FMT_VIDEO,
                     FaceDetector.GPUPIXEL_FRAME_TYPE_RGBA
                 )
-                // 官方 demo 的 key 是 **face_landmark**（单数）—— 之前写成 face_landmarks 属于未知 key；
-                // 且 detect 返回空时**不喂** native（空 FloatArray 对未验证的 native 路径有风险）
+                // 关键点非空才喂（官方文档也是这个条件）；多张脸的关键点由库自行处理
                 if (landmarks != null && landmarks.isNotEmpty()) {
                     reshape?.SetProperty("face_landmark", landmarks)
-                    reshape?.SetProperty("thin_face_delta", slim)
-                    reshape?.SetProperty("big_eye_delta", eyeZoom)
+                    reshape?.SetProperty("thin_face", slim)
+                    reshape?.SetProperty("big_eye", eyeZoom)
                 }
                 source?.ProcessData(
                     rgba, w, h, stride,

@@ -150,11 +150,12 @@
     <string name="floating_ball_enable">플로팅 볼 사용</string>
     <string name="seek_ball_forward_enable">앞으로 감기 볼</string>
     <string name="seek_ball_backward_enable">뒤로 감기 볼</string>
-    <string name="seek_ball_desc">탭하여 이동 · 더블 탭으로 초 변경 · 길게 눌러 드래그</string>
+    <string name="seek_ball_desc">탭하여 이동 · 더블 탭으로 초 변경 · 길게 눌러 드래그 · 스위치 상태 기억</string>
     <string name="seek_forward_hud">%1$d초 앞으로</string>
     <string name="seek_backward_hud">%1$d초 뒤로</string>
     <string name="seek_step_switched">단계가 %1$d초로 변경됨</string>
-    <string name="floating_ball_desc">길게 눌러 빨리 감기, 드래그로 위치 이동 가능</string>
+    <string name="ball_speed_switched">배속이 %1$s(으)로 변경됨</string>
+    <string name="floating_ball_desc">길게 눌러 가속 · 더블 탭으로 배속 단계 순환 · 드래그로 위치 이동 · 스위치 상태 기억</string>
     <string name="floating_ball_speed">길게 누를 때 속도</string>
     <string name="base_playback_speed">기본 재생 속도</string>
     <string name="settings_group_decoder">4. 디코더와 FPS 제한</string>
@@ -277,7 +278,7 @@
     <string name="beauty_status_2d">2D 모드(%1$s): 모든 미용 사용 가능. 인물 보정(얼굴 축소/큰 눈/립스틱 등)은 얼굴 인식 필요</string>
     <string name="beauty_status_3d">3D 모드(%1$s): 매끄러운 피부/미백 등 공통 효과만 적용. 2D 인물 보정은 꺼지며 2D로 전환하면 자동 복구</string>
     <string name="beauty_compare_original">미용 스위치</string>
-    <string name="beauty_compare_desc">꺼진 동안에는 미용 처리를 하지 않습니다</string>
+    <string name="beauty_compare_desc">미용은 재생 화면 전체에 적용 · 꺼진 동안에는 미용 처리를 하지 않습니다 · 스위치 상태 기억</string>
     <string name="beauty_engine_title">미용 엔진</string>
     <string name="beauty_engine_glsl">GLSL(내장)</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
