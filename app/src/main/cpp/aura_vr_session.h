@@ -114,7 +114,21 @@ public:
     // 本帧是否有待提交的 swapchain（Kotlin 渲染前判断用）
     bool hasPendingFrame() const { return pendingFrame_; }
 
-    // 供日志/调试：最近一次提交结果
+    /**
+     * 把第 eyeIndex 眼的 swapchain image 绑定成 GL framebuffer，返回 FBO 名称。
+     *
+     * ⚠️ 必须在**已 acquire 的那一帧**内调用（`acquireEyeTargets` 之后、
+     *    `submitFrame` 之前），且在写画面的同一个 EGL 上下文里。
+     * ⚠️ 画完必须调 [unbindEyeFramebuffer]，否则后续绘制会继续写进 swapchain。
+     *
+     * @return FBO 名称；0 表示失败（无待提交帧 / 眼索引越界），调用方应跳过该眼
+     */
+    uint32_t bindEyeFramebuffer(int eyeIndex);
+
+    /** 解绑（回到默认 framebuffer 0），幂等 */
+    void unbindEyeFramebuffer();
+
+    /** 供日志/调试：最近一次提交结果 */
     int lastFrameResult() const { return lastFrameResult_; }
 
     AuraVrState state() const { return state_.load(); }
@@ -184,6 +198,10 @@ private:
     std::mutex        frameMutex_;          // 保护 pendingFrame_ / acquired 状态
     std::atomic<bool> pendingFrame_{false};
     std::atomic<int>  lastFrameResult_{0};  // 0 = 正常，非 0 = 最近一次 OpenXR 结果码
+
+    // 供 Kotlin 写画面的 FBO（复用同一对象，每次重挂 texture，避免每帧泄漏）
+    uint32_t eyeFbo_       = 0;
+    int      boundEyeIndex_ = -1;
 
     // 最近一次 xrLocateViews 得到的双眼投影参数（external 模式的层构造要用它）
     // ⚠️ 类型来自 openxr.h → 必须放在条件编译内，否则无 SDK 时桩路径编不过。

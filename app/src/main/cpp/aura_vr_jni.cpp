@@ -178,6 +178,34 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeHasPendingFrame(
 }
 
 // ---------------------------------------------------------------------------
+// nativeBindEyeFramebuffer(eyeIndex) : int
+//   把指定眼的 swapchain image 绑成 GL framebuffer，返回 FBO 名称（0 = 失败）
+// ---------------------------------------------------------------------------
+JNIEXPORT jint JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeBindEyeFramebuffer(
+        JNIEnv* /*env*/, jclass /*clazz*/, jint eyeIndex) {
+    return static_cast<jint>(AuraVrSession::Get().bindEyeFramebuffer(static_cast<int>(eyeIndex)));
+}
+
+// ---------------------------------------------------------------------------
+// nativeUnbindEyeFramebuffer() : void
+// ---------------------------------------------------------------------------
+JNIEXPORT void JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeUnbindEyeFramebuffer(
+        JNIEnv* /*env*/, jclass /*clazz*/) {
+    AuraVrSession::Get().unbindEyeFramebuffer();
+}
+
+// ---------------------------------------------------------------------------
+// nativeFrameResult() : int —— 最近一次提交的 OpenXR 结果码（0 = 正常）
+// ---------------------------------------------------------------------------
+JNIEXPORT jint JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeFrameResult(
+        JNIEnv* /*env*/, jclass /*clazz*/) {
+    return static_cast<jint>(AuraVrSession::Get().lastFrameResult());
+}
+
+// ---------------------------------------------------------------------------
 // nativeSubmitFrame() : void
 // ---------------------------------------------------------------------------
 JNIEXPORT void JNICALL

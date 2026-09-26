@@ -2,19 +2,24 @@ package com.example.vr.huawei
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.SurfaceTexture
+import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.os.Process
 import android.util.Log
+import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.FrameLayout
 import android.widget.TextView
-import android.view.Gravity
 import android.graphics.Color
 import android.util.TypedValue
+import com.example.vr.VRGLRenderer
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
 
 /**
- * 华为 VR Glass 播放 Activity（P0 骨架）。
+ * 华为 VR Glass 播放 Activity（P1 完成版）。
  *
  * === 它为什么存在 ===
  * 华为官方的「2D 应用 → VR」通道是：应用自己声明一个响应
@@ -22,9 +27,20 @@ import android.util.TypedValue
  * 外部用 `Intent().setPackage(pkg).setAction(ACTION)` 拉起它。
  * 插入眼镜后，系统会跳过 VrLauncher 直接进入本 Activity 的 VR 会话。
  *
- * 参考项目 `LHT02/HuaweiVRGlass-ALVR` 的 `HuaweiVrActivity.java` 结构极薄：
- *   Activity + SurfaceView + `new LibUpdateClient(this).runUpdate()` + System.loadLibrary
- * 本类按同样思路，但渲染交给 native OpenXR 会话（路径 A′）。
+ * === 渲染架构（P1 完成的闭环）===
+ * ```
+ * HuaweiVrActivity                      VRGLRenderer（GL 线程）
+ *   │                                        │
+ *   ├─ native.acquireEyeTargets()  ──获取→   │  （本帧双眼 swapchain 就绪）
+ *   ├─ glSurfaceView.queueEvent {            │
+ *   │      renderer.updateHuaweiEyeTargets() │
+ *   │      renderer.drawHuaweiVrFrame()      │  逐眼 bindEyeFramebuffer → 画 → unbind
+ *   │   }                                    │
+ *   └─ native.submitFrame()  ──────────→     │  release + xrEndFrame（上屏）
+ * ```
+ * ⚠️ **native 的 acquire / submit 与 GL 绘制必须严格配对**：
+ *    acquire 之后立刻 queueEvent 让 GL 线程画，画完再 submit。
+ *    顺序颠倒（先 submit 再画）会画到已经被释放的 image 上，眼镜内表现为画面撕裂或全黑。
  *
  * === 生命周期铁律（参考项目实证，见报告 5.6 节）===
  * `onStop` 即 `finishAndRemoveTask()` + `killProcess`。
@@ -58,15 +74,34 @@ class HuaweiVrActivity : Activity() {
          */
         @Volatile
         var onBeforeKill: (() -> Unit)? = null
+
+        /**
+         * 视频源接线回调（P1 闭环的关键）。
+         *
+         * 调用方（`VRPlayerScreen`）在这里做两件事：
+         * 1. 把 ExoPlayer 的输出指向传入的 [SurfaceTexture]（`player.setVideoSurface(Surface(st))`）
+         * 2. 把视频宽高告知 [VRGLRenderer]（`renderer.videoWidth/Height` + `isVideoActive = true`）
+         *
+         * 用静态回调是为了跨进程内 Activity 边界传递，且避免持有 Activity 引用泄漏。
+         */
+        @Volatile
+        var onVideoSurfaceNeeded: ((SurfaceTexture) -> Unit)? = null
     }
 
-    private lateinit var surfaceView: SurfaceView
+    private lateinit var glSurfaceView: GLSurfaceView
+    private lateinit var renderer: VRGLRenderer
     private lateinit var statusText: TextView
 
     private var initialized = false
+    private var sessionRunning = false
 
     /** 是否由 Kotlin 画（见 [EXTRA_EXTERNAL_RENDERER]） */
     private var externalRenderer = true
+
+    /** 帧泵线程：acquire → 让 GL 线程画 → submit */
+    private var pumpThread: Thread? = null
+
+    @Volatile private var pumping = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,14 +121,43 @@ class HuaweiVrActivity : Activity() {
             Log.i(TAG, "LibUpdateClient.runUpdate() 已调用")
         }.onFailure { Log.i(TAG, "LibUpdateClient 不可用（可忽略）: ${it.message}") }
 
-        // ---- 极简 UI：SurfaceView（承载 GL）+ 状态文字（调试期可见）----
-        val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+        // ---- 极简 UI：GLSurfaceView（承载我们的渲染器）+ 状态文字（调试期可见）----
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+
+        // ⚠️ GLES 版本必须 ≥3，与 native 侧 createEglContext 的 ES3 优先策略一致；
+        //    用 ES2 会在部分机型上拿不到 OES 视频纹理的完整能力。
+        renderer = VRGLRenderer(this)
+        renderer.huaweiVrMode = externalRenderer
+
+        // ⚠️ 视频源接线回调必须在 setRenderer() **之前**挂上。
+        //    原因：GL 线程的 Renderer.onSurfaceCreated（内部会触发 onVideoSurfaceCreated）
+        //    可能在 setRenderer() 之后的任意时刻就跑完了；若等到 startFramePump() 才赋值，
+        //    回调早就错过了 → ExoPlayer 永远不会被切到华为侧的 SurfaceTexture → 眼镜里恒定黑屏。
+        renderer.onVideoSurfaceCreated = { st ->
+            Log.i(TAG, "渲染器 SurfaceTexture 就绪，交给播放器")
+            renderer.isVideoActive = true
+            if (externalRenderer) {
+                runOnUiThread {
+                    runCatching { onVideoSurfaceNeeded?.invoke(st) }
+                        .onFailure { Log.e(TAG, "视频源接线失败", it) }
+                }
+            } else {
+                // 非 external 模式：视频帧只用于姿态跟随期的预览，不接线
+                Log.i(TAG, "非 external 渲染模式，跳过视频源接线")
+            }
         }
 
-        surfaceView = SurfaceView(this)
+        glSurfaceView = GLSurfaceView(this).apply {
+            setEGLContextClientVersion(3)
+            setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+            setRenderer(renderer)
+            // ⚠️ 华为模式下帧由 pumpThread 驱动（RENDERMODE_WHEN_DIRTY），
+            //    连续模式会与 pumpThread 抢 framebuffer，造成画面抖动。
+            renderMode = if (externalRenderer) GLSurfaceView.RENDERMODE_WHEN_DIRTY
+                         else GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        }
         root.addView(
-            surfaceView,
+            glSurfaceView,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -116,7 +180,7 @@ class HuaweiVrActivity : Activity() {
 
         setContentView(root)
 
-        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+        glSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 Log.i(TAG, "surfaceCreated")
                 // ⚠️ 顺序不可颠倒：先把 Surface 交给 native（EGL window surface 的来源），
@@ -147,7 +211,7 @@ class HuaweiVrActivity : Activity() {
         }
 
         if (!HuaweiVrNative.isSdkBuiltIn) {
-            // SDK 未接入（桩实现）——P0 阶段会走到这里，给出明确提示而不是黑屏
+            // SDK 未接入（桩实现）——给出明确提示而不是黑屏
             showStatus(
                 "华为 OpenXR SDK 未接入\n" +
                 "请在 local.properties 配置 huawei.vr.sdk.dir 后重新构建"
@@ -175,20 +239,115 @@ class HuaweiVrActivity : Activity() {
         }
 
         initialized = true
+        sessionRunning = true
+
+        // 每眼尺寸告知渲染器（用于 aspect 计算）
+        renderer.updateHuaweiEyeSize(
+            eye.getOrNull(0) ?: 0,
+            eye.getOrNull(1) ?: 0
+        )
+
+        if (externalRenderer) startFramePump()
+
         showStatus(
             "华为 VR 已启动（每眼 ${eye.getOrNull(0)}×${eye.getOrNull(1)}）\n" +
-            if (externalRenderer) "渲染：Kotlin 3D 贴片" else "渲染：仅姿态跟随"
+            if (externalRenderer) "渲染：Kotlin 双眼直渲" else "渲染：仅姿态跟随"
         )
+    }
+
+    /**
+     * 帧泵：把 native 的「acquire」与 GL 线程的「画」串起来。
+     *
+     * ⚠️ 为什么必须有它：swapchain image 的 acquire/release 必须成对且在同一帧内，
+     * 而 GL 绘制只能在 GL 线程做。所以顺序固定为：
+     *   native.acquire（本线程）→ queueEvent 让 GL 线程画 → native.submit（本线程）
+     * 若把三步都塞进 GL 线程，acquire 的阻塞等待会卡住 GL 上下文；
+     * 若先 submit 再画，则画到已释放的 image 上 → 眼镜内撕裂/全黑。
+     */
+    private fun startFramePump() {
+        if (pumping) return
+        pumping = true
+
+        // ⚠️ 视频源接线回调已在 onCreate 中（setRenderer 之前）挂好，此处不再重复赋值。
+        pumpThread = Thread({
+            Log.i(TAG, "帧泵线程进入")
+            while (pumping) {
+                try {
+                    // 1) 等本帧可用（native 内部含 xrWaitFrame，会随显示刷新自然节流到 ~70Hz）
+                    if (!HuaweiVrNative.hasPendingFrame()) {
+                        // 还没有待提交帧 → 让 native 先 acquire 一轮
+                        val eyes = HuaweiVrNative.eyeTargetsEx()
+                        if (eyes == null) {
+                            Thread.sleep(2)
+                            continue
+                        }
+                    }
+
+                    val targets = HuaweiVrNative.eyeTargetsEx() ?: run {
+                        Thread.sleep(2)
+                        continue
+                    }
+
+                    if (!HuaweiVrNative.hasPendingFrame()) {
+                        Thread.sleep(2)
+                        continue
+                    }
+
+                    // 2) 交给 GL 线程画（queueEvent 是异步的 → 用 CountDownLatch 等它画完）
+                    val done = java.util.concurrent.CountDownLatch(1)
+                    glSurfaceView.queueEvent {
+                        try {
+                            renderer.updateHuaweiEyeTargets(targets)
+                            val drew = renderer.drawHuaweiVrFrame()
+                            if (!drew) Log.w(TAG, "本帧未画出任何一眼")
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "GL 线程绘制异常", t)
+                        } finally {
+                            done.countDown()
+                        }
+                    }
+                    // 最多等 100ms（约 7 帧 @70Hz），超时说明 GL 卡住，跳过本帧避免死等
+                    if (!done.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        Log.w(TAG, "GL 绘制等待超时，跳过本帧")
+                        continue
+                    }
+
+                    // 3) 画完了才提交（release + xrEndFrame）
+                    HuaweiVrNative.submitFrame()
+
+                } catch (_: InterruptedException) {
+                    break
+                } catch (t: Throwable) {
+                    Log.e(TAG, "帧泵异常", t)
+                    try { Thread.sleep(10) } catch (_: InterruptedException) { break }
+                }
+            }
+            Log.i(TAG, "帧泵线程退出")
+        }, "AuraHuaweiVrPump").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun stopFramePump() {
+        pumping = false
+        pumpThread?.let {
+            it.interrupt()
+            runCatching { it.join(500) }
+        }
+        pumpThread = null
     }
 
     private fun stopVrSession() {
         if (!initialized) return
+        stopFramePump()
         // ⚠️ 先落盘设置，再关会话（killProcess 在 onStop 里，顺序不能反）
         runCatching { onBeforeKill?.invoke() }
             .onFailure { Log.e(TAG, "onBeforeKill 回调失败", it) }
 
         HuaweiVrNative.shutdown()
         initialized = false
+        sessionRunning = false
     }
 
     private fun showStatus(text: String) {

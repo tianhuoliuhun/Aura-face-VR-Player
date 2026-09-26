@@ -23,6 +23,9 @@ import android.util.Log
  * nativeEyeTargetsEx() : float[]
  * nativeSetExternalRendererEnabled(boolean) : void
  * nativeHasPendingFrame() : boolean
+ * nativeBindEyeFramebuffer(int) : int
+ * nativeUnbindEyeFramebuffer() : void
+ * nativeFrameResult() : int
  * nativeSubmitFrame() : void
  * nativeIsSdkAvailable() : boolean
  * ```
@@ -170,6 +173,30 @@ object HuaweiVrNative {
         if (!isLibraryLoaded) false
         else runCatching { nativeHasPendingFrame() }.getOrDefault(false)
 
+    /**
+     * 把第 [eyeIndex] 眼的 swapchain image 绑成 GL framebuffer，返回 FBO 名称。
+     *
+     * ⚠️ 必须在**已 acquire 的那一帧**内调用，且与写画面在同一个 EGL 上下文。
+     * ⚠️ 画完必须调 [unbindEyeFramebuffer]。
+     *
+     * @return FBO 名称；0 = 失败（无待提交帧 / 眼索引越界），调用方应跳过该眼
+     */
+    fun bindEyeFramebuffer(eyeIndex: Int): Int =
+        if (!isLibraryLoaded) 0
+        else runCatching { nativeBindEyeFramebuffer(eyeIndex) }.getOrDefault(0)
+
+    /** 解绑（回到默认 framebuffer 0），幂等 */
+    fun unbindEyeFramebuffer() {
+        if (!isLibraryLoaded) return
+        runCatching { nativeUnbindEyeFramebuffer() }
+            .onFailure { Log.e(TAG, "unbindEyeFramebuffer 抛异常", it) }
+    }
+
+    /** 最近一次提交的 OpenXR 结果码（0 = 正常） */
+    fun frameResult(): Int =
+        if (!isLibraryLoaded) -1
+        else runCatching { nativeFrameResult() }.getOrDefault(-1)
+
     /** 提交当前帧 */
     fun submitFrame() {
         if (!isLibraryLoaded) return
@@ -189,6 +216,9 @@ object HuaweiVrNative {
     private external fun nativeEyeTargetsEx(): FloatArray?
     private external fun nativeSetExternalRendererEnabled(enabled: Boolean)
     private external fun nativeHasPendingFrame(): Boolean
+    private external fun nativeBindEyeFramebuffer(eyeIndex: Int): Int
+    private external fun nativeUnbindEyeFramebuffer()
+    private external fun nativeFrameResult(): Int
     private external fun nativeSubmitFrame()
     private external fun nativeIsSdkAvailable(): Boolean
 }

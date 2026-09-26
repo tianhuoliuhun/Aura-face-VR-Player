@@ -361,6 +361,68 @@ void AuraVrSession::setExternalRendererEnabled(bool enabled) {
     AURA_LOGI("external 渲染模式 = %s", enabled ? "开" : "关");
 }
 
+// ---------------------------------------------------------------------------
+// 双眼 FBO 绑定（供 Kotlin 把画面画进 swapchain image）
+// ---------------------------------------------------------------------------
+uint32_t AuraVrSession::bindEyeFramebuffer(int eyeIndex) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
+    if (!pendingFrame_) {
+        AURA_LOGW("bindEyeFramebuffer: 无待提交帧（应先 acquireEyeTargets 并成功）");
+        return 0;
+    }
+    if (eyeIndex < 0 || static_cast<size_t>(eyeIndex) >= eyeSwapchains_.size()) {
+        AURA_LOGW("bindEyeFramebuffer: 眼索引越界 %d", eyeIndex);
+        return 0;
+    }
+    const EyeSwapchain& sc = eyeSwapchains_[eyeIndex];
+    if (!sc.acquired || sc.acquiredImageIndex >= sc.images.size()) {
+        AURA_LOGW("bindEyeFramebuffer: eye%d 未 acquire", eyeIndex);
+        return 0;
+    }
+    const GLuint tex = static_cast<GLuint>(sc.images[sc.acquiredImageIndex].image);
+    if (tex == 0) {
+        AURA_LOGW("bindEyeFramebuffer: eye%d textureId 为 0", eyeIndex);
+        return 0;
+    }
+
+    // 复用同一个 FBO，只换挂载的 texture（比每帧 glGenFramebuffers 更省、也不会泄漏）
+    if (eyeFbo_ == 0) {
+        GLuint fbo = 0;
+        glGenFramebuffers(1, &fbo);
+        if (fbo == 0) {
+            AURA_LOGE("bindEyeFramebuffer: glGenFramebuffers 失败");
+            return 0;
+        }
+        eyeFbo_ = fbo;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, eyeFbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+
+    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        AURA_LOGE("bindEyeFramebuffer: eye%d FBO 不完整 (0x%x)", eyeIndex, status);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return 0;
+    }
+
+    boundEyeIndex_ = eyeIndex;
+    return eyeFbo_;
+#else
+    (void) eyeIndex;
+    return 0;
+#endif
+}
+
+void AuraVrSession::unbindEyeFramebuffer() {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
+    if (boundEyeIndex_ >= 0) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        boundEyeIndex_ = -1;
+    }
+#endif
+}
+
 // ===========================================================================
 // 真实路径实现
 // ===========================================================================
@@ -1056,6 +1118,16 @@ void AuraVrSession::releaseAcquiredImages() {
 // 清理
 // ---------------------------------------------------------------------------
 void AuraVrSession::destroySwapchains() {
+    // FBO 必须先于 swapchain 销毁（它引用 swapchain 的 texture）
+    if (eyeFbo_ != 0) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        GLuint fbo = static_cast<GLuint>(eyeFbo_);
+        glDeleteFramebuffers(1, &fbo);
+        eyeFbo_ = 0;
+    }
+    boundEyeIndex_ = -1;
+    pendingFrame_  = false;
+
     for (auto& sc : eyeSwapchains_) {
         if (sc.handle != XR_NULL_HANDLE) {
             xrDestroySwapchain(sc.handle);
@@ -1108,6 +1180,8 @@ bool AuraVrSession::renderFrame()               { return false; }
 bool AuraVrSession::renderFrameExternal()       { return false; }
 bool AuraVrSession::buildAndSubmitLayers()      { return false; }
 void AuraVrSession::releaseAcquiredImages()     {}
+// ⚠️ bindEyeFramebuffer / unbindEyeFramebuffer 不在此列：
+//    它们在文件前部定义，且内部自带 #if 分支，两路径都有实现。
 
 void AuraVrSession::destroySwapchains() {}
 void AuraVrSession::destroyEgl()        {}

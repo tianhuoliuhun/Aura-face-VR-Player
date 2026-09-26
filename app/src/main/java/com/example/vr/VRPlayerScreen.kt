@@ -2892,6 +2892,35 @@ fun VRPlayerScreen(
                                                                 .putBoolean("is_split_screen_vr", isSplitScreenVR)
                                                                 .apply()
                                                         }
+                                                    },
+                                                    // ⚠️ P1 视频源接线（关键）：
+                                                    // 华为侧 Activity 起来后会创建自己的 SurfaceTexture，
+                                                    // 这里把**当前正在播放的 ExoPlayer 输出切过去**，
+                                                    // 让它画的每一帧都来自真实视频流，而不是空画面。
+                                                    onVideoSurfaceNeeded = { st ->
+                                                        runCatching {
+                                                            val uriStr = selectedMediaItem.uri
+                                                            if (uriStr != null && selectedMediaItem.isVideo) {
+                                                                // 尺寸沿用当前渲染器已知的视频宽高（VRGLRenderer.videoWidth/Height，
+                                                                // 由 onVideoSizeChanged 持续更新），避免切换瞬间被当成 0。
+                                                                val r = currentGlSurfaceView?.renderer
+                                                                val w = r?.videoWidth?.takeIf { it > 0 } ?: 1920
+                                                                val h = r?.videoHeight?.takeIf { it > 0 } ?: 1080
+                                                                st.setDefaultBufferSize(w, h)
+                                                                val newSurface = Surface(st)
+                                                                // ⚠️ setVideoSurface 内部会做一次 flush + 重配解码器输出，
+                                                                //    不会丢播放位置，也不会重启解码器。
+                                                                playerInstance?.setVideoSurface(newSurface)
+                                                                Log.i(
+                                                                    "HuaweiVR",
+                                                                    "视频源已切到华为 VR（${w}x$h, uri=$uriStr）"
+                                                                )
+                                                            } else {
+                                                                Log.i("HuaweiVR", "当前非视频媒体，华为侧保持空画面")
+                                                            }
+                                                        }.onFailure {
+                                                            Log.e("HuaweiVR", "视频源接线失败", it)
+                                                        }
                                                     }
                                                 )
                                             )
@@ -6098,25 +6127,34 @@ fun isHuaweiVrRuntimeAvailable(context: Context): Boolean {
  *    集成 `hvrprompt.aar` 后由 `com.huawei.vrlab.HVRModeActivity` 响应，
  *    插眼镜可跳过 VrLauncher。P1 再启用。
  *
- * ⚠️ 本函数有副作用：会写入 `HuaweiVrActivity.onBeforeKill`（静态回调）。
- * 这是刻意的——Activity 退出时 `killProcess`，设置必须在同一进程内先落盘。
+ * ⚠️ 本函数有副作用：会写入 `HuaweiVrActivity.onBeforeKill` 与
+ * `HuaweiVrActivity.onVideoSurfaceNeeded`（静态回调）。
+ * 这是刻意的——Activity 退出时 `killProcess`，设置必须在同一进程内先落盘；
+ * 视频源也必须跨 Activity 边界交给华为侧的渲染器。
  * 回调用可空静态引用 + `@Volatile`，进程重启后自动失效，不会泄漏 Activity/Context。
  *
  * @param renderScale 渲染分辨率倍率（0.5f~1.0f），转成百分比传给 Activity
  * @param onBeforeKill 退出前落盘动作；传 null 则不覆盖既有回调
+ * @param onVideoSurfaceNeeded P1 视频源接线；见 [HuaweiVrActivity.onVideoSurfaceNeeded]
  */
 fun buildHuaweiVrPromptIntent(
     context: Context,
     renderScale: Float = 1.0f,
-    onBeforeKill: (() -> Unit)? = null
+    onBeforeKill: (() -> Unit)? = null,
+    onVideoSurfaceNeeded: ((SurfaceTexture) -> Unit)? = null
 ): Intent {
     if (onBeforeKill != null) {
         HuaweiVrActivity.onBeforeKill = onBeforeKill
     }
+    // ⚠️ 视频接线回调也必须每次覆盖（哪怕是 null）：上一次会话的 lambda 可能捕获了
+    //    已失效的 player/view 引用，留着会在华为侧触发时静默失败或崩。
+    HuaweiVrActivity.onVideoSurfaceNeeded = onVideoSurfaceNeeded
+
     val percent = (renderScale.coerceIn(0.5f, 1.0f) * 100f).roundToInt()
     return Intent(context, HuaweiVrActivity::class.java).apply {
         action = HuaweiVrRuntime.ACTION_VR_PROMPT
         putExtra(HuaweiVrActivity.EXTRA_RENDER_SCALE, percent)
+        putExtra(HuaweiVrActivity.EXTRA_EXTERNAL_RENDERER, true)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }

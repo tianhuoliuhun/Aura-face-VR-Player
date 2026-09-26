@@ -9,6 +9,7 @@ import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.Log
+import com.example.vr.huawei.HuaweiVrNative
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -43,6 +44,85 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      */
     @Volatile var beautyTextureDetail = 0.88f
     @Volatile var isSplitScreenVR = false // Cardboard mode
+
+    // ======================= 华为 VR Glass（OpenXR）=======================
+    /**
+     * v2.0.175：华为 OpenXR 渲染模式。
+     *
+     * 开启后 onDrawFrame 走**双眼 swapchain 直渲**通路：
+     *   native acquire → 本渲染器把第 i 眼画面画进 eye[i] 的 FBO → native release + endFrame
+     *
+     * 与 [isSplitScreenVR] 的区别：
+     * - 分屏 VR：自己把屏幕切成左右两半，用估算的 IPD 偏移，**没有真实头姿**
+     * - 华为 VR：每眼一块独立 swapchain，投影矩阵/FOV/头姿全部来自 OpenXR Runtime
+     *
+     * ⚠️ 开启时必须由 `HuaweiVrActivity` 驱动帧循环（native 侧 external 模式）。
+     */
+    @Volatile var huaweiVrMode = false
+
+    /**
+     * 上一帧从 native 取回的双眼渲染参数（长度 40）：
+     * 眼 0 占 `[0..19]`，眼 1 占 `[20..39]`；
+     * 每眼前 16 = 视图矩阵（列主序），后 4 = FOV `{left, right, up, down}`（弧度）。
+     *
+     * 由 `HuaweiVrActivity` 在每帧渲染前通过 [updateHuaweiEyeTargets] 写入。
+     */
+    @Volatile private var huaweiEyeTargets: FloatArray? = null
+
+    /** 每眼 swapchain 尺寸（由 [updateHuaweiEyeSize] 写入，用于 aspect 计算） */
+    @Volatile private var huaweiEyeWidth = 0
+    @Volatile private var huaweiEyeHeight = 0
+
+    /** 由 HuaweiVrActivity 每帧写入 OpenXR 双眼参数；传 null 表示本帧无新数据（保留上一帧） */
+    fun updateHuaweiEyeTargets(targets: FloatArray?) {
+        if (targets != null) huaweiEyeTargets = targets
+    }
+
+    /** 由 HuaweiVrActivity 告知每眼 swapchain 尺寸 */
+    fun updateHuaweiEyeSize(width: Int, height: Int) {
+        huaweiEyeWidth = width
+        huaweiEyeHeight = height
+    }
+
+    /**
+     * 华为 VR 模式下的单帧绘制：逐眼绑 FBO → 用 OpenXR 矩阵画 → 解绑。
+     *
+     * 由 `HuaweiVrActivity` 在 native `acquireEyeTargets` 成功后调用；
+     * 返回 true 表示至少画了一只眼（调用方随后应调 `HuaweiVrNative.submitFrame()`）。
+     */
+    fun drawHuaweiVrFrame(): Boolean {
+        val targets = huaweiEyeTargets ?: return false
+        if (targets.size < 40) return false
+
+        // ⚠️ 必须先在 GL 线程消费 SurfaceTexture 的新帧，否则画的是上一次的内容
+        //    （内置路径在 onDrawFrame 里做，华为路径由本函数自己负责）
+        synchronized(this) {
+            if (isVideoFrameAvailable) {
+                videoSurfaceTexture?.updateTexImage()
+                isVideoFrameAvailable = false
+            }
+        }
+
+        var drewAny = false
+        for (eye in 0 until 2) {
+            val fbo = HuaweiVrNative.bindEyeFramebuffer(eye)
+            if (fbo == 0) {
+                // 该眼未 acquire 到 image → 跳过（保留上一帧，不要清屏）
+                continue
+            }
+            try {
+                val w = if (huaweiEyeWidth > 0) huaweiEyeWidth else displayWidth
+                val h = if (huaweiEyeHeight > 0) huaweiEyeHeight else displayHeight
+                GLES20.glViewport(0, 0, w, h)
+                drawEyeWithOpenXrMatrices(eye, w, h, targets)
+                drewAny = true
+            } finally {
+                HuaweiVrNative.unbindEyeFramebuffer()
+            }
+        }
+        return drewAny
+    }
+
     @Volatile var gyroEnabled = true
     @Volatile var isVideoActive = false
     @Volatile var isMirrored = false
@@ -1058,6 +1138,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     override fun onDrawFrame(gl: GL10?) {
 
+        // 华为 VR 模式下帧循环由 HuaweiVrActivity 驱动（每帧要先 acquire swapchain 才能画），
+        // GLSurfaceView 自己的 onDrawFrame 只负责把默认 framebuffer 清成黑底，
+        // 否则会与双眼 FBO 渲染互抢 framebuffer 绑定与视频帧消费。
+        if (huaweiVrMode) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            return
+        }
+
         // Enforce frame rate limit if maxFps > 0
         if (maxFps > 0) {
             val targetMs = 1000L / maxFps
@@ -1140,23 +1230,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glUseProgram(prog.programId)
 
         // Bind active textures
-        if (isVideoActive) {
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
-            uniform1i(prog.hSamplerVideo, 1)
-            uniform1i(prog.hIsVideo, 1)
-        } else {
-            // Image/panorama: unit 0 gets the photo texture; unit 1 gets the plain
-            // 2D placeholder so the image program's sampler2D slot stays consistent.
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTextureId)
-            uniform1i(prog.hSamplerImage, 0)
-            uniform1i(prog.hIsVideo, 0)
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, placeholderTextureId)
-            uniform1i(prog.hSamplerVideo, 1)
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        }
+        bindActiveTextures(prog)
 
         // v104 LUT 视频滤镜：绑定 512x512 LUT 纹理到 TEXTURE2 并同步强度
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
@@ -1261,6 +1335,189 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             blitToScreen()
         }
+    }
+
+    // ======================= 华为 VR（OpenXR）单眼绘制 =======================
+
+    /**
+     * 用 OpenXR Runtime 给出的 FOV / 头姿矩阵绘制第 [eye] 眼。
+     *
+     * OpenXR 的投影矩阵**不能**用 `Matrix.frustumM` 直接构造：
+     * `frustumM` 假设视锥关于光轴对称（left = -right），而 VR 眼镜的每眼视锥
+     * 是**倾斜**的（左右/上下不对称），必须用通用形式。
+     *
+     * 推导：设近裁面 `n`，则
+     *   l = n·tan(angleLeft)，r = n·tan(angleRight)
+     *   b = n·tan(angleDown)，t = n·tan(angleUp)
+     * 投影矩阵（列主序，与 GLSL mat4 一致）：
+     *   [ 2n/(r-l)      0           (r+l)/(r-l)      0        ]
+     *   [ 0             2n/(t-b)    (t+b)/(t-b)      0        ]
+     *   [ 0             0          -(f+n)/(f-n)     -2fn/(f-n) ]
+     *   [ 0             0          -1                0        ]
+     *
+     * 视图矩阵直接用 native 算好的（`R(q)^T · T(-p)`），已是列主序。
+     * model 矩阵保持与内置分屏 VR 相同的语义（几何/缩放/手动旋转仍生效），
+     * 这样球面/穹顶/盒面等投影模式在眼镜里表现一致。
+     */
+    private fun drawEyeWithOpenXrMatrices(eye: Int, w: Int, h: Int, targets: FloatArray) {
+        // 与内置路径一致：视频走视频变体、图片走图片变体
+        val prog = if (isVideoActive) videoProgram else imageProgram
+        if (prog == null) { drawFallbackFrame(); return }
+
+        GLES20.glUseProgram(prog.programId)
+
+        val base = eye * 20
+
+        // --- 1) 用 OpenXR FOV 构造倾斜视锥投影矩阵 ---
+        val fovL = targets[base + 16]
+        val fovR = targets[base + 17]
+        val fovU = targets[base + 18]
+        val fovD = targets[base + 19]
+        val near = 0.05f
+        val far = 100.0f
+        val tanL = StrictMath.tan(fovL.toDouble()).toFloat()
+        val tanR = StrictMath.tan(fovR.toDouble()).toFloat()
+        val tanU = StrictMath.tan(fovU.toDouble()).toFloat()
+        val tanD = StrictMath.tan(fovD.toDouble()).toFloat()
+
+        val l = near * tanL
+        val r = near * tanR
+        val b = near * tanD
+        val t = near * tanU
+
+        // 退化保护：极端 FOV 会让分母趋零 → 直接退出该眼（保留上一帧，别画花屏）
+        if (kotlin.math.abs(r - l) < 1e-6f || kotlin.math.abs(t - b) < 1e-6f) {
+            Log.w(TAG, "eye$eye FOV 退化，跳过（l=$l r=$r b=$b t=$t）")
+            return
+        }
+
+        val pm = projectionMatrix
+        java.util.Arrays.fill(pm, 0f)
+        pm[0] = 2f * near / (r - l)
+        pm[5] = 2f * near / (t - b)
+        pm[8] = (r + l) / (r - l)
+        pm[9] = (t + b) / (t - b)
+        pm[10] = -(far + near) / (far - near)
+        pm[11] = -1f
+        pm[14] = -2f * far * near / (far - near)
+
+        // --- 2) 视图矩阵：直接用 native 的 OpenXR 结果 ---
+        System.arraycopy(targets, base, viewMatrix, 0, 16)
+
+        // --- 3) model 矩阵：沿用内置逻辑（几何缩放 + 手动旋转），但不叠加陀螺仪 ---
+        //     ⚠️ 头姿已由 OpenXR 的 viewMatrix 提供，若再叠陀螺仪会「转两次」。
+        Matrix.setIdentityM(modelMatrix, 0)
+
+        // 2D 平面投影时按源宽高比做 letterbox / pillarbox
+        val isPlanarMode = projectionMode == ProjectionMode.STANDARD ||
+            projectionMode == ProjectionMode.FISHEYE
+        if (isPlanarMode) {
+            val srcW = if (isVideoActive) videoWidth else imageWidth
+            val srcH = if (isVideoActive) videoHeight else imageHeight
+            if (srcW > 0 && srcH > 0) {
+                val aScreen = if (h > 0) w.toFloat() / h.toFloat() else 1f
+                val aSrc = srcW.toFloat() / srcH.toFloat()
+                var scaleX = 1.0f
+                var scaleY = 1.0f
+                if (aSrc > aScreen) scaleY = aScreen / aSrc else scaleX = aSrc / aScreen
+                Matrix.scaleM(modelMatrix, 0, scaleX, scaleY, 1.0f)
+            }
+        }
+
+        // 手动拖拽视角（VR_360/180/BOX 下作为朝向微调；STANDARD 不旋转，与内置一致）
+        if (projectionMode != ProjectionMode.STANDARD) {
+            Matrix.rotateM(modelMatrix, 0, manualPitch, 1.0f, 0.0f, 0.0f)
+            Matrix.rotateM(modelMatrix, 0, manualYaw, 0.0f, 1.0f, 0.0f)
+        }
+
+        // --- 4) 合成 MVP ---
+        Matrix.multiplyMM(mvMatrix, 0, viewMatrix, 0, modelMatrix, 0)
+        Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvMatrix, 0)
+        uniformMatrix4fv(prog.hMVPMatrix, 1, false, mvpMatrix, 0)
+
+        // --- 5) 同步美颜 / 投影 / 立体等 uniform（与内置路径共用同一套着色器） ---
+        uniform1i(prog.hProjectionMode, projectionMode.id)
+        uniform1i(prog.hStereoMode, stereoMode.id)
+
+        val bc = if (beautyMasterEnabled && beautyEngineType == BEAUTY_ENGINE_GLSL) 1f else 0f
+        uniform1f(prog.hBeautyStrength, beautyLevel * bc)
+        uniform1f(prog.hTextureDetail, beautyTextureDetail)
+        uniform1f(prog.hBrightness, brightnessLevel)
+        uniform1f(prog.hContrast, contrastLevel)
+        uniform1i(prog.hIsMirrored, if (isMirrored) 1 else 0)
+        uniform1i(prog.hWarpMode, warpMode.id)
+        uniform1f(prog.hCurvature, cylinderCurvature)
+        uniform1f(prog.hWhitening, beautyWhitening * bc)
+        uniform1f(prog.hFaceSlimming, beautyFaceSlimming * bc)
+        uniform1f(prog.hBigEyes, beautyBigEyes * bc)
+        uniform1f(prog.hDarkCircles, beautyDarkCircles * bc)
+        uniform1f(prog.hNoseSlimming, beautyNoseSlimming * bc)
+        uniform1f(prog.hMouth, beautyMouth * bc)
+        uniform1f(prog.hTeethWhitening, beautyTeethWhitening * bc)
+        uniform1f(prog.hLipstick, beautyLipstick * bc)
+        uniform1f(prog.hBlush, beautyBlush * bc)
+        uniform1f(prog.hEyebrows, beautyEyebrows * bc)
+        uniform1f(prog.hLongLegs, beautyLongLegs * bc)
+        uniform1f(prog.hSmallHead, beautySmallHead * bc)
+        uniform1i(prog.hFaceDetected, if (bc > 0f) faceDetectedUniform else 0)
+        uniform2f(prog.hFaceCenter, faceCenterXUniform, faceCenterYUniform)
+        uniform1f(prog.hEyeDistance, eyeDistanceUniform)
+        uniform1i(prog.hHasDetailed, hasDetailedLandmarks)
+        uniform2f(prog.hEyeLeft, eyeLeftXUniform, eyeLeftYUniform)
+        uniform2f(prog.hEyeRight, eyeRightXUniform, eyeRightYUniform)
+        uniform2f(prog.hMouthPos, mouthXUniform, mouthYUniform)
+        uniform1f(prog.hMouthHalfW, mouthHalfWidthUniform)
+        uniform1f(prog.hMouthHalfH, mouthHalfHeightUniform)
+        uniform1f(prog.hMouthAngle, mouthAngleUniform)
+        uniform2f(prog.hChin, chinXUniform, chinYUniform)
+        uniform1i(prog.hWarpDualCenter, if (warpDualCenter) 1 else 0)
+        uniform2f(prog.hTexelSize, 1.0f / w.coerceAtLeast(1), 1.0f / h.coerceAtLeast(1))
+
+        // uLeftEye：华为模式下每眼是独立渲染目标，填 1（左侧语义）——
+        // 部分几何（如半宽面片）会据此取纹理左半，但双眼各自全屏绘制时不受影响。
+        uniform1i(prog.hLeftEye, 1)
+
+        // --- 6) 绑纹理并绘制 ---
+        bindActiveTextures(prog)
+        drawActiveGeometry(prog)
+    }
+
+    /**
+     * 绑定视频/图片源纹理与 LUT（含占位回退）。
+     *
+     * 抽成独立函数是因为**华为 VR 双眼通路与内置分屏通路都要用**，
+     * 且必须保证两条路径的纹理单元分配完全一致（unit1 = OES 视频、unit2 = LUT）。
+     */
+    private fun bindActiveTextures(prog: GLProgram) {
+        if (isVideoActive) {
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
+            uniform1i(prog.hSamplerVideo, 1)
+            uniform1i(prog.hIsVideo, 1)
+        } else {
+            // Image/panorama: unit 0 gets the photo texture; unit 1 gets the plain
+            // 2D placeholder so the image program's sampler2D slot stays consistent.
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTextureId)
+            uniform1i(prog.hSamplerImage, 0)
+            uniform1i(prog.hIsVideo, 0)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, placeholderTextureId)
+            uniform1i(prog.hSamplerVideo, 1)
+        }
+
+        // LUT 视频滤镜：绑定到 TEXTURE2 并同步强度（绑定后统一回到 unit0）
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+        if (lutTextureId != -1) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTextureId)
+            uniform1i(prog.hLutTexture, 2)
+            uniform1f(prog.hLutMix, lutMix)
+        } else {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, placeholderTextureId)
+            uniform1i(prog.hLutTexture, 2)
+            uniform1f(prog.hLutMix, 0f)
+        }
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     }
 
     private fun calculateAndApplyMatrices(isLeft: Boolean, aspect: Float, mvpLoc: Int) {
