@@ -1,6 +1,7 @@
 package com.example.vr
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
@@ -58,6 +59,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import com.example.R
+import com.example.vr.huawei.HuaweiVrActivity
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import androidx.compose.material.icons.Icons
@@ -306,6 +308,33 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getFloat("fov_deg", 75f) else 75f
         )
     }
+
+    // v2.0.174：华为 VR Glass（VR Engine）接入开关。
+    // 默认关（华为设备占比低，避免误入）；受「记忆模式」门控，与其它设置一致。
+    // 该开关仅决定「默认后端与入口是否显示」，真正的 VR 会话由华为 Runtime 接管：
+    //   - 每眼 swapchain / FOV / IPD / 头姿 全部由 OpenXR Runtime 提供，
+    //     因此华为模式下 fovDeg、vrIpdOffsetRatio、isGyroEnabled、isSplitScreenVR 均不生效。
+    //   - ProjectionMode（平面/球面/穹顶几何）仍然生效，用于决定内容如何映射。
+    // 详见 HUAWEI_VR_ENGINE_PLAN_2026-09-26.md 第 6 节。
+    var huaweiVrEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("huawei_vr_enabled", false) else false
+        )
+    }
+    // 每眼分辨率相对 Runtime 推荐值（1552×1552/眼）的比例，预留性能调档：1.0 / 0.75 / 0.5
+    var huaweiVrRenderScale by remember {
+        mutableFloatStateOf(
+            if (isMemoryModeEnabled) prefs.getFloat("huawei_vr_render_scale", 1.0f) else 1.0f
+        )
+    }
+    // 手柄 6DoF 模式（P5 才实际使用，先落状态与开关）
+    var huaweiVrPrefer6dof by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("huawei_vr_prefer_6dof", false) else false
+        )
+    }
+    // 运行时可用性缓存在状态里：开关行与路由都要读，避免每帧查 PackageManager
+    val huaweiVrRuntimeAvailable = remember { isHuaweiVrRuntimeAvailable(context) }
 
     // Playback state
     var isVideoPlaying by remember { mutableStateOf(false) }
@@ -888,6 +917,9 @@ fun VRPlayerScreen(
         beautySmallHead,
         isSplitScreenVR,
         isGyroEnabled,
+        huaweiVrEnabled,
+        huaweiVrRenderScale,
+        huaweiVrPrefer6dof,
         asrThreads,
         gyroInverted,
         fovDeg,
@@ -976,6 +1008,9 @@ fun VRPlayerScreen(
                 if (beautyPresetId >= 0) putInt("beauty_preset_id", beautyPresetId)
                 putBoolean("is_split_screen_vr", isSplitScreenVR)
                 putBoolean("is_gyro_enabled", isGyroEnabled)
+                putBoolean("huawei_vr_enabled", huaweiVrEnabled)
+                putFloat("huawei_vr_render_scale", huaweiVrRenderScale)
+                putBoolean("huawei_vr_prefer_6dof", huaweiVrPrefer6dof)
                 putInt("asr_threads", asrThreads)
                 putBoolean("gyro_inverted", gyroInverted)
                 putFloat("fov_deg", fovDeg)
@@ -1040,6 +1075,9 @@ fun VRPlayerScreen(
                 remove("beauty_preset_id")
                 remove("is_split_screen_vr")
                 remove("is_gyro_enabled")
+                remove("huawei_vr_enabled")
+                remove("huawei_vr_render_scale")
+                remove("huawei_vr_prefer_6dof")
                 remove("fov_deg")
                 remove("is_video_mirrored")
                 remove("dome_half_select")
@@ -2829,6 +2867,75 @@ fun VRPlayerScreen(
                             )
                         }
 
+                        // v2.0.174：华为 VR Glass 显式入口。
+                        // 仅在「华为 VR 开关已开」或「本机检测到华为 VR 运行时」时出现，
+                        // 避免在普通机型上多出一个点不动的按钮。
+                        if (huaweiVrEnabled || huaweiVrRuntimeAvailable) {
+                            IconButton(
+                                onClick = {
+                                    keepUiAlight()
+                                    if (huaweiVrRuntimeAvailable) {
+                                        val ok = try {
+                                            context.startActivity(
+                                                buildHuaweiVrPromptIntent(
+                                                    context,
+                                                    huaweiVrRenderScale,
+                                                    // ⚠️ P2 退出落盘链路：
+                                                    // HuaweiVrActivity 退出会 killProcess，
+                                                    // 必须在此之前把设置写进 prefs，否则全丢。
+                                                    onBeforeKill = {
+                                                        runCatching {
+                                                            prefs.edit()
+                                                                .putBoolean("huawei_vr_enabled", huaweiVrEnabled)
+                                                                .putFloat("huawei_vr_render_scale", huaweiVrRenderScale)
+                                                                .putBoolean("huawei_vr_prefer_6dof", huaweiVrPrefer6dof)
+                                                                .putBoolean("is_split_screen_vr", isSplitScreenVR)
+                                                                .apply()
+                                                        }
+                                                    }
+                                                )
+                                            )
+                                            true
+                                        } catch (e: Exception) {
+                                            // 未集成 hvrprompt.aar 或 Activity 未注册时走到这里：
+                                            // 记录原因并降级到内置分屏 VR（用户要求：绝不黑屏）
+                                            Log.w("HuaweiVR", "启动华为 VR 失败，回退内置分屏 VR", e)
+                                            false
+                                        }
+                                        if (!ok) {
+                                            isSplitScreenVR = true
+                                            Toast.makeText(
+                                                context,
+                                                context.getString(R.string.huawei_vr_enter_failed),
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    } else {
+                                        // 无运行时：直接提示并回退
+                                        isSplitScreenVR = true
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.huawei_vr_runtime_missing),
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                },
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = if (huaweiVrEnabled) Color(0x33D0BCFF) else TranslucentWhite10,
+                                    contentColor = if (huaweiVrEnabled) AccentColor else Color.White
+                                ),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .testTag("huawei_vr_enter_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Vrpano,
+                                    contentDescription = stringResource(R.string.huawei_vr_enter),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
                         IconButton(
                             onClick = {
                                 isSettingsDialogOpen = !isSettingsDialogOpen
@@ -3937,6 +4044,99 @@ fun VRPlayerScreen(
                                     }
                                 }
 
+                                // v2.0.174：华为 VR Glass（VR Engine）接入开关。
+                                // 放在「立体格式」之后，与投影/分屏/FOV/IPD 同组，语义上属同一类「输出后端」配置。
+                                // 该开关默认关；非华为设备开启只作记录并提示，不会阻断使用。
+                                ExperimentalSwitchRow(
+                                    title = stringResource(R.string.huawei_vr_enable),
+                                    desc = stringResource(R.string.huawei_vr_enable_desc),
+                                    checked = huaweiVrEnabled,
+                                    onChanged = {
+                                        huaweiVrEnabled = it
+                                        keepUiAlight()
+                                        if (it && !huaweiVrRuntimeAvailable) {
+                                            // 不阻断用户：仅提示会回退到内置分屏 VR
+                                            Toast.makeText(
+                                                context,
+                                                context.getString(R.string.huawei_vr_runtime_missing),
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    },
+                                    accentColor = AccentColor,
+                                    accentOnColor = AccentOnColor
+                                )
+                                if (huaweiVrEnabled) {
+                                    // 状态文字与颜色预先算好（Compose 里 @Composable 调用不嵌在实参三元/if 表达式中更稳）
+                                    val hwStatusText = if (huaweiVrRuntimeAvailable)
+                                        stringResource(R.string.huawei_vr_ready)
+                                    else
+                                        stringResource(R.string.huawei_vr_runtime_absent)
+                                    val hwStatusColor = if (huaweiVrRuntimeAvailable) AccentColor else Color(0xFFE0A030)
+                                    val hwNoteText = stringResource(R.string.huawei_vr_note)
+                                    val hwScaleLabel = "${(huaweiVrRenderScale * 100).toInt()}%"
+                                    val hwScaleTitle = stringResource(R.string.huawei_vr_render_scale)
+                                    val hwScaleDesc = stringResource(R.string.huawei_vr_render_scale_desc)
+                                    Text(
+                                        text = hwStatusText,
+                                        color = hwStatusColor,
+                                        fontSize = 9.sp
+                                    )
+                                    Text(
+                                        text = hwNoteText,
+                                        color = Color.White.copy(alpha = 0.45f),
+                                        fontSize = 8.sp,
+                                        lineHeight = 11.sp
+                                    )
+                                    ExperimentalSwitchRow(
+                                        title = stringResource(R.string.huawei_vr_prefer_6dof),
+                                        desc = stringResource(R.string.huawei_vr_prefer_6dof_desc),
+                                        checked = huaweiVrPrefer6dof,
+                                        onChanged = { huaweiVrPrefer6dof = it; keepUiAlight() },
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor
+                                    )
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                hwScaleTitle,
+                                                color = Color.White.copy(alpha = 0.5f),
+                                                fontSize = 10.sp
+                                            )
+                                            Text(
+                                                hwScaleLabel,
+                                                color = AccentColor,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Slider(
+                                            value = huaweiVrRenderScale,
+                                            onValueChange = {
+                                                huaweiVrRenderScale = it
+                                                keepUiAlight()
+                                            },
+                                            valueRange = 0.5f..1.0f,
+                                            steps = 1, // 0.5 / 0.75 / 1.0
+                                            colors = SliderDefaults.colors(
+                                                thumbColor = AccentColor,
+                                                activeTrackColor = AccentColor,
+                                                inactiveTrackColor = Color.White.copy(alpha = 0.15f)
+                                            ),
+                                            modifier = Modifier.height(26.dp)
+                                        )
+                                        Text(
+                                            text = hwScaleDesc,
+                                            color = Color.White.copy(alpha = 0.4f),
+                                            fontSize = 8.sp,
+                                            lineHeight = 11.sp
+                                        )
+                                    }
+                                }
+
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(stringResource(R.string.video_mirror), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
@@ -4089,6 +4289,26 @@ fun VRPlayerScreen(
                                                 }
                                             }
                                         }
+                                    }
+                                }
+
+                                // v2.0.174：华为 VR 模式下的「接管提示」。
+                                // 华为 Runtime 用自己的 FOV(95°×95°) / IPD(63mm) / OpenXR pose，
+                                // 因此下面这些手动设置不再生效——显式告知，避免用户反复调却看不到变化。
+                                if (huaweiVrEnabled) {
+                                    Surface(
+                                        color = Color(0x1AE0A030),
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, Color(0x66E0A030)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.huawei_vr_handover),
+                                            color = Color(0xFFE0A030),
+                                            fontSize = 9.sp,
+                                            lineHeight = 13.sp,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                        )
                                     }
                                 }
 
@@ -5818,4 +6038,87 @@ BatchTranscribeSection(
         }
     }
 }
+
+// ============================================================================
+// 华为 VR Glass（VR Engine）接入支持
+// ----------------------------------------------------------------------------
+// 设计见 HUAWEI_VR_ENGINE_PLAN_2026-09-26.md 第 6 节。本段只做「用户可见的一层」：
+// 运行时探测 + 进入路由 + 降级提示。真正的 OpenXR 会话层（lib_loader.so /
+// HuaweiVrActivity / GLES3.2 上下文）属于 P0~P2，需要华为真机才能实施与验证。
+// ============================================================================
+object HuaweiVrRuntime {
+    /** 华为 VR SDK Service（插眼镜后自动安装的运行时服务） */
+    const val PKG_SDK_SERVICE = "com.huawei.hvrsdkserverapp"
+
+    /** 华为 VR 设备管理/手柄服务 */
+    const val PKG_VRHANDLE = "com.huawei.vrhandle"
+
+    /** 官方「2D 应用 → VR」提示页 Action（由 hvrprompt.aar 的 HVRModeActivity 响应） */
+    const val ACTION_VR_PROMPT = "com.huawei.android.vr.PROMPT"
+
+    /** 眼镜推荐 swapchain 尺寸（每眼），仅作注释用途 */
+    const val RECOMMENDED_EYE_SIZE = 1552
+
+    /** 眼镜刷新率 */
+    const val DISPLAY_REFRESH_RATE_HZ = 70
+}
+
+/**
+ * 探测华为 VR 运行时是否可用。
+ *
+ * 注意：`PackageManager.getPackageInfo` 在包不存在时抛 `NameNotFoundException`，
+ * 某些定制 ROM 还可能抛其它 SecurityException，因此统一按「查得到即可用」处理，
+ * 任何异常都视为不可用（安全降级）。
+ */
+fun isHuaweiVrRuntimeAvailable(context: Context): Boolean {
+    val pm = context.packageManager ?: return false
+    for (pkg in listOf(HuaweiVrRuntime.PKG_SDK_SERVICE, HuaweiVrRuntime.PKG_VRHANDLE)) {
+        try {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(pkg, 0)
+            return true
+        } catch (_: Exception) {
+            // 该包不存在，继续探测下一个
+        }
+    }
+    return false
+}
+
+/**
+ * 构建并「预备」进入华为 VR 的 Intent。
+ *
+ * 两条路一起给出，按可靠性排序：
+ *
+ * ① **显式指向自身的 `HuaweiVrActivity`**（主路径，本函数实际使用）
+ *    该 Activity 在 Manifest 中声明了 `action=com.huawei.android.vr.PROMPT` 的
+ *    `<intent-filter>`，同时又是显式组件。显式 `setClass` 启动最稳，
+ *    不依赖 `hvrprompt.aar` 是否已集成，也不受各 ROM 对隐式 Intent 的限制。
+ *
+ * ② `action=PROMPT` + `setPackage(自身包名)`（备用，见 [HuaweiVrRuntime.ACTION_VR_PROMPT]）
+ *    集成 `hvrprompt.aar` 后由 `com.huawei.vrlab.HVRModeActivity` 响应，
+ *    插眼镜可跳过 VrLauncher。P1 再启用。
+ *
+ * ⚠️ 本函数有副作用：会写入 `HuaweiVrActivity.onBeforeKill`（静态回调）。
+ * 这是刻意的——Activity 退出时 `killProcess`，设置必须在同一进程内先落盘。
+ * 回调用可空静态引用 + `@Volatile`，进程重启后自动失效，不会泄漏 Activity/Context。
+ *
+ * @param renderScale 渲染分辨率倍率（0.5f~1.0f），转成百分比传给 Activity
+ * @param onBeforeKill 退出前落盘动作；传 null 则不覆盖既有回调
+ */
+fun buildHuaweiVrPromptIntent(
+    context: Context,
+    renderScale: Float = 1.0f,
+    onBeforeKill: (() -> Unit)? = null
+): Intent {
+    if (onBeforeKill != null) {
+        HuaweiVrActivity.onBeforeKill = onBeforeKill
+    }
+    val percent = (renderScale.coerceIn(0.5f, 1.0f) * 100f).roundToInt()
+    return Intent(context, HuaweiVrActivity::class.java).apply {
+        action = HuaweiVrRuntime.ACTION_VR_PROMPT
+        putExtra(HuaweiVrActivity.EXTRA_RENDER_SCALE, percent)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+}
+
 

@@ -117,6 +117,22 @@
     <string name="audio_channel_mirror">오디오 채널 교체</string>
     <string name="audio_normal">보통</string>
     <string name="audio_swapped">좌우 교체</string>
+
+    <!-- ===== Huawei VR Glass (VR Engine) ===== -->
+    <string name="huawei_vr_enable">Huawei VR Glass (VR Engine)</string>
+    <string name="huawei_vr_enable_desc">Huawei VR 런타임으로 출력합니다. 안경 연결 후 VR 입구에서 실행하세요</string>
+    <string name="huawei_vr_render_scale">Huawei VR 렌더링 해상도</string>
+    <string name="huawei_vr_render_scale_desc">안경 권장 해상도(눈당 1552×1552) 대비 비율입니다. 화질 우선이면 100%, 발열이나 프레임 저하 시 순차적으로 낮추세요</string>
+    <string name="huawei_vr_enter">Huawei VR 진입</string>
+    <string name="huawei_vr_enter_desc">VR Glass 연결 후 누르세요. 안경이 연결되어 있으면 VR 런처를 건너뛰고 바로 재생합니다</string>
+    <string name="huawei_vr_runtime_missing">Huawei VR 런타임을 찾을 수 없어 내장 분할 화면 VR을 사용합니다</string>
+    <string name="huawei_vr_enter_failed">Huawei VR을 시작할 수 없어 내장 분할 화면 VR로 전환했습니다</string>
+    <string name="huawei_vr_ready">Huawei VR 런타임을 감지했습니다</string>
+    <string name="huawei_vr_runtime_absent">이 기기에는 Huawei VR 런타임이 없습니다. 스위치는 기록만 되며 실제로는 내장 분할 화면 VR을 사용합니다</string>
+    <string name="huawei_vr_handover">Huawei VR 모드: 시야각, IPD, 헤드 트래킹, 분할 화면은 런타임이 담당하므로 아래 설정은 적용되지 않습니다</string>
+    <string name="huawei_vr_prefer_6dof">6DoF 컨트롤러 모드 우선</string>
+    <string name="huawei_vr_prefer_6dof_desc">트래킹 키트가 연결되지 않으면 자동으로 3DoF로 돌아갑니다. 일반 사용에는 영향이 없습니다</string>
+    <string name="huawei_vr_note">Huawei VR 모드에서는 화면이 안경에 직접 표시되며 휴대폰 화면에는 나오지 않습니다. 플로팅 볼과 재생 컨트롤은 진입 전에 준비하세요. Home으로 나가면 재생도 종료됩니다.</string>
     <string name="dome_half_crop">180° 돔 소스 자르기</string>
     <string name="dome_half_left">왼쪽 절반만</string>
     <string name="dome_half_right">오른쪽 절반만</string>

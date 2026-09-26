@@ -117,6 +117,22 @@
     <string name="audio_channel_mirror">音声チャンネルを入れ替え</string>
     <string name="audio_normal">通常</string>
     <string name="audio_swapped">左右入れ替え</string>
+
+    <!-- ===== Huawei VR Glass（VR Engine）===== -->
+    <string name="huawei_vr_enable">Huawei VR Glass（VR Engine）</string>
+    <string name="huawei_vr_enable_desc">Huawei VR ランタイム経由で出力。グラス接続後、VR 入口から起動してください</string>
+    <string name="huawei_vr_render_scale">Huawei VR レンダリング解像度</string>
+    <string name="huawei_vr_render_scale_desc">グラス推奨解像度（片眼 1552×1552）に対する比率。画質重視なら 100%、発熱やコマ落ち時は順に下げてください</string>
+    <string name="huawei_vr_enter">Huawei VR に入る</string>
+    <string name="huawei_vr_enter_desc">VR Glass を接続してからタップ。接続済みなら VR ランチャーを飛ばして直接再生します</string>
+    <string name="huawei_vr_runtime_missing">Huawei VR ランタイムが見つかりません。内蔵の分割画面 VR を使用します</string>
+    <string name="huawei_vr_enter_failed">Huawei VR を起動できませんでした。内蔵の分割画面 VR に戻ります</string>
+    <string name="huawei_vr_ready">Huawei VR ランタイムを検出しました</string>
+    <string name="huawei_vr_runtime_absent">この端末には Huawei VR ランタイムがありません。スイッチは記録のみで、実際は内蔵の分割画面 VR を使用します</string>
+    <string name="huawei_vr_handover">Huawei VR モード：視野角・IPD・頭部トラッキング・分割画面はランタイムが担当するため、以下の設定は反映されません</string>
+    <string name="huawei_vr_prefer_6dof">6DoF コントローラーモードを優先</string>
+    <string name="huawei_vr_prefer_6dof_desc">トラッキングキット未接続の場合は自動的に 3DoF に戻ります。通常利用に影響はありません</string>
+    <string name="huawei_vr_note">Huawei VR モードでは映像はグラス側に表示され、スマートフォンの画面には出ません。フローティングボールと再生コントロールは入る前に準備してください。Home で終了すると再生も終了します。</string>
     <string name="dome_half_crop">180° ドームのソースをクロップ</string>
     <string name="dome_half_left">左半分のみ</string>
     <string name="dome_half_right">右半分のみ</string>

@@ -138,6 +138,22 @@
     <string name="audio_normal">正常聲道</string>
     <string name="audio_swapped">聲道反轉</string>
 
+    <!-- ===== 華為 VR Glass（VR Engine）===== -->
+    <string name="huawei_vr_enable">華為 VR Glass（VR Engine）</string>
+    <string name="huawei_vr_enable_desc">透過華為 VR 執行時輸出到 VR Glass；開啟後需連接眼鏡並從 VR 入口進入</string>
+    <string name="huawei_vr_render_scale">華為 VR 渲染解析度</string>
+    <string name="huawei_vr_render_scale_desc">相對於眼鏡建議解析度（每眼 1552×1552）的比例。重視畫質請選 100%，發熱掉幀時再依次調低</string>
+    <string name="huawei_vr_enter">進入華為 VR</string>
+    <string name="huawei_vr_enter_desc">插入 VR Glass 後點擊；已連接眼鏡時會跳過 VR 桌面直接進入播放</string>
+    <string name="huawei_vr_runtime_missing">未偵測到華為 VR 執行時，將使用內建分割畫面 VR</string>
+    <string name="huawei_vr_enter_failed">無法啟動華為 VR，已退回內建分割畫面 VR</string>
+    <string name="huawei_vr_ready">已偵測到華為 VR 執行時</string>
+    <string name="huawei_vr_runtime_absent">目前裝置無華為 VR 執行時，開關僅作記錄，實際仍走內建分割畫面 VR</string>
+    <string name="huawei_vr_handover">華為 VR 模式：視場角、瞳距、陀螺儀、分割畫面由 Runtime 接管，下列設定不再生效</string>
+    <string name="huawei_vr_prefer_6dof">優先 6DoF 控制器模式</string>
+    <string name="huawei_vr_prefer_6dof_desc">眼鏡未配對定位套件時會自動退回 3DoF，不影響使用</string>
+    <string name="huawei_vr_note">華為 VR 模式下畫面由眼鏡直接呈現，手機螢幕不再顯示畫面，懸浮球與播控列需在進入前準備好。按 Home 退出會結束播放。</string>
+
     <!-- ===== batch ===== -->
     <string name="dome_half_crop">180°穹幕源畫面裁剪</string>
     <string name="dome_half_left">僅左半屏</string>

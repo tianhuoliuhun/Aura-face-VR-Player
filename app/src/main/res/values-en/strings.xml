@@ -129,6 +129,22 @@
     <string name="audio_normal">Normal</string>
     <string name="audio_swapped">Swapped</string>
 
+    <!-- ===== Huawei VR Glass (VR Engine) ===== -->
+    <string name="huawei_vr_enable">Huawei VR Glass (VR Engine)</string>
+    <string name="huawei_vr_enable_desc">Output through the Huawei VR runtime; connect the glasses and enter from the VR entry</string>
+    <string name="huawei_vr_render_scale">Huawei VR render resolution</string>
+    <string name="huawei_vr_render_scale_desc">Ratio against the glasses\' recommended resolution (1552×1552 per eye). Pick 100% for best quality, lower it step by step if the device overheats or drops frames</string>
+    <string name="huawei_vr_enter">Enter Huawei VR</string>
+    <string name="huawei_vr_enter_desc">Tap after plugging in the VR Glass; with the glasses connected it skips the VR launcher and starts playback directly</string>
+    <string name="huawei_vr_runtime_missing">Huawei VR runtime not found, falling back to built-in split-screen VR</string>
+    <string name="huawei_vr_enter_failed">Could not start Huawei VR, fell back to built-in split-screen VR</string>
+    <string name="huawei_vr_ready">Huawei VR runtime detected</string>
+    <string name="huawei_vr_runtime_absent">No Huawei VR runtime on this device. The switch is only recorded; playback still uses built-in split-screen VR</string>
+    <string name="huawei_vr_handover">Huawei VR mode: field of view, IPD, head tracking and split-screen are handled by the runtime, so the settings below no longer apply</string>
+    <string name="huawei_vr_prefer_6dof">Prefer 6DoF controller mode</string>
+    <string name="huawei_vr_prefer_6dof_desc">Falls back to 3DoF automatically when no tracking kit is paired; no impact on normal use</string>
+    <string name="huawei_vr_note">In Huawei VR mode the image is presented by the glasses and no longer shown on the phone screen. Prepare the floating ball and playback controls before entering. Pressing Home exits and ends playback.</string>
+
     <!-- ===== batch ===== -->
     <string name="dome_half_crop">180° dome source crop</string>
     <string name="dome_half_left">Left half only</string>

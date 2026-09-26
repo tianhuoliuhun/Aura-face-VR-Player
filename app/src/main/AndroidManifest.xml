@@ -7,6 +7,41 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
+    <!-- ========================================================================
+         华为 VR Glass（VR Engine）接入，P0 阶段
+         ========================================================================
+         官方要求（键名逐条对照官方文档 / 参考项目 Manifest）：
+           · GLES 3.2：<uses-feature glEsVersion="0x00030002">
+             ⚠️ 这是**硬要求**，且属于「向后兼容」声明，声明 3.2 后，
+                普通设备（只要能提供 3.x 上下文）依然可以安装，不影响现有用户。
+           · 权限：com.huawei.android.permission.VR
+                  com.huawei.vrhandle.permission.DEVICE_MANAGER
+         ⚠️ `com.huawei.android.vr.application.mode=vr_only` 与
+            `sensor.mode=mobile`（调试项）**暂不启用**：
+            前者会改变应用启动行为（有回归风险），后者正式包必须删。
+            两者等真机 P0 验证通过后再逐个打开。
+         ⚠️ XML 注释内不能出现连续的双连字符，所以本文件的分隔线只用「=」。
+            曾因用了连字符分隔线导致 ManifestMerger 报 not well-formed。
+         ======================================================================== -->
+
+    <!-- GLES 3.2（华为硬要求）。required="false" 保证非华为设备不受影响 -->
+    <uses-feature
+        android:glEsVersion="0x00030002"
+        android:required="false" />
+
+    <!-- 华为 VR 权限（未装 VR 运行时的设备上仅是被忽略） -->
+    <uses-permission android:name="com.huawei.android.permission.VR" />
+    <uses-permission android:name="com.huawei.vrhandle.permission.DEVICE_MANAGER" />
+
+    <!-- API 30+ 包可见性：不声明则查不到华为 VR 运行时 -->
+    <queries>
+        <package android:name="com.huawei.vrhandle" />
+        <package android:name="com.huawei.hvrsdkserverapp" />
+        <intent>
+            <action android:name="com.huawei.android.vr.PROMPT" />
+        </intent>
+    </queries>
+
     <application
         android:name=".AppApplication"
         android:allowBackup="true"
@@ -50,6 +85,36 @@
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- ====================================================================
+             华为 VR Glass 播放 Activity（P0 骨架）
+             ====================================================================
+             · 它是官方「2D 应用 → VR」通道的接收方：外部用
+               Intent().setPackage(pkg).setAction("com.huawei.android.vr.PROMPT") 拉起。
+             · `android:exported="false"`：只允许本应用显式启动（用 setClass），
+               action 声明保留是为了兼容华为 Runtime 的探测。
+             · `vr_only` / `application.type` 等 meta-data 待真机验证后再启用。
+             ==================================================================== -->
+        <activity
+            android:name="com.example.vr.huawei.HuaweiVrActivity"
+            android:exported="false"
+            android:label="@string/huawei_vr_enter"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|density|uiMode"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.MyApplication">
+            <intent-filter>
+                <action android:name="com.huawei.android.vr.PROMPT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- 官方 VR 应用入口 action（官方示例 HVRSDK_XrDemo 的 MainActivity 同款）。
+                 部分华为 VR Runtime / VrLauncher 版本用这个 action 来识别「支持 VR 的应用」，
+                 比自建的 PROMPT 通道更标准。两条都声明，兼容性最好。 -->
+            <intent-filter>
+                <action android:name="com.huawei.android.vr.action.MAIN" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
     </application>

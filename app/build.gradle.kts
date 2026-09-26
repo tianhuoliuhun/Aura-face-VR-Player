@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 173
-    versionName = "2.0.173"
+    versionCode = 174
+    versionName = "2.0.174"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -36,6 +36,77 @@ android {
   // 既慢又容易 OOM；noCompress 后可走文件描述符直接读。
   androidResources {
     noCompress += listOf("onnx", "bin", "txt")
+  }
+
+  // ==========================================================================
+  // 华为 VR Glass（VR Engine / OpenXR）native 构建 —— 默认**关闭**
+  // --------------------------------------------------------------------------
+  // 为什么默认关闭：native 构建需要 NDK + CMake + 华为 SDK 三件套，
+  // 在它们到位之前必须保证「普通构建照常可用」（不能因为缺 NDK 就编不过）。
+  //
+  // 启用方式：在项目根 local.properties 里加
+  //     huawei.vr.enable=true
+  //     huawei.vr.sdk.dir=D:/HuaweiVRSDK          ← SDK 解压根目录
+  //     ndk.dir=C:/Users/<你>/AppData/Local/Android/Sdk/ndk/<版本号>
+  //
+  // ⚠️ 设计要点：`useLegacyPackaging = true`（上方 packaging 块）会让 .so
+  //    以压缩形式打包，**保留不动** —— 移除它会让 APK 涨约 24MB。
+  //
+  // ⚠️ ABI 只保留 arm64-v8a：华为 VR Glass 仅支持真机 arm64；
+  //    x86_64（模拟器）没有华为 Runtime，编了也用不上，白增体积。
+  //
+  // ⚠️ CMake 版本必须与本机 SDK 里实际安装的版本一致。
+  //    本机（2026-09-26）装的是 4.1.2；若你的环境不同，改这里或删掉 version
+  //    让 Gradle 自行协商（需 sdkmanager 已装多个版本）。
+  // ==========================================================================
+  val huaweiCmakeVersion = "4.1.2"
+  val huaweiVrEnabled: Boolean = run {
+    val f = project.rootProject.file("local.properties")
+    if (!f.exists()) false
+    else f.readLines().any { it.trim() == "huawei.vr.enable=true" }
+  }
+  val huaweiVrSdkDir: String = run {
+    val f = project.rootProject.file("local.properties")
+    if (!f.exists()) ""
+    else f.readLines()
+      .firstOrNull { it.trim().startsWith("huawei.vr.sdk.dir=") }
+      ?.substringAfter("=")?.trim() ?: ""
+  }
+
+  if (huaweiVrEnabled) {
+    logger.lifecycle("[HuaweiVR] native 构建已启用，SDK 路径: $huaweiVrSdkDir")
+    // ⚠️ NDK 版本必须与 local.properties 的 ndk.dir 一致：
+    //    AGP 默认要 28.2.13676358，本机装的是 30.0.16248370，不一致会报
+    //    「CXX1104: NDK from ndk.dir had version ... which disagrees with android.ndkVersion」。
+    //    这里显式指定本机实际版本；若你的环境不同，改这个字符串即可。
+    ndkVersion = "30.0.16248370"
+    defaultConfig {
+      ndk {
+        abiFilters += listOf("arm64-v8a")
+      }
+    }
+    externalNativeBuild {
+      cmake {
+        path = file("src/main/cpp/CMakeLists.txt")
+        version = huaweiCmakeVersion
+      }
+    }
+    defaultConfig {
+      externalNativeBuild {
+        cmake {
+          // 把 SDK 路径与「已接入」宏传进 CMake
+          arguments += listOf(
+            "-DHUAWEI_VR_SDK_DIR=$huaweiVrSdkDir",
+            "-DAURA_HAVE_OPENXR=1"
+          )
+          cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti")
+        }
+      }
+    }
+    // 让 CMake 里复制出来的 libxr_loader.so 参与打包
+    sourceSets["main"].jniLibs.directories.add("src/main/cpp/libs")
+  } else {
+    logger.lifecycle("[HuaweiVR] native 构建未启用（local.properties 无 huawei.vr.enable=true），跳过")
   }
 
   signingConfigs {
@@ -143,6 +214,18 @@ dependencies {
   // 以及 Mars-Face 模型（face_det / face_align .mars_model）与妆容素材（AAR assets 自动合并）。
   // 注意：官方预编译包**不含 x86_64** —— 模拟器上会初始化失败，运行时自动回退 GLSL 引擎。
   implementation(files("libs/gpupixel-release.aar"))
+  // v2.0.174：华为 VR Engine 官方 Java 桥（hvrbridge.jar）。
+  // 提供 com.huawei.hvr.LibUpdateClient（确保设备已装/已更新华为 VR Runtime）
+  // 与 com.huawei.vrlab.HVRActivity（官方 2D→VR 通道）。
+  // ⚠️ 这是华为 SDK 的一部分，**不入仓**（已在 .gitignore 忽略）；
+  //    本地构建前需从 SDK 的 sdkDemo/openXRsdk/libs/ 复制到 app/libs/。
+  //    文件缺失时不报错（普通构建不受影响），仅华为 VR 功能不可用。
+  val hvrBridgeJar = file("libs/hvrbridge.jar")
+  if (hvrBridgeJar.exists()) {
+    implementation(files("libs/hvrbridge.jar"))
+  } else {
+    logger.lifecycle("[HuaweiVR] app/libs/hvrbridge.jar 不存在，跳过（官方 Java 桥不可用）")
+  }
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)

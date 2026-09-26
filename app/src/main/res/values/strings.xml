@@ -128,6 +128,22 @@
     <string name="audio_normal">正常声道</string>
     <string name="audio_swapped">声道反转</string>
 
+    <!-- ===== 华为 VR Glass（VR Engine）===== -->
+    <string name="huawei_vr_enable">华为 VR Glass（VR Engine）</string>
+    <string name="huawei_vr_enable_desc">通过华为 VR 运行时输出到 VR Glass；开启后需连接眼镜并从 VR 入口进入</string>
+    <string name="huawei_vr_render_scale">华为 VR 渲染分辨率</string>
+    <string name="huawei_vr_render_scale_desc">相对眼镜推荐分辨率（每眼 1552×1552）的比例。画质优先选 100%，发热掉帧时依次下调</string>
+    <string name="huawei_vr_enter">进入华为 VR</string>
+    <string name="huawei_vr_enter_desc">插入 VR Glass 后点击；已连接眼镜时会跳过 VR 桌面直接进入播放</string>
+    <string name="huawei_vr_runtime_missing">未检测到华为 VR 运行时，将使用内置分屏 VR</string>
+    <string name="huawei_vr_enter_failed">无法启动华为 VR，已回退到内置分屏 VR</string>
+    <string name="huawei_vr_ready">已检测到华为 VR 运行时</string>
+    <string name="huawei_vr_runtime_absent">当前设备无华为 VR 运行时，开关仅作记录，实际仍走内置分屏 VR</string>
+    <string name="huawei_vr_handover">华为 VR 模式：视场角、瞳距、陀螺仪、分屏由 Runtime 接管，下列设置不再生效</string>
+    <string name="huawei_vr_prefer_6dof">优先 6DoF 手柄模式</string>
+    <string name="huawei_vr_prefer_6dof_desc">眼镜未配对定位套件时会自动退回 3DoF，不影响使用</string>
+    <string name="huawei_vr_note">华为 VR 模式下画面由眼镜直接呈现，手机屏幕不再显示画面，悬浮球与播控条需在进入前准备好。按 Home 退出会结束播放。</string>
+
     <!-- ===== batch ===== -->
     <string name="dome_half_crop">180°穹幕源画面裁剪</string>
     <string name="dome_half_left">仅左半屏</string>

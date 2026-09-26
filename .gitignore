@@ -40,3 +40,14 @@ google-services.json
 # 改为构建前用脚本拉取：`python scripts/fetch_asr_model.py`
 # 注：tokens.txt 仅 0.3MB，随仓库提交，保证 clone 后目录结构完整。
 app/src/main/assets/sense-voice/model.int8.onnx
+
+# v2.0.174：华为 VR Engine（OpenXR）native 产物。
+# ⚠️ 华为 SDK 的二进制是**预编译第三方产物**，
+# 华为许可明确禁止再分发，绝不可提交到公开仓库。
+#   · libxr_loader.so ：CMake 的 POST_BUILD 从 HUAWEI_VR_SDK_DIR 复制而来
+#   · hvrbridge.jar   ：官方 Java 桥（LibUpdateClient / HVRActivity 等）
+# 两者均由本地 SDK 提供；clone 后需自行放置 SDK 才能启用 native 构建。
+app/src/main/cpp/libs/
+app/libs/hvrbridge.jar
+
+
