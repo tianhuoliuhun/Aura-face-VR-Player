@@ -1046,6 +1046,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glClearColor(0.04f, 0.05f, 0.07f, 1.0f) // Dark night canvas background Hex #0a0c12
         GLES20.glDisable(GLES20.GL_DEPTH_TEST) // 2D or spherically projected mapping, depth test is unneeded
 
+        // 记录实际拿到的 GL 版本：上下文虽然按 ES3 请求，但真机上驱动可能仍回退到 ES2
+        // （VRGLSurfaceView / HuaweiVrActivity 均 setEGLContextClientVersion(3)）。
+        // 排查「shader 在 A 设备能编译、B 设备黑屏」这类问题时，第一手证据就是这行日志。
+        // GL_MAJOR_VERSION / GL_MINOR_VERSION 在 ES2 上下文下查询无效，故只用 GL_VERSION 字符串。
+        Log.i(TAG, "GL_VERSION = ${GLES20.glGetString(GLES20.GL_VERSION)}"
+                + " | VENDOR = ${GLES20.glGetString(GLES20.GL_VENDOR)}")
+
         // Build the two main programs: video variant samples an OES external texture,
         // image variant uses plain sampler2D so strict GPU drivers (Adreno etc.) never
         // hit an empty OES slot while displaying photos/panoramas.
@@ -1886,8 +1893,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *  3. 采样窗口相对视口的比例记进 [faceCropScaleX] / [faceCropScaleY] 供坐标换算；
      *  4. 回读缓冲与帧数组**复用**，不再每 8 帧产生 2MB 垃圾。
      *
-     * 注：`glReadPixels` 是同步回读，在 GLES2 下无法用 PBO 异步化
-     * （本项目 `setEGLContextClientVersion(2)`），故通过「减少无谓采样 + 复用缓冲」控制代价。
+     * 注：`glReadPixels` 是同步回读，**未**使用 PBO 异步化（PBO 需 GLES3 + 驱动支持
+     * `GL_PIXEL_PACK_BUFFER`，且本项目主 shader 仍为 ESSL 100、未启用 ES3 专属路径），
+     * 故通过「减少无谓采样 + 复用缓冲」控制代价。
      */
     // ===== v2.0.160：GPUPixel 双引擎支持 =====
 

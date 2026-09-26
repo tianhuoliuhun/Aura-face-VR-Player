@@ -34,8 +34,12 @@ class VRGLSurfaceView @JvmOverloads constructor(
     private val gestureDetector: GestureDetector
 
     init {
-        // Setup EGL core version 2.0
-        setEGLContextClientVersion(2)
+        // ⚠️ 必须是 ES3，与华为 VR 路径（HuaweiVrActivity.setEGLContextClientVersion(3)）保持一致。
+        //    两边跑的是同一个 VRGLRenderer、同一份 shader 源码；若此处仍是 ES2，则任何一处
+        //    shader 改动都必须在 ES2 和 ES3 两种上下文下同时可编译，否则会出现
+        //    「华为路径能过、普通路径黑屏」（或反之）这种极难定位的问题。
+        //    shader 本身无需改动：ES3 向后兼容 GLSL ES 1.00（ESSL 100），现有 shader 照常编译。
+        setEGLContextClientVersion(3)
         setEGLConfigChooser(8, 8, 8, 8, 16, 0)
         setRenderer(renderer)
         renderMode = RENDERMODE_CONTINUOUSLY
