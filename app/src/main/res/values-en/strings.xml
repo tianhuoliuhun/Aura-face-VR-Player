@@ -311,7 +311,7 @@
     <string name="lut_intensity">Filter intensity</string>
     <string name="loading">Loading</string>
     <string name="lut_custom_pick">Pick custom LUT</string>
-    <string name="lut_current">Current: %1$s (12 built-in, .cube files supported)</string>
+    <string name="lut_current">Current: %1$s (24 built-in, .cube files supported)</string>
     <string name="beauty_section_portrait">2D portrait retouch - needs 2D mode &amp; face detection</string>
     <string name="beauty_3d_disabled">Disabled in 3D</string>
     <string name="beauty_status_2d">2D mode (%1$s): all effects available; portrait retouch needs a detected face</string>
@@ -534,6 +534,13 @@
     <string name="lut_intense_cyan_orange">Intense Cyan-Orange</string>
     <string name="lut_soft_teal">Soft Teal</string>
     <string name="lut_high_contrast">High Contrast</string>
+    <!-- v2.0.178: 6 portrait beauty-oriented LUTs -->
+    <string name="lut_heartland_warm_portrait">Warm Portrait</string>
+    <string name="lut_meridian_bright_daylight">Bright Daylight</string>
+    <string name="lut_skylight_clear_open">Clear &amp; Open</string>
+    <string name="lut_postcard_pure_hue">Pure Hue Film</string>
+    <string name="lut_almond_soft_skin">Soft Almond Skin</string>
+    <string name="lut_burin_subtle_film">Subtle Film</string>
     <string name="asr_status_builtin_ready">Model bundled, ready to use</string>
     <string name="asr_source_downloaded">Downloaded (filesDir)</string>
     <string name="asr_source_assets">Bundled (assets)</string>

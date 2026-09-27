@@ -36,7 +36,25 @@ object LutUtils {
         BuiltinLut("09_Black_White_Cinema", R.string.lut_black_white_cinema),
         BuiltinLut("10_Intense_Cyan_Orange", R.string.lut_intense_cyan_orange),
         BuiltinLut("11_Soft_Teal", R.string.lut_soft_teal),
-        BuiltinLut("12_High_Contrast", R.string.lut_high_contrast)
+        BuiltinLut("12_High_Contrast", R.string.lut_high_contrast),
+        // ===== v2.0.178：6 款「人像美颜向」LUT =====
+        // 上面 12 款是**风格化**滤镜（青橙 / 赛博朋克 / 黑白…），不适合当美颜用；
+        // 这 6 款专做「柔和 / 通透 / 肤色友好」，与磨皮美白叠加时不会互相打架。
+        //
+        // 来源：开源项目 t0saki/lumix-original-looks（GitHub），**MIT 许可**，
+        //       `.cube` 文件可自由使用（含商用，注明来源为佳）。
+        //       上游为 LUMIX Real Time LUT 的 33 点 look，在 OKLab/OKLCh 空间参数化生成，
+        //       全套共用「肤色保护窗」（OKLCh 色相 30–70° 羽化），因此人脸在所有款下表现一致；
+        //       生成是确定性的，白点严格映射到 [1,1,1]、灰轴严格单调 ⇒ 不会丢高光层次。
+        //       我们对上游文件仅做**格式规范化**（重写 TITLE、统一 CRLF、补齐 6 位小数），
+        //       数值数据逐条原样保留，未做任何色调改动。
+        // 上游仓库：https://github.com/t0saki/lumix-original-looks  （LICENSE: MIT）
+        BuiltinLut("19_Heartland_Warm_Portrait", R.string.lut_heartland_warm_portrait),
+        BuiltinLut("20_Meridian_Bright_Daylight", R.string.lut_meridian_bright_daylight),
+        BuiltinLut("21_Skylight_Clear_Open", R.string.lut_skylight_clear_open),
+        BuiltinLut("22_Postcard_Pure_Hue", R.string.lut_postcard_pure_hue),
+        BuiltinLut("23_Almond_Soft_Skin", R.string.lut_almond_soft_skin),
+        BuiltinLut("24_Burin_Subtle_Film", R.string.lut_burin_subtle_film)
     )
 
     /** 由文件名解析本地化显示名；非内置（自定义）LUT 直接返回文件名 */

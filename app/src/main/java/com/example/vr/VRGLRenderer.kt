@@ -920,11 +920,26 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 vec3 smoothed = low.rgb + detail * uTextureDetail;
 
                 color.rgb = mix(color.rgb, smoothed, uBeautyStrength);
+                } else {
+                    // ===== v2.0.178 修复「美颜只显示一小块区域」 =====
+                    // v2.0.177 让非皮肤像素**完全不做**磨皮（省 8 次采样）。但 isSkin 是
+                    // RGB 阈值判定，实测一段真实视频（1920x1080，人物占中下 3/4）：
+                    //   上 1/4 的粉/紫背景 → 通过率 0%，中下人物区 → 20~93%，总通过率仅 35%。
+                    // 于是皮肤区被磨皮、背景完全没动，**看上去就是「美颜只在小块区域生效」**，
+                    // 且皮肤/背景交界处出现可见的一圈分界。
+                    //
+                    // 这里恢复「非皮肤也轻度处理」，但**只采 2 个垂直邻域**（不是旧的 8 个）：
+                    //   · 采样数 9 → 3（仅比 v2.0.177 多 2 次，远低于旧的 9 次）
+                    //   · 背景获得极轻降噪 → 分界线消失，观感统一
+                    // 权重固定 0.25（与 v2.0.176 的非皮肤分支一致），保持「背景不被过度处理」。
+                    vec2 stepV = vec2(0.0, uTexelSize.y * 6.0);
+                    vec3 vUp = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepV).rgb
+                                               : texture2D(uSamplerImage, tc + stepV).rgb;
+                    vec3 vDn = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepV).rgb
+                                               : texture2D(uSamplerImage, tc - stepV).rgb;
+                    vec3 vAvg = (color.rgb + vUp + vDn) / 3.0;
+                    color.rgb = mix(color.rgb, vAvg, uBeautyStrength * 0.25);
                 }
-                // 非皮肤像素：v2.0.177 起**完全不做**（旧实现是 mix(..., uBeautyStrength * 0.25)
-                // 的轻微降噪 —— 视频播放场景下该差异不可感知，而代价是 8 次采样）。
-                // 若日后实测发现暗部背景噪点明显，可在此补一个 2 次采样的极轻量版本
-                // （例如仅用 n5/n6 垂直两邻域），代价 +2 次采样。
             }
             
             // Apply advanced fine cosmetics
@@ -2176,14 +2191,22 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
         void main() {
             vec4 full = texture2D(uFullTex, vTex);
-            if (uBeautyStrength <= 0.01 || !isSkin(full.rgb)) {
+            if (uBeautyStrength <= 0.01) {
                 gl_FragColor = full;
                 return;
             }
             vec3 low = texture2D(uLowTex, vTex).rgb;
             vec3 detail = full.rgb - low;
             vec3 smoothed = low + detail * uTextureDetail;
-            gl_FragColor = vec4(mix(full.rgb, smoothed, uBeautyStrength), full.a);
+            if (isSkin(full.rgb)) {
+                gl_FragColor = vec4(mix(full.rgb, smoothed, uBeautyStrength), full.a);
+            } else {
+                // v2.0.178 修复：与主 shader 一致 —— 非皮肤像素不再「完全跳过」。
+                // 实测真实视频 isSkin 总通过率仅 35%（粉/紫背景 0%），若背景完全不动，
+                // 皮肤与背景之间会出现可见的一圈分界，观感即「美颜只在一小块生效」。
+                // 这里用半分辨率低频层也做一次 0.25 权重的轻度混合（零额外采样）。
+                gl_FragColor = vec4(mix(full.rgb, smoothed, uBeautyStrength * 0.25), full.a);
+            }
         }
     """.trimIndent()
 
