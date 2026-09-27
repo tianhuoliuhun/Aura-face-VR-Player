@@ -54,8 +54,47 @@ object LutUtils {
         BuiltinLut("21_Skylight_Clear_Open", R.string.lut_skylight_clear_open),
         BuiltinLut("22_Postcard_Pure_Hue", R.string.lut_postcard_pure_hue),
         BuiltinLut("23_Almond_Soft_Skin", R.string.lut_almond_soft_skin),
-        BuiltinLut("24_Burin_Subtle_Film", R.string.lut_burin_subtle_film)
+        BuiltinLut("24_Burin_Subtle_Film", R.string.lut_burin_subtle_film),
+
+        // ===== v2.0.179：18 款「人像美颜 / 美白」向 LUT（与上面 6 款同属「人像美颜」分组）=====
+        // 25~30：柯达经典胶片仿真，来自 scernst13/HaldCLUT-Cube-Files（GitHub），**CC0-1.0**
+        //         （公共领域贡献，可自由商用；原始 HaldCLUT 出自 darktable/RT 社区，Portra 系列以
+        //          柔和肤色、低反差、暖调著称，是公认的人像胶片），cube 由 LUT Lab 转换。
+        // 31~42：LUMIX 原创 look，来自 t0saki/lumix-original-looks（GitHub），**MIT**，
+        //         与 19~24 同一上游，主打通透 / 柔雾 / 明亮，肤色友好。
+        // 两个来源均只做**格式规范化**（重写 TITLE、统一 CRLF、数据保留 6 位小数），
+        // 数值逐条原样保留，未做任何色调改动。
+        // CC0 上游：https://github.com/scernst13/HaldCLUT-Cube-Files
+        // MIT 上游：https://github.com/t0saki/lumix-original-looks
+        BuiltinLut("25_Portra_400", R.string.lut_portra_400),
+        BuiltinLut("26_Portra_160", R.string.lut_portra_160),
+        BuiltinLut("27_Portra_800", R.string.lut_portra_800),
+        BuiltinLut("28_Ektachrome_100VS", R.string.lut_ektachrome_100vs),
+        BuiltinLut("29_Elite_Color_400", R.string.lut_elite_color_400),
+        BuiltinLut("30_Kodachrome_64", R.string.lut_kodachrome_64),
+        BuiltinLut("31_Glaze", R.string.lut_glaze),
+        BuiltinLut("32_Gilt", R.string.lut_gilt),
+        BuiltinLut("33_Viride", R.string.lut_viride),
+        BuiltinLut("34_Clear", R.string.lut_clear),
+        BuiltinLut("35_Voile", R.string.lut_voile),
+        BuiltinLut("36_Arcade", R.string.lut_arcade),
+        BuiltinLut("37_Tinsel", R.string.lut_tinsel),
+        BuiltinLut("38_Splice", R.string.lut_splice),
+        BuiltinLut("39_Sodium", R.string.lut_sodium),
+        BuiltinLut("40_Argent", R.string.lut_argent),
+        BuiltinLut("41_Canopy", R.string.lut_canopy),
+        BuiltinLut("42_Dusk_Tide", R.string.lut_dusk_tide)
     )
+
+    /** 风格化滤镜分组（青橙 / 赛博朋克 / 黑白…），不针对人像肤色优化 */
+    val styleLuts: List<BuiltinLut> = builtinLuts.filter {
+        it.fileName.substringBefore('_').toIntOrNull()?.let { n -> n in 1..12 } == true
+    }
+
+    /** 人像美颜分组（胶片仿真 / 通透柔肤 / 暖调肤色），适合与磨皮美白叠加 */
+    val portraitLuts: List<BuiltinLut> = builtinLuts.filter {
+        it.fileName.substringBefore('_').toIntOrNull()?.let { n -> n >= 19 } == true
+    }
 
     /** 由文件名解析本地化显示名；非内置（自定义）LUT 直接返回文件名 */
     fun lutDisplayName(fileName: String, context: Context): String {

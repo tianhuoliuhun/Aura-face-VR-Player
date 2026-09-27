@@ -288,7 +288,7 @@
     <string name="lut_intensity">フィルタの強度</string>
     <string name="loading">読み込み中</string>
     <string name="lut_custom_pick">LUT を選択</string>
-    <string name="lut_current">現在：%1$s（内蔵 24 種、.cube ファイル対応）</string>
+    <string name="lut_current">現在：%1$s（内蔵 36 種、.cube ファイル対応）</string>
     <string name="beauty_section_portrait">2D ポートレート加工・2D モードと顔検出が必要</string>
     <string name="beauty_3d_disabled">3D では無効</string>
     <string name="beauty_status_2d">2D モード（%1$s）：すべての美顔が利用可能。ポートレート加工（小顔/大きな目/リップ等）には顔検出が必要</string>
@@ -508,6 +508,28 @@
     <string name="lut_postcard_pure_hue">ピュアヒューフィルム</string>
     <string name="lut_almond_soft_skin">ソフトアーモンド肌</string>
     <string name="lut_burin_subtle_film">サトルフィルム</string>
+    <!-- v2.0.179：18 款人像美颜 LUT（25~30 CC0 Kodak 胶片 / 31~42 MIT LUMIX look） -->
+    <string name="lut_portra_400">ポートラ 400</string>
+    <string name="lut_portra_160">ポートラ 160</string>
+    <string name="lut_portra_800">ポートラ 800</string>
+    <string name="lut_ektachrome_100vs">エクタクローム 100VS</string>
+    <string name="lut_elite_color_400">エリートカラー 400</string>
+    <string name="lut_kodachrome_64">コダクローム 64</string>
+    <string name="lut_glaze">グレーズ</string>
+    <string name="lut_gilt">ギルト</string>
+    <string name="lut_viride">ヴィリデ</string>
+    <string name="lut_clear">クリア</string>
+    <string name="lut_voile">ヴォワール</string>
+    <string name="lut_arcade">アーケード</string>
+    <string name="lut_tinsel">ティンセル</string>
+    <string name="lut_splice">スプライス</string>
+    <string name="lut_sodium">ソジウム</string>
+    <string name="lut_argent">アルジャン</string>
+    <string name="lut_canopy">キャノピー</string>
+    <string name="lut_dusk_tide">ダスクタイド</string>
+    <!-- v2.0.179：LUT 分区标题 -->
+    <string name="lut_group_portrait">ポートレート美顔</string>
+    <string name="lut_group_style">スタイルフィルタ</string>
     <string name="asr_status_builtin_ready">モデル内蔵、すぐ利用可能</string>
     <string name="asr_source_downloaded">ダウンロード版（filesDir）</string>
     <string name="asr_source_assets">内蔵版（assets）</string>

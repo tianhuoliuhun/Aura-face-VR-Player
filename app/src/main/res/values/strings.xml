@@ -310,7 +310,7 @@
     <string name="lut_intensity">滤镜强度</string>
     <string name="loading">加载中</string>
     <string name="lut_custom_pick">自选 LUT</string>
-    <string name="lut_current">当前：%1$s（内置 24 款，支持 .cube 文件）</string>
+    <string name="lut_current">当前：%1$s（内置 36 款，支持 .cube 文件）</string>
     <string name="beauty_section_portrait">2D 人像精修 · 需 2D 模式 + 人脸检测</string>
     <string name="beauty_3d_disabled">3D 停用</string>
     <string name="beauty_status_2d">当前 2D 模式（%1$s）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸</string>
@@ -540,6 +540,28 @@
     <string name="lut_postcard_pure_hue">纯色胶片</string>
     <string name="lut_almond_soft_skin">柔杏肤</string>
     <string name="lut_burin_subtle_film">淡雅胶片</string>
+    <!-- v2.0.179：18 款人像美颜 LUT（25~30 CC0 Kodak 胶片 / 31~42 MIT LUMIX look） -->
+    <string name="lut_portra_400">柯达波特拉 400</string>
+    <string name="lut_portra_160">柯达波特拉 160</string>
+    <string name="lut_portra_800">柯达波特拉 800</string>
+    <string name="lut_ektachrome_100vs">柯达爱泰 100VS</string>
+    <string name="lut_elite_color_400">柯达丽彩 400</string>
+    <string name="lut_kodachrome_64">柯达克罗姆 64</string>
+    <string name="lut_glaze">琉璃通透</string>
+    <string name="lut_gilt">鎏金暖肤</string>
+    <string name="lut_viride">苍翠清透</string>
+    <string name="lut_clear">澄明明亮</string>
+    <string name="lut_voile">轻纱柔雾</string>
+    <string name="lut_arcade">骑楼活力</string>
+    <string name="lut_tinsel">千禧暖金</string>
+    <string name="lut_splice">放映柔光</string>
+    <string name="lut_sodium">夜灯暖光</string>
+    <string name="lut_argent">银盐高级灰</string>
+    <string name="lut_canopy">林荫清爽</string>
+    <string name="lut_dusk_tide">暮潮冷调</string>
+    <!-- v2.0.179：LUT 分区标题 -->
+    <string name="lut_group_portrait">人像美颜</string>
+    <string name="lut_group_style">风格滤镜</string>
     <string name="asr_status_builtin_ready">模型已内置，开箱即用</string>
     <string name="asr_source_downloaded">下载版（filesDir）</string>
     <string name="asr_source_assets">内置版（assets）</string>

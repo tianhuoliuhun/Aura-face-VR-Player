@@ -288,7 +288,7 @@
     <string name="lut_intensity">필터 강도</string>
     <string name="loading">불러오는 중</string>
     <string name="lut_custom_pick">LUT 선택</string>
-    <string name="lut_current">현재: %1$s (내장 24종, .cube 파일 지원)</string>
+    <string name="lut_current">현재: %1$s (내장 36종, .cube 파일 지원)</string>
     <string name="beauty_section_portrait">2D 인물 보정 · 2D 모드와 얼굴 인식 필요</string>
     <string name="beauty_3d_disabled">3D에서는 사용 안 함</string>
     <string name="beauty_status_2d">2D 모드(%1$s): 모든 미용 사용 가능. 인물 보정(얼굴 축소/큰 눈/립스틱 등)은 얼굴 인식 필요</string>
@@ -508,6 +508,28 @@
     <string name="lut_postcard_pure_hue">퓨어 휴 필름</string>
     <string name="lut_almond_soft_skin">소프트 아몬드 피부</string>
     <string name="lut_burin_subtle_film">서틀 필름</string>
+    <!-- v2.0.179：18 款人像美颜 LUT（25~30 CC0 Kodak 胶片 / 31~42 MIT LUMIX look） -->
+    <string name="lut_portra_400">포트라 400</string>
+    <string name="lut_portra_160">포트라 160</string>
+    <string name="lut_portra_800">포트라 800</string>
+    <string name="lut_ektachrome_100vs">엑타크롬 100VS</string>
+    <string name="lut_elite_color_400">엘리트 컬러 400</string>
+    <string name="lut_kodachrome_64">코다크롬 64</string>
+    <string name="lut_glaze">글레이즈</string>
+    <string name="lut_gilt">길트</string>
+    <string name="lut_viride">비리데</string>
+    <string name="lut_clear">클리어</string>
+    <string name="lut_voile">보일</string>
+    <string name="lut_arcade">아케이드</string>
+    <string name="lut_tinsel">틴셀</string>
+    <string name="lut_splice">스플라이스</string>
+    <string name="lut_sodium">소듐</string>
+    <string name="lut_argent">아르장</string>
+    <string name="lut_canopy">캐노피</string>
+    <string name="lut_dusk_tide">더스크 타이드</string>
+    <!-- v2.0.179：LUT 分区标题 -->
+    <string name="lut_group_portrait">인물 뷰티</string>
+    <string name="lut_group_style">스타일 필터</string>
     <string name="asr_status_builtin_ready">모델 내장, 즉시 사용 가능</string>
     <string name="asr_source_downloaded">다운로드 버전（filesDir）</string>
     <string name="asr_source_assets">내장 버전（assets）</string>

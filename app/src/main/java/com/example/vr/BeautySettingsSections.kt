@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -149,7 +147,14 @@ fun GeneralBeautySection(
 // ===================== LUT 视频滤镜 =====================
 
 /**
- * LUT 视频滤镜（内置 12 款 + 手机自选 .cube）。
+ * LUT 视频滤镜（内置 36 款 + 手机自选 .cube）。
+ *
+ * v2.0.179 改版：
+ *  - 由原来的「横向滚动 LazyRow」改为**纯文字网格平铺**，一眼看全，不用左右滑；
+ *  - 内置款按用途拆成**两个独立分区**（同面板内分区，不拆新面板）：
+ *      · 人像美颜 —— 24 款（19~42），胶片仿真 / 通透柔肤 / 暖调肤色，适合与磨皮美白叠加；
+ *      · 风格滤镜 —— 12 款（01~12），青橙 / 赛博朋克 / 黑白等强风格化。
+ *    两块各自带小标题与数量角标，选中态在各自区块高亮。
  *
  * @param onApplyLutRgba 把解析出的 RGBA LUT 交给渲染器（null 表示关闭滤镜）
  * @param onPickCustomLut 打开系统文件选择器（调用方持有 ActivityResultLauncher）
@@ -173,65 +178,89 @@ fun LutFilterSection(
     val scope = rememberCoroutineScope()
 
     val ctx = LocalContext.current
+
+    // 点击某款内置 LUT：异步解析 → 交渲染器
+    fun applyBuiltin(lut: LutUtils.BuiltinLut) {
+        if (isLutLoading) return
+        val file = lut.fileName
+        onLutLoadingChange(true)
+        onLutNameChange(file)
+        scope.launch(Dispatchers.IO) {
+            try {
+                val rgba = context.assets.open("luts/$file.cube").use {
+                    LutUtils.parseCubeToRgba(it)
+                }
+                withContext(Dispatchers.Main) {
+                    onApplyLutRgba(rgba)
+                    onLutMixChange(lutMix)
+                }
+            } catch (e: Exception) {
+                Log.e("LutFilterSection", "LUT $file load failed", e)
+            } finally {
+                withContext(Dispatchers.Main) { onLutLoadingChange(false) }
+            }
+        }
+        onUserInteraction()
+    }
+
     Column(modifier = modifier) {
         SectionTitle(stringResource(R.string.lut_section_title), accentColor)
 
-        // 内置 LUT 横向选择（无滤镜 + 12 款风格）
-        LazyRow(
+        // ---------- 无滤镜 ----------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth()
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            item {
-                val selected = lutName == stringResource(R.string.lut_none)
-                LutChip(
-                    text = stringResource(R.string.lut_none),
-                    selected = selected,
-                    accentColor = accentColor,
-                    onClick = {
-                        onLutNameChange(ctx.getString(R.string.lut_none))
-                        onApplyLutRgba(null)
-                        onLutMixChange(0f)
-                        onUserInteraction()
-                    }
-                )
-            }
-            items(LutUtils.builtinLuts) { lut ->
-                val file = lut.fileName
-                val cnName = stringResource(lut.nameResId)
-                val selected = lutName == file
-                LutChip(
-                    text = cnName,
-                    selected = selected,
-                    accentColor = accentColor,
-
-                    onClick = {
-                        if (isLutLoading) return@LutChip
-                        onLutLoadingChange(true)
-                        onLutNameChange(file)
-                        scope.launch(Dispatchers.IO) {
-                            try {
-                                val rgba = context.assets.open("luts/$file.cube").use {
-                                    LutUtils.parseCubeToRgba(it)
-                                }
-                                withContext(Dispatchers.Main) {
-                                    onApplyLutRgba(rgba)
-                                    onLutMixChange(lutMix)
-                                }
-                            } catch (e: Exception) {
-                                Log.e("LutFilterSection", "LUT $file load failed", e)
-                            } finally {
-                                withContext(Dispatchers.Main) { onLutLoadingChange(false) }
-                            }
-                        }
-                        onUserInteraction()
-                    }
-                )
-            }
+            val noneSelected = lutName == stringResource(R.string.lut_none) || lutName.isEmpty()
+            LutChip(
+                text = stringResource(R.string.lut_none),
+                selected = noneSelected,
+                accentColor = accentColor,
+                onClick = {
+                    onLutNameChange(ctx.getString(R.string.lut_none))
+                    onApplyLutRgba(null)
+                    onLutMixChange(0f)
+                    onUserInteraction()
+                }
+            )
         }
+
+        // ---------- 分区 1：人像美颜（平铺网格，4 列）----------
+        LutGroupHeader(
+            title = stringResource(R.string.lut_group_portrait),
+            count = LutUtils.portraitLuts.size,
+            accentColor = accentColor,
+            withTopGap = true
+        )
+        LutChipGrid(
+            luts = LutUtils.portraitLuts,
+            selectedName = lutName,
+            accentColor = accentColor,
+            isLutLoading = isLutLoading,
+            onPick = { applyBuiltin(it) }
+        )
+
+        // ---------- 分区 2：风格滤镜（平铺网格，4 列）----------
+        LutGroupHeader(
+            title = stringResource(R.string.lut_group_style),
+            count = LutUtils.styleLuts.size,
+            accentColor = accentColor,
+            withTopGap = true
+        )
+        LutChipGrid(
+            luts = LutUtils.styleLuts,
+            selectedName = lutName,
+            accentColor = accentColor,
+            isLutLoading = isLutLoading,
+            onPick = { applyBuiltin(it) }
+        )
 
         // 强度滑块 + 手机自选按钮
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -300,25 +329,115 @@ fun LutFilterSection(
     }
 }
 
+/** 分区小标题：左侧短竖条 + 名称 + 右侧数量角标 */
+@Composable
+private fun LutGroupHeader(
+    title: String,
+    count: Int,
+    accentColor: Color,
+    withTopGap: Boolean = false
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = if (withTopGap) 12.dp else 0.dp, bottom = 6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 3.dp, height = 11.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(accentColor)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = title,
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = "$count",
+            color = accentColor.copy(alpha = 0.85f),
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+/** 纯文字 Chip 平铺网格：每行固定 4 列，自动换行成多行，一眼看全 */
+@Composable
+private fun LutChipGrid(
+    luts: List<LutUtils.BuiltinLut>,
+    selectedName: String,
+    accentColor: Color,
+    isLutLoading: Boolean,
+    onPick: (LutUtils.BuiltinLut) -> Unit,
+    columns: Int = 4
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        luts.chunked(columns).forEach { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rowItems.forEach { lut ->
+                    LutChip(
+                        text = stringResource(lut.nameResId),
+                        selected = selectedName == lut.fileName,
+                        accentColor = accentColor,
+                        enabled = !isLutLoading,
+                        onClick = { onPick(lut) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                // 补齐末行的空缺格，保证每列等宽对齐
+                repeat(columns - rowItems.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun LutChip(
     text: String,
     selected: Boolean,
     accentColor: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
     Surface(
-        color = if (selected) accentColor else Color.White.copy(alpha = 0.10f),
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.clickable(onClick = onClick)
+        color = when {
+            selected -> accentColor
+            !enabled -> Color.White.copy(alpha = 0.06f)
+            else -> Color.White.copy(alpha = 0.10f)
+        },
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick)
     ) {
         Text(
             text = text,
             textAlign = TextAlign.Center,
-            color = if (selected) Color(0xFF1A1A2E) else Color.White.copy(alpha = 0.85f),
+            maxLines = 1,
+            color = when {
+                selected -> Color(0xFF1A1A2E)
+                !enabled -> Color.White.copy(alpha = 0.4f)
+                else -> Color.White.copy(alpha = 0.85f)
+            },
             fontSize = 10.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 7.dp)
         )
     }
 }
