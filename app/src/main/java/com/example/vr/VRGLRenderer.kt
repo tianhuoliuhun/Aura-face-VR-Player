@@ -343,6 +343,46 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var hFallbackSampler = -1
     private var placeholderTextureId = -1
 
+    // ===== v2.0.177：磨皮半分辨率离屏 pass =====
+    //
+    // 为什么值得拆：磨皮处理的是**低频视觉信息**（色块、光影过渡、痘印），半分辨率下的
+    // 双线性放大几乎不可辨；而高频细节（毛孔、发丝）本来就靠 detail * uTextureDetail
+    // 从全分辨率原图叠回去 —— 拆分后这个「叠回」在合成 pass 里做，纹理保留度不受影响。
+    //
+    // 三个 pass：
+    //   down  : 主渲染结果(全分辨率纹理) → 降采样 1/2
+    //   blur  : 半分辨率上做 8 邻域保边均值（频域分离的低频层）
+    //   blend : 全分辨率原图 + 半分辨率低频，按皮肤判定与 uBeautyStrength 混合上屏
+    //
+    // 收益：磨皮 pass 的片元数降到 1/4（该 pass 开销 ↓75%）。
+    private var pDownProgram = 0
+    private var pBlurProgram = 0
+    private var pBlendProgram = 0
+    private var downTexId = 0        // 主渲染结果的**全分辨率**拷贝
+    private var downFboId = 0
+    private var halfLowTexId = 0     // 半分辨率低频层
+    private var halfLowFboId = 0
+    private var halfTexId = 0        // 半分辨率原图（供 blur pass 采样）
+    private var halfFboId = 0
+    private var halfW = 0
+    private var halfH = 0
+    private var halfFboW = 0
+    private var halfFboH = 0
+    private var downFboW = 0
+    private var downFboH = 0
+    private val halfQuad: java.nio.FloatBuffer = java.nio.ByteBuffer.allocateDirect(4 * 4 * 4)
+        .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer().apply {
+            put(floatArrayOf(
+                -1f, -1f, 0f, 0f,
+                1f, -1f, 1f, 0f,
+                -1f, 1f, 0f, 1f,
+                1f, 1f, 1f, 1f
+            ))
+            position(0)
+        }
+    /** 半分辨率 pass 是否为本次 onDrawFrame 铺好了数据（决定上屏走合成还是直绘） */
+    private var halfPassReady = false
+
     // ===== 美颜对比模式（v102：GPUPixel 已移除，纯 shader 美颜）=====
     /** v2.0.160：美颜总开关（由原「对比原图」改造而来；false = 直通原图）。v2.0.172：默认改为关 */
     @Volatile var beautyMasterEnabled = false
@@ -362,6 +402,36 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var gpRegionH = 0
     private var lastSampleX0 = 0
     private var lastSampleY0 = 0
+
+    // ===== v2.0.177：GPUPixel 回读收窄到人脸 ROI =====
+    /**
+     * 人脸 ROI 的**低通跟随**状态（边长比例 + 中心，均为「单眼视口」UV 空间）。
+     *
+     * 为什么必须低通：人脸轻微晃动会让 ROI 每帧变化，贴回矩形的边缘就会出现
+     * 「已美颜 / 未美颜」的分界跳动，肉眼表现为一圈会呼吸的矩形。
+     * 用跟随系数把 ROI 变化压慢（只在人脸大幅移动时才有明显位移）。
+     */
+    private var gpRoiSide = 0f      // ROI 边长（UV，相对于视口宽）
+    private var gpRoiCx = 0.5f      // ROI 中心 x（UV）
+    private var gpRoiCy = 0.5f      // ROI 中心 y（UV）
+    /** 上一帧实际生效的 ROI（像素，窗口坐标）—— 检测短暂失败时沿用，避免画面跳变 */
+    private var gpRoiPx: IntArray? = null
+
+    /** ROI 边长档位（像素）。量化到固定档位，避免尺寸连续变化导致贴回边缘持续抖动 */
+    private val gpRoiLadder = intArrayOf(384, 512, 640, 768, 896, 1024, 1280)
+
+    /**
+     * ROI 相对人脸尺度的余量系数。
+     *
+     * 必须 ≥ 1.3：GPUPixel 内部会做**瘦脸/大眼的几何形变**，形变后的像素可能取自
+     * ROI 之外（脸被拉瘦时边缘像素来自更外侧）——余量不足会在脸颊/下巴出现硬切割线。
+     */
+    private val gpRoiMargin = 3.2f
+
+    /** 检测失败时保持上次 ROI 的帧数上限（配合 faceMissStreak 的 3 次防抖） */
+    private val gpRoiHoldFrames = 24
+    private var gpRoiHoldCounter = 0
+
     // GPUPixel 模式的离屏渲染目标（画到 FBO → 区域处理贴回 → blit 上屏）
     private var gpFboId = 0
     private var gpFboTexId = 0
@@ -794,6 +864,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             }
             
             // Realtime Skin-Smoothing Bilateral bilateral filter 3x3
+            // ===== v2.0.177：皮肤判定前置，非皮肤像素**跳过 8 次邻域采样** =====
+            // 旧实现：先把 8 个远邻域全采样完，最后才按 isSkin 决定混合强度
+            // （皮肤 1.0 / 非皮肤 0.25）—— 而非皮肤区（背景、头发、衣物）占画面 60~80%，
+            // 这些像素白付 8 次纹理采样，最后只换来一个乘 0.25 的轻微降噪（视频场景肉眼不可见）。
+            // 移动 GPU 上纹理采样是 fragment 的主要瓶颈：1080p60 下 8 次/像素 ≈ 每秒 10 亿次采样，
+            // 其中约 6.5 亿次是纯浪费。前置判定后，非皮肤区采样数 9 → 1。
+            //
+            // ⚠️ 这是一个「失败即退化」的优化：isSkin 是 RGB 阈值快速判定（见其定义处），
+            //    对暖光墙 / 木地板 / 肤色家具会**误判成皮肤** → 只是退化回全采样路径，
+            //    只损失收益、绝不会画错。这正是该优化风险极低的根本原因。
+            // 注：GPU 以 2x2 quad 为单位执行分支，quad 内皮肤/非皮肤混合时两条分支都会跑
+            //    （无收益但无害）；因 isSkin 在局部区域高度一致，quad 分歧概率低，收益基本保留。
             if (uBeautyStrength > 0.01) {
                 // ===== v2.0.159：磨皮改为「频域分离」 =====
                 // 把画面拆成两层：
@@ -802,6 +884,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 // 只平滑低频、再按 uTextureDetail 把高频叠回去 —— 于是「磨皮强度」与「纹理保留度」
                 // 解耦：既能抹平色块，又不会变成塑料脸。
                 // （旧实现是单尺度双边 + 0.90 强混合：半径不足只能靠混合硬拉，观感是"糊"不是"净"。）
+                if (isSkin(color.rgb)) {   // ← v2.0.177：纯标量比较，零采样成本
                 vec2 stepF = vec2(uTexelSize.x * 6.0, uTexelSize.y * 6.0);
 
                 // 8 个远邻域（±6 像素）
@@ -836,12 +919,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 // 低频 + 高频×保留度：uTextureDetail < 1 更平滑，> 1 相当于 USM 锐化（找回通透感）
                 vec3 smoothed = low.rgb + detail * uTextureDetail;
 
-                if (isSkin(color.rgb)) {
-                    color.rgb = mix(color.rgb, smoothed, uBeautyStrength);
-                } else {
-                    // 非皮肤：只做轻微降噪，避免背景与边缘被过度处理
-                    color.rgb = mix(color.rgb, smoothed, uBeautyStrength * 0.25);
+                color.rgb = mix(color.rgb, smoothed, uBeautyStrength);
                 }
+                // 非皮肤像素：v2.0.177 起**完全不做**（旧实现是 mix(..., uBeautyStrength * 0.25)
+                // 的轻微降噪 —— 视频播放场景下该差异不可感知，而代价是 8 次采样）。
+                // 若日后实测发现暗部背景噪点明显，可在此补一个 2 次采样的极轻量版本
+                // （例如仅用 n5/n6 垂直两邻域），代价 +2 次采样。
             }
             
             // Apply advanced fine cosmetics
@@ -859,6 +942,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     fUnit = clamp(uEyeDistance, 0.02, 0.25);
                 }
 
+                // ===== v2.0.177：妆容 gate 到人脸包围盒 =====
+                // 下方整段妆容（美白/黑眼圈/眉毛/口红/腮红/白牙）要跑 10+ 次 ellipseMask，
+                // 每次含 cos/sin/length/smoothstep —— 这些是**纯算术**开销（无纹理采样）。
+                // 但人脸通常只占画面一小部分，画面上 80%+ 的像素算完 mask 发现权重为 0 就丢弃。
+                // 这里先做一次包围盒剔除：最远的腮红中心距 fCenter 约 0.72*fUnit、半径约 0.46*fUnit，
+                // 再加上椭圆边界羽化，1.5*fUnit / 1.8*fUnit 的包围盒足以包住全部妆容区域且有余量。
+                // ⚠️ 注意：这只是算术优化的「快路径」，盒外像素直接跳过整段妆容计算。
+                bool inFaceBox =
+                    abs(tc.x - fCenter.x) < 1.5 * fUnit &&
+                    abs(tc.y - fCenter.y) < 1.8 * fUnit;
+
+                if (inFaceBox) {
                 // Derive facial feature anchors (MediaPipe 468-point aware)
                 vec2 eyeL = fCenter + vec2(-0.5 * fUnit, 0.0);
                 vec2 eyeR = fCenter + vec2(0.5 * fUnit, 0.0);
@@ -955,6 +1050,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         color.rgb = mix(color.rgb, vec3(luma + 0.12), teethMask * uTeethWhitening * 0.75);
                     }
                 }
+                }   // v2.0.177: end if (inFaceBox)
             }
             
             // Brightness
@@ -1219,9 +1315,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             GpuPixelBeauty.init(context)
         }
         val gpActive = isGpuPixelActive()
+        // v2.0.177：磨皮半分辨率 pass 激活时，主渲染写到 downFbo（全分辨率纹理）而非屏幕，
+        // 之后跑 down→blur 两个 pass 再合成上屏。
+        val halfActive = isHalfPassActive()
+        // 主 shader 的磨皮段是否要让位给离屏 pass（见下方 hBeautyStrength 同步处）
+        val halfPassThisFrame = halfActive
         if (gpActive) {
             ensureGpFbo(displayWidth, displayHeight)
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, gpFboId)
+        } else if (halfActive) {
+            ensureHalfPassFbos(displayWidth, displayHeight)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, downFboId)
         }
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
@@ -1262,9 +1366,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // v2.0.160：原「对比原图」改为「美颜总开关」；且 GLSL 美颜只在 GLSL 引擎下生效
         // （GPUPixel 引擎下由其独立滤镜负责，避免双重磨皮/美白叠加）
         val bc = if (beautyMasterEnabled && beautyEngineType == BEAUTY_ENGINE_GLSL) 1f else 0f
-        uniform1f(prog.hBeautyStrength, beautyLevel * bc)
+        // v2.0.177：磨皮半分辨率 pass 激活时，主 shader 的磨皮段必须关闭（传 0）——
+        // 磨皮的「低频层 + 频域分离合成」已搬到离屏 pass，主 shader 只负责其余美颜效果。
+        // 若此处仍传 beautyLevel，会变成「主 shader 糊一次 + 合成 pass 再糊一次」的双重磨皮。
+        uniform1f(prog.hBeautyStrength, if (halfPassThisFrame) 0f else beautyLevel * bc)
         // v2.0.159：磨皮的高频保留度。刻意不随对比模式归零 —— 对比模式下磨皮本身不执行（
-        // uBeautyStrength = 0），这个值不会被用到。
+        // uBeautyStrength = 0），这个值不会被用到。半分辨率合成 pass 仍消费它。
         uniform1f(prog.hTextureDetail, beautyTextureDetail)
         
         uniform1f(prog.hBrightness, brightnessLevel)
@@ -1341,6 +1448,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             uploadPendingGpRegion()
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             blitToScreen()
+        } else if (halfActive) {
+            // v2.0.177：跑 down(降采样) → blur(半分辨率低频)，再合成上屏。
+            // ⚠️ 主渲染的磨皮段必须已被 uBeautyStrength = 0 关掉（见 uniform 同步处），
+            //    否则会「主 shader 糊一次 + 半分辨率再糊一次」双重磨皮。
+            runHalfSmoothingPasses()
+            blendHalfPassToScreen()
         }
     }
 
@@ -1829,6 +1942,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         videoSurfaceTexture?.release()
         videoSurfaceTexture = null
         try {
+            // v2.0.177：半分辨率磨皮 pass 的 FBO / program 清理
+            releaseHalfPassFbos()
+            if (pDownProgram != 0) { GLES20.glDeleteProgram(pDownProgram); pDownProgram = 0 }
+            if (pBlurProgram != 0) { GLES20.glDeleteProgram(pBlurProgram); pBlurProgram = 0 }
+            if (pBlendProgram != 0) { GLES20.glDeleteProgram(pBlendProgram); pBlendProgram = 0 }
+            halfPassReady = false
+        } catch (e: Throwable) {
+            // ignore
+        }
+        try {
             faceExecutor.shutdownNow()
             faceInitExecutor.shutdownNow()
             mediaPipeManager?.release()
@@ -1978,6 +2101,274 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return id
     }
 
+    // ===== v2.0.177：磨皮半分辨率 pass 的三个 program =====
+
+    /** 全屏 quad 的顶点着色器：pos(-1..1) + tex(0..1)，直接透传，不做任何变换 */
+    private val halffsVs = "attribute vec2 aPos;attribute vec2 aTex;varying vec2 vTex;" +
+        "void main(){gl_Position=vec4(aPos,0.0,1.0);vTex=aTex;}"
+
+    /** down pass：把全分辨率纹理降采样到 1/2（GL_LINEAR 自带 2x2 平均，已足够） */
+    private val halfDownFs = "precision mediump float;varying vec2 vTex;uniform sampler2D uTex;" +
+        "void main(){gl_FragColor=texture2D(uTex,vTex);}"
+
+    /**
+     * blur pass：半分辨率上做 8 邻域**保边**均值（频域分离的低频层）。
+     *
+     * 与主 shader 内联版算法的唯一区别是采样半径：主 shader 用 ±6 个**全分辨率**像素，
+     * 这里纹理已是半分辨率，故半径取 ±6 个半分辨率像素 —— 视觉上等效于全分辨率的 ±12，
+     * 只让低频更平滑一点（磨皮本就只要低频），并不会改变观感量级。
+     * `uTexelSize` 由 Kotlin 侧按**半分辨率纹理**传入（绝不能复用全分辨率那份，
+     * 否则半径会翻倍成 ±12 半分辨率像素 ≈ 全分辨率 ±24，磨皮会糊成一片）。
+     */
+    private val halfBlurFs = """
+        precision mediump float;
+        varying vec2 vTex;
+        uniform sampler2D uTex;
+        uniform vec2 uTexelSize;
+        void main() {
+            vec4 color = texture2D(uTex, vTex);
+            vec2 stepF = vec2(uTexelSize.x * 6.0, uTexelSize.y * 6.0);
+            vec4 n1 = texture2D(uTex, vTex + stepF);
+            vec4 n2 = texture2D(uTex, vTex - stepF);
+            vec4 n3 = texture2D(uTex, vTex + vec2(stepF.x, 0.0));
+            vec4 n4 = texture2D(uTex, vTex - vec2(stepF.x, 0.0));
+            vec4 n5 = texture2D(uTex, vTex + vec2(0.0, stepF.y));
+            vec4 n6 = texture2D(uTex, vTex - vec2(0.0, stepF.y));
+            vec4 n7 = texture2D(uTex, vTex + vec2(stepF.x, -stepF.y));
+            vec4 n8 = texture2D(uTex, vTex - vec2(stepF.x, -stepF.y));
+            float deltaThres = 0.30;
+            float w1 = max(0.0, 1.0 - distance(color.rgb, n1.rgb) / deltaThres);
+            float w2 = max(0.0, 1.0 - distance(color.rgb, n2.rgb) / deltaThres);
+            float w3 = max(0.0, 1.0 - distance(color.rgb, n3.rgb) / deltaThres);
+            float w4 = max(0.0, 1.0 - distance(color.rgb, n4.rgb) / deltaThres);
+            float w5 = max(0.0, 1.0 - distance(color.rgb, n5.rgb) / deltaThres);
+            float w6 = max(0.0, 1.0 - distance(color.rgb, n6.rgb) / deltaThres);
+            float w7 = max(0.0, 1.0 - distance(color.rgb, n7.rgb) / deltaThres);
+            float w8 = max(0.0, 1.0 - distance(color.rgb, n8.rgb) / deltaThres);
+            gl_FragColor = (color + n1 * w1 + n2 * w2 + n3 * w3 + n4 * w4
+                + n5 * w5 + n6 * w6 + n7 * w7 + n8 * w8)
+                / (1.0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8);
+        }
+    """.trimIndent()
+
+    /**
+     * blend pass：全分辨率原图 + 半分辨率低频 → 上屏。
+     *
+     * 频域分离在这里完成：
+     *   低频 = texture2D(uLowTex, vTex)        （半分辨率，双线性上采样）
+     *   高频 = 原图 - 低频                      （全分辨率，含毛孔/发丝/五官边缘）
+     *   结果 = 低频 + 高频 × uTextureDetail
+     * 再按 isSkin 与 uBeautyStrength 决定混合强度 —— 与主 shader 内联版语义完全一致，
+     * 只是**皮肤判定也从主 shader 搬到了这里**（主 shader 不再做磨皮）。
+     */
+    private val halfBlendFs = """
+        precision highp float;
+        varying vec2 vTex;
+        uniform sampler2D uFullTex;   // 全分辨率原图（主渲染结果）
+        uniform sampler2D uLowTex;    // 半分辨率低频层
+        uniform float uBeautyStrength;
+        uniform float uTextureDetail;
+        bool isSkin(vec3 rgb) {
+            float r = rgb.r;
+            float g = rgb.g;
+            float b = rgb.b;
+            return (r > 0.35 && g > 0.15 && b > 0.08 && r > g && r > b && (r - g) > 0.05);
+        }
+        void main() {
+            vec4 full = texture2D(uFullTex, vTex);
+            if (uBeautyStrength <= 0.01 || !isSkin(full.rgb)) {
+                gl_FragColor = full;
+                return;
+            }
+            vec3 low = texture2D(uLowTex, vTex).rgb;
+            vec3 detail = full.rgb - low;
+            vec3 smoothed = low + detail * uTextureDetail;
+            gl_FragColor = vec4(mix(full.rgb, smoothed, uBeautyStrength), full.a);
+        }
+    """.trimIndent()
+
+    /** 编译并链接一个「aPos + aTex」全屏 pass program；失败返回 0 */
+    private fun buildHalfPassProgram(fs: String): Int {
+        return try {
+            val vsId = compileGpuShader(GLES20.GL_VERTEX_SHADER, halffsVs)
+            val fsId = compileGpuShader(GLES20.GL_FRAGMENT_SHADER, fs)
+            val prog = GLES20.glCreateProgram()
+            GLES20.glAttachShader(prog, vsId)
+            GLES20.glAttachShader(prog, fsId)
+            GLES20.glLinkProgram(prog)
+            val st = IntArray(1)
+            GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, st, 0)
+            if (st[0] == 0) {
+                Log.e(TAG, "半分辨率磨皮 pass 链接失败: ${GLES20.glGetProgramInfoLog(prog)}")
+                0
+            } else {
+                prog
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "半分辨率磨皮 pass 编译失败", e)
+            0
+        }
+    }
+
+    private fun ensureHalfPassPrograms() {
+        if (pDownProgram == 0) pDownProgram = buildHalfPassProgram(halfDownFs)
+        if (pBlurProgram == 0) pBlurProgram = buildHalfPassProgram(halfBlurFs)
+        if (pBlendProgram == 0) pBlendProgram = buildHalfPassProgram(halfBlendFs)
+    }
+
+    /** 创建一个可作 FBO attachment 的 RGBA 纹理（LINEAR + CLAMP_TO_EDGE） */
+    private fun createFboTexture(w: Int, h: Int): Int {
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+        return tex[0]
+    }
+
+    private fun createFboFor(texId: Int): Int {
+        val fbo = IntArray(1)
+        GLES20.glGenFramebuffers(1, fbo, 0)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
+        GLES20.glFramebufferTexture2D(
+            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+            GLES20.GL_TEXTURE_2D, texId, 0
+        )
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        return fbo[0]
+    }
+
+    /** 按需（重）建半分辨率 pass 的 FBO 组。尺寸变化时才重建 */
+    private fun ensureHalfPassFbos(w: Int, h: Int) {
+        if (downTexId != 0 && downFboW == w && downFboH == h) return
+        releaseHalfPassFbos()
+        downTexId = createFboTexture(w, h)
+        downFboId = createFboFor(downTexId)
+        halfW = (w / 2).coerceAtLeast(1)
+        halfH = (h / 2).coerceAtLeast(1)
+        halfTexId = createFboTexture(halfW, halfH)
+        halfFboId = createFboFor(halfTexId)
+        halfLowTexId = createFboTexture(halfW, halfH)
+        halfLowFboId = createFboFor(halfLowTexId)
+        downFboW = w
+        downFboH = h
+        halfFboW = halfW
+        halfFboH = halfH
+    }
+
+    private fun releaseHalfPassFbos() {
+        if (downTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(downTexId), 0)
+        if (downFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(downFboId), 0)
+        if (halfTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(halfTexId), 0)
+        if (halfFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(halfFboId), 0)
+        if (halfLowTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(halfLowTexId), 0)
+        if (halfLowFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(halfLowFboId), 0)
+        downTexId = 0; downFboId = 0
+        halfTexId = 0; halfFboId = 0
+        halfLowTexId = 0; halfLowFboId = 0
+        downFboW = 0; downFboH = 0; halfFboW = 0; halfFboH = 0
+    }
+
+    /**
+     * 是否启用「磨皮半分辨率 pass」。
+     *
+     * 仅在**内置分屏/全屏通路**下启用（[huaweiVrMode] 与 GPUPixel 通路各走自己的渲染目标，
+     * 混进来会把 FBO 绑定搞乱）。且必须磨皮真的在跑（GLSL 引擎 + 总开关 + 强度 > 0）。
+     */
+    private fun isHalfPassActive(): Boolean =
+        !huaweiVrMode &&
+            !isGpuPixelActive() &&
+            beautyMasterEnabled &&
+            beautyEngineType == BEAUTY_ENGINE_GLSL &&
+            beautyLevel > 0.01f &&
+            displayWidth > 0 && displayHeight > 0
+
+    /**
+     * 绘制一个全屏 quad 到当前绑定的 framebuffer（供三个 pass 复用）。
+     * [texUnit0] / [texUnit1] 为 -1 表示不绑定该单元。
+     */
+    private fun drawHalfQuad(prog: Int, texUnit0: Int, texUnit1: Int, texelW: Float, texelH: Float) {
+        val posLoc = GLES20.glGetAttribLocation(prog, "aPos")
+        val texLoc = GLES20.glGetAttribLocation(prog, "aTex")
+        GLES20.glUseProgram(prog)
+        if (texUnit0 != -1) {
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texUnit0)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uTex"), 0)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uFullTex"), 0)
+            GLES20.glUniform2f(GLES20.glGetUniformLocation(prog, "uTexelSize"), texelW, texelH)
+        }
+        if (texUnit1 != -1) {
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texUnit1)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uLowTex"), 1)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        }
+        halfQuad.position(0)
+        GLES20.glVertexAttribPointer(posLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
+        GLES20.glEnableVertexAttribArray(posLoc)
+        halfQuad.position(2)
+        GLES20.glVertexAttribPointer(texLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
+        GLES20.glEnableVertexAttribArray(texLoc)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(posLoc)
+        GLES20.glDisableVertexAttribArray(texLoc)
+    }
+
+    /**
+     * 跑三个 pass，把「低频层」准备好。
+     *
+     * ⚠️ 副作用：结束时**不恢复 framebuffer 绑定**（停在 0 = 屏幕）。
+     *    调用方需自行绑定到 [downFboId] 做正式绘制。
+     */
+    private fun runHalfSmoothingPasses() {
+        ensureHalfPassPrograms()
+        if (pDownProgram == 0 || pBlurProgram == 0 || pBlendProgram == 0) {
+            halfPassReady = false
+            return
+        }
+        ensureHalfPassFbos(displayWidth, displayHeight)
+
+        // pass 1：全分辨率 → 半分辨率
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, halfFboId)
+        GLES20.glViewport(0, 0, halfW, halfH)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        drawHalfQuad(pDownProgram, downTexId, -1, 0f, 0f)
+
+        // pass 2：半分辨率 8 邻域保边均值 → 半分辨率低频层
+        // ⚠️ texel 尺寸必须按**半分辨率纹理**算（1/halfW），不能用 1/displayWidth
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, halfLowFboId)
+        GLES20.glViewport(0, 0, halfW, halfH)
+        drawHalfQuad(pBlurProgram, halfTexId, -1, 1.0f / halfW, 1.0f / halfH)
+
+        halfPassReady = true
+        // 交给调用方绑定 downFbo 做正式绘制（不在此恢复 framebuffer，避免多一次切换）
+    }
+
+    /**
+     * 磨皮半分辨率 pass 的合成上屏：全分辨率原图 + 半分辨率低频 → 屏幕。
+     *
+     * 全程 `glDisable(GL_BLEND)`：主渲染用的是直写（不混合），而 FBO 预乘/混合语义易踩坑。
+     */
+    private fun blendHalfPassToScreen() {
+        if (!halfPassReady || pBlendProgram == 0 || downTexId == 0 || halfLowTexId == 0) return
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glViewport(0, 0, displayWidth, displayHeight)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        val prog = pBlendProgram
+        GLES20.glUseProgram(prog)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uBeautyStrength"), beautyLevel)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uTextureDetail"), beautyTextureDetail)
+        drawHalfQuad(prog, downTexId, halfLowTexId, 0f, 0f)
+    }
+
     private fun blitToScreen() {
         if (gpBlitProgram == 0 || gpBlitQuad == null) return
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -2015,14 +2406,106 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
+    // ===== v2.0.177：GPUPixel 人脸 ROI 计算 =====
+
+    /**
+     * 计算 GPUPixel 本帧的回读 ROI（窗口坐标），返回 `[x0, y0, w, h]`。
+     *
+     * 输入是**视口 UV 空间**的人脸参数（[faceCenterXUniform] / [faceCenterYUniform] /
+     * [eyeDistanceUniform]），与 shader 里妆容用的是同一套坐标，因此不需要额外换算。
+     *
+     * 四道防抖处理（缺一不可，否则 ROI 边缘会出现会呼吸的矩形）：
+     *  1. **尺寸量化档位** —— ROI 边长吸附到 [gpRoiLadder]，避免尺寸连续变化；
+     *  2. **中心低通跟随** —— 只取 25% 的新位置，大幅移动时才明显位移；
+     *  3. **向外对齐 16 像素** —— GPU 回读/贴回对齐更友好，也减少档位切换频率；
+     *  4. **检测失败保持** —— [faceDetectedUniform] == 0 时沿用上一帧 ROI（[gpRoiPx]），
+     *     最多保持 [gpRoiHoldFrames] 帧，避免检测抖一下 ROI 就跳。
+     *
+     * ⚠️ 绝不改变「每帧处理」的节奏（interval 恒为 1）：间隔 > 1 帧时 ROI 内会出现
+     *    「美颜帧 / 原始帧」交替的肉眼可见闪烁 —— 这是 v2.0.173 已验证过的教训。
+     *
+     * ⚠️ VR 分屏：调用方传进来的 w 已是**单眼视口宽度**（`displayWidth / 2`），
+     *    左右眼各自渲染时 faceCenterXUniform 也在各自视口 UV 空间内，故每只眼独立成 ROI。
+     */
+    private fun computeGpRoi(w: Int, h: Int): IntArray {
+        val detected = faceDetectedUniform == 1
+        if (!detected) {
+            // 检测失败：沿用上一帧 ROI（若还没有过，退回一个居中的保守尺寸）
+            gpRoiHoldCounter++
+            val held = gpRoiPx
+            if (held != null && gpRoiHoldCounter <= gpRoiHoldFrames) {
+                return clampGpRoi(held[0], held[1], held[2], held[3], w, h)
+            }
+            val side = minOf(640, minOf(w, h)).coerceAtLeast(16)
+            return clampGpRoi((w - side) / 2, (h - side) / 2, side, side, w, h)
+        }
+        gpRoiHoldCounter = 0
+
+        // --- 1) 由人脸尺度推 ROI 边长 ---
+        // fUnit = 视口 UV 的眼距尺度；人脸整体宽约 2.2*fUnit、高约 3.0*fUnit，
+        // 再乘 gpRoiMargin 留出瘦脸/大眼形变的溢出余量。
+        val fUnit = eyeDistanceUniform.coerceIn(0.02f, 0.25f)
+        val wantSidePx = gpRoiMargin * fUnit * w
+
+        // --- 2) 量化到固定档位（取 >= wantSide 的最小档位）---
+        var side = gpRoiLadder.last()
+        for (v in gpRoiLadder) {
+            if (wantSidePx <= v) { side = v; break }
+        }
+        // 档位上限也受视口约束：不能超过视口短边（ROI 是正方形，按短边夹）
+        val maxSide = minOf(w, h)
+        side = side.coerceAtMost(maxSide).coerceAtLeast(16)
+
+        // --- 3) 中心低通跟随 ---
+        // faceCenterYUniform 是 shader 的 UV（y 向上），而窗口坐标 y 向上也是从下往上，
+        // 二者方向一致；但读回的像素行序是自下而上、贴回按行填，故贴回 y 直接用同一套即可
+        // （既有实现就是这么用的，保持一致，避免引入新的翻转错误）。
+        val targetCx = faceCenterXUniform.coerceIn(0f, 1f)
+        val targetCy = faceCenterYUniform.coerceIn(0f, 1f)
+        if (gpRoiSide <= 0f) {
+            // 首次：直接吸附，不做低通（否则开头几帧 ROI 会从中心慢慢爬过去）
+            gpRoiCx = targetCx
+            gpRoiCy = targetCy
+        } else {
+            gpRoiCx += (targetCx - gpRoiCx) * 0.25f
+            gpRoiCy += (targetCy - gpRoiCy) * 0.25f
+        }
+        gpRoiSide = side.toFloat()
+
+        // 窗口坐标：ROI 中心像素 = UV * 视口尺寸；左上角 = 中心 - 半边长
+        val cxPx = gpRoiCx * w
+        val cyPx = gpRoiCy * h
+        val rx0 = (cxPx - side * 0.5f).toInt()
+        val ry0 = (cyPx - side * 0.5f).toInt()
+
+        // --- 4) 向外对齐 16 像素 + 夹进视口 ---
+        val ax0 = (Math.floor(rx0 / 16.0) * 16).toInt()
+        val ay0 = (Math.floor(ry0 / 16.0) * 16).toInt()
+        val out = clampGpRoi(ax0, ay0, side, side, w, h)
+        gpRoiPx = out
+        return out
+    }
+
+    /** 把 ROI 夹进视口并保证尺寸不超界（返回 `[x0, y0, w, h]`） */
+    private fun clampGpRoi(x0: Int, y0: Int, w0: Int, h0: Int, w: Int, h: Int): IntArray {
+        val rw = w0.coerceIn(16, w)
+        val rh = h0.coerceIn(16, h)
+        val rx = x0.coerceIn(0, (w - rw).coerceAtLeast(0))
+        val ry = y0.coerceIn(0, (h - rh).coerceAtLeast(0))
+        return intArrayOf(rx, ry, rw, rh)
+    }
+
+    /**
+     * 视情况采一帧屏幕内容交给后台做人脸检测 / GPUPixel 处理（v2.0.156 重构，v2.0.177 收窄 ROI）。
+     */
     private fun maybeScheduleFaceSampling() {
         if (!isBeautyActive()) {
             faceFrameCounter = 0
             return
         }
-        // v2.0.173：GPUPixel 全屏路径**每帧**采样处理 —— 贴回间隔 > 1 帧时，显示内容在
-        // 「整幅美颜帧 / 原始帧」之间交替，全屏尺度下就是肉眼可见的闪烁；
-        // 每帧处理则屏幕恒为「上一帧的美颜帧」，只有整体 1~2 帧延迟（不可感知）。
+        // v2.0.173：GPUPixel 路径**每帧**采样处理 —— 贴回间隔 > 1 帧时，显示内容在
+        // 「美颜帧 / 原始帧」之间交替，肉眼可见闪烁；每帧处理则屏幕恒为「上一帧的美颜帧」，
+        // 只有整体 1~2 帧延迟（不可感知）。v2.0.177 收窄到人脸 ROI 后**同样必须保持 1**。
         // GLSL 检测路径维持 8 帧节奏（它只消费人脸坐标，磨皮/美白是 shader 实时全帧）。
         val gpFullFrame = isGpuPixelActive()
         val interval = if (gpFullFrame) 1 else faceSampleInterval
@@ -2030,7 +2513,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         if (faceFrameCounter < interval) return
         faceFrameCounter = 0
 
-        // v2.0.173：后台仍在处理上一帧时跳过本次回读（全帧 8MB+，白回读只制造 GC 压力），
+        // v2.0.173：后台仍在处理上一帧时跳过本次回读（白回读只制造 GC 压力），
         // 贴回间隔自适应 = max(1 帧, 实际处理耗时)
         if (gpFullFrame && isDetectingFace.get()) return
 
@@ -2042,10 +2525,26 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 磨皮/美白作用于全部画面，瘦脸/大眼由其内部 Mars-Face 检测定位人脸。
         // GLSL 引擎仍用中央 512×512 小图做人脸检测（它只消费人脸坐标，
         // 磨皮/美白在 shader 里本就是全屏皮肤色判定，无需大图）。
-        val rw = if (gpFullFrame) w else minOf(faceReadSize, w)
-        val rh = if (gpFullFrame) h else minOf(faceReadSize, h)
-        val x0 = (w - rw) / 2
-        val y0 = (h - rh) / 2
+        //
+        // ===== v2.0.177：GPUPixel 回读从「全屏」收窄到「人脸 ROI」 =====
+        // 旧实现每帧回读 1920×1080×4 ≈ 8.29 MB，且 glReadPixels 是**同步阻塞**
+        // （GL 线程停下等 GPU 回传），之后还要再拷一份 → ≈16 MB/帧内存流量。
+        // 收窄到人脸 ROI 后典型 640×640 ≈ 1.6 MB（↓80%），远景小脸可降到 384×384（↓97%）。
+        // 计算复用本项目已有的人脸坐标（uFaceCenter / uEyeDistance，均为**视口 UV** 空间）
+        // 与已有基础设施（faceCropScaleX/Y + mapCrop*ToViewport + uploadPendingGpRegion 局部贴回）。
+        val rw: Int
+        val rh: Int
+        val x0: Int
+        val y0: Int
+        if (gpFullFrame) {
+            val roi = computeGpRoi(w, h)
+            rw = roi[2]; rh = roi[3]; x0 = roi[0]; y0 = roi[1]
+        } else {
+            rw = minOf(faceReadSize, w)
+            rh = minOf(faceReadSize, h)
+            x0 = (w - rw) / 2
+            y0 = (h - rh) / 2
+        }
         faceCropScaleX = rw.toFloat() / w
         faceCropScaleY = rh.toFloat() / h
         // v2.0.160：记录回读区域（窗口坐标）—— GPUPixel 的处理结果要贴回同一区域
