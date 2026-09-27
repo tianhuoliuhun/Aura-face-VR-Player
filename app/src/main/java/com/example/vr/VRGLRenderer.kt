@@ -44,14 +44,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      */
     @Volatile var beautyTextureDetail = 0.88f
     @Volatile var isSplitScreenVR = false // Cardboard mode
-        set(value) {
-            if (field != value) {
-                field = value
-                // v2.0.179：分屏开关切换会改变 GPUPixel 回读/贴回的坐标系，
-                // 必须复位分屏状态机（含 gpRoiPx 这个跨坐标系缓存），否则第一帧定位错乱。
-                resetGpSplitState()
-            }
-        }
 
     // ======================= 华为 VR Glass（OpenXR）=======================
     /**
@@ -408,8 +400,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile private var gpRegionPending: ByteArray? = null
     private var gpRegionW = 0
     private var gpRegionH = 0
-    /** 该结果是否为「整屏」回读（贴回起点 0,0，不做分屏的眼偏移） */
-    private var gpRegionFullScreen = false
     private var lastSampleX0 = 0
     private var lastSampleY0 = 0
 
@@ -441,49 +431,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /** 检测失败时保持上次 ROI 的帧数上限（配合 faceMissStreak 的 3 次防抖） */
     private val gpRoiHoldFrames = 24
     private var gpRoiHoldCounter = 0
-
-    /** v2.0.179 诊断计数（每 120 次回读打一次 VR 分屏日志） */
-    private var gpDiagCounter = 0
-
-    // ===== v2.0.179：GPUPixel + VR 分屏 —— 按单眼视口逐次回读+贴回 =====
-    /**
-     * 「上一位被回读的眼的索引」——回读发生在两眼都画完之后（左眼被右眼覆盖），
-     * 而贴回发生在**下一帧左眼绘制之前**（此时 [leftEyeDrawIndex] 已被复位为 0）。
-     * 故必须用上帧记录的值来决定贴回位置，否则右眼的结果会被贴到左眼位置。
-     */
-    private var gpLastEyeIdx = 0
-
-    /**
-     * 分屏 GPUPixel 首帧标记。
-     *
-     * 分屏下正常路径只处理单眼视口（屏幕的一半），另一半永远没有「待贴回像素」。
-     * 若 FBO 里有残留像素（改窗口尺寸 / 切换分屏开关 / 切换投影模式都会留下旧内容），
-     * 那半屏会永远显示陈旧画面。因此切入分屏 GPUPixel 的**第一帧**先做一次整屏贴回，
-     * 把 FBO 拉回「本帧原始渲染」状态，之后再开始逐眼处理。
-     */
-    private var gpSplitNeedFullFlush = true
-
-    /**
-     * 本帧**当前/最后**绘制的那只眼的索引（0 = 左，1 = 右）。
-     *
-     * 分屏 GPUPixel 的回读在两眼都画完之后才执行，此时屏幕上最后一次写入是右眼，
-     * 故回读区取的就是这个索引对应的视口。
-     */
-    private var leftEyeDrawIndex = 0
-
-    /**
-     * 切换分屏 / 引擎开关时复位分屏状态机（由 setter 调用）。
-     *
-     * [gpRoiPx] 必须一起清空：它存的是「窗口坐标」的 ROI，分屏与否坐标系不同，
-     * 沿用会让修复后第一帧定位到错误位置。
-     */
-    fun resetGpSplitState() {
-        gpSplitNeedFullFlush = true
-        gpLastEyeIdx = 0
-        gpRoiPx = null
-        gpRoiSide = 0f
-        gpRegionPending = null
-    }
 
     // GPUPixel 模式的离屏渲染目标（画到 FBO → 区域处理贴回 → blit 上屏）
     private var gpFboId = 0
@@ -1397,33 +1344,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // v2.0.179：GPUPixel + 分屏时，正常路径只处理「本帧轮到的那只眼的视口」（屏幕的一半），
-        // 另一半不会收到任何贴回 —— 若 FBO 里有陈旧残留（切换分屏开关 / 改窗口尺寸 /
-        // 切换投影模式），那半屏会一直显示旧画面。故切入分屏 GPUPixel 的**第一帧**
-        // 先整体回读一次、结果覆盖全 FBO 贴回，把两个半屏都拉回「本帧原始渲染」状态。
-        // （与逐眼处理共用同一条异步链路，无递归，仅首帧多一趟全屏读写。）
-        if (gpActive && isSplitScreenVR && gpSplitNeedFullFlush && !isDetectingFace.get()) {
-            val need = displayWidth * displayHeight * 4
-            val buf = faceReadBuffer?.takeIf { it.capacity() >= need }
-                ?: java.nio.ByteBuffer.allocateDirect(need)
-                    .order(java.nio.ByteOrder.nativeOrder())
-                    .also { faceReadBuffer = it }
-            buf.clear()
-            GLES20.glReadPixels(0, 0, displayWidth, displayHeight,
-                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
-            buf.rewind()
-            val frame = ByteArray(need)
-            buf.get(frame, 0, need)
-            synchronized(faceFrameLock) {
-                pendingFaceFrame = frame
-                pendingFaceFrameW = displayWidth
-                pendingFaceFrameH = displayHeight
-            }
-            triggerBackgroundFaceDetection()
-            gpSplitNeedFullFlush = false
-        }
-        // 后台仍在忙时保留标记，下一帧重试（首帧的旧内容最多多显示一帧）
-
         // v102：视频/图片统一走主程序 shader（美颜在片元着色器内实时计算）
         val prog = if (isVideoActive) videoProgram else imageProgram
         if (prog == null) {
@@ -1511,21 +1431,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             val halfWidth = displayWidth / 2
 
             // Left Eye Viewport
-            // v2.0.179：记录当前绘制的是哪只眼 —— GPUPixel 分屏回读要用它决定回读区
-            leftEyeDrawIndex = 0
             GLES20.glViewport(0, 0, halfWidth, displayHeight)
             calculateAndApplyMatrices(isLeft = true, aspect = halfWidth.toFloat() / displayHeight.toFloat(), mvpLoc = prog.hMVPMatrix)
             uniform1i(prog.hLeftEye, 1)
             drawActiveGeometry(prog)
 
             // Right Eye Viewport
-            leftEyeDrawIndex = 1
             GLES20.glViewport(halfWidth, 0, halfWidth, displayHeight)
             calculateAndApplyMatrices(isLeft = false, aspect = halfWidth.toFloat() / displayHeight.toFloat(), mvpLoc = prog.hMVPMatrix)
             uniform1i(prog.hLeftEye, 0)
             drawActiveGeometry(prog)
         } else {
-            leftEyeDrawIndex = 0
             // Standard full width screen mode
             GLES20.glViewport(0, 0, displayWidth, displayHeight)
             calculateAndApplyMatrices(isLeft = true, aspect = displayWidth.toFloat() / displayHeight.toFloat(), mvpLoc = prog.hMVPMatrix)
@@ -2500,27 +2416,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
-    /**
-     * 把后台 GPUPixel 处理完的像素写回 FBO 纹理。
-     *
-     * v2.0.179：目标位置不再直接沿用 [lastSampleX0] —— 回读发生在「两眼都画完」之后
-     * （[leftEyeDrawIndex] 停在右眼），而贴回发生在**下一帧左眼绘制之前**
-     * （[leftEyeDrawIndex] 已被复位为 0）。若沿用 lastSampleX0 会把右眼的处理结果
-     * 贴到左眼位置。故用回读时记录的 [gpLastEyeIdx] 重算贴回 x 偏移。
-     *
-     * 起始 y 沿用 [lastSampleY0]（当前所有路径都是 0，保持既有行为）。
-     */
+    /** 把后台 GPUPixel 处理完的人脸区域像素写回 FBO 纹理（区域与回读时一致） */
     private fun uploadPendingGpRegion() {
         val bytes = gpRegionPending ?: return
         gpRegionPending = null
         if (gpFboTexId == 0 || gpRegionW <= 0 || gpRegionH <= 0) return
-        if (gpRegionW > gpFboW || gpRegionH > gpFboH) return
-        val dstX = if (gpRegionFullScreen) 0
-        else (gpLastEyeIdx * gpRegionW).coerceIn(0, (gpFboW - gpRegionW).coerceAtLeast(0))
-        val dstY = lastSampleY0.coerceIn(0, (gpFboH - gpRegionH).coerceAtLeast(0))
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gpFboTexId)
         GLES20.glTexSubImage2D(
-            GLES20.GL_TEXTURE_2D, 0, dstX, dstY, gpRegionW, gpRegionH,
+            GLES20.GL_TEXTURE_2D, 0, lastSampleX0, lastSampleY0, gpRegionW, gpRegionH,
             GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, java.nio.ByteBuffer.wrap(bytes)
         )
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
@@ -2652,60 +2555,24 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 收窄到人脸 ROI 后典型 640×640 ≈ 1.6 MB（↓80%），远景小脸可降到 384×384（↓97%）。
         // 计算复用本项目已有的人脸坐标（uFaceCenter / uEyeDistance，均为**视口 UV** 空间）
         // 与已有基础设施（faceCropScaleX/Y + mapCrop*ToViewport + uploadPendingGpRegion 局部贴回）。
-        // ===== v2.0.179 修复：VR 分屏下 GPUPixel 只美颜「中间一块」 =====
-        // 三段错误史（避免再踩）：
-        //  · v2.0.172：回读**整屏** —— 分屏时那是一幅 1920×1080 的**并排双画面**，
-        //    而 GPUPixel 的 Mars-Face 在并排双画面上检测极不可靠，只会处理它碰巧认出的
-        //    那一小块 → 屏幕中间一条被美颜，正是用户报的「只有中间一块生效」；
-        //  · v2.0.177：改成「人脸 ROI」，但传入的 w 是单眼视口宽（displayWidth/2），
-        //    算出的 x0 ∈ [0, 一半屏幕)，只覆盖左眼；
-        //  · v2.0.179（本次）：改成**按单眼视口逐次回读 + 贴回** —— 左眼一次、右眼一次，
-        //    每次喂给 GPUPixel 的都是「一幅正常的完整画面」，检测与美颜都正常，
-        //    且两只眼都照顾到。
-        //
-        // ⚠️ 不要再用「整屏 + ROI 覆盖双眼」的取巧做法：双画面不是自然图像，
-        //    landmarks 与画面语义对不上，瘦脸/大眼的形变会落在错误位置。
-        val splitGp = gpFullFrame && isSplitScreenVR
-        val roiUsable = gpFullFrame && !isSplitScreenVR
         val rw: Int
         val rh: Int
         val x0: Int
         val y0: Int
-        if (roiUsable) {
+        if (gpFullFrame) {
             val roi = computeGpRoi(w, h)
             rw = roi[2]; rh = roi[3]; x0 = roi[0]; y0 = roi[1]
-        } else if (splitGp) {
-            // GPUPixel + 分屏：本帧轮到的那只眼的视口（左 x=0 / 右 x=halfW）
-            gpLastEyeIdx = leftEyeDrawIndex
-            rw = w
-            rh = h
-            x0 = leftEyeDrawIndex * w
-            y0 = 0
         } else {
             rw = minOf(faceReadSize, w)
             rh = minOf(faceReadSize, h)
             x0 = (w - rw) / 2
             y0 = (h - rh) / 2
         }
-        // v2.0.179：faceCropScale 的基准必须与「回读区相对谁的比例」一致。
-        // 非分屏 GPUPixel 回读的是整屏（displayWidth），而 w 是播放视口宽，两者可能不等；
-        // 分屏时回读区就是单眼视口、w 也是单眼宽 —— 此时若仍用 displayWidth 做基准
-        // 会得到 0.5，人脸坐标被缩小一半、定位完全错乱。
-        val wholeScreenRead = gpFullFrame && !splitGp
-        val scaleBaseW = if (wholeScreenRead) displayWidth else w
-        val scaleBaseH = if (wholeScreenRead) displayHeight else h
-        faceCropScaleX = rw.toFloat() / scaleBaseW.coerceAtLeast(1)
-        faceCropScaleY = rh.toFloat() / scaleBaseH.coerceAtLeast(1)
+        faceCropScaleX = rw.toFloat() / w
+        faceCropScaleY = rh.toFloat() / h
         // v2.0.160：记录回读区域（窗口坐标）—— GPUPixel 的处理结果要贴回同一区域
         lastSampleX0 = x0
         lastSampleY0 = y0
-
-        // v2.0.179 诊断：确认 VR 分屏下的实际回读区（定位「只美颜一块」）
-        if (splitGp && gpDiagCounter++ % 120 == 0) {
-            Log.d(TAG, "[gpVR] disp=${displayWidth}x${displayHeight} eyeViewport=${w}x$h " +
-                "| read eye=${leftEyeDrawIndex} x0=$x0 y0=$y0 ${rw}x$rh " +
-                "| cropScale=${faceCropScaleX},${faceCropScaleY}")
-        }
 
         try {
             val need = rw * rh * 4
@@ -2763,8 +2630,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     if (out != null) {
                         gpRegionW = fw
                         gpRegionH = fh
-                        // v2.0.179：该结果覆盖范围是否等于整个 FBO（决定贴回是否走眼偏移）
-                        gpRegionFullScreen = (fw == gpFboW && fh == gpFboH)
                         // GPUPixel 内部可能复用输出 buffer，必须拷贝出一份再交 GL 线程贴回
                         gpRegionPending = out.copyOf()
                     }
