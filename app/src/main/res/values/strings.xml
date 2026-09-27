@@ -310,7 +310,7 @@
     <string name="lut_intensity">滤镜强度</string>
     <string name="loading">加载中</string>
     <string name="lut_custom_pick">自选 LUT</string>
-    <string name="lut_current">当前：%1$s（内置 24 款，支持 .cube 文件）</string>
+    <string name="lut_current">当前：%1$s（内置 18 款，支持 .cube 文件）</string>
     <string name="beauty_section_portrait">2D 人像精修 · 需 2D 模式 + 人脸检测</string>
     <string name="beauty_3d_disabled">3D 停用</string>
     <string name="beauty_status_2d">当前 2D 模式（%1$s）：全部美颜可用，人像精修（瘦脸/大眼/口红等）需检测到人脸</string>
