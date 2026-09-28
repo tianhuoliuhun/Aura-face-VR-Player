@@ -355,6 +355,8 @@ fun VRPlayerScreen(
     var isHoverActive by remember { mutableStateOf(false) }
     var hoverTimeMs by remember { mutableLongStateOf(0L) }
     var hoverPreviewBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    // v2.0.180：上次抓取拖动预览帧的时刻（用于节流，避免拖动期间每帧都解码）
+    var lastSeekThumbAt by remember { mutableLongStateOf(0L) }
 
     // Trigger state to notify Renderer to refresh its static photo texture
     var photoReloadTrigger by remember { mutableIntStateOf(0) }
@@ -1262,37 +1264,85 @@ fun VRPlayerScreen(
         }
     }
 
-    // Effect to retrieve video seek preview thumbnails on user scrub dragging
+    // ===== v2.0.180：拖动预览缩略图（性能优化版）=====
+    //
+    // 优化前的问题：
+    //  ① 每次拖动，`hoverTimeMs` 一变就重启 effect（每帧都触发），每次都 `new MediaMetadataRetriever()`
+    //     + `setDataSource` + `getFrameAtTime` + `createScaledBitmap` + `release()`；
+    //  ② 无缓存 —— 来回拖动到同一位置要重新解码；
+    //  ③ 160×90 分辨率在 xxhdpi 屏上被放大到 160dp → 模糊。
+    //
+    // 现在的做法：
+    //  · **节流**：拖动期间每 [SEEK_THUMB_THROTTLE_MS] 才真正抓一次；
+    //  · **时间量化**：按 [SEEK_THUMB_QUANTUM_MS] 对齐时间戳，配合内存缓存大幅提高命中率
+    //    （同一关键帧区间内来回拖动直接命中，不再解码）；
+    //  · **LruCache**：缓存"（视频标识 + 量化时间戳）→ Bitmap"，用内存预算控制（约 24 张 @320×180）。
+    //    ⚠️ key 必须带视频标识：只按时间戳缓存会在切换视频后命中**上一部视频**的帧（跨片串味）。
+    //  · **分辨率提升**：320×180（匹配高密度屏的 160dp 显示尺寸，观感明显更清晰）。
+    //
+    // ⚠️ retriever 仍按需创建并即时释放：`MediaMetadataRetriever` 不是线程安全的，
+    //    且持有的 native 资源必须显式 release；复用单个实例在快速拖动时反而会互相打架
+    //    （并发 setDataSource）。这里靠"节流 + 缓存"把创建次数压下来，而不是靠复用实例。
+
+    val seekThumbCache = remember { object : android.util.LruCache<String, Bitmap>(24) {} }
+
+    // 节流 + 抓帧
     LaunchedEffect(hoverTimeMs, selectedMediaItem.uri, isHoverActive) {
-        if (selectedMediaItem.isVideo && selectedMediaItem.uri != null && isHoverActive) {
-            val uriStr = selectedMediaItem.uri ?: return@LaunchedEffect
-            withContext(Dispatchers.IO) {
-                var retriever: android.media.MediaMetadataRetriever? = null
-                try {
-                    retriever = android.media.MediaMetadataRetriever().apply {
-                        if (uriStr.startsWith("content://") || uriStr.startsWith("file://") || uriStr.startsWith("android.resource://")) {
-                            setDataSource(context, Uri.parse(uriStr))
-                        } else {
-                            setDataSource(uriStr, java.util.HashMap<String, String>())
-                        }
+        if (!isHoverActive || !selectedMediaItem.isVideo || selectedMediaItem.uri == null) return@LaunchedEffect
+        val uriStr = selectedMediaItem.uri ?: return@LaunchedEffect
+
+        // ① 节流：距上次抓帧不足阈值则跳过（仅更新文字时间，不重新解码）
+        val now = System.currentTimeMillis()
+        if (now - lastSeekThumbAt < SEEK_THUMB_THROTTLE_MS) return@LaunchedEffect
+        lastSeekThumbAt = now
+
+        // ② 时间量化：对齐到固定步长，提高缓存命中率
+        val quantizedMs = (hoverTimeMs / SEEK_THUMB_QUANTUM_MS) * SEEK_THUMB_QUANTUM_MS
+        // ③ key 带视频标识，避免换片后命中上一部视频的帧
+        val cacheKey = "${uriStr.hashCode()}:$quantizedMs"
+
+        // ④ 缓存命中直接返回
+        seekThumbCache.get(cacheKey)?.let { cached ->
+            if (!cached.isRecycled) {
+                hoverPreviewBitmap = cached
+                return@LaunchedEffect
+            }
+            seekThumbCache.remove(cacheKey)
+        }
+
+        withContext(Dispatchers.IO) {
+            var retriever: android.media.MediaMetadataRetriever? = null
+            try {
+                retriever = android.media.MediaMetadataRetriever().apply {
+                    if (uriStr.startsWith("content://") || uriStr.startsWith("file://") || uriStr.startsWith("android.resource://")) {
+                        setDataSource(context, Uri.parse(uriStr))
+                    } else {
+                        setDataSource(uriStr, java.util.HashMap<String, String>())
                     }
-                    val bmp = retriever.getFrameAtTime(hoverTimeMs * 1000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                    if (bmp != null) {
-                        val scaled = Bitmap.createScaledBitmap(bmp, 160, 90, true)
-                        if (scaled != bmp) {
-                            bmp.recycle()
-                        }
-                        withContext(Dispatchers.Main) {
-                            hoverPreviewBitmap = scaled
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("VRPlayerScreen", "Error of hover frame retrieval", e)
-                } finally {
-                    try { retriever?.release() } catch (e: Exception) {}
                 }
+                // OPTION_CLOSEST_SYNC：只取关键帧，解码代价最低（拖动预览无需精确帧）
+                val bmp = retriever.getFrameAtTime(quantizedMs * 1000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (bmp != null) {
+                    // 目标 320×180（16:9）；若源不是 16:9 则等比缩放后居中裁切，避免变形
+                    val target = scaleSeekThumb(bmp)
+                    if (target !== bmp) bmp.recycle()
+                    seekThumbCache.put(cacheKey, target)
+                    withContext(Dispatchers.Main) {
+                        hoverPreviewBitmap = target
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("VRPlayerScreen", "Error of hover frame retrieval", e)
+            } finally {
+                try { retriever?.release() } catch (e: Exception) {}
             }
         }
+    }
+
+    // v2.0.180：切换视频时清掉拖动预览缓存与当前缩略图，避免跨片串味 / 残影
+    LaunchedEffect(selectedMediaItem.uri) {
+        seekThumbCache.evictAll()
+        hoverPreviewBitmap = null
     }
 
     // Modern android system photo picker launcher to load custom panoramic/flat files
@@ -2184,11 +2234,16 @@ fun VRPlayerScreen(
             isVideoPlaying = false
             view.renderer.isVideoActive = false
 
-            // Load Bitmap asynchronously on background thread to prevent ANR during canvas generation
+            // v2.0.180：位图获取与缓存
+            //  · 内置演示图走 DemoMediaProvider 的 LruCache（同一 id 不再重复 Canvas 绘制）；
+            //    loadDemoBitmap 返回的是**母本副本**，交给渲染器上传纹理。
+            //  · 导入图直接用已有的 customBitmap（渲染器自 v2.0.180 起不再 recycle 传入位图，
+            //    因此可以安全复用，无需重新解码）。
             val bmp: Bitmap = withContext(Dispatchers.IO) {
                 if (selectedMediaItem.isDemo) {
                     DemoMediaProvider.loadDemoBitmap(selectedMediaItem.id)
                 } else {
+                    // 导入图：优先复用；仅在缺失时才回退到内置测试卡
                     customBitmap ?: DemoMediaProvider.loadDemoBitmap("demo_standard_portrait")
                 }
             }
@@ -3215,6 +3270,8 @@ fun VRPlayerScreen(
                                     val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
                                     if (currentIndex >= 0) {
                                         val prevIndex = if (currentIndex > 0) currentIndex - 1 else DemoMediaProvider.demoMediaList.size - 1
+                                        // v2.0.180：释放导入图占用的内存（渲染器已不再回收传入位图）
+                                        customBitmap?.takeIf { !it.isRecycled }?.recycle()
                                         customBitmap = null
                                         selectedMediaItem = DemoMediaProvider.demoMediaList[prevIndex]
                                     }
@@ -3223,6 +3280,8 @@ fun VRPlayerScreen(
                                     val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
                                     if (currentIndex >= 0) {
                                         val nextIndex = if (currentIndex < DemoMediaProvider.demoMediaList.size - 1) currentIndex + 1 else 0
+                                        // v2.0.180：释放导入图占用的内存（渲染器已不再回收传入位图）
+                                        customBitmap?.takeIf { !it.isRecycled }?.recycle()
                                         customBitmap = null
                                         selectedMediaItem = DemoMediaProvider.demoMediaList[nextIndex]
                                     }
@@ -6157,6 +6216,59 @@ fun buildHuaweiVrPromptIntent(
         putExtra(HuaweiVrActivity.EXTRA_EXTERNAL_RENDERER, true)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+}
+
+// ===================== v2.0.180：拖动预览缩略图参数与工具 =====================
+
+/** 拖动预览抓帧节流间隔（ms）：拖动期间最快每 120ms 抓一次，避免每帧都解码。 */
+private const val SEEK_THUMB_THROTTLE_MS = 120L
+
+/**
+ * 拖动预览时间量化步长（ms）：把请求时间对齐到该步长后再抓帧 / 查缓存。
+ * 1 秒 ≈ 关键帧量级，配合 OPTION_CLOSEST_SYNC 能显著提高缓存命中率（同一秒内拖动不再重复解码）。
+ */
+private const val SEEK_THUMB_QUANTUM_MS = 1000L
+
+/** 拖动预览目标尺寸（匹配 UI 的 160dp×90dp，在 xxhdpi 上足够清晰）。 */
+private const val SEEK_THUMB_W = 320
+private const val SEEK_THUMB_H = 180
+
+/**
+ * 把抓到的原始帧缩放到拖动预览尺寸（320×180，16:9）。
+ *
+ * 源不是 16:9 时先**等比缩放**再**居中裁切**，避免直接拉伸导致人脸变形
+ * （拖动预览正是用来看清画面的，变形会误导用户）。
+ * 返回的 Bitmap 与入参不是同一对象时，调用方负责回收入参。
+ */
+private fun scaleSeekThumb(src: Bitmap): Bitmap {
+    val srcW = src.width
+    val srcH = src.height
+    if (srcW <= 0 || srcH <= 0) return src
+
+    val targetRatio = SEEK_THUMB_W.toFloat() / SEEK_THUMB_H
+    val srcRatio = srcW.toFloat() / srcH
+
+    // 先等比放大/缩小，使短边覆盖目标尺寸
+    val (scaledW, scaledH) = if (srcRatio > targetRatio) {
+        // 源更宽 → 以高为准
+        (srcW.toFloat() * SEEK_THUMB_H / srcH).toInt().coerceAtLeast(SEEK_THUMB_W) to SEEK_THUMB_H
+    } else {
+        SEEK_THUMB_W to (srcH.toFloat() * SEEK_THUMB_W / srcW).toInt().coerceAtLeast(SEEK_THUMB_H)
+    }
+
+    val scaled = Bitmap.createScaledBitmap(src, scaledW, scaledH, true)
+    // 居中裁切到目标尺寸
+    val x = ((scaledW - SEEK_THUMB_W) / 2).coerceAtLeast(0)
+    val y = ((scaledH - SEEK_THUMB_H) / 2).coerceAtLeast(0)
+    val out = if (scaledW == SEEK_THUMB_W && scaledH == SEEK_THUMB_H) {
+        scaled
+    } else {
+        Bitmap.createBitmap(scaled, x, y, SEEK_THUMB_W, SEEK_THUMB_H)
+    }
+    if (out !== scaled && scaled !== src) {
+        scaled.recycle()
+    }
+    return out
 }
 
 

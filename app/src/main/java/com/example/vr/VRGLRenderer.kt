@@ -1303,7 +1303,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         bToLoad?.let {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTextureId)
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, it, 0)
-            it.recycle()
+            // v2.0.180：不再在此回收传入的 Bitmap。
+            // 原先这里 `it.recycle()` 有两个问题：
+            //  ① 与「位图缓存」冲突 —— 同一实例被缓存后再传来会抛
+            //     IllegalStateException（texImage2D on a recycled bitmap）；
+            //  ② 既有隐患：导入的图片 `customBitmap` 在切走再切回时会复用同一实例，
+            //     第二次上传必然命中已回收的 bitmap → 崩溃。
+            // 现改为由**提供方**管理生命周期：内置演示图由 DemoMediaProvider 缓存母本、
+            // 每次返回副本（副本交给 GL 上传后即成为垃圾，由 GC 回收）；
+            // 导入图由 VRPlayerScreen 持有并复用。渲染器只读取，不回收。
         }
 
         // 2. Fetch new video stream frames from SurfaceTexture on the GL thread
