@@ -333,7 +333,7 @@
     <string name="beauty_engine_unavailable">GPUPixel 初始化失敗，已保持 GLSL 引擎</string>
     <string name="beauty_gp_sharpen">銳化</string>
     <string name="beauty_gp_vr_face">VR 影片人臉美顏</string>
-    <string name="beauty_gp_vr_face_desc">VR / 全景模式下同樣整屏生效：磨皮美白覆蓋全螢幕，瘦臉大眼需偵測到人臉（效能開銷較大）</string>
+    <string name="beauty_gp_vr_face_desc">VR / 全景模式下也套用 GPUPixel 美顏，整屏生效：磨皮美白覆蓋全螢幕，瘦臉大眼需偵測到人臉（效能開銷較大，預設開啟）</string>
     <string name="beauty_preset_custom">自定義</string>
 
     <!-- ===== batch ===== -->

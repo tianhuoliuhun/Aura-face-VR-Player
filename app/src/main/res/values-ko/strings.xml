@@ -301,7 +301,7 @@
     <string name="beauty_engine_unavailable">GPUPixel 초기화 실패, GLSL 엔진을 유지합니다</string>
     <string name="beauty_gp_sharpen">선명화</string>
     <string name="beauty_gp_vr_face">VR 영상 얼굴 미용</string>
-    <string name="beauty_gp_vr_face_desc">VR / 파노라마 모드에서도 전체 화면에 적용: 피부 보정·미백은 전체 화면, 얼굴 축소·눈 확대는 얼굴 감지 필요(부하가 큼)</string>
+    <string name="beauty_gp_vr_face_desc">VR / 파노라마 모드에서도 GPUPixel 미용을 적용해 전체 화면에 반영: 피부 보정·미백은 전체 화면, 얼굴 축소·눈 확대는 얼굴 감지 필요(부하가 큼, 기본 켜짐)</string>
     <string name="beauty_preset_custom">사용자 지정</string>
     <string name="cd_gyro_on">자이로 켜짐</string>
     <string name="cd_gyro_off">자이로 꺼짐</string>

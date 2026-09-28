@@ -198,9 +198,11 @@ fun VRPlayerScreen(
     var beautyGpEyeZoom by remember {
         mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_eye_zoom", 0.3f) else 0.3f)
     }
-    // v2.0.160（P3）：GPUPixel 方案下把人脸美颜也应用到 VR/全景视频（屏幕空间后处理，默认关）
+    // v2.0.160（P3）：GPUPixel 方案下把人脸美颜也应用到 VR/全景视频（屏幕空间后处理）。
+    // v2.0.184：恢复为**真开关**（默认开）—— v2.0.182 曾把它从激活条件里拿掉（当时 VR 无条件生效），
+    // 于是它退化成 UI 占位；现重新纳入 isGpuPixelActive()，让用户能真正控制「VR 下是否启用 GPUPixel 美颜」。
     var gpuPixelVrFaceBeauty by remember {
-        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_gp_vr_face", false) else false)
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_gp_vr_face", true) else true)
     }
     var beautyLevel by remember {
         mutableFloatStateOf(
@@ -1063,6 +1065,17 @@ fun VRPlayerScreen(
                 remove("projection_mode")
                 remove("stereo_mode")
                 remove("beauty_level")
+                // v2.0.184：补齐此前遗漏的美颜 key（关闭记忆模式时应一并清除，
+                // 否则残留旧值会在下次开启记忆模式时被"恢复"成过期状态）
+                remove("beauty_texture_detail")
+                remove("beauty_master_enabled")
+                remove("beauty_engine_type")
+                remove("beauty_gp_smooth")
+                remove("beauty_gp_white")
+                remove("beauty_gp_sharpen")
+                remove("beauty_gp_slim")
+                remove("beauty_gp_eye_zoom")
+                remove("beauty_gp_vr_face")
                 remove("brightness_level")
                 remove("contrast_level")
                 remove("beauty_whitening")

@@ -445,8 +445,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var beautyGpSharpen = 0.3f
     @Volatile var beautyGpSlim = 0.4f
     @Volatile var beautyGpEyeZoom = 0.3f
-    /** v2.0.160（P3）：GPUPixel 方案下把人脸美颜也应用到 VR/全景视频（屏幕空间后处理）。默认关 */
-    @Volatile var gpuPixelVrFaceBeauty = false
+    /**
+     * v2.0.160（P3）：GPUPixel 是否在 VR / 全景（非平面投影）下也生效。
+     * v2.0.184：恢复为**真开关**且**默认开** —— v2.0.182 曾把它从 [isGpuPixelActive] 里拿掉
+     * （当时 VR 被改成无条件生效），使它退化成 UI 占位；现重新纳入激活条件。
+     */
+    @Volatile var gpuPixelVrFaceBeauty = true
     // GPUPixel 处理结果（faceExecutor 产出 → GL 线程贴回 FBO）
     @Volatile private var gpRegionPending: ByteArray? = null
     // v2.0.183：后台线程写入、GL 线程读取 —— 加 @Volatile 保证可见性（配合 gpRegionPending 的 volatile 写）
@@ -1606,8 +1610,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val isPlanarFaceMode = projectionMode == ProjectionMode.STANDARD ||
             projectionMode == ProjectionMode.FISHEYE
         // v2.0.160：GPUPixel 的「VR 视频人脸美颜」开启时，非平面模式也采样（屏幕空间后处理）
-        // v2.0.182：GPUPixel 激活即采样（VR 下已是全覆盖屏幕空间后处理，不再依赖那个开关）
-        if (isPlanarFaceMode || gpActive) maybeScheduleFaceSampling()
+        // v2.0.184：恢复开关条件 —— gpActive 已把该开关纳入（VR 下关开关时 gpActive=false），
+        // 故此处条件写回「平面 或 gpActive」，语义等价于 v2.0.160 的原始设计。
+        if (isPlanarFaceMode || (gpActive && gpuPixelVrFaceBeauty)) maybeScheduleFaceSampling()
 
         // v2.0.160：GPUPixel 链路收尾 —— 把后台处理完的人脸区域写回 FBO，再将整帧 blit 到屏幕
         if (gpActive) {
@@ -2274,18 +2279,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // ===== v2.0.160：GPUPixel 双引擎支持 =====
 
     /**
-     * GPUPixel 链路是否激活：总开关 + 引擎选择 + 初始化成功。
+     * GPUPixel 链路是否激活：总开关 + 引擎选择 + 初始化成功 +（平面投影 或 VR 人脸美颜开关）。
      *
-     * v2.0.182：**VR 模式不再要求显式开启 `gpuPixelVrFaceBeauty`**。
-     * 该开关（「VR 视频人脸美颜」）原先的作用是「是否在 VR 下也做人脸 ROI 美颜」；
-     * 现在 GPUPixel 在 VR 下就是**屏幕空间全覆盖后处理**（用户要求覆盖全屏），
-     * 与投影模式无关，故去掉这个前提 —— 只要选了 GPUPixel 引擎且总开关打开就生效。
-     * 开关本身保留（用于 UI 兼容与持久化），但不再作为激活条件。
+     * v2.0.182：一度去掉了最后一项（当时 VR 被改成无条件全覆盖），使 [gpuPixelVrFaceBeauty]
+     * 退化成 UI 占位。
+     * v2.0.184：**恢复为真开关（默认开）** —— 用户的意图是「这个开关要真的能控制 VR 下的美颜」，
+     * 而不是让它永远生效。故：
+     *   - 平面投影（STANDARD / FISHEYE）：始终生效（开关与它无关）
+     *   - 3D / VR（VR_360 / VR_180 / VR_BOX 等）：由 [gpuPixelVrFaceBeauty] 控制
+     * 开关关闭时 VR 下退回**纯 GLSL 美颜**（GLSL 在 VR 下的面部效果本就受限，见下方注释）。
      */
     private fun isGpuPixelActive(): Boolean {
         if (!beautyMasterEnabled || beautyEngineType != BEAUTY_ENGINE_GPUPIXEL) return false
         if (!GpuPixelBeauty.available) return false
-        return true
+        return isPlanarProjection() || gpuPixelVrFaceBeauty
     }
 
     private fun isPlanarProjection(): Boolean =
