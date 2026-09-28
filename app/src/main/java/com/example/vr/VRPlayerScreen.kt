@@ -120,14 +120,17 @@ fun VRPlayerScreen(
     var isUserTouching by remember { mutableStateOf(false) }
 
     // Media and projection states
+    // v2.0.181：内置演示图恢复为 v2.0.179 的第一张 —— `demo_360_beauty`「360° 等距圆柱全景
+    // 画展廊」(2:1)。这张**必须**配 VR_360 球面投影才是一幅可环视的画廊；用 STANDARD 平面
+    // 看会被压成屏幕中间一条窄带。故默认投影随之改回 **VR_360**。
     var selectedMediaItem by remember { mutableStateOf(DemoMediaProvider.demoMediaList[0]) }
     var projectionMode by remember {
         mutableStateOf(
             if (isMemoryModeEnabled) {
-                val modeId = prefs.getInt("projection_mode", ProjectionMode.VR_180.id)
-                ProjectionMode.values().firstOrNull { it.id == modeId } ?: ProjectionMode.VR_180
+                val modeId = prefs.getInt("projection_mode", ProjectionMode.VR_360.id)
+                ProjectionMode.values().firstOrNull { it.id == modeId } ?: ProjectionMode.VR_360
             } else {
-                ProjectionMode.VR_180
+                ProjectionMode.VR_360
             }
         )
     }
@@ -2244,9 +2247,11 @@ fun VRPlayerScreen(
                     DemoMediaProvider.loadDemoBitmap(selectedMediaItem.id)
                 } else {
                     // 导入图：优先复用；仅在缺失时才回退到内置测试卡
-                    customBitmap ?: DemoMediaProvider.loadDemoBitmap("demo_standard_portrait")
+                    customBitmap ?: DemoMediaProvider.loadDemoBitmap(DemoMediaProvider.primaryDemoId)
                 }
             }
+            // v2.0.181：先把尺寸告诉渲染器（决定是否走分块上传），再投递位图
+            view.renderer.setImageSizeHint(bmp.width, bmp.height)
             view.updateImage(bmp)
         }
     }
@@ -3267,23 +3272,31 @@ fun VRPlayerScreen(
                                 isSettingsOpen = isSettingsDialogOpen,
                                 onToggleSettings = { isSettingsDialogOpen = !isSettingsDialogOpen },
                                 onPrev = {
-                                    val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
-                                    if (currentIndex >= 0) {
-                                        val prevIndex = if (currentIndex > 0) currentIndex - 1 else DemoMediaProvider.demoMediaList.size - 1
-                                        // v2.0.180：释放导入图占用的内存（渲染器已不再回收传入位图）
-                                        customBitmap?.takeIf { !it.isRecycled }?.recycle()
-                                        customBitmap = null
-                                        selectedMediaItem = DemoMediaProvider.demoMediaList[prevIndex]
+                                    val list = DemoMediaProvider.demoMediaList
+                                    // v2.0.181：内置演示图只剩 1 张 —— 单元素时不做任何事
+                                    //（原先回绕到自身会白白 recycle/重建一次高清位图，很浪费）
+                                    if (list.size > 1) {
+                                        val currentIndex = list.indexOfFirst { it.id == selectedMediaItem.id }
+                                        if (currentIndex >= 0) {
+                                            val prevIndex = if (currentIndex > 0) currentIndex - 1 else list.size - 1
+                                            // v2.0.180：释放导入图占用的内存（渲染器已不再回收传入位图）
+                                            customBitmap?.takeIf { !it.isRecycled }?.recycle()
+                                            customBitmap = null
+                                            selectedMediaItem = list[prevIndex]
+                                        }
                                     }
                                 },
                                 onNext = {
-                                    val currentIndex = DemoMediaProvider.demoMediaList.indexOfFirst { it.id == selectedMediaItem.id }
-                                    if (currentIndex >= 0) {
-                                        val nextIndex = if (currentIndex < DemoMediaProvider.demoMediaList.size - 1) currentIndex + 1 else 0
-                                        // v2.0.180：释放导入图占用的内存（渲染器已不再回收传入位图）
-                                        customBitmap?.takeIf { !it.isRecycled }?.recycle()
-                                        customBitmap = null
-                                        selectedMediaItem = DemoMediaProvider.demoMediaList[nextIndex]
+                                    val list = DemoMediaProvider.demoMediaList
+                                    if (list.size > 1) {
+                                        val currentIndex = list.indexOfFirst { it.id == selectedMediaItem.id }
+                                        if (currentIndex >= 0) {
+                                            val nextIndex = if (currentIndex < list.size - 1) currentIndex + 1 else 0
+                                            // v2.0.180：释放导入图占用的内存（渲染器已不再回收传入位图）
+                                            customBitmap?.takeIf { !it.isRecycled }?.recycle()
+                                            customBitmap = null
+                                            selectedMediaItem = list[nextIndex]
+                                        }
                                     }
                                 },
                                 onTogglePlayPause = {

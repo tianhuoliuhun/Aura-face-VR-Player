@@ -14,6 +14,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.graphics.Color
 import android.util.TypedValue
+import com.example.vr.DemoMediaProvider
 import com.example.vr.VRGLRenderer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -128,6 +129,12 @@ class HuaweiVrActivity : Activity() {
         //    用 ES2 会在部分机型上拿不到 OES 视频纹理的完整能力。
         renderer = VRGLRenderer(this)
         renderer.huaweiVrMode = externalRenderer
+
+        // v2.0.181：华为通路每帧都要 glReadPixels 回读人脸 ROI，且每眼一块 swapchain。
+        // 若此时还拿着 4096×2048（单张 32 MB）的测试卡，显存与回读代价都过大，
+        // 故强制把内置测试卡降到低清档（2048×1024）。返回主界面时由 MainActivity 复位。
+        DemoMediaProvider.setHighResEnabled(false)
+        Log.i(TAG, "DemoMediaProvider -> ${DemoMediaProvider.currentSizeDesc()} (华为 VR 低清档)")
 
         // ⚠️ 视频源接线回调必须在 setRenderer() **之前**挂上。
         //    原因：GL 线程的 Renderer.onSurfaceCreated（内部会触发 onVideoSurfaceCreated）

@@ -18,6 +18,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     companion object {
         const val TAG = "VRGLRenderer"
+
+        /** 面积 ≥ 此值（≈ 2048×2048）时改用分块上传，单张 ≥ 16 MB */
+        private const val CHUNK_UPLOAD_AREA_THRESHOLD = 2048L * 2048L
     }
 
     // Volatile settings accessible from Compose UI
@@ -136,6 +139,40 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // Dimensions of the currently displayed image (used for 2D aspect fitting)
     @Volatile var imageWidth = 0
     @Volatile var imageHeight = 0
+
+    // ===== v2.0.181：图片纹理「分块上传」 =====
+    /**
+     * true = 使用 `glTexSubImage2D` 按行条带逐块上传，而非一次性 `GLUtils.texImage2D`。
+     *
+     * 动因：内置测试卡提到了 4096×2048。`GLUtils.texImage2D(..., bitmap, 0)` 内部会
+     * 在**上传前**再 `copyPixelsToBuffer` 出一份等大的像素缓冲 —— 4096×2048 ARGB_8888
+     * 即 32 MB，于是上传瞬间会出现「Java 堆 32 MB（调用方副本）+ 32 MB（GLUtils 临时
+     * 缓冲）+ 32 MB（GL 纹理）」约 96 MB 的峰值。低端机 / MuMu 上极易 OOM 或长时间卡顿。
+     *
+     * 改为分块后：先以 `glTexImage2D(..., null)` 开辟显存（不产生 Java 侧大对象），
+     * 再按 [uploadChunkRows] 行一条把 `Bitmap.getPixels` 出来的 int[]（每块约 1 MB）
+     * 升级为 RGBA 后上传。峰值只与条带高度有关，与整图尺寸解耦。
+     *
+     * 由 [setImageSizeHint] 在收到大图时自动开启。
+     */
+    private var useChunkedImageUpload = false
+
+    /** 分块上传时每条带的行数（4096 宽 × 64 行 ≈ 1 MB 的 ARGB 像素） */
+    private val uploadChunkRows = 64
+
+    /**
+     * 在 [updateImage] 之前告诉渲染器即将到来的图片尺寸，用于决定是否需要分块上传。
+     * 不调用也能工作（[updateImage] 内部会自行判断）。
+     */
+    fun setImageSizeHint(width: Int, height: Int) {
+        val w = if (width > 0) width else imageWidth
+        val area = if (w > 0 && height > 0) w.toLong() * height.toLong() else 0L
+        useChunkedImageUpload = area >= CHUNK_UPLOAD_AREA_THRESHOLD
+    }
+
+    /** 复用的条带缓冲：每块 int[] + byte[]，避免逐块 new */
+    private var chunkPixelBuf: IntArray? = null
+    private var chunkByteBuf: ByteArray? = null
     @Volatile var maxFps = 0 // Frame rate limit: 0 (unlimited), 12, 18, 24, 30, 48, 60, 90, 120
     private var lastFrameTimeMs = 0L
 
@@ -260,15 +297,28 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     // Queue for loading Bitmap securely on the GL thread
     private var pendingBitmap: Bitmap? = null
+
+    /** 与 [pendingBitmap] 配套：这一张是否走分块上传（由 updateImage 决定） */
+    private var pendingBitmapChunked = false
     private val bitmapLock = Any()
 
     fun updateImage(bitmap: Bitmap) {
         imageWidth = bitmap.width
         imageHeight = bitmap.height
+        // v2.0.181：大图自动走分块上传（见 useChunkedImageUpload 注释）
+        setImageSizeHint(bitmap.width, bitmap.height)
+        // 记录随图变化的 texelSize（每像素 UV 步长），供 shader 做邻域采样
+        imageTexelW = 1.0f / bitmap.width.coerceAtLeast(1)
+        imageTexelH = 1.0f / bitmap.height.coerceAtLeast(1)
         synchronized(bitmapLock) {
             pendingBitmap = bitmap
+            pendingBitmapChunked = useChunkedImageUpload
         }
     }
+
+    /** 当前图片的每像素 UV 步长（视频时回退为 0，由 shader 用视口 texel 兜底） */
+    @Volatile private var imageTexelW = 0f
+    @Volatile private var imageTexelH = 0f
 
     // Geometry caches
     private var quadPositionBuffer: FloatBuffer = GeometryHelper.createFloatBuffer(GeometryHelper.quadPositions)
@@ -1294,15 +1344,22 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // 1. Process any pending Bitmap from synchronization lock
         var bToLoad: Bitmap? = null
+        var bChunked = false
         synchronized(bitmapLock) {
             if (pendingBitmap != null) {
                 bToLoad = pendingBitmap
+                bChunked = pendingBitmapChunked
                 pendingBitmap = null
             }
         }
         bToLoad?.let {
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTextureId)
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, it, 0)
+            if (bChunked) {
+                // v2.0.181：大图分块上传 —— 避免 GLUtils 内部再复制一份等大像素缓冲
+                uploadImageChunked(it)
+            } else {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTextureId)
+                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, it, 0)
+            }
             // v2.0.180：不再在此回收传入的 Bitmap。
             // 原先这里 `it.recycle()` 有两个问题：
             //  ① 与「位图缓存」冲突 —— 同一实例被缓存后再传来会抛
@@ -1432,7 +1489,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform1i(prog.hWarpDualCenter, if (warpDualCenter) 1 else 0)
 
         // Pass texel dimensions (size of 1 pixel) to fragment shaders
-        uniform2f(prog.hTexelSize, 1.0f / displayWidth.coerceAtLeast(1), 1.0f / displayHeight.coerceAtLeast(1))
+        // v2.0.181：图片模式下改用**图片自身**的 texel 步长。原先固定传视口的 1/W、1/H，
+        // 当图片分辨率（现在 4096×2048）与视口（如 1920×1080）不同量级时，shader 里所有
+        // 以 uTexelSize 为步长的邻域采样（磨皮模糊核、边缘检测等）会取错范围 ——
+        // 4096 宽的图上按 1/1920 步长采样会跨到 2 个像素外，糊成一团。
+        val texelW = if (!isVideoActive && imageTexelW > 0f) imageTexelW else 1.0f / displayWidth.coerceAtLeast(1)
+        val texelH = if (!isVideoActive && imageTexelH > 0f) imageTexelH else 1.0f / displayHeight.coerceAtLeast(1)
+        uniform2f(prog.hTexelSize, texelW, texelH)
 
         // Check if Dual Viewport/VR Box split mode is requested
         if (isSplitScreenVR) {
@@ -1614,7 +1677,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform1f(prog.hMouthAngle, mouthAngleUniform)
         uniform2f(prog.hChin, chinXUniform, chinYUniform)
         uniform1i(prog.hWarpDualCenter, if (warpDualCenter) 1 else 0)
-        uniform2f(prog.hTexelSize, 1.0f / w.coerceAtLeast(1), 1.0f / h.coerceAtLeast(1))
+        // v2.0.181：同内置路径 —— 图片模式用图片自身 texel，视频用视口 texel
+        uniform2f(
+            prog.hTexelSize,
+            if (!isVideoActive && imageTexelW > 0f) imageTexelW else 1.0f / w.coerceAtLeast(1),
+            if (!isVideoActive && imageTexelH > 0f) imageTexelH else 1.0f / h.coerceAtLeast(1)
+        )
 
         // uLeftEye：华为模式下每眼是独立渲染目标，填 1（左侧语义）——
         // 部分几何（如半宽面片）会据此取纹理左半，但双眼各自全屏绘制时不受影响。
@@ -1911,6 +1979,86 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GL10.GL_TEXTURE_WRAP_S, GL10.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GL10.GL_TEXTURE_WRAP_T, GL10.GL_CLAMP_TO_EDGE)
         return texId
+    }
+
+    /**
+     * 分块上传图片纹理（v2.0.181）。
+     *
+     * 为什么不用 `GLUtils.texImage2D`：它在上传前会 `copyPixelsToBuffer` 出一份**等大**的
+     * 像素缓冲。对 4096×2048 来说就是额外 32 MB 的 Java 侧大对象，与调用方持有的 `Bitmap`
+     * 叠加后峰值极高。本函数改为：
+     *  1. `glTexImage2D(..., null)` 先在显存里开辟 [w]×[h]（**不**产生 Java 大对象）；
+     *  2. 按 [uploadChunkRows] 行一条，`Bitmap.getPixels` 取出的 int[] 转 RGBA byte[]（GLES2
+     *     没有 `GL_UNSIGNED_INT_8_8_8_8` 这类像素类型，必须自己拆包）；
+     *  3. `glTexSubImage2D` 逐条覆盖。
+     *
+     * 于是 Java 侧峰值从「整图 ×2」降到「条带 ×2」（1 MB 级），且与整图尺寸解耦。
+     * 复用 [chunkPixelBuf] / [chunkByteBuf]，稳态下几乎零分配。
+     */
+    private fun uploadImageChunked(bitmap: Bitmap) {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w <= 0 || h <= 0) return
+
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, imageTextureId)
+        // 1) 开辟显存（pixels = null，不上传数据）
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+        )
+        val glErr = GLES20.glGetError()
+        if (glErr != GLES20.GL_NO_ERROR) {
+            // 显存不够（4096×2048 RGBA = 32 MB）→ 退回一次性上传，至少保证有画面
+            Log.w(TAG, "uploadImageChunked: glTexImage2D failed err=$glErr, fallback to GLUtils")
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+            return
+        }
+
+        val rows = uploadChunkRows.coerceAtMost(h)
+        val pxSize = w * rows
+        val needPx = pxSize
+        val needByte = pxSize * 4
+        if (chunkPixelBuf == null || chunkPixelBuf!!.size < needPx) chunkPixelBuf = IntArray(needPx)
+        if (chunkByteBuf == null || chunkByteBuf!!.size < needByte) chunkByteBuf = ByteArray(needByte)
+        val px = chunkPixelBuf!!
+        val bytes = chunkByteBuf!!
+
+        var y = 0
+        while (y < h) {
+            val band = (h - y).coerceAtMost(rows)
+            val n = w * band
+            // 2) 取一条带的 ARGB（Bitmap 是 ARGB_8888 → premultiplied）
+            bitmap.getPixels(px, 0, w, 0, y, w, band)
+            // 3) 拆包成 RGBA，并做 un-premultiply
+            var i = 0
+            var j = 0
+            while (i < n) {
+                val c = px[i]
+                val a = (c ushr 24) and 0xFF
+                var r = (c ushr 16) and 0xFF
+                var g = (c ushr 8) and 0xFF
+                var b = c and 0xFF
+                if (a != 0 && a != 255) {
+                    // Bitmap 像素是预乘的；GL 上传后还会再乘一次 alpha，需还原
+                    r = (r * 255 / a).coerceAtMost(255)
+                    g = (g * 255 / a).coerceAtMost(255)
+                    b = (b * 255 / a).coerceAtMost(255)
+                }
+                bytes[j] = r.toByte(); j++
+                bytes[j] = g.toByte(); j++
+                bytes[j] = b.toByte(); j++
+                bytes[j] = a.toByte(); j++
+                i++
+            }
+            val buf = java.nio.ByteBuffer.wrap(bytes, 0, n * 4)
+                .order(java.nio.ByteOrder.nativeOrder())
+            GLES20.glTexSubImage2D(
+                GLES20.GL_TEXTURE_2D, 0, 0, y, w, band,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+            )
+            y += band
+        }
+        Log.i(TAG, "chunked image upload ${w}x$h in bands of $rows rows (peak Java ${needByte / 1024} KB)")
     }
 
     // ===== v104 LUT 视频滤镜：纹理上传与公开接口 =====

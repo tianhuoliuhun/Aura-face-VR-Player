@@ -38,6 +38,18 @@ class MainActivity : ComponentActivity(), LanguageManager.LanguageHost {
         super.attachBaseContext(LanguageManager.wrap(newBase))
     }
 
+    /**
+     * v2.0.181：华为 VR Glass 通路（[com.example.vr.huawei.HuaweiVrActivity]）进入时会把
+     * 内置测试卡切到低清档（它每帧回读人脸 ROI，扛不住 4096×2048）。回到主界面时复位为高清，
+     * 否则用户从眼镜里退出后再看主界面会一直是低清图。
+     */
+    override fun onResume() {
+        super.onResume()
+        if (com.example.vr.DemoMediaProvider.setHighResEnabled(true)) {
+            Log.i("MainActivity", "DemoMediaProvider 复位为高清档")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
