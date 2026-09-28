@@ -459,6 +459,50 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /** v2.0.182 性能：GPUPixel 输出拷贝复用池（单块，avoid 每帧分配） */
     private var gpRegionPool: ByteArray? = null
     private val gpRegionPoolLock = Any()
+
+    // ===== v2.0.185：修复「全屏闪烁」—— 保底帧（stable result）机制 =====
+    /**
+     * 本帧是否因「后台仍在处理上一帧」而**跳过回读**（见 [maybeScheduleFaceSampling] 首行）。
+     *
+     * 跳过的帧里 gpFbo 只含**原始渲染结果**（未经 GPUPixel 处理），若直接上屏，
+     * 画面就在「美颜帧 ↔ 原始帧」之间交替 —— 这就是用户看到的**整个画面全屏闪烁**。
+     * 上屏处据此改写为「重播上一张美颜结果」。
+     *
+     * 注：上屏的**决策判据**是 `gpRegionPending`（本帧是否真的贴回了新结果），
+     * 因为「未跳读但后台未完成」的帧同样没有新结果、同样会闪；
+     * 本字段保留用于诊断打点（区分「后台忙」与「后台空闲但未出结果」两种来源）。
+     */
+    private var gpSkipReadThisFrame = false
+    /** 最近一次成功的「美颜结果 FBO 快照」纹理（含全部 GPUPixel 处理），跳过回读时用它上屏 */
+    private var gpResultTexId = 0
+    private var gpResultFboId = 0
+    private var gpResultW = 0
+    private var gpResultH = 0
+    /** 是否已有可用的保底帧（首次成功前不启用，避免上屏一张空白） */
+    private var gpHasStableResult = false
+
+    // ===== v2.0.185：自适应降采样（降低 T_proc，从源头减少「跳帧」频率）=====
+    /**
+     * 最近一次 GPUPixel 后台处理的实测耗时（纳秒，指数滑动平均）。
+     *
+     * 用途：T_proc 越大，GL 线程跳帧越频繁（闪烁虽已被保底帧消掉，但画面更新率会下降、
+     * 观感变「卡」）。故按实测耗时**自动加大降采样档位**，把 T_proc 压回帧时长附近。
+     */
+    @Volatile private var gpProcNanosAvg = 0L
+    /** 当前生效的降采样档位（1 = 不降采样）。随 [gpProcNanosAvg] 自适应调整 */
+    @Volatile private var gpDownscaleNow = 0   // 0 = 尚未确定，用 gpReadDownscale 初值
+    /**
+     * 预热期样本数 —— 前 [gpAdaptiveWarmup] 次处理耗时**不计入**统计。
+     *
+     * 实测首帧耗时可达 1326 ms（Mars-Face 模型加载 + GPUPixel 管线首建 + shader 编译），
+     * 是稳态（~10 ms）的上百倍。若计入平均，档位会瞬间冲到上限再逐级回落，
+     * 表现为「启动时画面先糊一下再变清晰」。
+     */
+    private var gpAdaptiveSamples = 0
+    private val gpAdaptiveWarmup = 3
+    /** 连续同向调整计数（≥2 才真正换档，抑制横跳）；[gpAdaptiveLastDir] 记录上次方向 */
+    private var gpAdaptiveDirStreak = 0
+    private var gpAdaptiveLastDir = 0
     private var lastSampleX0 = 0
     private var lastSampleY0 = 0
 
@@ -503,6 +547,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 故统一按 0.5 倍回读 —— 内存流量降到 1/4（1920×1080 → 960×540 ≈ 2.1 MB）。
      */
     private val gpReadDownscale = 2
+
+    /**
+     * v2.0.185：自适应降采样的**上限**档位。
+     *
+     * 处理耗时超过帧时长时会被调到更高的降采样档位（1 → 2 → 3 → 4），
+     * 目的是把 T_proc 压回帧时长附近，让画面更新率维持在可用水平。
+     * 上限取 4（即 1/4 分辨率，1920×1080 → 480×270）：再低人脸关键点就不可靠了
+     * （Mars-Face 在 100px 以下检出率骤降），磨皮/美白的软化也开始可察觉。
+     */
+    private val gpReadDownscaleMax = 4
 
     /** 降采样后回读区的最小边（太小则人脸检测失效，宁可放大） */
     private val gpReadMinSide = 128
@@ -1612,13 +1666,40 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // v2.0.160：GPUPixel 的「VR 视频人脸美颜」开启时，非平面模式也采样（屏幕空间后处理）
         // v2.0.184：恢复开关条件 —— gpActive 已把该开关纳入（VR 下关开关时 gpActive=false），
         // 故此处条件写回「平面 或 gpActive」，语义等价于 v2.0.160 的原始设计。
-        if (isPlanarFaceMode || (gpActive && gpuPixelVrFaceBeauty)) maybeScheduleFaceSampling()
+        if (isPlanarFaceMode || (gpActive && gpuPixelVrFaceBeauty)) {
+            maybeScheduleFaceSampling()
+        } else {
+            // v2.0.185：没走采样路径就无所谓「跳过回读」，清掉记账避免残留到下一帧误判
+            gpSkipReadThisFrame = false
+        }
 
         // v2.0.160：GPUPixel 链路收尾 —— 把后台处理完的人脸区域写回 FBO，再将整帧 blit 到屏幕
         if (gpActive) {
+            // v2.0.185：修复「全屏闪烁」——
+            // 本帧若因「后台仍在处理上一帧」而跳过回读（见 maybeScheduleFaceSampling 首行），
+            // gpFbo 里是**未经 GPUPixel 处理的原始渲染结果**；若直接上屏，画面就会在
+            // 「美颜帧 ↔ 原始帧」之间交替 = 肉眼看到的整个画面全屏闪烁。
+            // 正确做法：跳过回读的帧**不呈现本帧原始内容**，而是把最近一次成功的美颜结果
+            // 原样再上屏一次，屏幕因此恒定停留在一张美颜画面上（仅时间上略旧 1~2 帧）。
+            //
+            // ⚠️ 判据只看「本帧是否真的贴回了新结果」——这是**唯一充分**的条件：
+            //   全覆盖模式下贴回覆盖整个视口，故「贴回过」⇒ gpFbo 整张 = 美颜画面；
+            //   反之 gpFbo 里是本帧原始渲染（未美颜）。若拿 `!gpSkipReadThisFrame` 当有效判据
+            //   就会漏掉「本帧没跳读、但后台还没处理完 ⇒ 也没有 pending」这一类帧 ——
+            //   它们同样是未美颜的原始帧，正是闪烁的另一半来源。
+            val hadPending = gpRegionPending != null
             uploadPendingGpRegion()
+            var fromStable = false
+            if (!hadPending && gpHasStableResult && gpResultTexId != 0) {
+                fromStable = true   // 本帧无新美颜结果 → 复现上一张，杜绝「原始帧」闪现
+            }
+            if (hadPending) snapshotGpResult()   // 有新结果才刷新保底帧
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            blitToScreen()
+            if (fromStable) {
+                blitToScreen(gpResultTexId)   // 复现上一张已美颜画面（内容恒定）
+            } else {
+                blitToScreen()                // 正常：呈现本帧的美颜结果
+            }
         } else if (halfActive) {
             // v2.0.177：跑 down(降采样) → blur(半分辨率低频)，再合成上屏。
             // ⚠️ 主渲染的磨皮段必须已被 uBeautyStrength = 0 关掉（见 uniform 同步处），
@@ -2314,7 +2395,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glGenFramebuffers(1, fbo, 0)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
         GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex[0], 0)
+        // v2.0.185：校验完整性 —— 不完整时后续绘制/回读/上屏会静默失败（黑屏或残留内容）
+        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            Log.w(TAG, "gpFbo incomplete: 0x${Integer.toHexString(status)}")
+            GLES20.glDeleteTextures(1, tex, 0)
+            GLES20.glDeleteFramebuffers(1, fbo, 0)
+            return
+        }
         gpFboTexId = tex[0]
         gpFboId = fbo[0]
         gpFboW = w
@@ -2328,6 +2417,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         gpFboTexId = 0; gpFboId = 0; gpFboW = 0; gpFboH = 0
         releaseGpHalfFbo()    // v2.0.183：降采样 FBO 随主 FBO 一起释放
         releaseGpUploadTex()  // v2.0.182：中转纹理随 FBO 一起释放
+        releaseGpResultFbo()  // v2.0.185：保底帧随 FBO 一起释放
     }
 
     // ===== v2.0.183：降采样 FBO（glBlitFramebuffer 真缩放，修 v2.0.182 错位） =====
@@ -2355,7 +2445,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
             GLES20.GL_TEXTURE_2D, tex[0], 0
         )
+        // v2.0.185：校验完整性（原实现未查，导致 glBlitFramebuffer 失败难以定位）
+        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            Log.w(TAG, "gpHalfFbo incomplete: 0x${Integer.toHexString(status)}")
+            GLES20.glDeleteTextures(1, tex, 0)
+            GLES20.glDeleteFramebuffers(1, fbo, 0)
+            return
+        }
         gpHalfFboTexId = tex[0]
         gpHalfFboId = fbo[0]
         gpHalfFboW = w
@@ -2366,6 +2464,88 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         if (gpHalfFboTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpHalfFboTexId), 0)
         if (gpHalfFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpHalfFboId), 0)
         gpHalfFboTexId = 0; gpHalfFboId = 0; gpHalfFboW = 0; gpHalfFboH = 0
+    }
+
+    // ===== v2.0.185：保底帧（最近一次成功的美颜结果快照）=====
+
+    /**
+     * 创建（或按尺寸重建）「保底帧」FBO —— 用来存最近一次**成功贴回后**的完整画面。
+     *
+     * 为什么需要它：GPUPixel 的处理是异步的，后台忙时 GL 线程会跳帧（不回读、不贴回），
+     * 这时 gpFbo 里只有原始渲染。若直接上屏就会出现「美颜帧 ↔ 原始帧」交替闪烁。
+     * 有了这张快照，跳帧时改成重播它，屏幕内容恒定 → 闪烁消失（代价：画面略旧 1~2 帧）。
+     */
+    private fun ensureGpResultFbo(w: Int, h: Int) {
+        if (gpResultFboId != 0 && gpResultW == w && gpResultH == h) return
+        releaseGpResultFbo()
+        val tex = IntArray(1)
+        val fbo = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glGenFramebuffers(1, fbo, 0)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
+        GLES20.glFramebufferTexture2D(
+            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+            GLES20.GL_TEXTURE_2D, tex[0], 0
+        )
+        // v2.0.185：校验 FBO 完整性 —— 不完整时后续 blit/上屏会静默失败（黑屏或花屏）
+        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            Log.w(TAG, "stable-result FBO incomplete: 0x${Integer.toHexString(status)}")
+            GLES20.glDeleteTextures(1, tex, 0)
+            GLES20.glDeleteFramebuffers(1, fbo, 0)
+            gpHasStableResult = false
+            return
+        }
+        gpResultTexId = tex[0]
+        gpResultFboId = fbo[0]
+        gpResultW = w
+        gpResultH = h
+        gpHasStableResult = false   // 新尺寸下旧内容作废
+    }
+
+    private fun releaseGpResultFbo() {
+        if (gpResultTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpResultTexId), 0)
+        if (gpResultFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpResultFboId), 0)
+        gpResultTexId = 0; gpResultFboId = 0; gpResultW = 0; gpResultH = 0
+        gpHasStableResult = false
+    }
+
+    /**
+     * 把当前 gpFbo（已贴回 GPUPixel 结果）整帧快照到保底帧纹理。
+     *
+     * 用 `glBlitFramebuffer` 让 GPU 直接搬（同尺寸 1:1，`GL_NEAREST` 无滤波开销），
+     * 比「回读像素再上传」便宜一个数量级（1920×1080 回读 ≈ 8 MB 且同步阻塞）。
+     */
+    private fun snapshotGpResult() {
+        if (gpFboTexId == 0 || gpFboId == 0) return
+        ensureGpResultFbo(gpFboW, gpFboH)
+        if (gpResultFboId == 0) return
+        GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, gpFboId)
+        GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, gpResultFboId)
+        GLES30.glBlitFramebuffer(
+            0, 0, gpFboW, gpFboH,
+            0, 0, gpResultW, gpResultH,
+            GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_NEAREST
+        )
+        val err = GLES20.glGetError()
+        GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
+        GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, 0)
+        if (err != GLES20.GL_NO_ERROR) {
+            Log.w(TAG, "snapshotGpResult blit failed err=$err")
+            gpHasStableResult = false
+            return
+        }
+        gpHasStableResult = true
     }
 
     /**
@@ -2392,6 +2572,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val sh = sy1 - sy0
         if (sw <= 0 || sh <= 0) return false
 
+        // v2.0.185：先清一遍历史错误，避免把上一次调用遗留的错误误判成本次失败
+        while (GLES20.glGetError() != GLES20.GL_NO_ERROR) { /* drain */ }
+
         GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, gpFboId)
         GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, gpHalfFboId)
         GLES30.glBlitFramebuffer(
@@ -2399,6 +2582,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             0, 0, dstW, dstH,
             GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_LINEAR
         )
+        // ⚠️ 必须先取错误再解绑 —— glBindFramebuffer 本身也会改写错误状态，
+        //    若放在解绑之后读取，blit 的真实错误可能已被后续调用清掉（漏判）。
         val err = GLES20.glGetError()
         GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
         GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, 0)
@@ -2724,15 +2909,23 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         drawHalfQuad(prog, downTexId, halfLowTexId, 0f, 0f)
     }
 
-    private fun blitToScreen() {
+    /**
+     * 把 GPUPixel 结果 FBO 整帧上屏。
+     *
+     * @param srcTex 要上屏的纹理，默认 [gpFboTexId]（本帧 gpFbo）。
+     *   v2.0.185 新增该参数：跳过回读的帧传入 [gpResultTexId]（保底帧），
+     *   从而复现上一张已美颜画面，避免「美颜帧 ↔ 原始帧」交替闪烁。
+     */
+    private fun blitToScreen(srcTex: Int = gpFboTexId) {
         if (gpBlitProgram == 0 || gpBlitQuad == null) return
+        if (srcTex == 0) return
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
         GLES20.glViewport(0, 0, gpFboW, gpFboH)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         GLES20.glUseProgram(gpBlitProgram)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gpFboTexId)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex)
         GLES20.glUniform1i(gpBlitTexLoc, 0)
         val q = gpBlitQuad!!
         q.position(0)
@@ -2907,8 +3100,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private fun computeGpCoverRegion(w: Int, h: Int): IntArray {
         // VR / 3D 投影下屏幕内容更「高频」（球面网格线、几何边缘），降采样过猛会看出软化，
         // 故平面模式用 gpReadDownscale，非平面（VR）模式降一档（更保守）。
-        val base = gpReadDownscale.coerceAtLeast(1)
-        val d = if (isPlanarProjection()) base else (base).coerceAtMost(2)
+        //
+        // v2.0.185：档位改为**自适应** —— 以实测处理耗时为准，在 [1, gpReadDownscaleMax]
+        // 之间调节（见 updateGpAdaptiveDownscale）。首帧尚未有实测值时用初始值 gpReadDownscale。
+        val base = if (gpDownscaleNow > 0) gpDownscaleNow
+                   else gpReadDownscale.coerceAtLeast(1)
+        val d = if (isPlanarProjection()) base else base.coerceAtMost(2)
         // 降采样后的目标尺寸（至少 gpReadMinSide，保证人脸检测可用）
         var rw = (w / d).coerceAtLeast(gpReadMinSide).coerceAtMost(w)
         var rh = (h / d).coerceAtLeast(gpReadMinSide).coerceAtMost(h)
@@ -2933,6 +3130,60 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *   - 全覆盖：回读区覆盖整个视口（只是分辨率低）→ scale = 1，坐标无需换算
      */
     private fun gpCoverScale(): Float = 1.0f
+
+    // ===== v2.0.185：自适应降采样 =====
+
+    /**
+     * 根据实测处理耗时 [elapsedNanos] 调整降采样档位，把 T_proc 压向帧时长。
+     *
+     * 背景：GL 线程在「后台仍在处理上一帧」时会跳过回读（见 [maybeScheduleFaceSampling]），
+     * 于是画面更新率被 T_proc 限死。保底帧机制已消除「美颜/原始交替」的闪烁，
+     * 但 T_proc 过大仍会让画面显得卡顿、且有明显延迟感 —— 故这里**主动加码降采样**。
+     *
+     * 策略（指数滑动平均 + 多重收敛保护，避免档位横跳导致画面清晰度抖动）：
+     *  - **预热跳过**：前 [gpAdaptiveWarmup] 次样本直接丢弃。首次处理包含 Mars-Face 模型
+     *    加载、GPUPixel 管线首建、shader 编译等一次性开销（实测可达 **1.3 s**，是稳态的
+     *    上百倍），若计入平均会让档位瞬间冲到上限、随后又逐级回落 —— 启动时画面先糊再变清。
+     *  - 平滑：`avg = avg·0.7 + sample·0.3`
+     *  - 升档：`avg > 1.4×帧预算` → +1；降档：`avg < 0.5×帧预算` → −1
+     *  - **连续 2 次同向才换档**：单次抖动不足以改变档位，消除「2→3→4→3→2→1」这类连跳。
+     *  - 帧预算取 30fps（33 ms）而非 60fps：GPUPixel 是异步管线，允许它慢于渲染帧率，
+     *    只要画面更新率 ≥ ~30fps 观感就已流畅，不必为此把分辨率压到最低。
+     */
+    private fun updateGpAdaptiveDownscale(elapsedNanos: Long) {
+        if (elapsedNanos <= 0) return
+        // v2.0.185：预热期样本直接丢弃（含模型加载 / 管线首建 / shader 编译的一次性开销）
+        if (gpAdaptiveSamples < gpAdaptiveWarmup) {
+            gpAdaptiveSamples++
+            return
+        }
+        gpProcNanosAvg = if (gpProcNanosAvg == 0L) elapsedNanos
+                         else (gpProcNanosAvg * 7 + elapsedNanos * 3) / 10
+
+        val frameBudget = 33_000_000L          // 33 ms ≈ 30fps
+        val cur = if (gpDownscaleNow > 0) gpDownscaleNow else gpReadDownscale
+        val dir = when {
+            gpProcNanosAvg > frameBudget * 14 / 10 -> +1
+            gpProcNanosAvg < frameBudget * 5 / 10  -> -1
+            else -> 0
+        }
+        if (dir == 0) {
+            gpAdaptiveDirStreak = 0
+            return
+        }
+        // 同向累积；方向改变则重新计数（滞回，避免档位来回横跳）
+        gpAdaptiveDirStreak = if (dir == gpAdaptiveLastDir) gpAdaptiveDirStreak + 1 else 1
+        gpAdaptiveLastDir = dir
+        if (gpAdaptiveDirStreak < 2) return
+
+        val next = (cur + dir).coerceIn(1, gpReadDownscaleMax)
+        gpAdaptiveDirStreak = 0
+        if (next != cur) {
+            Log.i(TAG, "GPUPixel adaptive downscale: $cur -> $next " +
+                "(avg ${gpProcNanosAvg / 1_000_000} ms, budget ${frameBudget / 1_000_000} ms)")
+            gpDownscaleNow = next
+        }
+    }
 
     // ===== v2.0.177：GPUPixel 人脸 ROI 计算 =====
 
@@ -3043,7 +3294,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // v2.0.173：后台仍在处理上一帧时跳过本次回读（白回读只制造 GC 压力），
         // 贴回间隔自适应 = max(1 帧, 实际处理耗时)
-        if (gpFullFrame && isDetectingFace.get()) return
+        //
+        // ⚠️⚠️ v2.0.185：**这里就是「全屏闪烁」的源头**。
+        // 跳过后本帧不会产生新的贴回，gpFbo 里只有**未经 GPUPixel 处理的原始渲染结果**；
+        // 若照常上屏，画面便在「美颜帧 ↔ 原始帧」之间交替（处理耗时 > 帧时长时必然发生，
+        // 模拟器/低端机尤其明显）。故此处**必须记账**，让上屏阶段改用保底帧复现上一张美颜画面。
+        if (gpFullFrame && isDetectingFace.get()) {
+            gpSkipReadThisFrame = true
+            return
+        }
+        gpSkipReadThisFrame = false
 
         // v2.0.182：全覆盖模式下回读区就是**整个物理屏幕**（VR 分屏也整屏，不取单眼）——
         // 因为 GPUPixel 在此是屏幕空间后处理，且用户要求「VR 覆盖全屏」。
@@ -3137,17 +3397,28 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // v2.0.183：降采样回读必须先「真正缩放」再读 —— glReadPixels 只裁剪不缩放。
             // 用 glBlitFramebuffer 把主 FBO 的 [gpReadUv*] 区域缩小渲染到降采样 FBO，
             // 再从降采样 FBO 读（此时读到的才是整屏缩略图，坐标与视口 UV 一一对应）。
-            var readFromHalf = false
-            if (gpFullCoverageThisFrame && (rw < w || rh < h)) {
-                readFromHalf = blitFboToHalf(
+            //
+            // v2.0.185 修复：blit 失败时**不再**退回「左上角裁剪 + 拉伸铺满」的错误回退
+            // （原实现只改了 FBO 绑定，却仍按 rw×rh 在左上角裁剪，随后被 needsScale 判定为
+            // 需要缩放、把这一小块拉伸到全屏 → 该帧画面异常放大）。
+            // 现改为：blit 失败即视为「本帧不回读」，交给保底帧显示上一张美颜画面 ——
+            // 既不放大也不闪烁，下一帧会自动重试。
+            val needsDownscale = gpFullCoverageThisFrame && (rw < w || rh < h)
+            if (needsDownscale && !blitFboToHalf(
                     gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
                 )
+            ) {
+                gpSkipReadThisFrame = true
+                return
             }
-            val readFbo = if (readFromHalf) gpHalfFboId else gpFboId
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, readFbo)
+            // 降采样成功 → 从降采样 FBO 全图读；否则（本就 1:1）从 gpFbo 的 (x0,y0) 读同尺寸区域
+            GLES20.glBindFramebuffer(
+                GLES20.GL_FRAMEBUFFER,
+                if (needsDownscale) gpHalfFboId else gpFboId
+            )
             GLES20.glReadPixels(
-                if (readFromHalf) 0 else x0,
-                if (readFromHalf) 0 else y0,
+                if (needsDownscale) 0 else x0,
+                if (needsDownscale) 0 else y0,
                 rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
             )
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -3192,10 +3463,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 // v2.0.160：GPUPixel 引擎分支 —— 独立检测（Mars-Face）+ 局部处理，不碰 MediaPipe。
                 // 一次回读的像素可以同时作为两套引擎的输入（共享的是像素，不是检测结果）。
                 if (isGpuPixelActive()) {
+                    // v2.0.185：实测处理耗时（含 Mars-Face 检测 + GPUPixel 链 + 拷贝），
+                    // 供自适应降采样使用 —— T_proc 越大越要降采样，以压低跳帧率。
+                    val t0 = System.nanoTime()
                     val out = GpuPixelBeauty.getOrCreatePipeline().process(
                         rgbaData, fw, fh, fw * 4,
                         beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom
                     )
+                    updateGpAdaptiveDownscale(System.nanoTime() - t0)
                     if (out != null) {
                         gpRegionW = fw
                         gpRegionH = fh
