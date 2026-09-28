@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
+import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
@@ -448,8 +449,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var gpuPixelVrFaceBeauty = false
     // GPUPixel 处理结果（faceExecutor 产出 → GL 线程贴回 FBO）
     @Volatile private var gpRegionPending: ByteArray? = null
-    private var gpRegionW = 0
-    private var gpRegionH = 0
+    // v2.0.183：后台线程写入、GL 线程读取 —— 加 @Volatile 保证可见性（配合 gpRegionPending 的 volatile 写）
+    @Volatile private var gpRegionW = 0
+    @Volatile private var gpRegionH = 0
     /** v2.0.182 性能：GPUPixel 输出拷贝复用池（单块，avoid 每帧分配） */
     private var gpRegionPool: ByteArray? = null
     private val gpRegionPoolLock = Any()
@@ -542,6 +544,28 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var gpFboTexId = 0
     private var gpFboW = 0
     private var gpFboH = 0
+
+    /**
+     * v2.0.183：GPUPixel 回读用的**降采样 FBO**（尺寸 = 回读尺寸）。
+     *
+     * ⚠️ 为什么必须有它 —— ⚠️ 这是 v2.0.182 的错位根因：
+     *   `glReadPixels(x0, y0, rw, rh)` **只做区域裁剪，不做缩放**。
+     *   想在 1920×1080 的 FBO 上"降采样读取"，写 `glReadPixels(0, 0, 960, 540)`
+     *   读到的其实是**屏幕左下角那 960×540 区域**（原尺寸裁剪），不是整屏缩略图。
+     *   于是：美颜只作用在左下角 1/4 区域，贴回时又把它拉伸到全屏 →
+     *   画面被放大 2 倍且效果与实际内容错位。
+     *
+     *   正确做法：先用 `GLES30.glBlitFramebuffer` 把主 FBO **真正缩放**渲染到这张
+     *   降采样 FBO（GPU 线性滤波完成缩小），再从降采样 FBO 读像素 —— 这时读到的
+     *   才是「整屏的缩略图」，坐标与视口 UV 一一对应。
+     *
+     * 本项目 EGL 上下文是 ES3（`VRGLSurfaceView` / `HuaweiVrActivity` 均
+     * `setEGLContextClientVersion(3)`），故 `glBlitFramebuffer` 可用。
+     */
+    private var gpHalfFboId = 0
+    private var gpHalfFboTexId = 0
+    private var gpHalfFboW = 0
+    private var gpHalfFboH = 0
     private var gpBlitProgram = 0
     private var gpBlitPosLoc = 0
     private var gpBlitTexLoc = 0
@@ -2295,7 +2319,87 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         if (gpFboTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpFboTexId), 0)
         if (gpFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpFboId), 0)
         gpFboTexId = 0; gpFboId = 0; gpFboW = 0; gpFboH = 0
+        releaseGpHalfFbo()    // v2.0.183：降采样 FBO 随主 FBO 一起释放
         releaseGpUploadTex()  // v2.0.182：中转纹理随 FBO 一起释放
+    }
+
+    // ===== v2.0.183：降采样 FBO（glBlitFramebuffer 真缩放，修 v2.0.182 错位） =====
+
+    /** 创建（或按尺寸重建）GPUPixel 回读用的降采样 FBO */
+    private fun ensureGpHalfFbo(w: Int, h: Int) {
+        if (gpHalfFboId != 0 && gpHalfFboW == w && gpHalfFboH == h) return
+        releaseGpHalfFbo()
+        val tex = IntArray(1)
+        val fbo = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+        )
+        // LINEAR 让 glBlitFramebuffer 的缩小走线性滤波（比 NEAREST 少锯齿）
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glGenFramebuffers(1, fbo, 0)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
+        GLES20.glFramebufferTexture2D(
+            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+            GLES20.GL_TEXTURE_2D, tex[0], 0
+        )
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        gpHalfFboTexId = tex[0]
+        gpHalfFboId = fbo[0]
+        gpHalfFboW = w
+        gpHalfFboH = h
+    }
+
+    private fun releaseGpHalfFbo() {
+        if (gpHalfFboTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpHalfFboTexId), 0)
+        if (gpHalfFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpHalfFboId), 0)
+        gpHalfFboTexId = 0; gpHalfFboId = 0; gpHalfFboW = 0; gpHalfFboH = 0
+    }
+
+    /**
+     * 把主 FBO 的 [srcUvX, srcUvY, srcUvW, srcUvH] 区域**真正缩放**渲染到 [dstW]×[dstH]
+     * 的降采样 FBO（GPU 线性滤波），随后可从降采样 FBO 读像素。
+     *
+     * 这是「降采样回读」唯一正确的实现方式 —— `glReadPixels` 只裁剪不缩放。
+     *
+     * 返回是否成功（FBO 不完整 / 尺寸非法则返回 false，调用方退回全分辨率回读）。
+     */
+    private fun blitFboToHalf(srcUvX: Float, srcUvY: Float, srcUvW: Float, srcUvH: Float,
+                              dstW: Int, dstH: Int): Boolean {
+        if (gpFboId == 0 || gpFboTexId == 0) return false
+        if (dstW <= 0 || dstH <= 0) return false
+        ensureGpHalfFbo(dstW, dstH)
+        if (gpHalfFboId == 0) return false
+
+        // 源矩形（主 FBO 像素坐标，GL 左下原点）—— 用 UV × 主 FBO 尺寸，需夹紧
+        val sx0 = (srcUvX * gpFboW).toInt().coerceIn(0, gpFboW)
+        val sy0 = (srcUvY * gpFboH).toInt().coerceIn(0, gpFboH)
+        val sx1 = ((srcUvX + srcUvW) * gpFboW).toInt().coerceIn(sx0, gpFboW)
+        val sy1 = ((srcUvY + srcUvH) * gpFboH).toInt().coerceIn(sy0, gpFboH)
+        val sw = sx1 - sx0
+        val sh = sy1 - sy0
+        if (sw <= 0 || sh <= 0) return false
+
+        GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, gpFboId)
+        GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, gpHalfFboId)
+        GLES30.glBlitFramebuffer(
+            sx0, sy0, sx1, sy1,
+            0, 0, dstW, dstH,
+            GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_LINEAR
+        )
+        val err = GLES20.glGetError()
+        GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
+        GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, 0)
+        if (err != GLES20.GL_NO_ERROR) {
+            Log.w(TAG, "glBlitFramebuffer downscale failed err=$err, fallback to full-res read")
+            return false
+        }
+        return true
     }
 
     /** 极简上屏 pass：把 FBO 纹理 1:1 画回屏幕（FBO 与屏幕同为 GL 左下原点约定，直接对应即可） */
@@ -3022,7 +3126,24 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     .order(java.nio.ByteOrder.nativeOrder())
                     .also { faceReadBuffer = it }
             buf.clear()
-            GLES20.glReadPixels(x0, y0, rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+
+            // v2.0.183：降采样回读必须先「真正缩放」再读 —— glReadPixels 只裁剪不缩放。
+            // 用 glBlitFramebuffer 把主 FBO 的 [gpReadUv*] 区域缩小渲染到降采样 FBO，
+            // 再从降采样 FBO 读（此时读到的才是整屏缩略图，坐标与视口 UV 一一对应）。
+            var readFromHalf = false
+            if (gpFullCoverageThisFrame && (rw < w || rh < h)) {
+                readFromHalf = blitFboToHalf(
+                    gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
+                )
+            }
+            val readFbo = if (readFromHalf) gpHalfFboId else gpFboId
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, readFbo)
+            GLES20.glReadPixels(
+                if (readFromHalf) 0 else x0,
+                if (readFromHalf) 0 else y0,
+                rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+            )
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             buf.rewind()
 
             // 从池里取一块装这一帧（所有权转移给后台线程，用完后归还）
