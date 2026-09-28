@@ -450,6 +450,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile private var gpRegionPending: ByteArray? = null
     private var gpRegionW = 0
     private var gpRegionH = 0
+    /** v2.0.182 性能：GPUPixel 输出拷贝复用池（单块，avoid 每帧分配） */
+    private var gpRegionPool: ByteArray? = null
+    private val gpRegionPoolLock = Any()
     private var lastSampleX0 = 0
     private var lastSampleY0 = 0
 
@@ -481,6 +484,58 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /** 检测失败时保持上次 ROI 的帧数上限（配合 faceMissStreak 的 3 次防抖） */
     private val gpRoiHoldFrames = 24
     private var gpRoiHoldCounter = 0
+
+    // ===== v2.0.182：GPUPixel 覆盖范围改为「全视频范围 / 全屏幕」=====
+    /**
+     * 回读降采样系数（v2.0.182）。
+     *
+     * 全覆盖后每帧回读量从「人脸 ROI 640×640 ≈ 1.6 MB」涨到「整屏 1920×1080 ≈ 8.3 MB」，
+     * 而 `glReadPixels` 是**同步阻塞**的（GL 线程停下等 GPU 回传），量级不可接受。
+     *
+     * 磨皮 / 美白本质是**低频效果**，在 1/2 分辨率上处理再线性上采样贴回几乎无感损失；
+     * 瘦脸 / 大眼依赖 Mars-Face 关键点定位，1/2 分辨率下人脸仍有 100+ 像素宽，精度足够。
+     * 故统一按 0.5 倍回读 —— 内存流量降到 1/4（1920×1080 → 960×540 ≈ 2.1 MB）。
+     */
+    private val gpReadDownscale = 2
+
+    /** 降采样后回读区的最小边（太小则人脸检测失效，宁可放大） */
+    private val gpReadMinSide = 128
+
+    /** 本帧是否为「全覆盖」模式（2D 全视频 或 VR 全屏）；false = 旧的人脸 ROI 模式 */
+    private var gpFullCoverageThisFrame = false
+
+    /**
+     * 是否启用「全覆盖」（v2.0.182 起默认为 true）。
+     *
+     * 用户要求：2D 覆盖全视频范围、3D/VR 覆盖全屏。保留此开关是为了在低端设备上
+     * 一键退回 v2.0.177 的「仅人脸 ROI」省电模式（未来可挂到设置项）。
+     */
+    @Volatile var gpCoverageFull = true
+
+    /**
+     * 回读区在**全分辨率视口**里覆盖的范围（UV，0~1），贴回时按它拉伸。
+     *
+     * ⚠️ 必须与 [gpLastReadW]/[gpLastReadH]（回读像素尺寸，可能已降采样）区分：
+     *   - 全覆盖：UV 覆盖 = (0,0)~(1,1)，即整个视口 → 降采样结果要拉伸回整屏；
+     *   - 人脸 ROI：UV 覆盖 = 该矩形在视口里的实际位置与占比。
+     * 若误用回读像素尺寸当目标矩形，降采样后只能填住视口左上角一小块。
+     */
+    private var gpReadUvX0 = 0f
+    private var gpReadUvY0 = 0f
+    private var gpReadUvW = 1f
+    private var gpReadUvH = 1f
+    /** 上一帧实际生效的回读区（像素，窗口坐标）—— 贴回时必须与回读一致 */
+    private var gpLastReadX0 = 0
+    private var gpLastReadY0 = 0
+    private var gpLastReadW = 0
+    private var gpLastReadH = 0
+
+    // v2.0.182：降采样结果的中转纹理（上传 → GPU 上采样拉伸贴回 FBO）
+    private var gpUploadTexId = 0
+    private var gpUploadTexW = 0
+    private var gpUploadTexH = 0
+    /** 带缩放 blit 的临时顶点缓冲（pos.xy + uv.xy × 4 顶点） */
+    private var gpScaledBlitQuad: java.nio.FloatBuffer? = null
 
     // GPUPixel 模式的离屏渲染目标（画到 FBO → 区域处理贴回 → blit 上屏）
     private var gpFboId = 0
@@ -1527,7 +1582,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val isPlanarFaceMode = projectionMode == ProjectionMode.STANDARD ||
             projectionMode == ProjectionMode.FISHEYE
         // v2.0.160：GPUPixel 的「VR 视频人脸美颜」开启时，非平面模式也采样（屏幕空间后处理）
-        if (isPlanarFaceMode || (gpActive && gpuPixelVrFaceBeauty)) maybeScheduleFaceSampling()
+        // v2.0.182：GPUPixel 激活即采样（VR 下已是全覆盖屏幕空间后处理，不再依赖那个开关）
+        if (isPlanarFaceMode || gpActive) maybeScheduleFaceSampling()
 
         // v2.0.160：GPUPixel 链路收尾 —— 把后台处理完的人脸区域写回 FBO，再将整帧 blit 到屏幕
         if (gpActive) {
@@ -2193,11 +2249,19 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      */
     // ===== v2.0.160：GPUPixel 双引擎支持 =====
 
-    /** GPUPixel 链路是否激活：总开关 + 引擎选择 + 初始化成功 +（平面模式 或 VR 人脸美颜开） */
+    /**
+     * GPUPixel 链路是否激活：总开关 + 引擎选择 + 初始化成功。
+     *
+     * v2.0.182：**VR 模式不再要求显式开启 `gpuPixelVrFaceBeauty`**。
+     * 该开关（「VR 视频人脸美颜」）原先的作用是「是否在 VR 下也做人脸 ROI 美颜」；
+     * 现在 GPUPixel 在 VR 下就是**屏幕空间全覆盖后处理**（用户要求覆盖全屏），
+     * 与投影模式无关，故去掉这个前提 —— 只要选了 GPUPixel 引擎且总开关打开就生效。
+     * 开关本身保留（用于 UI 兼容与持久化），但不再作为激活条件。
+     */
     private fun isGpuPixelActive(): Boolean {
         if (!beautyMasterEnabled || beautyEngineType != BEAUTY_ENGINE_GPUPIXEL) return false
         if (!GpuPixelBeauty.available) return false
-        return isPlanarProjection() || gpuPixelVrFaceBeauty
+        return true
     }
 
     private fun isPlanarProjection(): Boolean =
@@ -2231,6 +2295,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         if (gpFboTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpFboTexId), 0)
         if (gpFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpFboId), 0)
         gpFboTexId = 0; gpFboId = 0; gpFboW = 0; gpFboH = 0
+        releaseGpUploadTex()  // v2.0.182：中转纹理随 FBO 一起释放
     }
 
     /** 极简上屏 pass：把 FBO 纹理 1:1 画回屏幕（FBO 与屏幕同为 GL 左下原点约定，直接对应即可） */
@@ -2572,18 +2637,191 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
-    /** 把后台 GPUPixel 处理完的人脸区域像素写回 FBO 纹理（区域与回读时一致） */
+    /**
+     * 把后台 GPUPixel 处理完的像素写回 FBO 纹理（区域与回读时一致）。
+     *
+     * v2.0.182：全覆盖模式下回读是**降采样**的（如 1080p → 960×540），
+     * 而 FBO 是全分辨率（1920×1080）—— 不能再用 `glTexSubImage2D` 按同尺寸覆盖，
+     * 否则只会填住左上角一块。改为：
+     * ① 先把处理结果上传到一张**临时纹理**（尺寸 = 回读尺寸）；
+     * ② 再用 blit shader 带缩放的把这张临时纹理**拉伸铺满**回读区对应的
+     *    全分辨率区域（全覆盖时就是整个视口）。
+     *
+     * ⚠️ 这里用 `glTexSubImage2D` 到临时纹理仍然是零拷贝上传（一次 `ByteBuffer.wrap`），
+     *    真正的缩放交给 GPU 的线性采样完成，比 CPU 上采样便宜得多。
+     */
     private fun uploadPendingGpRegion() {
         val bytes = gpRegionPending ?: return
         gpRegionPending = null
-        if (gpFboTexId == 0 || gpRegionW <= 0 || gpRegionH <= 0) return
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gpFboTexId)
+        try {
+            if (gpFboTexId != 0 && gpRegionW > 0 && gpRegionH > 0) {
+                doUploadGpRegion(bytes)
+            }
+        } finally {
+            // v2.0.182 性能：用完把缓冲还池，供下一帧拷贝复用（省掉每帧 2.1 MB 分配）
+            synchronized(gpRegionPoolLock) { gpRegionPool = bytes }
+        }
+    }
+
+    private fun doUploadGpRegion(bytes: ByteArray) {
+        // 需不需要缩放贴回：回读尺寸 < 目标矩形尺寸（即降采样了）就必须走 blit 拉伸。
+        // ⚠️ 不能用「gpRegionW == gpLastReadW」判断 —— 二者恒等（回读就是该尺寸），
+        //    那样会永远走直通，把降采样结果只填在视口左上角。
+        val dstW = (gpReadUvW * gpFboW + 0.5f).toInt()
+        val dstH = (gpReadUvH * gpFboH + 0.5f).toInt()
+        val needsScale = dstW > 0 && dstH > 0 &&
+            (gpRegionW != dstW || gpRegionH != dstH)
+
+        if (!needsScale) {
+            // 1:1 直通：直接把处理结果写回 FBO 的同一区域（无人脸 ROI 缩放的旧路径）
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gpFboTexId)
+            GLES20.glTexSubImage2D(
+                GLES20.GL_TEXTURE_2D, 0, gpLastReadX0, gpLastReadY0, gpRegionW, gpRegionH,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, java.nio.ByteBuffer.wrap(bytes)
+            )
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+            return
+        }
+
+        // 缩放路径：先传到临时纹理，再拉伸贴回 FBO 的对应区域（GPU 线性上采样）
+        ensureGpUploadTex(gpRegionW, gpRegionH)
+        val uploadTex = gpUploadTexId
+        if (uploadTex == 0) return
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, uploadTex)
         GLES20.glTexSubImage2D(
-            GLES20.GL_TEXTURE_2D, 0, lastSampleX0, lastSampleY0, gpRegionW, gpRegionH,
+            GLES20.GL_TEXTURE_2D, 0, 0, 0, gpRegionW, gpRegionH,
             GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, java.nio.ByteBuffer.wrap(bytes)
         )
+
+        // 用 blit shader 把 uploadTex 拉伸画进 FBO 的回读区（全覆盖时为整张 FBO）
+        blitScaledIntoFbo(uploadTex)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
+
+    /** 降采样结果的中转纹理（尺寸 = 回读尺寸），随回读尺寸变化重建 */
+    private fun ensureGpUploadTex(w: Int, h: Int) {
+        if (gpUploadTexId != 0 && gpUploadTexW == w && gpUploadTexH == h) return
+        releaseGpUploadTex()
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        gpUploadTexId = tex[0]
+        gpUploadTexW = w
+        gpUploadTexH = h
+    }
+
+    private fun releaseGpUploadTex() {
+        if (gpUploadTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpUploadTexId), 0)
+        gpUploadTexId = 0; gpUploadTexW = 0; gpUploadTexH = 0
+    }
+
+    /**
+     * 用 blit shader 把 [srcTex] 拉伸画进 gpFbo 的「回读区对应的全分辨率矩形」。
+     *
+     * 目标矩形来自 [gpReadUvX0]/[gpReadUvY0]/[gpReadUvW]/[gpReadUvH]（UV 语义）——
+     * **不能**用回读像素尺寸 [gpLastReadW]/[gpLastReadH]，因为那是降采样后的尺寸，
+     * 当目标矩形用只会填住视口左上角一小块。
+     *
+     * 顶点：铺满目标矩形的 NDC；纹理：整张 [srcTex]（0..1）。
+     * 线性过滤让 GPU 做上采样，比 CPU 快且质量足够（磨皮/美白是低频效果）。
+     */
+    private fun blitScaledIntoFbo(srcTex: Int) {
+        if (gpBlitProgram == 0) return
+        val fw = gpFboW; val fh = gpFboH
+        if (fw <= 0 || fh <= 0) return
+        // 目标矩形：UV → 全分辨率像素 → NDC（GL 左下原点，与 UV 的 y 向上一致）
+        val x0 = gpReadUvX0 * fw
+        val y0 = gpReadUvY0 * fh
+        val x1 = (gpReadUvX0 + gpReadUvW) * fw
+        val y1 = (gpReadUvY0 + gpReadUvH) * fh
+        if (x1 <= x0 || y1 <= y0) return
+        val nx0 = x0 / fw * 2f - 1f
+        val ny0 = y0 / fh * 2f - 1f
+        val nx1 = x1 / fw * 2f - 1f
+        val ny1 = y1 / fh * 2f - 1f
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, gpFboId)
+        GLES20.glViewport(0, 0, fw, fh)
+        GLES20.glUseProgram(gpBlitProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex)
+        GLES20.glUniform1i(gpBlitTexLoc, 0)
+
+        // 临时顶点缓冲：pos.xy + uv.xy（TRIANGLE_STRIP: bl,br,tl,tr）
+        val verts = gpScaledBlitQuad
+            ?: java.nio.ByteBuffer.allocateDirect(4 * 4 * 4)
+                .order(java.nio.ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .also { gpScaledBlitQuad = it }
+        verts.clear()
+        verts.put(nx0); verts.put(ny0); verts.put(0f); verts.put(0f)
+        verts.put(nx1); verts.put(ny0); verts.put(1f); verts.put(0f)
+        verts.put(nx0); verts.put(ny1); verts.put(0f); verts.put(1f)
+        verts.put(nx1); verts.put(ny1); verts.put(1f); verts.put(1f)
+        verts.position(0)
+
+        GLES20.glVertexAttribPointer(gpBlitPosLoc, 2, GLES20.GL_FLOAT, false, 16, verts)
+        GLES20.glEnableVertexAttribArray(gpBlitPosLoc)
+        verts.position(2)
+        val texAttr = GLES20.glGetAttribLocation(gpBlitProgram, "aTex")
+        GLES20.glVertexAttribPointer(texAttr, 2, GLES20.GL_FLOAT, false, 16, verts)
+        GLES20.glEnableVertexAttribArray(texAttr)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(gpBlitPosLoc)
+        GLES20.glDisableVertexAttribArray(texAttr)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+    }
+
+    // ===== v2.0.182：GPUPixel 全覆盖回读区计算 =====
+
+    /**
+     * 计算 GPUPixel「全覆盖」模式下的回读区（窗口坐标），返回 `[x0, y0, w, h]`。
+     *
+     * 语义：**2D 覆盖全视频范围、3D/VR 覆盖全屏幕** —— 即整个 [w]×[h] 视口，
+     * 再按 [gpReadDownscale] 降采样回读。不做任何按人脸 ROI 的收窄，
+     * 因此屏幕上不会出现「只有中间一块被美颜」的矩形分界。
+     *
+     * 为什么必须 16 像素对齐：`glReadPixels` / `glTexSubImage2D` 在部分驱动上
+     * 对非对齐矩形会走慢路径（逐行拷贝），对齐后更接近整块 DMA。
+     * 同时 16 对齐也让降采样后的边界是整数，避免上采样贴回时边缘出现半像素错位。
+     */
+    private fun computeGpCoverRegion(w: Int, h: Int): IntArray {
+        // VR / 3D 投影下屏幕内容更「高频」（球面网格线、几何边缘），降采样过猛会看出软化，
+        // 故平面模式用 gpReadDownscale，非平面（VR）模式降一档（更保守）。
+        val base = gpReadDownscale.coerceAtLeast(1)
+        val d = if (isPlanarProjection()) base else (base).coerceAtMost(2)
+        // 降采样后的目标尺寸（至少 gpReadMinSide，保证人脸检测可用）
+        var rw = (w / d).coerceAtLeast(gpReadMinSide).coerceAtMost(w)
+        var rh = (h / d).coerceAtLeast(gpReadMinSide).coerceAtMost(h)
+        // 16 像素对齐（向下取整，再夹回合法范围）
+        rw = ((rw / 16) * 16).coerceIn(16, w)
+        rh = ((rh / 16) * 16).coerceIn(16, h)
+        // 覆盖整屏 → 起点为 0；若因对齐导致尺寸不足，补到能覆盖的整块
+        val x0 = 0
+        val y0 = 0
+        return intArrayOf(x0, y0, rw, rh)
+    }
+
+    /**
+     * 把「降采样回读区」的坐标换算成**全分辨率视口 UV**。
+     *
+     * 全覆盖模式下回读区虽然是降采样的，但它在视口里覆盖的范围仍是**整个视口**
+     * （即 [0,1]×[0,1] 的 UV 全域），所以 [faceCropScaleX] 必须记「1.0」而不是
+     * `rw/w` —— 否则后续把 MediaPipe 的裁剪图坐标换算回视口时会整体缩水。
+     *
+     * ⚠️ 这与 v2.0.177 的人脸 ROI 语义**相反**，是本函数存在的唯一理由：
+     *   - 人脸 ROI：回读区只覆盖视口一小块 → scale = rw/w（< 1），必须放大回全域
+     *   - 全覆盖：回读区覆盖整个视口（只是分辨率低）→ scale = 1，坐标无需换算
+     */
+    private fun gpCoverScale(): Float = 1.0f
 
     // ===== v2.0.177：GPUPixel 人脸 ROI 计算 =====
 
@@ -2696,7 +2934,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 贴回间隔自适应 = max(1 帧, 实际处理耗时)
         if (gpFullFrame && isDetectingFace.get()) return
 
-        val vpW = if (isSplitScreenVR) (displayWidth / 2) else displayWidth
+        // v2.0.182：全覆盖模式下回读区就是**整个物理屏幕**（VR 分屏也整屏，不取单眼）——
+        // 因为 GPUPixel 在此是屏幕空间后处理，且用户要求「VR 覆盖全屏」。
+        // 注意：只在 GPUPixel 全帧路径（gpFullFrame）下才用整屏；GLSL 检测路径仍用单眼
+        // （跨两眼取样会得到两张脸拼一起，MediaPipe 无法检测）。
+        val vpW = if (isSplitScreenVR && !gpFullFrame) (displayWidth / 2) else displayWidth
         val w = vpW.coerceAtLeast(1)
         val h = displayHeight.coerceAtLeast(1)
         // v2.0.172：GPUPixel 引擎把美颜作用范围从「视口中央 512×512 人脸区域」扩到
@@ -2711,24 +2953,67 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 收窄到人脸 ROI 后典型 640×640 ≈ 1.6 MB（↓80%），远景小脸可降到 384×384（↓97%）。
         // 计算复用本项目已有的人脸坐标（uFaceCenter / uEyeDistance，均为**视口 UV** 空间）
         // 与已有基础设施（faceCropScaleX/Y + mapCrop*ToViewport + uploadPendingGpRegion 局部贴回）。
+        //
+        // ===== v2.0.182：恢复「全覆盖」，但用降采样把代价压回去 =====
+        // 用户明确要求：**2D 覆盖全视频范围、3D/VR 覆盖全屏**。
+        // 直接回读整帧会回到 v2.0.177 之前的 8.3 MB/帧 → 故按 gpReadDownscale(=2) 降采样回读，
+        // 处理完再上采样贴回，内存流量 = 整帧 / 4（1920×1080 → 960×540 ≈ 2.1 MB）。
+        // 磨皮/美白是低频效果，降采样几乎无感；瘦脸/大眼在 1/2 分辨率下人脸仍 ≥100 px，定位可靠。
+        //
+        // ⚠️ 3D/VR 模式下**不再**按人脸 ROI 收窄：VR 是屏幕空间后处理，收窄会出现
+        //    「只有中间一块被美颜」的矩形分界（用户反馈的原始问题）。改为覆盖整个物理屏幕。
         val rw: Int
         val rh: Int
         val x0: Int
         val y0: Int
         if (gpFullFrame) {
-            val roi = computeGpRoi(w, h)
-            rw = roi[2]; rh = roi[3]; x0 = roi[0]; y0 = roi[1]
+            if (gpCoverageFull) {
+                // v2.0.182（默认）：全覆盖 —— 整个视口（2D 即全视频；VR 即整屏，见上方 vpW 注释）
+                val cov = computeGpCoverRegion(w, h)
+                rw = cov[2]; rh = cov[3]; x0 = cov[0]; y0 = cov[1]
+                gpFullCoverageThisFrame = true
+                // 全覆盖：回读（可能降采样）覆盖整个视口 → UV 范围就是全域
+                gpReadUvX0 = 0f; gpReadUvY0 = 0f; gpReadUvW = 1f; gpReadUvH = 1f
+            } else {
+                // 降级路径：v2.0.177 的「仅人脸 ROI」省电模式
+                val roi = computeGpRoi(w, h)
+                rw = roi[2]; rh = roi[3]; x0 = roi[0]; y0 = roi[1]
+                gpFullCoverageThisFrame = false
+                // 人脸 ROI：UV 范围 = 该矩形在视口里的实际位置与占比
+                gpReadUvX0 = x0.toFloat() / w
+                gpReadUvY0 = y0.toFloat() / h
+                gpReadUvW = rw.toFloat() / w
+                gpReadUvH = rh.toFloat() / h
+            }
         } else {
             rw = minOf(faceReadSize, w)
             rh = minOf(faceReadSize, h)
             x0 = (w - rw) / 2
             y0 = (h - rh) / 2
+            gpFullCoverageThisFrame = false
+            gpReadUvX0 = x0.toFloat() / w
+            gpReadUvY0 = y0.toFloat() / h
+            gpReadUvW = rw.toFloat() / w
+            gpReadUvH = rh.toFloat() / h
         }
-        faceCropScaleX = rw.toFloat() / w
-        faceCropScaleY = rh.toFloat() / h
+        // v2.0.182：scale 的语义分两种（这是全覆盖与人脸 ROI 的关键差异）
+        //   - 全覆盖：回读区（降采样）覆盖整个视口 → 裁剪图坐标 = 视口坐标，scale = 1
+        //   - 人脸 ROI：回读区只覆盖视口一小块 → scale = rw/w，需放大回全域
+        if (gpFullCoverageThisFrame) {
+            faceCropScaleX = gpCoverScale()
+            faceCropScaleY = gpCoverScale()
+        } else {
+            faceCropScaleX = rw.toFloat() / w
+            faceCropScaleY = rh.toFloat() / h
+        }
         // v2.0.160：记录回读区域（窗口坐标）—— GPUPixel 的处理结果要贴回同一区域
         lastSampleX0 = x0
         lastSampleY0 = y0
+        // v2.0.182：全覆盖模式还要记住回读区尺寸，贴回时按同一区域 glTexSubImage2D
+        gpLastReadX0 = x0
+        gpLastReadY0 = y0
+        gpLastReadW = rw
+        gpLastReadH = rh
 
         try {
             val need = rw * rh * 4
@@ -2786,8 +3071,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     if (out != null) {
                         gpRegionW = fw
                         gpRegionH = fh
-                        // GPUPixel 内部可能复用输出 buffer，必须拷贝出一份再交 GL 线程贴回
-                        gpRegionPending = out.copyOf()
+                        // v2.0.182 性能：GPUPixel 内部会复用它的输出 buffer，必须拷一份再交 GL 线程。
+                        // 原先用 out.copyOf() 每次都分配新数组（全覆盖下 2.1 MB/帧 → GC 压力大），
+                        // 改为「双缓冲交换」：从池里取一块可复用缓冲，拷完交出去，用过的还回池。
+                        val need = out.size
+                        val dst = synchronized(gpRegionPoolLock) {
+                            gpRegionPool?.takeIf { it.size == need }?.also { gpRegionPool = null }
+                        } ?: ByteArray(need)
+                        System.arraycopy(out, 0, dst, 0, need)
+                        gpRegionPending = dst
                     }
                     return@execute
                 }

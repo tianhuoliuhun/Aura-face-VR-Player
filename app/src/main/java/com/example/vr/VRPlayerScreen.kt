@@ -2584,6 +2584,8 @@ fun VRPlayerScreen(
                 view.renderer.beautyGpSlim = beautyGpSlim
                 view.renderer.beautyGpEyeZoom = beautyGpEyeZoom
                 view.renderer.gpuPixelVrFaceBeauty = gpuPixelVrFaceBeauty
+                // v2.0.182：GPUPixel 覆盖范围 —— 2D 全视频 / VR 全屏（用户要求）
+                view.renderer.gpCoverageFull = true
                 view.renderer.brightnessLevel = brightnessLevel
                 view.renderer.contrastLevel = contrastLevel
                 view.renderer.beautyWhitening = beautyWhitening

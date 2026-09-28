@@ -164,10 +164,18 @@ object GpuPixelBeauty {
                     FaceDetector.GPUPIXEL_FRAME_TYPE_RGBA
                 )
                 // 关键点非空才喂（官方文档也是这个条件）；多张脸的关键点由库自行处理
+                // v2.0.182：全覆盖模式下（尤其 VR 整屏 = 并排双画面）Mars-Face **可能检测失败**，
+                // 此时必须显式把美型级别归零 —— 否则 reshape 滤镜会沿用上一帧的 face_landmark，
+                // 对着一张已经移动/不存在的脸做形变，画面会出现诡异的局部扭曲。
+                // 磨皮 / 美白（上面已 SetProperty）**不依赖人脸检测**，整屏照常生效 —— 这正是
+                // 「检测失败也不会退回『只有一块被美颜』」的保证。
                 if (landmarks != null && landmarks.isNotEmpty()) {
                     reshape?.SetProperty("face_landmark", landmarks)
                     reshape?.SetProperty("thin_face", slim)
                     reshape?.SetProperty("big_eye", eyeZoom)
+                } else {
+                    reshape?.SetProperty("thin_face", 0f)
+                    reshape?.SetProperty("big_eye", 0f)
                 }
                 source?.ProcessData(
                     rgba, w, h, stride,

@@ -324,7 +324,7 @@
     <string name="beauty_engine_unavailable">GPUPixel failed to initialize; staying on the GLSL engine</string>
     <string name="beauty_gp_sharpen">Sharpen</string>
     <string name="beauty_gp_vr_face">VR face beauty</string>
-    <string name="beauty_gp_vr_face_desc">Also apply face beauty in VR / panoramic mode (heavier on performance, off by default)</string>
+    <string name="beauty_gp_vr_face_desc">Also works full-screen in VR / panoramic mode: smoothing &amp; whitening cover the whole screen; slim &amp; big-eye need a detected face (heavier on performance)</string>
     <string name="beauty_preset_custom">Custom</string>
 
     <!-- ===== batch ===== -->
