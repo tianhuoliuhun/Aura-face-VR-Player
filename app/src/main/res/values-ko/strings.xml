@@ -571,4 +571,6 @@
     <string name="toast_subtitle_generated">자막 생성 및 로드 완료: %1$s（%2$d 개）</string>
     <string name="toast_subtitle_gen_failed">자막 생성 실패: %1$s</string>
     <string name="asr_vocab_label">어휘</string>
+    <string name="beauty_gp_half_res">절반 해상도 미용 처리</string>
+    <string name="beauty_gp_half_res_desc">미용을 1/2 해상도로 처리합니다. 부하가 낮아지고 세부 묘사가 다소 부드러워집니다. 끄면 전체 해상도 처리(화질 최우선, 부하 높음). GPUPixel 엔진에서만 적용</string>
 </resources>

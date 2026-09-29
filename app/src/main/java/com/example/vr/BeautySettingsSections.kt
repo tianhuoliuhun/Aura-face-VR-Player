@@ -544,6 +544,8 @@ fun BeautyEngineSection(
     onGpEyeZoomChange: (Float) -> Unit,
     vrFace: Boolean,
     onVrFaceChange: (Boolean) -> Unit,
+    halfRes: Boolean,
+    onHalfResChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
@@ -602,6 +604,35 @@ fun BeautyEngineSection(
                 Switch(
                     checked = vrFace,
                     onCheckedChange = onVrFaceChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = accentColor
+                    )
+                )
+            }
+
+            // v2.0.187：半分辨率美颜处理 —— 见 VRGLRenderer.gpuPixelHalfResBeauty 的说明
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.beauty_gp_half_res),
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.beauty_gp_half_res_desc),
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 9.sp
+                    )
+                }
+                Switch(
+                    checked = halfRes,
+                    onCheckedChange = onHalfResChange,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = accentColor

@@ -613,4 +613,6 @@
     <string name="toast_subtitle_generated">字幕已生成並載入：%1$s（%2$d 句）</string>
     <string name="toast_subtitle_gen_failed">字幕生成失敗：%1$s</string>
     <string name="asr_vocab_label">詞表</string>
+    <string name="beauty_gp_half_res">半解析度美顏處理</string>
+    <string name="beauty_gp_half_res_desc">美顏以 1/2 解析度處理：負載較低、畫面細節略為柔化。關閉則以全解析度處理，畫質最佳但負載較高（僅 GPUPixel 引擎生效）</string>
 </resources>

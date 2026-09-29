@@ -538,6 +538,30 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * （当时 VR 被改成无条件生效），使它退化成 UI 占位；现重新纳入激活条件。
      */
     @Volatile var gpuPixelVrFaceBeauty = true
+
+    /**
+     * v2.0.187：GPUPixel 美颜是否按**半分辨率**处理（默认开）。
+     *
+     * ## 影响
+     * - **开启**（默认）：回读区固定为 1/2 尺寸，GPUPixel 的磨皮/美白/美型都在 1/2
+     *   分辨率上处理，再上采样贴回。1080p 下每帧数据量 2.07 MB（全分辨率 8.29 MB 的
+     *   1/4），实测 `gpu` 段 19~20 ms → 约 5 ms。代价是画面细节（毛孔/发丝/边缘）
+     *   略有软化 —— 磨皮美白属低频效果，观感差异通常不明显。
+     * - **关闭**：按自适应档位 [gpDownscaleNow] 回读（当前稳定在 1 档 = 全分辨率），
+     *   画质最佳，但 `gpu` 段回到 19~20 ms。
+     *
+     * ## 生效范围
+     * - 仅 **GPUPixel 引擎**（`isGpuPixelActive()`）的**全覆盖**路径。
+     * - GLSL 引擎不受影响：它的磨皮/美白本就在主 shader 里按全分辨率执行。
+     * - 若将来启用 texture 零拷贝通道（[GpuPixelBeauty.useTextureSink] = true），
+     *   处理输入由主渲染的帧缓冲直接提供，**本开关不生效**。
+     *
+     * ## 与其他参数的关系
+     * - 与自适应降采样 [updateGpAdaptiveDownscale]：本开关**开启时覆盖自适应结果**
+     *   （固定 1/2，不让检测/处理分辨率随性能档位波动）；关闭时交回自适应档位决定。
+     * - 与 [gpuPixelVrFaceBeauty]：后者决定 VR/全景下是否跑 GPUPixel，是本开关的前提。
+     */
+    @Volatile var gpuPixelHalfResBeauty = true
     // GPUPixel 处理结果（faceExecutor 产出 → GL 线程贴回 FBO）
     @Volatile private var gpRegionPending: ByteArray? = null
     // v2.0.183：后台线程写入、GL 线程读取 —— 加 @Volatile 保证可见性（配合 gpRegionPending 的 volatile 写）
@@ -3858,7 +3882,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 //    处理输入改走 texture 通道（SourceTexture 直接吃 gpFbo 的纹理，
                 //    免去每帧 8.29 MB 的 glTexImage2D 上传）。因此回读尺寸按「检测够用」
                 //    来定，用固定的 1/2 尺寸（数据量 ↓75%，Mars-Face 在 1/2 图上检测稳定）。
-                val cov = computeGpDetectRegion(w, h)
+                val cov = if (gpuPixelHalfResBeauty) {
+                    // 半分辨率处理（默认）：开销低，细节略软化
+                    computeGpDetectRegion(w, h)
+                } else {
+                    // 全分辨率处理：画质最佳，开销更大（自适应档位决定降采样比）
+                    computeGpCoverRegion(w, h)
+                }
                 rw = cov[2]; rh = cov[3]; x0 = cov[0]; y0 = cov[1]
                 gpFullCoverageThisFrame = true
                 // 检测小图覆盖整个视口 → UV 范围就是全域

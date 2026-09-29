@@ -204,6 +204,10 @@ fun VRPlayerScreen(
     var gpuPixelVrFaceBeauty by remember {
         mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_gp_vr_face", true) else true)
     }
+    // v2.0.187：GPUPixel 美颜半分辨率处理（默认开，跟随记忆模式）
+    var gpuPixelHalfResBeauty by remember {
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_gp_half_res", true) else true)
+    }
     var beautyLevel by remember {
         mutableFloatStateOf(
             if (isMemoryModeEnabled) prefs.getFloat("beauty_level", 0.65f) else 0.65f
@@ -908,6 +912,7 @@ fun VRPlayerScreen(
         beautyGpSlim,
         beautyGpEyeZoom,
         gpuPixelVrFaceBeauty,
+        gpuPixelHalfResBeauty,
         brightnessLevel,
         contrastLevel,
         beautyWhitening,
@@ -998,6 +1003,7 @@ fun VRPlayerScreen(
                 putFloat("beauty_gp_slim", beautyGpSlim)
                 putFloat("beauty_gp_eye_zoom", beautyGpEyeZoom)
                 putBoolean("beauty_gp_vr_face", gpuPixelVrFaceBeauty)
+                putBoolean("beauty_gp_half_res", gpuPixelHalfResBeauty)
                 putFloat("brightness_level", brightnessLevel)
                 putFloat("contrast_level", contrastLevel)
                 putFloat("beauty_whitening", beautyWhitening)
@@ -1076,6 +1082,7 @@ fun VRPlayerScreen(
                 remove("beauty_gp_slim")
                 remove("beauty_gp_eye_zoom")
                 remove("beauty_gp_vr_face")
+                remove("beauty_gp_half_res")
                 remove("brightness_level")
                 remove("contrast_level")
                 remove("beauty_whitening")
@@ -2597,6 +2604,7 @@ fun VRPlayerScreen(
                 view.renderer.beautyGpSlim = beautyGpSlim
                 view.renderer.beautyGpEyeZoom = beautyGpEyeZoom
                 view.renderer.gpuPixelVrFaceBeauty = gpuPixelVrFaceBeauty
+                view.renderer.gpuPixelHalfResBeauty = gpuPixelHalfResBeauty
                 // v2.0.182：GPUPixel 覆盖范围 —— 2D 全视频 / VR 全屏（用户要求）
                 view.renderer.gpCoverageFull = true
                 view.renderer.brightnessLevel = brightnessLevel
@@ -5294,7 +5302,9 @@ BatchTranscribeSection(
                                     gpEyeZoom = beautyGpEyeZoom,
                                     onGpEyeZoomChange = { beautyGpEyeZoom = it; keepUiAlight() },
                                     vrFace = gpuPixelVrFaceBeauty,
-                                    onVrFaceChange = { gpuPixelVrFaceBeauty = it; keepUiAlight() }
+                                    onVrFaceChange = { gpuPixelVrFaceBeauty = it; keepUiAlight() },
+                                    halfRes = gpuPixelHalfResBeauty,
+                                    onHalfResChange = { gpuPixelHalfResBeauty = it; keepUiAlight() }
                                 )
 
                                 // v2.0.160：GLSL 专属参数区（GPUPixel 模式下显示其自带参数区，避免混淆）

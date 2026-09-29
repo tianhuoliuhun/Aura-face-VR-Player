@@ -604,4 +604,6 @@
     <string name="toast_subtitle_generated">Subtitles generated and loaded: %1$s (%2$d cues)</string>
     <string name="toast_subtitle_gen_failed">Subtitle generation failed: %1$s</string>
     <string name="asr_vocab_label">Vocab</string>
+    <string name="beauty_gp_half_res">Half-resolution beauty</string>
+    <string name="beauty_gp_half_res_desc">Process beauty at half resolution: lower cost, slightly softer detail. Turn off for full-resolution processing (best quality, higher cost). GPUPixel engine only</string>
 </resources>
