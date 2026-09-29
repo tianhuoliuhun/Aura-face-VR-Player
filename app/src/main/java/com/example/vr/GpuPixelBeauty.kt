@@ -51,18 +51,20 @@ object GpuPixelBeauty {
     private var lastFailedMs = 0L
 
     /**
-     * v2.0.187：是否使用 **texture 输出通道**（默认开）。
+     * v2.0.187：是否使用 **texture 零拷贝通道**（输入 + 输出都走 GPU 纹理）。
      *
-     * 该通道依赖「GPUPixel 与主渲染共享 EGLContext」—— 应用侧需在 GL 线程先调用
-     * [com.pixpark.gpupixel.GPUPixel.captureSharedEglContext]。若共享未生效
-     * （驱动拒绝 / 未调用捕获），主渲染 context 里 `glIsTexture` 会返回 false，
-     * 此时应用侧会自动调用 `Pipeline.fallbackToRawDataSink()` 切回 CPU 回读，
-     * 功能不受影响，只是没有零拷贝收益。
+     * ⚠️ 2026-09-29 临时回退：MuMu 上实测「CPU 侧开销极低（gpu 0ms/rb 2ms）、帧率正常，
+     * 但体感卡顿」—— 判断问题在 **GPU 层面**（主渲染采样跨 context 的结果纹理时的隐式
+     * 同步，在 MuMu 的 houdini 转译层被放大），故先置 false 回到稳定的 raw-data 通道，
+     * 待定位后再开。置 true 即可恢复零拷贝实验通道。
      *
-     * 置 false 可强制走 raw-data 通道（对照验证 / 应急）。
+     * 依赖「GPUPixel 与主渲染共享 EGLContext」—— 应用侧需在 GL 线程先调用
+     * [com.pixpark.gpupixel.GPUPixel.captureSharedEglContext]。共享未生效时，
+     * 主渲染 context 里 `glIsTexture` 会返回 false，应用侧自动调用
+     * `Pipeline.fallbackToRawDataSink()` 切回 CPU 回读，功能不受影响。
      */
     @Volatile
-    var useTextureSink = true
+    var useTextureSink = false
 
     private var pipeline: Pipeline? = null
 
