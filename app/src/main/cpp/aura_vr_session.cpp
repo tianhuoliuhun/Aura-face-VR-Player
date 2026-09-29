@@ -496,9 +496,42 @@ bool AuraVrSession::createInstance() {
 
     r = xrCreateInstance(&createInfo, &instance_);
     if (XR_FAILED(r)) {
-        formatXrError(lastError_, sizeof(lastError_), "xrCreateInstance 失败", r);
-        AURA_LOGE("%s", lastError_);
-        return false;
+        // ===== v2.0.196：标准 loader 失败 → 自动切 legacy 重试 =====
+        // 场景：PICO Neo3 / PICO 4 等老固件的运行时与 Khronos 1.1.x loader 不匹配 ——
+        // loader 能 dlopen 成功，但 xrCreateInstance 会失败。此时自动改用
+        // libopenxr_loader_legacy.so（Khronos 1.0.34）再试一次。
+        //
+        // 不重试的两种情形：
+        //   · 当前已是 legacy loader（再试无意义）
+        //   · 当前是华为 loader（华为设备有专用运行时，不应回退标准 loader）
+        const char* curLoader = aura::AuraXrLoaderName();
+        const bool isLegacy =
+            curLoader != nullptr && std::strstr(curLoader, "legacy") != nullptr;
+        const bool isHuawei =
+            curLoader != nullptr && std::strstr(curLoader, "libxr_loader") != nullptr;
+
+        if (!isLegacy && !isHuawei) {
+            AURA_LOGW("xrCreateInstance 失败（loader=%s），尝试切换 legacy loader 重试…",
+                      curLoader ? curLoader : "?");
+            if (aura::AuraXrLoadByName("libopenxr_loader_legacy.so")) {
+                instance_ = XR_NULL_HANDLE;
+                // ⚠️ 扩展列表沿用上一次的：用的都是标准扩展
+                //    （XR_KHR_android_create_instance / XR_KHR_opengl_es_enable），跨版本兼容
+                r = xrCreateInstance(&createInfo, &instance_);
+                if (XR_SUCCEEDED(r)) {
+                    AURA_LOGI("legacy loader 重试成功（loader=%s）",
+                              aura::AuraXrLoaderName());
+                }
+            } else {
+                AURA_LOGW("legacy loader 加载失败，无法重试");
+            }
+        }
+
+        if (XR_FAILED(r)) {
+            formatXrError(lastError_, sizeof(lastError_), "xrCreateInstance 失败", r);
+            AURA_LOGE("%s", lastError_);
+            return false;
+        }
     }
 
     // v2.0.195：instance 创建成功后才可能解析 instance 相关入口（OpenXR 规定）。

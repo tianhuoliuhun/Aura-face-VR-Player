@@ -145,7 +145,7 @@
              ==================================================================== -->
         <activity
             android:name="com.example.vr.huawei.HuaweiVrActivity"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/huawei_vr_enter"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|density|uiMode"
@@ -154,6 +154,13 @@
             <intent-filter>
                 <action android:name="com.huawei.android.vr.PROMPT" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <!-- ===== 各平台 VR 启动入口（缺一个就会在该平台的 VR 库中不可见）===== -->
+                <!-- PICO（Neo3 / PICO 4 系列） -->
+                <category android:name="com.picovr.intent.category.VR" />
+                <!-- Meta Quest -->
+                <category android:name="com.oculus.intent.category.VR" />
+                <!-- Khronos OpenXR 标准（Android XR 等通用实现） -->
+                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
             </intent-filter>
             <!-- 官方 VR 应用入口 action（官方示例 HVRSDK_XrDemo 的 MainActivity 同款）。
                  部分华为 VR Runtime / VrLauncher 版本用这个 action 来识别「支持 VR 的应用」，
