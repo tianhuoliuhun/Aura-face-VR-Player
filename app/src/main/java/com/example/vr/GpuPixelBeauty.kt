@@ -7,6 +7,7 @@ import com.pixpark.gpupixel.GPUPixel
 import com.pixpark.gpupixel.GPUPixelFilter
 import com.pixpark.gpupixel.GPUPixelSinkRawData
 import com.pixpark.gpupixel.GPUPixelSinkTexture
+import com.pixpark.gpupixel.GPUPixelSourceTexture
 import com.pixpark.gpupixel.GPUPixelSourceRawData
 
 /** 美颜引擎标识（prefs 里存 Int，避免跨文件枚举依赖） */
@@ -113,6 +114,9 @@ object GpuPixelBeauty {
 
     /** 一条处理链：输入 RGBA → 磨皮/美白 → 美型（吃 landmarks）→ 输出 RGBA / texture */
     class Pipeline {
+        /** v2.0.187 阶段2：输入侧 texture 通道（替代 CPU 上传） */
+        private var sourceTexture: GPUPixelSourceTexture? = null
+        /** 回退路径：CPU 上传 + 回读（v2.0.187 之前的方式） */
         private var source: GPUPixelSourceRawData? = null
         private var beauty: GPUPixelFilter? = null
         private var reshape: GPUPixelFilter? = null
@@ -169,27 +173,36 @@ object GpuPixelBeauty {
 
         @Synchronized
         private fun ensure() {
-            if (source != null && (sink != null || sinkTexture != null)) return
-            source = GPUPixelSourceRawData.Create()
+            if ((source != null || sourceTexture != null) &&
+                (sink != null || sinkTexture != null)
+            ) {
+                return
+            }
             beauty = GPUPixelFilter.Create(GPUPixelFilter.BEAUTY_FACE_FILTER)
             reshape = GPUPixelFilter.Create(GPUPixelFilter.FACE_RESHAPE_FILTER)
-            // v2.0.164：按官方文档的链顺序 —— source → reshape → beauty → sink
-            // （官方示例里美型在美颜之前，之前接反了）
-            source?.AddSink(reshape)
-            reshape?.AddSink(beauty)
 
-            // v2.0.187：优先用 texture 输出通道（需 GPUPixel 与主渲染共享 EGLContext）。
+            // v2.0.187：优先用 texture 通道（输入 + 输出都零拷贝，需与主渲染共享 EGLContext）。
             // 是否真的生效由应用侧在主渲染 context 里用 glIsTexture 校验 —— 校验失败时
-            // 由 GL 线程调用 fallbackToRawDataSink() 切回 raw-data 通道。
+            // 由 GL 线程调用 fallbackToRawDataSink() 把整条链切回 CPU 回读 + 上传。
             textureMode = GpuPixelBeauty.useTextureSink
             if (textureMode) {
+                // ---- texture 通道：source → reshape → beauty → sink（全程不落 CPU）----
+                sourceTexture = GPUPixelSourceTexture.Create()
+                sourceTexture?.AddSink(reshape)
+                reshape?.AddSink(beauty)
                 sinkTexture = GPUPixelSinkTexture.Create()
                 beauty?.AddSink(sinkTexture)
-                Log.i(TAG, "pipeline -> SinkTexture (GPU-side output, zero-copy)")
+                Log.i(TAG, "pipeline -> [texture] SourceTexture -> ... -> SinkTexture (zero-copy)")
             } else {
+                // ---- raw-data 通道：与 v2.0.186 完全一致 ----
+                // v2.0.164：按官方文档的链顺序 —— source → reshape → beauty → sink
+                // （官方示例里美型在美颜之前，之前接反了）
+                source = GPUPixelSourceRawData.Create()
+                source?.AddSink(reshape)
+                reshape?.AddSink(beauty)
                 sink = GPUPixelSinkRawData.Create()
                 beauty?.AddSink(sink)
-                Log.i(TAG, "pipeline -> SinkRawData (CPU readback)")
+                Log.i(TAG, "pipeline -> [raw-data] SourceRawData -> ... -> SinkRawData")
             }
         }
 
@@ -203,22 +216,37 @@ object GpuPixelBeauty {
         @Synchronized
         fun fallbackToRawDataSink() {
             if (!textureMode) return
-            val t = sinkTexture
-            if (t != null) {
+            // 拆掉 texture 通道的**输出** sink
+            val st = sinkTexture
+            if (st != null) {
                 try {
-                    beauty?.RemoveSink(t)
-                    t.Destroy()
+                    beauty?.RemoveSink(st)
+                    st.Destroy()
                 } catch (e: Throwable) {
                     Log.w(TAG, "destroy SinkTexture failed", e)
                 }
                 sinkTexture = null
             }
+            // 拆掉 texture 通道的**输入** source
+            val srcT = sourceTexture
+            if (srcT != null) {
+                try {
+                    srcT.RemoveAllSinks()
+                    srcT.Destroy()
+                } catch (e: Throwable) {
+                    Log.w(TAG, "destroy SourceTexture failed", e)
+                }
+                sourceTexture = null
+            }
+            // 换成 raw-data 的 source + sink（保留已有的 reshape/beauty 滤镜实例）
+            source = GPUPixelSourceRawData.Create()
+            source?.AddSink(reshape)
             sink = GPUPixelSinkRawData.Create()
             beauty?.AddSink(sink)
             textureMode = false
             resultTextureId = 0
             resultSerial = 0L
-            Log.w(TAG, "fallback: pipeline -> SinkRawData (texture path unavailable)")
+            Log.w(TAG, "fallback: pipeline -> [raw-data] SourceRawData/SinkRawData")
         }
 
         /** 当前是否走 texture 通道（GL 线程据此决定贴回方式） */
@@ -324,6 +352,52 @@ object GpuPixelBeauty {
                 }
             } catch (e: Throwable) {
                 Log.e(TAG, "GPUPixel processFrameTexture failed", e)
+                false
+            }
+        }
+
+        /**
+         * v2.0.187 阶段2：**全零拷贝**处理 —— 输入直接用外部纹理（免 `glTexImage2D` 上传），
+         * 输出取 SinkTexture 的纹理 id（免 `glReadPixels` 回读）。
+         *
+         * 相比 [processFrameTexture]（输入仍需 CPU 上传），本方法把输入侧 8.29 MB/帧的
+         * 上传也一并省掉。
+         *
+         * ⚠️ 调用方须保证：`inputTexture` 在本次调用期间**不被改写**（用多缓冲轮转输入帧）。
+         *
+         * @param inputTexture 主渲染本帧的输入帧缓冲纹理（共享 context 下可见）
+         * @return 是否产出了新结果（true 时 [resultTextureId] / [resultSerial] 已更新）
+         */
+        fun processFrameFromTexture(
+            inputTexture: Int,
+            w: Int,
+            h: Int,
+            smooth: Float,
+            white: Float,
+            slim: Float,
+            eyeZoom: Float,
+            landmarks: FloatArray?
+        ): Boolean {
+            if (!GpuPixelBeauty.available) return false
+            return try {
+                ensure()
+                val srcTex = sourceTexture ?: return false
+                val st = sinkTexture ?: return false
+                synchronized(glLock) {
+                    applyParamsLocked(smooth, white, slim, eyeZoom, landmarks)
+                    if (!srcTex.PushTexture(inputTexture, w, h)) {
+                        return false
+                    }
+                    val tex = st.GetTextureId()
+                    if (tex == 0) {
+                        return false
+                    }
+                    resultTextureId = tex
+                    resultSerial = st.GetResultSerial()
+                    true
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "GPUPixel processFrameFromTexture failed", e)
                 false
             }
         }
@@ -461,6 +535,7 @@ object GpuPixelBeauty {
         fun release() {
             try {
                 source?.Destroy()
+                sourceTexture?.Destroy()
                 beauty?.Destroy()
                 reshape?.Destroy()
                 sink?.Destroy()
@@ -469,6 +544,7 @@ object GpuPixelBeauty {
             } catch (_: Throwable) {
             }
             source = null
+            sourceTexture = null
             beauty = null
             reshape = null
             sink = null

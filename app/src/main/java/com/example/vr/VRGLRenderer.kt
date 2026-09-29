@@ -367,6 +367,19 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var pendingFaceFrameW = 0
     private var pendingFaceFrameH = 0
 
+    // ===== v2.0.187 阶段2：texture 输入通道的待处理纹理 =====
+    /**
+     * 本帧要交给 GPUPixel 的**输入纹理**（= 当前 gpFbo 的纹理）。
+     *
+     * 阶段 2 下回读只用于人脸检测（小图），**处理**直接吃这张纹理 —— 免去每帧
+     * 8.29 MB 的 `glTexImage2D` 上传。
+     */
+    @Volatile private var pendingInputTexId = 0
+    @Volatile private var pendingInputTexW = 0
+    @Volatile private var pendingInputTexH = 0
+    /** 最近一次成功美颜结果的纹理（供「本帧无新结果」时复用，避免回落到原始帧） */
+    @Volatile private var gpLastResultTex = 0
+
     // Video frame sync flag
     private var isVideoFrameAvailable = false
 
@@ -698,6 +711,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var gpFboTexId = 0
     private var gpFboW = 0
     private var gpFboH = 0
+
+    // ===== v2.0.187 阶段2：输入帧缓冲改**双缓冲轮转** =====
+    // 引入 texture 输入通道后，GPUPixel 后台线程会直接采样 gpFbo 的纹理；若只有一张，
+    // 主渲染重绘本帧时就会覆盖它正在读的内容（撕裂）。两张轮转后：GPUPixel 读第 N 帧
+    // 那张时，主渲染已在写第 N+1 帧的另一张。
+    // 为让上层代码零改动，[gpFboTexId] / [gpFboId] 始终指向「当前帧」那张（见 switchGpFboForFrame）。
+    private var gpFboTexIdArr = IntArray(2)
+    private var gpFboIdArr = IntArray(2)
+    private var gpFboIdx = 0
 
     /**
      * v2.0.183：GPUPixel 回读用的**降采样 FBO**（尺寸 = 回读尺寸）。
@@ -1690,6 +1712,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val halfPassThisFrame = halfActive
         if (gpActive) {
             ensureGpFbo(displayWidth, displayHeight)
+            // v2.0.187 阶段2：切到本帧的输入帧缓冲（双缓冲轮转）。
+            // 必须在任何绘制之前 —— 之后的绘制代码都用 gpFboId，无需改动即作用于本帧那张。
+            switchGpFboForFrame()
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, gpFboId)
         } else if (halfActive) {
             ensureHalfPassFbos(displayWidth, displayHeight)
@@ -2542,27 +2567,40 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private fun ensureGpFbo(w: Int, h: Int) {
         if (gpFboId != 0 && gpFboW == w && gpFboH == h) return
         releaseGpFbo()
-        val tex = IntArray(1)
-        val fbo = IntArray(1)
-        GLES20.glGenTextures(1, tex, 0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glGenFramebuffers(1, fbo, 0)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
-        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, tex[0], 0)
-        // v2.0.185：校验完整性 —— 不完整时后续绘制/回读/上屏会静默失败（黑屏或残留内容）
-        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-            Log.w(TAG, "gpFbo incomplete: 0x${Integer.toHexString(status)}")
-            GLES20.glDeleteTextures(1, tex, 0)
-            GLES20.glDeleteFramebuffers(1, fbo, 0)
-            return
+        // v2.0.187 阶段2：创建**两张**并轮转（texture 输入通道下防撕裂，见字段注释）
+        val tex = IntArray(2)
+        val fbo = IntArray(2)
+        GLES20.glGenTextures(2, tex, 0)
+        GLES20.glGenFramebuffers(2, fbo, 0)
+        for (i in 0..1) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[i])
+            GLES20.glTexImage2D(
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+            )
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[i])
+            GLES20.glFramebufferTexture2D(
+                GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, tex[i], 0
+            )
+            // v2.0.185：校验完整性 —— 不完整时后续绘制/回读/上屏会静默失败（黑屏或残留内容）
+            val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+            if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                Log.w(TAG, "gpFbo[$i] incomplete: 0x${Integer.toHexString(status)}")
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+                GLES20.glDeleteTextures(2, tex, 0)
+                GLES20.glDeleteFramebuffers(2, fbo, 0)
+                return
+            }
         }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        gpFboTexIdArr = tex
+        gpFboIdArr = fbo
+        gpFboIdx = 0
         gpFboTexId = tex[0]
         gpFboId = fbo[0]
         gpFboW = w
@@ -2570,9 +2608,30 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         ensureBlitProgram()
     }
 
+    /**
+     * v2.0.187 阶段2：切到本帧要用的输入帧缓冲（双缓冲轮转）。
+     *
+     * 让 [gpFboTexId] / [gpFboId] 始终指向「当前帧」那张，从而让所有既有绘制/上屏
+     * 代码**无需改动**即可受益。
+     */
+    private fun switchGpFboForFrame() {
+        if (gpFboTexIdArr[0] == 0 || gpFboTexIdArr[1] == 0) return
+        gpFboIdx = 1 - gpFboIdx
+        gpFboTexId = gpFboTexIdArr[gpFboIdx]
+        gpFboId = gpFboIdArr[gpFboIdx]
+    }
+
+    /** 本帧输入帧缓冲是否已交出去（在途）—— 在途时禁止再次切换，避免刚投递就被覆盖 */
+    @Volatile private var gpInputTextureInFlight = 0
+
     private fun releaseGpFbo() {
-        if (gpFboTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(gpFboTexId), 0)
-        if (gpFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpFboId), 0)
+        for (i in 0..1) {
+            if (gpFboTexIdArr[i] != 0) GLES20.glDeleteTextures(1, intArrayOf(gpFboTexIdArr[i]), 0)
+            if (gpFboIdArr[i] != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(gpFboIdArr[i]), 0)
+            gpFboTexIdArr[i] = 0
+            gpFboIdArr[i] = 0
+        }
+        gpFboIdx = 0
         gpFboTexId = 0; gpFboId = 0; gpFboW = 0; gpFboH = 0
         releaseGpHalfFbo()    // v2.0.183：降采样 FBO 随主 FBO 一起释放
         releaseGpUploadTex()  // v2.0.182：中转纹理随 FBO 一起释放
@@ -2705,13 +2764,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * @return true = 已由本方法完成贴回与上屏；false = 调用方应走 raw-data 路径
      */
     private fun applyGpTextureResult(tex: Int): Boolean {
-        if (tex == 0) return false
         if (gpTextureFallbackRequested) {
             gpResultTexIdPending = 0
             return false
         }
 
-        if (gpTexturePathOk == null) {
+        if (gpTexturePathOk == null && tex != 0) {
             val visible = GLES30.glIsTexture(tex)
             gpTexturePathOk = visible
             Log.i(TAG, "GPUPixel texture path: glIsTexture($tex)=$visible (main context visibility)")
@@ -2731,27 +2789,25 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             return false
         }
 
-        // 采样该纹理并按回读区 UV 拉伸贴回 gpFbo（与 raw-data 路径同一实现）
-        blitScaledIntoFbo(tex)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        if (tex != 0) {
+            // 有新结果 → 记住它（SinkTexture 是双缓冲，本帧这张不会被下一帧覆盖）
+            gpLastResultTex = tex
+            gpResultTexIdPending = 0
+            gpTextureAppliedFrames++
 
-        // 刷新保底帧：本帧确实产生了新结果（供「无新结果」的帧复现）
-        snapshotGpResult()
-
-        // ⚠️ 顺序要点：fence 必须在「采样 tex 的命令」之后插入 —— 这样 GPUPixel 等到它
-        //    时，本帧对 tex 的采样已执行完，才不会在下一帧覆盖掉我们正在读的那张。
-        //    （双缓冲已提供基础保护，fence 是加固，用于外部消费偶发慢于生产的场景。）
-        val sync = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
-        if (sync != 0L) {
-            GpuPixelBeauty.getOrCreatePipeline().setConsumerFence(sync)
-        } else {
-            Log.w(TAG, "glFenceSync failed; consumer fence not set this frame")
+            // 回传消费端 fence：让 GPUPixel 在下一次写入前等待我们对这张的采样完成
+            val sync = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+            if (sync != 0L) {
+                GpuPixelBeauty.getOrCreatePipeline().setConsumerFence(sync)
+            }
         }
 
-        gpResultTexIdPending = 0
-        gpTextureAppliedFrames++
-
-        blitToScreen()
+        // v2.0.187 阶段2：结果纹理本身就是「整屏美颜后的画面」（输入即整张 gpFbo），
+        // 因此**直接上屏** —— 不再需要「贴回 gpFbo」那一步（那是 raw-data 通道为
+        // 「输入帧缓冲与输出目标复用同一张」而做的妥协）。
+        // 无新结果的帧复用上一张结果纹理，避免回落到未美颜的原始画面。
+        val src = if (gpLastResultTex != 0) gpLastResultTex else gpFboTexId
+        blitToScreen(src)
         return true
     }
 
@@ -3532,6 +3588,25 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 对非对齐矩形会走慢路径（逐行拷贝），对齐后更接近整块 DMA。
      * 同时 16 对齐也让降采样后的边界是整数，避免上采样贴回时边缘出现半像素错位。
      */
+    /**
+     * v2.0.187 阶段2：**检测专用**回读区 —— 固定 1/2 尺寸。
+     *
+     * 阶段 2 起回读不再服务于「处理输入」（那走 texture 零拷贝），只给人脸检测用
+     * （Mars-Face 需要 CPU 像素）。1/2 尺寸下 1080p 每帧 2.07 MB（原 8.29 MB，↓75%），
+     * 且 Mars-Face 在 960×540 上检测稳定。
+     *
+     * 与 [computeGpCoverRegion] 的区别：后者按自适应档位决定清晰度；这里固定 1/2，
+     * **不受自适应影响** —— 检测精度不应随性能档位波动。
+     */
+    private fun computeGpDetectRegion(w: Int, h: Int): IntArray {
+        val d = 2
+        var rw = (w / d).coerceAtLeast(gpReadMinSide).coerceAtMost(w)
+        var rh = (h / d).coerceAtLeast(gpReadMinSide).coerceAtMost(h)
+        rw = ((rw / 16) * 16).coerceIn(16, w)
+        rh = ((rh / 16) * 16).coerceIn(16, h)
+        return intArrayOf(0, 0, rw, rh)
+    }
+
     private fun computeGpCoverRegion(w: Int, h: Int): IntArray {
         // VR / 3D 投影下屏幕内容更「高频」（球面网格线、几何边缘），降采样过猛会看出软化，
         // 故平面模式用 gpReadDownscale，非平面（VR）模式降一档（更保守）。
@@ -3778,10 +3853,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         if (gpFullFrame) {
             if (gpCoverageFull) {
                 // v2.0.182（默认）：全覆盖 —— 整个视口（2D 即全视频；VR 即整屏，见上方 vpW 注释）
-                val cov = computeGpCoverRegion(w, h)
+                //
+                // ⚠️ v2.0.187 阶段2：这里的回读**只用于人脸检测**了 ——
+                //    处理输入改走 texture 通道（SourceTexture 直接吃 gpFbo 的纹理，
+                //    免去每帧 8.29 MB 的 glTexImage2D 上传）。因此回读尺寸按「检测够用」
+                //    来定，用固定的 1/2 尺寸（数据量 ↓75%，Mars-Face 在 1/2 图上检测稳定）。
+                val cov = computeGpDetectRegion(w, h)
                 rw = cov[2]; rh = cov[3]; x0 = cov[0]; y0 = cov[1]
                 gpFullCoverageThisFrame = true
-                // 全覆盖：回读（可能降采样）覆盖整个视口 → UV 范围就是全域
+                // 检测小图覆盖整个视口 → UV 范围就是全域
                 gpReadUvX0 = 0f; gpReadUvY0 = 0f; gpReadUvW = 1f; gpReadUvH = 1f
             } else {
                 // 降级路径：v2.0.177 的「仅人脸 ROI」省电模式
@@ -3823,6 +3903,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         gpLastReadY0 = y0
         gpLastReadW = rw
         gpLastReadH = rh
+
+        // v2.0.187 阶段2：记录本帧要交给 GPUPixel 的**输入纹理**（= 当前 gpFbo）。
+        // 后台线程用它走零拷贝输入通道，替代「回读的像素再上传」。
+        // 仅在 texture 通道可用时才有意义；raw-data 路径会忽略它。
+        if (gpFullFrame && !gpTextureFallbackRequested) {
+            pendingInputTexId = gpFboTexId
+            pendingInputTexW = gpFboW
+            pendingInputTexH = gpFboH
+        }
 
         try {
             val need = rw * rh * 4
@@ -4012,12 +4101,25 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     val useTexChannel =
                         GpuPixelBeauty.useTextureSink && !gpTextureFallbackRequested
                     if (useTexChannel) {
-                        // ---- texture 通道：结果留在 GPU，只回传一个 texture id ----
-                        val ok = pipeline.processFrameTexture(
-                            rgbaData, fw, fh, stride,
-                            beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
-                            gpCachedLandmarks
-                        )
+                        // ---- 全零拷贝通道 ----
+                        // 输入：直接吃 gpFbo 的纹理（免去每帧 8.29 MB 的 glTexImage2D 上传）
+                        // 输出：SinkTexture 暴露的纹理 id（免去 glReadPixels 回读 + JNI 拷贝）
+                        val inTex = pendingInputTexId
+                        val ok = if (inTex != 0) {
+                            pipeline.processFrameFromTexture(
+                                inTex, pendingInputTexW, pendingInputTexH,
+                                beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                                gpCachedLandmarks
+                            )
+                        } else {
+                            // 罕见：本帧没有可用的输入纹理（启动瞬间 / 尺寸未就绪）
+                            // → 退回 CPU 上传路径，保证仍有结果产出
+                            pipeline.processFrameTexture(
+                                rgbaData, fw, fh, stride,
+                                beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                                gpCachedLandmarks
+                            )
+                        }
                         if (ok) {
                             gpResultTexIdPending = pipeline.resultTextureId
                         }
