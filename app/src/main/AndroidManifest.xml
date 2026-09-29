@@ -33,12 +33,36 @@
     <uses-permission android:name="com.huawei.android.permission.VR" />
     <uses-permission android:name="com.huawei.vrhandle.permission.DEVICE_MANAGER" />
 
+    <!-- ===== PICO（Neo3 / PICO 4 系列）兼容声明 =====
+         PICO 与华为都走 Android OpenXR，但各自使用**厂商定制的 loader**：
+           华为：libxr_loader.so       （来自 huawei.vr.sdk.dir）
+           PICO：libopenxr_loader.so   （来自 PICO OpenXR SDK，同样不入仓）
+         下面这些声明对非 PICO 设备**无副作用**（未知 permission / metadata 仅被忽略），
+         可与华为的声明共存。
+
+         ⚠️ PICO 的 VR 启动入口（category com.picovr.intent.category.VR）**暂不加**：
+            在 PICO 的 loader 接入之前加上，会让 PICO 把应用当 VR 应用启动、随后
+            因找不到 loader 而失败 —— 比「不出现 VR 库」更糟。等 loader 就绪后再开启。
+         ==================================================================== -->
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <!-- OpenXR 标准：标记为支持 VR 头显（required=false 保证普通 Android 设备不受影响） -->
+    <uses-feature
+        android:name="android.hardware.vr.headtracking"
+        android:version="1"
+        android:required="false" />
+    <uses-feature android:name="oculus.software.handtracking" android:required="false" />
+
     <!-- API 30+ 包可见性：不声明则查不到华为 VR 运行时 -->
     <queries>
         <package android:name="com.huawei.vrhandle" />
         <package android:name="com.huawei.hvrsdkserverapp" />
         <intent>
             <action android:name="com.huawei.android.vr.PROMPT" />
+        <!-- PICO / 标准 OpenXR：运行时服务发现（API 30+ 包可见性要求） -->
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+        </intent>
         </intent>
     </queries>
 
@@ -55,6 +79,28 @@
         android:theme="@style/Theme.MyApplication">
 
         <!-- v107：统计由 Firebase Analytics 提供（google-services.json 配置，见 FIREBASE_ANALYTICS.md） -->
+
+        <!-- ===== Meta Quest 应用声明 =====
+             Quest 与 PICO / 华为一样走 Android OpenXR。三者的差异在 **loader 来源**：
+               华为：libxr_loader.so        （华为 SDK 定制）
+               PICO：libopenxr_loader.so    （PICO SDK 定制）
+               Quest：libopenxr_loader.so   （**Khronos 标准 loader** —— Meta 设备的
+                      OpenXR 运行时由系统自带，应用侧用标准 loader 即可对接）
+             以下声明对非 Quest 设备无副作用。
+
+             ⚠️ 与 PICO 同理，VR 启动入口（category com.oculus.intent.category.VR）
+                暂不加：loader 未接入前加上会让 Quest 把应用当 VR 应用启动随后失败。
+                等标准 loader 就绪后再与 PICO 一并开启。 -->
+        <meta-data android:name="com.oculus.supportedDevices" android:value="all" />
+        <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+
+        <!-- ===== PICO VR 应用声明（PICO 官方 OpenXR 接入要求）=====
+             对非 PICO 设备无副作用。
+             pvr.sdk.version=OpenXR 表示走 OpenXR 路线（而非 PICO 旧的私有 PVRSDK），
+             pxr.sdk.version_code 为 PICO OpenXR SDK 版本号。 -->
+        <meta-data android:name="pvr.app.type" android:value="vr" />
+        <meta-data android:name="pvr.sdk.version" android:value="OpenXR" />
+        <meta-data android:name="pxr.sdk.version_code" android:value="5900" />
 
         <activity
             android:name=".MainActivity"
