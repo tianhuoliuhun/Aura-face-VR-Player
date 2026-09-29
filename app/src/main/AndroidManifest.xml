@@ -16,10 +16,11 @@
                 普通设备（只要能提供 3.x 上下文）依然可以安装，不影响现有用户。
            · 权限：com.huawei.android.permission.VR
                   com.huawei.vrhandle.permission.DEVICE_MANAGER
-         ⚠️ `com.huawei.android.vr.application.mode=vr_only` 与
-            `sensor.mode=mobile`（调试项）**暂不启用**：
-            前者会改变应用启动行为（有回归风险），后者正式包必须删。
-            两者等真机 P0 验证通过后再逐个打开。
+         ⚠️ v2.0.198 更新：`com.huawei.android.vr.application.mode=vr_only` **已启用**
+            （见下方 application 内的 metadata）。此前因「怕影响 2D 启动行为」而保守搁置，
+            但华为官方《申请应用适配华为 VR Glass 上架流程》明确说明：**缺它则 VRLauncher
+            不识别本应用**，插上 VR Glass 后在「华为 VR」内容库里看不到 —— 是必需项而非可选项。
+            `sensor.mode=mobile` 仍**不启用**（那是调试期临时项，正式包必须无）。
          ⚠️ XML 注释内不能出现连续的双连字符，所以本文件的分隔线只用「=」。
             曾因用了连字符分隔线导致 ManifestMerger 报 not well-formed。
          ======================================================================== -->
@@ -57,6 +58,10 @@
     <queries>
         <package android:name="com.huawei.vrhandle" />
         <package android:name="com.huawei.hvrsdkserverapp" />
+        <!-- targetSdk>=30 时不声明则搜不到手柄服务（官方规范明确列出） -->
+        <intent>
+            <action android:name="com.huawei.vrhandle.service.vrdeviceservice" />
+        </intent>
         <intent>
             <action android:name="com.huawei.android.vr.PROMPT" />
         </intent>
@@ -93,6 +98,19 @@
                 等标准 loader 就绪后再与 PICO 一并开启。 -->
         <meta-data android:name="com.oculus.supportedDevices" android:value="all" />
         <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+
+        <!-- ===== 华为 VR Glass 应用声明（官方 Manifest 规范）=====
+             ⚠️ application.mode=vr_only 是 **VRLauncher 识别本应用的核心** ——
+                缺它则插上 VR Glass 后在「华为 VR」内容库里看不到本应用。
+             type=video 影响温控策略（播放器选 video；游戏才选 game）。
+             freeDegree=3dof：本应用是播放器，不需要 6DoF 空间定位。
+             max_aspect 为华为 VR 要求的值。
+             ⚠️ 不要加 com.huawei.android.vr.sensor.mode=mobile ——
+                那是调试期让眼镜用手机陀螺仪的临时项，正式包必须删除。 -->
+        <meta-data android:name="com.huawei.android.vr.application.mode" android:value="vr_only" />
+        <meta-data android:name="com.huawei.android.vr.application.type" android:value="video" />
+        <meta-data android:name="com.huawei.vr.application.freeDegree" android:value="3dof" />
+        <meta-data android:name="android.max_aspect" android:value="2.1" />
 
         <!-- ===== PICO VR 应用声明（PICO 官方 OpenXR 接入要求）=====
              对非 PICO 设备无副作用。
@@ -168,6 +186,15 @@
             <intent-filter>
                 <action android:name="com.huawei.android.vr.action.MAIN" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <!-- 调试期：让图标出现在**手机桌面**（点图标即可启动）。
+                 官方公告：HarmonyOS 3.0 起若不显式声明 LAUNCHER，
+                 应用只在「华为 VR - 内容库」里显示，手机桌面看不到。
+                 正式发布时若不想暴露手机桌面图标，可移除本 intent-filter。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
