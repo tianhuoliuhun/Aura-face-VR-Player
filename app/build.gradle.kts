@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 192
-    versionName = "2.0.192"
+    versionCode = 193
+    versionName = "2.0.193"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -311,6 +311,16 @@ dependencies {
 
   // v110：sherpa-onnx 离线 ASR（Qwen3-ASR 等，29 语言 + 20 种中文方言）
   implementation(files("libs/sherpa-onnx-1.13.6.aar"))
+
+  // ===== Khronos 标准 OpenXR loader（Android AAR）=====
+  // 用途：给 PICO / Meta Quest 提供 OpenXR loader。它们与华为同为 Android OpenXR，
+  // 差异只在 loader 来源：
+  //   华为：libxr_loader.so（华为 SDK 定制，已接入）
+  //   PICO / Quest：libopenxr_loader.so（**Khronos 标准 loader**）
+  // ⚠️ Meta 设备的 OpenXR 运行时由**系统自带**；PICO（4 Ultra / 新固件）亦兼容标准
+  //    loader。若需支持 PICO Neo3 / 老固件（ALVR 实测需 1.0.34 legacy），
+  //    改用 1.0.34 或引入 PICO 官方 SDK 的 loader（同名 .so，只能二选一）。
+  implementation("org.khronos.openxr:openxr_loader_for_android:1.1.63")
   // tar.bz2 模型解压支持（sherpa-onnx 模型打包格式）
   implementation("org.apache.commons:commons-compress:1.27.1")
   testImplementation(libs.androidx.compose.ui.test.junit4)
