@@ -266,3 +266,61 @@ HuaweiVrActivity
    若不接受，需要改用「手柄姿态相对头部的偏角」来生成射线（更接近直觉，但华为手柄
    姿态数据是否足够稳定需真机验证）。
 3. **触摸板是否可用**：决定兜底操作链路的丰富程度（需真机确认 profile path）。
+
+---
+
+## 14. 参考同类产品：JellyQuest（Quest 上的 Jellyfin 影院应用）
+
+仓库：`https://github.com/JoeCotellese/JellyQuest`（Meta Spatial SDK + Kotlin + ExoPlayer）
+它解决的正是同一类问题（在 VR 里播媒体库），以下几个设计**值得直接借鉴**：
+
+### 14.1 Quick Connect —— 免打字登录（印证了「手机输入」路线）
+JellyQuest 用 Jellyfin 的 Quick Connect：**在手机/电脑上授权，VR 里不用输入任何文字**。
+这与本文 §12 提出的「手机输入优先、VR 键盘兜底」**思路完全一致**，且被成熟产品验证。
+**对我们的启示**：与其做 VR 键盘，不如优先做「手机扫码 / 局域网配对」类输入通道；
+VR 键盘降级为最后兜底。
+
+### 14.2 影院预设 + 座位位置（影院模式的成熟形态）
+JellyQuest 提供 4 种影院（Screening Room / Multiplex / PLF / IMAX）× 3 个座位（前/中/后），
+银幕尺寸从 32" 到 22m —— 本质是「**银幕尺寸 + 距离**」的组合预设。
+**对我们的启示**：§5 的「影院模式」不应只有一种，而应做**预设列表**
+（如：手机屏 / 电视 / 小影院 / IMAX × 前/中/后排），用户点一下就切。
+实现上只是改投影面的宽度和距离两个数，成本低、体验收益大。
+
+### 14.3 CylinderLayer —— 曲面层渲染（⭐ 最有价值的一条）
+JellyQuest 用 **CylinderLayer** 播放视频：视频画在一块**弯曲的曲面层**上，
+由**合成器（compositor）直接合成**，不走应用 GL —— 获得原生级画质且零合成开销。
+OpenXR 对应扩展：**`XR_KHR_composition_layer_cylinder`**。
+**对我们的启示（若华为 Runtime 支持）**：
+- 视频不再画进 swapchain 纹理再上屏，而是交给合成器的曲面层
+- **清晰度更好**（绕过一次采样）、**GPU 负担更低**、抗畸变更好
+- ⚠️ 前置：需真机确认华为 Runtime 是否支持该扩展（`xrEnumerateInstanceExtensionProperties` 可查）
+- ⚠️ 与本方案的关系：现有 GL 渲染路径保留为兜底；cylinder layer 作为增强路径
+
+### 14.4 Compose 画 UI → 贴成 VR 纹理（⭐ 解决我们「native 无字体」的困境）
+JellyQuest 的库浏览/影院选择面板全是 **Compose**，通过 Meta Spatial SDK 的 Panel
+机制把 Compose 内容**渲染成纹理贴进 VR**。
+Meta 的 Panel 是专有的，但**思路是通用的**：
+- 用 Android **Canvas / Compose 画到一个 `SurfaceTexture`**（离屏）
+- 该纹理作为普通 GL 纹理，贴在 VR 里的 UI 平面上（我们现成的 quad 绘制路径）
+**对我们的启示**：
+- 控制条/菜单/字幕可以**用 Compose/Canvas 画**——中文、复杂 UI 全都解决，
+  **不需要 FreeType**，也和 2D 侧的 UI 代码风格统一
+- 实现代价：一条「Canvas → SurfaceTexture → GL 纹理 → quad」的通路
+  （我们已有 SurfaceTexture 通路，复用度高）
+- ⚠️ 注意每帧重绘的成本：UI 变化时才重绘纹理，静止帧直接复用
+
+### 14.5 控制器按键映射对照
+JellyQuest：X=切库浏览、A=切影院、B=播放暂停、Trigger=确认。
+**对我们的启示**：华为手柄没有多按键（只有 select + 触摸板），
+「一键多义 + 时序」是我们已有的方案，无需照搬其按键布局。
+
+### 14.6 结论
+| JellyQuest 的做法 | 我们怎么做 |
+|---|---|
+| Quick Connect 免打字 | 手机输入/配对优先，VR 键盘兜底 |
+| 影院预设 × 座位 | 影院模式做预设列表（银幕尺寸+距离） |
+| CylinderLayer 视频渲染 | 查华为是否支持 `XR_KHR_composition_layer_cylinder`，支持则做增强路径 |
+| Compose Panel 画 UI | **Canvas→SurfaceTexture→GL quad**：解决中文字体问题，推荐采纳 |
+| 多按键手柄 | 不适用（华为只有 select+触摸板），保持时序方案 |
+
