@@ -6,6 +6,7 @@ import com.pixpark.gpupixel.FaceDetector
 import com.pixpark.gpupixel.GPUPixel
 import com.pixpark.gpupixel.GPUPixelFilter
 import com.pixpark.gpupixel.GPUPixelSinkRawData
+import com.pixpark.gpupixel.GPUPixelSinkTexture
 import com.pixpark.gpupixel.GPUPixelSourceRawData
 
 /** 美颜引擎标识（prefs 里存 Int，避免跨文件枚举依赖） */
@@ -47,6 +48,20 @@ object GpuPixelBeauty {
     /** 上次 init 失败的时刻（自动重试的 60s 冷却；UI 主动点击可跳过） */
     @Volatile
     private var lastFailedMs = 0L
+
+    /**
+     * v2.0.187：是否使用 **texture 输出通道**（默认开）。
+     *
+     * 该通道依赖「GPUPixel 与主渲染共享 EGLContext」—— 应用侧需在 GL 线程先调用
+     * [com.pixpark.gpupixel.GPUPixel.captureSharedEglContext]。若共享未生效
+     * （驱动拒绝 / 未调用捕获），主渲染 context 里 `glIsTexture` 会返回 false，
+     * 此时应用侧会自动调用 `Pipeline.fallbackToRawDataSink()` 切回 CPU 回读，
+     * 功能不受影响，只是没有零拷贝收益。
+     *
+     * 置 false 可强制走 raw-data 通道（对照验证 / 应急）。
+     */
+    @Volatile
+    var useTextureSink = true
 
     private var pipeline: Pipeline? = null
 
@@ -96,13 +111,28 @@ object GpuPixelBeauty {
         pipeline = null
     }
 
-    /** 一条处理链：输入 RGBA → 磨皮/美白 → 美型（吃 landmarks）→ 输出 RGBA */
+    /** 一条处理链：输入 RGBA → 磨皮/美白 → 美型（吃 landmarks）→ 输出 RGBA / texture */
     class Pipeline {
         private var source: GPUPixelSourceRawData? = null
         private var beauty: GPUPixelFilter? = null
         private var reshape: GPUPixelFilter? = null
+        /** 回退路径：CPU 回读（v2.0.187 之前的唯一方式） */
         private var sink: GPUPixelSinkRawData? = null
+        /** v2.0.187：texture 输出通道 —— 结果留在 GPU 上，供共享 context 的主渲染直接采样 */
+        private var sinkTexture: GPUPixelSinkTexture? = null
         private var detector: FaceDetector? = null
+
+        /** 本次链是否走 texture 通道（false = raw-data 通道） */
+        @Volatile private var textureMode = false
+
+        /**
+         * texture 通道的结果（faceExecutor 写、GL 线程读）。
+         *
+         * 与 [gpRegionPending] 的语义对应：`resultSerial` 变化即表示「产生了新结果」，
+         * 正是 v2.0.185 保底帧机制所需的那个判据。
+         */
+        @Volatile var resultTextureId = 0
+        @Volatile var resultSerial = 0L
 
         // ===== v2.0.186（P0-B）：检测与 GL 处理分离，支持两线程并行 =====
         /**
@@ -139,16 +169,163 @@ object GpuPixelBeauty {
 
         @Synchronized
         private fun ensure() {
-            if (source != null && sink != null) return
+            if (source != null && (sink != null || sinkTexture != null)) return
             source = GPUPixelSourceRawData.Create()
             beauty = GPUPixelFilter.Create(GPUPixelFilter.BEAUTY_FACE_FILTER)
             reshape = GPUPixelFilter.Create(GPUPixelFilter.FACE_RESHAPE_FILTER)
-            sink = GPUPixelSinkRawData.Create()
             // v2.0.164：按官方文档的链顺序 —— source → reshape → beauty → sink
             // （官方示例里美型在美颜之前，之前接反了）
             source?.AddSink(reshape)
             reshape?.AddSink(beauty)
+
+            // v2.0.187：优先用 texture 输出通道（需 GPUPixel 与主渲染共享 EGLContext）。
+            // 是否真的生效由应用侧在主渲染 context 里用 glIsTexture 校验 —— 校验失败时
+            // 由 GL 线程调用 fallbackToRawDataSink() 切回 raw-data 通道。
+            textureMode = GpuPixelBeauty.useTextureSink
+            if (textureMode) {
+                sinkTexture = GPUPixelSinkTexture.Create()
+                beauty?.AddSink(sinkTexture)
+                Log.i(TAG, "pipeline -> SinkTexture (GPU-side output, zero-copy)")
+            } else {
+                sink = GPUPixelSinkRawData.Create()
+                beauty?.AddSink(sink)
+                Log.i(TAG, "pipeline -> SinkRawData (CPU readback)")
+            }
+        }
+
+        /**
+         * v2.0.187：切回 raw-data 通道。
+         *
+         * 触发条件：GL 线程检测到 `glIsTexture(resultTextureId)` 为 false —— 说明
+         * GPUPixel 并未真正与主渲染共享 context（共享创建失败已回退私有 context，
+         * 或驱动拒绝），此时 texture id 对外部不可见，必须切回 CPU 回读。
+         */
+        @Synchronized
+        fun fallbackToRawDataSink() {
+            if (!textureMode) return
+            val t = sinkTexture
+            if (t != null) {
+                try {
+                    beauty?.RemoveSink(t)
+                    t.Destroy()
+                } catch (e: Throwable) {
+                    Log.w(TAG, "destroy SinkTexture failed", e)
+                }
+                sinkTexture = null
+            }
+            sink = GPUPixelSinkRawData.Create()
             beauty?.AddSink(sink)
+            textureMode = false
+            resultTextureId = 0
+            resultSerial = 0L
+            Log.w(TAG, "fallback: pipeline -> SinkRawData (texture path unavailable)")
+        }
+
+        /** 当前是否走 texture 通道（GL 线程据此决定贴回方式） */
+        fun isTextureMode(): Boolean = textureMode
+
+        /** 是否已产出过可用的结果 texture */
+        fun hasTextureResult(): Boolean = resultTextureId != 0
+
+        /**
+         * v2.0.187：把「外部已消费完当前结果」的 fence 回传给 SinkTexture，
+         * 使其在下一次写入前等待 —— 防止覆盖主渲染正在采样的那张。
+         *
+         * @param fence 由**主渲染 context** 创建的 GLsync 句柄；0 表示清除
+         */
+        fun setConsumerFence(fence: Long) {
+            sinkTexture?.SetConsumerFence(fence)
+        }
+
+        /** fence 等待失败次数（诊断） */
+        fun getFenceWaitFailures(): Int = sinkTexture?.GetFenceWaitFailures() ?: 0
+
+        /**
+         * 下发美颜/美型参数（**必须先持有 [glLock]**）。
+         *
+         * 抽成独立方法是为了让 [processFrame]（raw-data）与 [processFrameTexture]
+         * 共用同一套参数语义，避免两处实现漂移。
+         */
+        private fun applyParamsLocked(
+            smooth: Float,
+            white: Float,
+            slim: Float,
+            eyeZoom: Float,
+            landmarks: FloatArray?
+        ) {
+            // v2.0.186（P2-E2）：值变了才设 —— 稳态下（滑条不动）这几行全部跳过
+            val b = beauty
+            if (smooth != lastSmooth) {
+                b?.SetProperty("skin_smoothing", smooth); lastSmooth = smooth
+            }
+            if (white != lastWhite) {
+                b?.SetProperty("whiteness", white); lastWhite = white
+            }
+            // 美型：landmark 引用未变则不重复下发（检测降频时会连续几帧同引用）
+            val hasFace = landmarks != null && landmarks.isNotEmpty()
+            val r = reshape
+            if (hasFace) {
+                val lm = landmarks!!
+                if (lm !== lastLandmarks) {
+                    r?.SetProperty("face_landmark", lm)
+                    lastLandmarks = lm
+                }
+                if (slim != lastSlim) {
+                    r?.SetProperty("thin_face", slim); lastSlim = slim
+                }
+                if (eyeZoom != lastEye) {
+                    r?.SetProperty("big_eye", eyeZoom); lastEye = eyeZoom
+                }
+            } else if (lastHasFace != false) {
+                // v2.0.182：检测失败必须显式归零，否则 reshape 会沿用上一帧的
+                // landmarks 对已不存在的脸做形变（画面出现诡异局部扭曲）
+                r?.SetProperty("thin_face", 0f)
+                r?.SetProperty("big_eye", 0f)
+                lastSlim = 0f; lastEye = 0f
+                lastLandmarks = null
+            }
+            lastHasFace = hasFace
+        }
+
+        /**
+         * v2.0.187：**texture 输出通道**的处理 —— 与 [processFrame] 完全同构，
+         * 只是结果不落 CPU，而是取 SinkTexture 暴露的 texture id。
+         *
+         * @return 是否产出了新结果（true 时 [resultTextureId] / [resultSerial] 已更新）
+         */
+        fun processFrameTexture(
+            rgba: ByteArray,
+            w: Int,
+            h: Int,
+            stride: Int,
+            smooth: Float,
+            white: Float,
+            slim: Float,
+            eyeZoom: Float,
+            landmarks: FloatArray?
+        ): Boolean {
+            if (!GpuPixelBeauty.available) return false
+            return try {
+                ensure()
+                val st = sinkTexture ?: return false
+                synchronized(glLock) {
+                    applyParamsLocked(smooth, white, slim, eyeZoom, landmarks)
+                    source?.ProcessData(
+                        rgba, w, h, stride,
+                        GPUPixelSourceRawData.FRAME_TYPE_RGBA
+                    )
+                    val tex = st.GetTextureId()
+                    if (tex == 0) {
+                        return false
+                    }
+                    resultTextureId = tex
+                    resultSerial = st.GetResultSerial()
+                    true
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "GPUPixel processFrameTexture failed", e)
+                false
+            }
         }
 
         /**
@@ -248,39 +425,8 @@ object GpuPixelBeauty {
             return try {
                 ensure()
                 synchronized(glLock) {
-                    // v2.0.186（P2-E2）：值变了才设 —— 稳态下（滑条不动）这几行全部跳过
-                    val b = beauty
-                    if (smooth != lastSmooth) {
-                        b?.SetProperty("skin_smoothing", smooth); lastSmooth = smooth
-                    }
-                    if (white != lastWhite) {
-                        b?.SetProperty("whiteness", white); lastWhite = white
-                    }
-                    // 美型：landmark 引用未变则不重复下发（检测降频时会连续几帧同引用）
-                    val hasFace = landmarks != null && landmarks.isNotEmpty()
-                    val r = reshape
-                    if (hasFace) {
-                        val lm = landmarks!!
-                        if (lm !== lastLandmarks) {
-                            r?.SetProperty("face_landmark", lm)
-                            lastLandmarks = lm
-                        }
-                        if (slim != lastSlim) {
-                            r?.SetProperty("thin_face", slim); lastSlim = slim
-                        }
-                        if (eyeZoom != lastEye) {
-                            r?.SetProperty("big_eye", eyeZoom); lastEye = eyeZoom
-                        }
-                    } else if (lastHasFace != false) {
-                        // v2.0.182：检测失败必须显式归零，否则 reshape 会沿用上一帧的
-                        // landmarks 对已不存在的脸做形变（画面出现诡异局部扭曲）
-                        r?.SetProperty("thin_face", 0f)
-                        r?.SetProperty("big_eye", 0f)
-                        lastSlim = 0f; lastEye = 0f
-                        lastLandmarks = null
-                    }
-                    lastHasFace = hasFace
-
+                    // 参数下发与 texture 通道共用（避免两处实现漂移）
+                    applyParamsLocked(smooth, white, slim, eyeZoom, landmarks)
                     source?.ProcessData(
                         rgba, w, h, stride,
                         GPUPixelSourceRawData.FRAME_TYPE_RGBA
@@ -318,6 +464,7 @@ object GpuPixelBeauty {
                 beauty?.Destroy()
                 reshape?.Destroy()
                 sink?.Destroy()
+                sinkTexture?.Destroy()
                 detector?.destroy()
             } catch (_: Throwable) {
             }
@@ -325,6 +472,10 @@ object GpuPixelBeauty {
             beauty = null
             reshape = null
             sink = null
+            sinkTexture = null
+            textureMode = false
+            resultTextureId = 0
+            resultSerial = 0L
             detector = null
             // v2.0.186：清空属性/平滑缓存，避免下次创建时沿用旧值导致「跳过首次下发」
             lastSmooth = Float.NaN; lastWhite = Float.NaN

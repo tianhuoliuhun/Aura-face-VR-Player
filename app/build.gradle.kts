@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 186
-    versionName = "2.0.186"
+    versionCode = 187
+    versionName = "2.0.187"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -97,7 +97,13 @@ android {
           // 把 SDK 路径与「已接入」宏传进 CMake
           arguments += listOf(
             "-DHUAWEI_VR_SDK_DIR=$huaweiVrSdkDir",
-            "-DAURA_HAVE_OPENXR=1"
+            "-DAURA_HAVE_OPENXR=1",
+            // v2.0.187：本地 fork 的 GPUPixel（submodule，源码级集成）。
+            // 由 CMake 侧 add_subdirectory 编译出 libgpupixel.so，并复用 fork 内
+            // 预编译的 libmars-face-kit.so —— 取代原先的 libs/gpupixel-release.aar。
+            // 目的：接入 fork 的 texture 通道（共享 EGLContext + SinkTexture），
+            // 免去每帧「回读→上传」的跨界搬运。详见 GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md
+            "-DGPUPIXEL_FORK_DIR=" + rootProject.file("third_party/gpupixel").absolutePath
           )
           cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti")
         }
@@ -108,6 +114,20 @@ android {
   } else {
     logger.lifecycle("[HuaweiVR] native 构建未启用（local.properties 无 huawei.vr.enable=true），跳过")
   }
+
+  // v2.0.187：GPUPixel 的 Java 类改由 submodule 源码提供（不再来自 AAR）。
+  // 路径对应 fork 的 Android 库模块源码目录；classpath 上不再有 gpupixel-release.aar。
+  sourceSets["main"].java.directories.add(
+    rootProject.file("third_party/gpupixel/src/android/java/gpupixel/src/main/java").absolutePath
+  )
+
+  // v2.0.187：GPUPixel 自带**预编译**的 libmars-face-kit.so（Mars-Face 关键点模型运行时），
+  // 必须随包分发。该目录结构 `libs/android/<abi>/*.so` 正好符合 jniLibs 的 ABI 约定，
+  // 直接挂为源目录即可 —— 比在 CMake 里做 POST_BUILD 拷贝更干净
+  // （且 CMake 的 add_custom_command(TARGET ...) 也无法作用于子目录创建的 target）。
+  sourceSets["main"].jniLibs.directories.add(
+    rootProject.file("third_party/gpupixel/third_party/mars-face-kit/libs/android").absolutePath
+  )
 
   signingConfigs {
     // v106：release 签名。密码来源优先级：
@@ -213,7 +233,15 @@ dependencies {
   // AAR 取自官方 Release v1.3.1：自带 arm64-v8a / armeabi-v7a 两个 ABI 的 .so，
   // 以及 Mars-Face 模型（face_det / face_align .mars_model）与妆容素材（AAR assets 自动合并）。
   // 注意：官方预编译包**不含 x86_64** —— 模拟器上会初始化失败，运行时自动回退 GLSL 引擎。
-  implementation(files("libs/gpupixel-release.aar"))
+  // v2.0.187：GPUPixel 改为**源码级集成**（submodule: third_party/gpupixel，本地 fork）。
+  // 原因：需要 fork 的 texture 通道（共享 EGLContext + SinkTexture）来消除每帧
+  // 「回读→上传」的跨界搬运。AAR 只能提供原始 raw-data 通道，无法接入。
+  //
+  // ⚠️ 回退方式：把下面这行注释换成 `implementation(files("libs/gpupixel-release.aar"))`
+  //    即可回到 AAR 形态（.so 版本覆盖的 Java 类同样来自 AAR，无需改其他代码）；
+  //    但注意此时 **不能**再加 add_subdirectory(GPUPixel)，否则 libgpupixel.so 会重复。
+  // implementation(files("libs/gpupixel-release.aar"))
+  //
   // v2.0.174：华为 VR Engine 官方 Java 桥（hvrbridge.jar）。
   // 提供 com.huawei.hvr.LibUpdateClient（确保设备已装/已更新华为 VR Runtime）
   // 与 com.huawei.vrlab.HVRActivity（官方 2D→VR 通道）。

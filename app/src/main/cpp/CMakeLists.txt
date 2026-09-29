@@ -169,3 +169,46 @@ add_custom_command(TARGET auravr POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/libxr_loader.so"
     COMMENT "复制华为 libxr_loader.so 到 jniLibs (${ANDROID_ABI})"
 )
+
+# ===========================================================================
+# GPUPixel（本地 fork，git submodule: third_party/gpupixel）—— 源码级集成
+# ---------------------------------------------------------------------------
+# 为什么改用源码而非 AAR：
+#   需要 fork 新增的 texture 通道（共享 EGLContext + SinkTexture），把处理结果
+#   留在 GPU 上供本渲染器直接采样，从而消除每帧「回读成字节 → 再上传」的跨界
+#   搬运（1080p 实测约 5 × 8.29 MB/帧，占 gpu 段 19~20 ms + 回读 8~9 ms 的绝大部分）。
+#   AAR 只暴露 raw-data 通道，无法接入。
+# 设计见 GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md（§2.2 含 PoC 实测结论）。
+#
+# 要点：
+#   · GPUPIXEL_FORK_DIR 由 app/build.gradle.kts 传入（指向 third_party/gpupixel）
+#   · GPUPixel 顶层自带 project()，其内部 PROJECT_SOURCE_DIR 会正确指向自己
+#   · 产出 libgpupixel.so 由 AGP 自动收集打包
+#   · libmars-face-kit.so 是 fork 内预编译二进制，须拷进 jniLibs（同 libxr_loader.so 的做法）
+#   · ⚠️ 与 libs/gpupixel-release.aar 互斥：AAR 里也有 libgpupixel.so，二者同时存在
+#     会触发 mergeNativeLibs 的「2 files found with path」冲突
+# ===========================================================================
+if(NOT DEFINED GPUPIXEL_FORK_DIR OR GPUPIXEL_FORK_DIR STREQUAL "")
+    message(FATAL_ERROR
+        "未提供 GPUPIXEL_FORK_DIR（应指向 third_party/gpupixel）。"
+        "它由 app/build.gradle.kts 的 externalNativeBuild.cmake.arguments 传入。")
+endif()
+file(TO_CMAKE_PATH "${GPUPIXEL_FORK_DIR}" GPUPIXEL_FORK_DIR)
+message(STATUS "GPUPixel fork 路径: ${GPUPIXEL_FORK_DIR}")
+
+set(_gpupixel_mars_so
+    "${GPUPIXEL_FORK_DIR}/third_party/mars-face-kit/libs/android/${ANDROID_ABI}/libmars-face-kit.so")
+if(NOT EXISTS "${_gpupixel_mars_so}")
+    message(FATAL_ERROR
+        "GPUPixel 缺少 ${ANDROID_ABI} 的 libmars-face-kit.so：${_gpupixel_mars_so}\n"
+        "（官方预编译只含 arm64-v8a / armeabi-v7a；本工程 abiFilters 只有 arm64-v8a）")
+endif()
+
+# 独立 build 目录，避免与 auravr 的产物混淆
+add_subdirectory("${GPUPIXEL_FORK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/gpupixel_build")
+
+# ⚠️ 这里**不能**用 `add_custom_command(TARGET gpupixel POST_BUILD ...)` —— CMake 规定
+#    该形式只能作用于「本 CMakeLists 创建的 target」，而 gpupixel 建在子目录里，
+#    会报 `CMake Error at ... (add_custom_command)`。
+#    libmars-face-kit.so 改由 gradle 侧挂 jniLibs 源目录解决（见 app/build.gradle.kts），
+#    那个目录结构 `.../libs/android/<abi>/*.so` 正好符合 jniLibs 的 ABI 约定。

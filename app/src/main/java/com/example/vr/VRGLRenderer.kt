@@ -550,6 +550,27 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var gpSkipReadThisFrame = false
     /** 最近一次成功的「美颜结果 FBO 快照」纹理（含全部 GPUPixel 处理），跳过回读时用它上屏 */
     private var gpResultTexId = 0
+
+    // ===== v2.0.187：GPUPixel texture 输出通道（需与主渲染共享 EGLContext）=====
+    /**
+     * 待贴回的结果纹理（faceExecutor 产出 → GL 线程消费）。0 = 本帧无新结果。
+     *
+     * 与 [gpRegionPending] 语义对应：二者都表示「后台产出了一个可用的新结果」，
+     * 只是载体不同（GPU texture vs CPU 字节数组）。
+     */
+    @Volatile private var gpResultTexIdPending = 0
+    /**
+     * texture 通道是否已确认可用：`null` = 尚未校验。
+     *
+     * GL 线程首次拿到结果纹理后用 `glIsTexture` 在**主渲染 context** 里校验 ——
+     * 不可见即说明共享未生效（GPUPixel 回退到了私有 context，或驱动拒绝），
+     * 此时置 [gpTextureFallbackRequested] 让 Pipeline 切回 raw-data 通道。
+     */
+    private var gpTexturePathOk: Boolean? = null
+    /** 已请求回退到 raw-data 通道（Pipeline 下次 ensure 时重建为 SinkRawData） */
+    @Volatile private var gpTextureFallbackRequested = false
+    /** texture 通道成功贴回的帧数（诊断） */
+    private var gpTextureAppliedFrames = 0
     private var gpResultFboId = 0
     private var gpResultW = 0
     private var gpResultH = 0
@@ -1464,6 +1485,23 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         Log.i(TAG, "GL_VERSION = ${GLES20.glGetString(GLES20.GL_VERSION)}"
                 + " | VENDOR = ${GLES20.glGetString(GLES20.GL_VENDOR)}")
 
+        // ===== v2.0.187：把本 GL 线程的 EGL context 登记为 GPUPixel 的共享源 =====
+        // 共享后 GPUPixel 的结果 texture 可被本渲染器直接采样，省掉每帧「回读 8.29MB
+        // + JNI 拷贝 8.29MB + GL 线程再 memcpy 8.29MB」的 CPU 往返。
+        //
+        // ⚠️ 两个时机约束：
+        //   1. 必须在**有 current context 的线程**调用 —— 这里是 GLSurfaceView 的渲染线程 ✓
+        //   2. 必须在 GPUPixel 的 EGLContext 被创建**之前** —— 它是懒创建的，只要早于
+        //      任何会触发 GPU 的 GPUPixel 调用（SourceRawData.Create 等）即可；本处最早 ✓
+        // 失败不影响功能：GPUPixel 会用私有 context，texture 通道由 GL 线程的
+        // glIsTexture 校验发现不可用后自动回退到 CPU 回读。
+        try {
+            val shared = com.pixpark.gpupixel.GPUPixel.captureSharedEglContext()
+            Log.i(TAG, "GPUPixel shared EGL context registered: $shared")
+        } catch (t: Throwable) {
+            Log.w(TAG, "captureSharedEglContext failed (will use private context)", t)
+        }
+
         // Build the two main programs: video variant samples an OES external texture,
         // image variant uses plain sampler2D so strict GPU drivers (Adreno etc.) never
         // hit an empty OES slot while displaying photos/panoramas.
@@ -1800,18 +1838,24 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             //   反之 gpFbo 里是本帧原始渲染（未美颜）。若拿 `!gpSkipReadThisFrame` 当有效判据
             //   就会漏掉「本帧没跳读、但后台还没处理完 ⇒ 也没有 pending」这一类帧 ——
             //   它们同样是未美颜的原始帧，正是闪烁的另一半来源。
-            val hadPending = gpRegionPending != null
-            uploadPendingGpRegion()
-            var fromStable = false
-            if (!hadPending && gpHasStableResult && gpResultTexId != 0) {
-                fromStable = true   // 本帧无新美颜结果 → 复现上一张，杜绝「原始帧」闪现
-            }
-            if (hadPending) snapshotGpResult()   // 有新结果才刷新保底帧
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            if (fromStable) {
-                blitToScreen(gpResultTexId)   // 复现上一张已美颜画面（内容恒定）
-            } else {
-                blitToScreen()                // 正常：呈现本帧的美颜结果
+            // ===== v2.0.187：两条输出通道 =====
+            // · texture 通道（优先）：GPUPixel 结果留在 GPU 上，直接采样贴回 —— 零拷贝，
+            //   省掉「glReadPixels 回读 8.29MB + JNI 拷贝 8.29MB + GL 线程再 memcpy 8.29MB」
+            // · raw-data 通道（回退）：上面的 CPU 回读路径，行为与 v2.0.186 完全一致
+            if (!applyGpTextureResult(gpResultTexIdPending)) {
+                val hadPending = gpRegionPending != null
+                uploadPendingGpRegion()
+                var fromStable = false
+                if (!hadPending && gpHasStableResult && gpResultTexId != 0) {
+                    fromStable = true   // 本帧无新美颜结果 → 复现上一张，杜绝「原始帧」闪现
+                }
+                if (hadPending) snapshotGpResult()   // 有新结果才刷新保底帧
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+                if (fromStable) {
+                    blitToScreen(gpResultTexId)   // 复现上一张已美颜画面（内容恒定）
+                } else {
+                    blitToScreen()                // 正常：呈现本帧的美颜结果
+                }
             }
         } else if (halfActive) {
             // v2.0.177：跑 down(降采样) → blur(半分辨率低频)，再合成上屏。
@@ -2642,6 +2686,75 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 用 `glBlitFramebuffer` 让 GPU 直接搬（同尺寸 1:1，`GL_NEAREST` 无滤波开销），
      * 比「回读像素再上传」便宜一个数量级（1920×1080 回读 ≈ 8 MB 且同步阻塞）。
      */
+    /**
+     * v2.0.187：**texture 输出通道**的贴回 + 上屏。
+     *
+     * 与 raw-data 路径做的事完全对应（贴回回读区 → 刷新保底帧 → 上屏），但省掉了
+     * CPU 往返：GPUPixel 的结果本就留在 GPU 上，这里直接把它按回读区 UV 拉伸贴回
+     * `gpFbo` 即可（复用 raw-data 路径同一个 [blitScaledIntoFbo]）。
+     *
+     * ## 首次校验（关键）
+     * 结果纹理由 GPUPixel 在自己的 EGLContext 里创建。**只有共享生效时**，主渲染
+     * context 才能看到它 —— 故这里用 `glIsTexture` 做一次权威校验：
+     *  - `true`  → 共享成立，后续帧直接用该通道
+     *  - `false` → 共享未生效（GPUPixel 已回退私有 context／驱动拒绝共享），
+     *             置 [gpTextureFallbackRequested] 让 Pipeline 切回 raw-data，
+     *             本帧及后续都走 CPU 回读，功能不受影响
+     *
+     * @param tex 待贴回的结果纹理；0 表示本帧没有新结果
+     * @return true = 已由本方法完成贴回与上屏；false = 调用方应走 raw-data 路径
+     */
+    private fun applyGpTextureResult(tex: Int): Boolean {
+        if (tex == 0) return false
+        if (gpTextureFallbackRequested) {
+            gpResultTexIdPending = 0
+            return false
+        }
+
+        if (gpTexturePathOk == null) {
+            val visible = GLES30.glIsTexture(tex)
+            gpTexturePathOk = visible
+            Log.i(TAG, "GPUPixel texture path: glIsTexture($tex)=$visible (main context visibility)")
+            if (!visible) {
+                gpTextureFallbackRequested = true
+                gpResultTexIdPending = 0
+                Log.w(
+                    TAG,
+                    "GPUPixel texture path NOT available (shared EGL context ineffective); " +
+                        "falling back to raw-data readback"
+                )
+                return false
+            }
+        }
+        if (gpTexturePathOk != true) {
+            gpResultTexIdPending = 0
+            return false
+        }
+
+        // 采样该纹理并按回读区 UV 拉伸贴回 gpFbo（与 raw-data 路径同一实现）
+        blitScaledIntoFbo(tex)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+
+        // 刷新保底帧：本帧确实产生了新结果（供「无新结果」的帧复现）
+        snapshotGpResult()
+
+        // ⚠️ 顺序要点：fence 必须在「采样 tex 的命令」之后插入 —— 这样 GPUPixel 等到它
+        //    时，本帧对 tex 的采样已执行完，才不会在下一帧覆盖掉我们正在读的那张。
+        //    （双缓冲已提供基础保护，fence 是加固，用于外部消费偶发慢于生产的场景。）
+        val sync = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        if (sync != 0L) {
+            GpuPixelBeauty.getOrCreatePipeline().setConsumerFence(sync)
+        } else {
+            Log.w(TAG, "glFenceSync failed; consumer fence not set this frame")
+        }
+
+        gpResultTexIdPending = 0
+        gpTextureAppliedFrames++
+
+        blitToScreen()
+        return true
+    }
+
     private fun snapshotGpResult() {
         if (gpFboTexId == 0 || gpFboId == 0) return
         ensureGpResultFbo(gpFboW, gpFboH)
@@ -3885,25 +3998,49 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     // v2.0.186：这里只剩 **GL 段**（检测已移到 gpDetectExecutor），
                     // 故 EMA 反映的是纯 GPU 开销，降采样决策比之前更准确。
                     val t0 = System.nanoTime()
-                    val out = GpuPixelBeauty.getOrCreatePipeline().processFrame(
-                        rgbaData, fw, fh, stride,
-                        beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
-                        gpCachedLandmarks
-                    )
+                    val pipeline = GpuPixelBeauty.getOrCreatePipeline()
+
+                    // v2.0.187：GL 线程判定 texture 通道不可用时，在这里把链切回 raw-data。
+                    // 必须在这里（faceExecutor 上）做 —— 它持有 GPUPixel context 的线程语义，
+                    // 且此刻没有在途处理（gpInFlight 保证了串行）。
+                    if (gpTextureFallbackRequested && pipeline.isTextureMode()) {
+                        pipeline.fallbackToRawDataSink()
+                    }
+
+                    gpRegionW = fw
+                    gpRegionH = fh
+                    val useTexChannel =
+                        GpuPixelBeauty.useTextureSink && !gpTextureFallbackRequested
+                    if (useTexChannel) {
+                        // ---- texture 通道：结果留在 GPU，只回传一个 texture id ----
+                        val ok = pipeline.processFrameTexture(
+                            rgbaData, fw, fh, stride,
+                            beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                            gpCachedLandmarks
+                        )
+                        if (ok) {
+                            gpResultTexIdPending = pipeline.resultTextureId
+                        }
+                    } else {
+                        // ---- raw-data 通道（回退）：CPU 回读字节 ----
+                        val out = pipeline.processFrame(
+                            rgbaData, fw, fh, stride,
+                            beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                            gpCachedLandmarks
+                        )
+                        if (out != null) {
+                            // v2.0.186（P0-A）：直接移交所有权，**不再 arraycopy**。
+                            // 依据：jni_sink_raw_data.cc nativeGetRgbaBuffer 每次都
+                            // env->NewByteArray(size) + SetByteArrayRegion 拷进新数组，
+                            // 故 out 是本次调用独有的新数组（native 侧 rgba_buffer_ 的复用
+                            // 被 JNI 边界隔离），GL 线程下一帧消费它不存在竞争。
+                            gpRegionPending = out
+                        }
+                    }
+
                     val glNanos = System.nanoTime() - t0
                     updateGpAdaptiveDownscale(glNanos)
                     gpProfLogGpu(glNanos)
-                    if (out != null) {
-                        gpRegionW = fw
-                        gpRegionH = fh
-                        // v2.0.186（P0-A）：直接移交所有权，**不再 arraycopy**。
-                        // 依据：jni_sink_raw_data.cc nativeGetRgbaBuffer 每次都
-                        // env->NewByteArray(size) + SetByteArrayRegion 拷进新数组，
-                        // 故 out 是本次调用独有的新数组（native 侧 rgba_buffer_ 的复用
-                        // 被 JNI 边界隔离），GL 线程下一帧消费它不存在竞争。
-                        // 省掉每帧 2.07 MB（全覆盖 + 2 档降采样）的纯 memcpy。
-                        gpRegionPending = out
-                    }
                 } catch (e: Throwable) {
                     Log.e(TAG, "GPUPixel background process failed", e)
                 } finally {
