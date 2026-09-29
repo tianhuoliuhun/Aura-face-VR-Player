@@ -1309,6 +1309,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 }
             }
             
+            // ===== v2.0.190 修复：GLSL 美白改为**全屏生效** =====
+            // 此前美白被放在下方 `if (uProjectionMode == 0 && uFaceDetected == 1)` 之内，导致：
+            //   ① 未检出人脸时**完全不生效**（用户反馈的「GLSL 美白不生效」正是此现象）；
+            //   ② VR / 全景模式（uProjectionMode != 0）下**根本不执行**。
+            // 美白只依赖肤色判定 isSkin()，**既不需要人脸位置，也不该受投影模式限制** ——
+            // 现在与 GPUPixel 引擎（磨皮/美白全屏生效、不依赖检测）的行为对齐。
+            // 开销可忽略：isSkin 是纯比较运算（无纹理采样），全屏皮肤像素只多做一次加法。
+            // 注：黑眼圈/口红/腮红/白牙等**必须**有人脸位置的妆容仍留在下方块内（逻辑不变）。
+            if (isSkin(color.rgb)) {
+                color.rgb += vec3(uWhitening * 0.14) * (1.0 - color.rgb);
+            }
+
             // Apply advanced fine cosmetics
             // v2.0.173：妆容/局部效果 gate 到 uFaceDetected == 1 —— 检测丢失时完全不画
             // （否则会按默认中心 (0.5,0.45) 把口红/腮红画到画面中央，产生跳变）。
@@ -1344,13 +1356,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     eyeL = uEyeLeft;
                     eyeR = uEyeRight;
                     mouthC = uMouthPos;
-                }
-
-                // 1. Skin Whitening (美白)
-                // v2.0.159：纯加法 → 「保高光提亮」：越接近白色的通道加得越少，
-                // 避免鼻尖/额头等高光区直接溢出成白块（系数上调以补偿整体减弱）。
-                if (isSkin(color.rgb)) {
-                    color.rgb += vec3(uWhitening * 0.14) * (1.0 - color.rgb);
                 }
                 
                 // 2. Dark Circles removal (黑眼圈) just below the tracked eyes
