@@ -221,4 +221,49 @@ object HuaweiVrNative {
     private external fun nativeFrameResult(): Int
     private external fun nativeSubmitFrame()
     private external fun nativeIsSdkAvailable(): Boolean
+
+    // ===== v2.0.200：华为 VR Glass 手柄输入 =====
+
+    /**
+     * 手柄状态快照（每帧从 native 轮询）。
+     *
+     * 华为手柄**不走** Android KeyEvent/MotionEvent，而是由 OpenXR Action 系统上报，
+     * 所以这里用轮询而不是事件回调。
+     *
+     * @param selectLeft/selectRight  左/右手 select（点击 / 触摸板按下）当前是否按住
+     * @param pressedEdge             本帧是否有「刚按下」—— 用于触发一次性动作（如播放/暂停），
+     *                                否则按住期间会每帧重复触发
+     * @param controllerAvailable     华为手柄是否可用
+     * @param selectCount             累计按下次数（诊断用）
+     * @param inputReady              动作集是否就绪（false = 本机无 Action 系统或无手柄）
+     */
+    data class VrInputState(
+        val selectLeft: Boolean,
+        val selectRight: Boolean,
+        val pressedEdge: Boolean,
+        val controllerAvailable: Boolean,
+        val selectCount: Int,
+        val inputReady: Boolean
+    )
+
+    private external fun nativePollVrInput(): IntArray?
+
+    /**
+     * 轮询一次手柄状态。未加载 native 库 / 非华为设备时返回「全 false」的安全值，
+     * 调用方无需做判空。
+     */
+    fun pollInput(): VrInputState {
+        val a = if (isLibraryLoaded) runCatching { nativePollVrInput() }.getOrNull() else null
+        if (a == null || a.size < 6) {
+            return VrInputState(false, false, false, false, 0, false)
+        }
+        return VrInputState(
+            selectLeft = a[0] != 0,
+            selectRight = a[1] != 0,
+            pressedEdge = a[2] != 0,
+            controllerAvailable = a[3] != 0,
+            selectCount = a[4],
+            inputReady = a[5] != 0
+        )
+    }
 }

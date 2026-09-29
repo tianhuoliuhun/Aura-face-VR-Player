@@ -839,6 +839,13 @@ bool AuraVrSession::createSession(JavaVM* vm, jobject activity) {
     }
 
     AURA_LOGI("session 创建成功，参考空间 = LOCAL");
+
+    // v2.0.200：手柄动作集必须等 session 就绪后才能附加（OpenXR 规定），
+    // 附加成功后每帧 XrInputSync() 才有意义。失败不阻断（本机可能无手柄）。
+    if (!aura::XrInputAttach(session_)) {
+        AURA_LOGW("手柄动作集未附加（无手柄 / 运行时无 Action 系统，不影响渲染）");
+    }
+
     return true;
 }
 
@@ -1013,6 +1020,9 @@ bool AuraVrSession::renderFrame() {
     // 1) wait / begin
     XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
     XrResult r = xrWaitFrame(session_, &waitInfo, &currentFrameState_);
+    // v2.0.200：每帧同步手柄动作状态（必须在 waitFrame 之后、读取状态之前）。
+    // 内部已做「未附加则直接返回」的保护，不会因无手柄而报错。
+    aura::XrInputSync(session_);
     if (XR_FAILED(r)) {
         AURA_LOGW("xrWaitFrame 失败 (%ld)", static_cast<long>(r));
         return false;
@@ -1110,6 +1120,9 @@ bool AuraVrSession::renderFrameExternal() {
     // 1) wait / begin
     XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
     XrResult r = xrWaitFrame(session_, &waitInfo, &currentFrameState_);
+    // v2.0.200：每帧同步手柄动作状态（必须在 waitFrame 之后、读取状态之前）。
+    // 内部已做「未附加则直接返回」的保护，不会因无手柄而报错。
+    aura::XrInputSync(session_);
     if (XR_FAILED(r)) {
         AURA_LOGW("xrWaitFrame 失败 (%ld)", static_cast<long>(r));
         return false;

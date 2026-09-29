@@ -271,8 +271,50 @@ class HuaweiVrActivity : Activity() {
      * 若把三步都塞进 GL 线程，acquire 的阻塞等待会卡住 GL 上下文；
      * 若先 submit 再画，则画到已释放的 image 上 → 眼镜内撕裂/全黑。
      */
-    private fun startFramePump() {
-        if (pumping) return
+    // ===== v2.0.200：手柄业务映射钩子 =====
+
+    /**
+     * 手柄 select（点击 / 触摸板按下）的**一次性**回调。
+     *
+     * ⚠️ 只在本帧「刚按下」时触发一次（不是按住期间每帧触发）—— 见 pollVrInputOnce。
+     * 由上层（播放器）挂载，映射成具体操作，例如：
+     *   onVrSelect = { togglePlayPause() }
+     * 本类不内置具体动作：VR Activity 只负责把「手柄被按了」这件事转达出去。
+     */
+    @Volatile
+    var onVrSelect: (() -> Unit)? = null
+
+    /** 上一次的 inputReady，用于只在状态变化时打一次日志（避免每帧刷屏） */
+    private var lastInputLogged = false
+
+    /**
+     * 轮询一次手柄状态（帧泵每帧调用）。
+     *
+     * 华为手柄由 OpenXR Action 系统上报、不是 Android 事件，所以只能轮询。
+     * native 侧未就绪 / 本机无手柄时返回全 false，本函数静默返回。
+     */
+    private fun pollVrInputOnce() {
+        val st = try {
+            HuaweiVrNative.pollInput()
+        } catch (t: Throwable) {
+            return
+        }
+        // 首次就绪（或首次失败）时各打一行日志，便于真机确认链路
+        if (st.inputReady != lastInputLogged) {
+            lastInputLogged = st.inputReady
+            Log.i(
+                TAG,
+                if (st.inputReady) "手柄动作集就绪（手柄可用=${st.controllerAvailable}）"
+                else "手柄动作集未就绪（无 Action 系统或非华为设备）"
+            )
+        }
+        if (st.pressedEdge) {
+            Log.i(TAG, "手柄 select 按下（累计 ${st.selectCount}）→ 转交上层")
+            onVrSelect?.invoke()
+        }
+    }
+
+    private fun startFramePump() {        if (pumping) return
         pumping = true
 
         // ⚠️ 视频源接线回调已在 onCreate 中（setRenderer 之前）挂好，此处不再重复赋值。
@@ -280,6 +322,10 @@ class HuaweiVrActivity : Activity() {
             Log.i(TAG, "帧泵线程进入")
             while (pumping) {
                 try {
+                    // v2.0.200：每帧轮询华为手柄（由 OpenXR Action 系统上报，非 Android 事件）。
+                    // 与帧泵同频，开销极小；未接手柄时 pollInput 返回全 false。
+                    pollVrInputOnce()
+
                     // 1) 等本帧可用（native 内部含 xrWaitFrame，会随显示刷新自然节流到 ~70Hz）
                     if (!HuaweiVrNative.hasPendingFrame()) {
                         // 还没有待提交帧 → 让 native 先 acquire 一轮

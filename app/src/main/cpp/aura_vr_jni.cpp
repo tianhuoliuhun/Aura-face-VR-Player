@@ -7,6 +7,8 @@
 
 #include "aura_vr_session.h"
 #include "aura_vr_log.h"
+// v2.0.200：手柄状态轮询（nativePollVrInput）
+#include "aura_vr_input.h"
 
 #include <jni.h>
 #include <string>
@@ -223,6 +225,37 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeIsSdkAvailable(JNIEnv* /*env*/, 
 #else
     return JNI_FALSE;
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// nativePollVrInput() : int[] —— 轮询华为 VR Glass 手柄状态（v2.0.200）
+// ---------------------------------------------------------------------------
+// 返回定长 6 的 int 数组，约定：
+//   [0] selectLeft       左/右手 select 当前是否按下（0/1）
+//   [1] selectRight      同上
+//   [2] pressedEdge      本帧是否有「刚按下」（用于触发一次性动作，如播放/暂停）
+//   [3] controllerAvail  华为手柄是否可用（0/1）
+//   [4] selectCount      累计按下次数（诊断，截断为低 31 位）
+//   [5] inputReady       动作集是否就绪（0/1）
+// ⚠️ 之所以返回数组而不是多个 boolean：JNI 往返有成本，播放器每帧要轮询，
+//    一次取回全部状态最省。Kotlin 侧封装成 VrInputState 数据类再使用。
+JNIEXPORT jintArray JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativePollVrInput(JNIEnv* env, jclass /*clazz*/) {
+    const aura::XrInputState& s = aura::XrInputGet();
+    jint buf[6];
+    buf[0] = s.selectLeft ? 1 : 0;
+    buf[1] = s.selectRight ? 1 : 0;
+    buf[2] = (s.selectLeftPressed || s.selectRightPressed) ? 1 : 0;
+    buf[3] = s.controllerAvailable ? 1 : 0;
+    buf[4] = static_cast<jint>(s.selectCount & 0x7fffffffULL);
+    buf[5] = aura::XrInputReady() ? 1 : 0;
+
+    jintArray out = env->NewIntArray(6);
+    if (out == nullptr) {
+        return nullptr;
+    }
+    env->SetIntArrayRegion(out, 0, 6, buf);
+    return out;
 }
 
 } // extern "C"
