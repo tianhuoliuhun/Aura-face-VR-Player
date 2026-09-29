@@ -108,6 +108,8 @@ set(AURAVR_SOURCES
     aura_vr_log.cpp
     # v2.0.195：多 OpenXR loader 运行时选择（dlopen + 函数指针重定向）
     aura_xr_loader.cpp
+    # v2.0.199：华为 VR Glass 手柄输入（OpenXR Action 系统）
+    aura_vr_input.cpp
 )
 
 add_library(auravr SHARED ${AURAVR_SOURCES})

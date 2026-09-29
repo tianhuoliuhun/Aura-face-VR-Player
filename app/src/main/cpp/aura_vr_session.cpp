@@ -20,6 +20,8 @@
 //    xrCreateInstance 等入口 `#define` 到同名函数指针，此后本文件里所有
 //    xrXxx(...) 调用自动走运行时解析，不再依赖链接期符号。
 #include "aura_xr_loader.h"
+// v2.0.199：华为 VR Glass 手柄输入（OpenXR Action 系统）
+#include "aura_vr_input.h"
 
 #include <cstring>
 #include <cstdio>
@@ -617,6 +619,14 @@ bool AuraVrSession::createInstance() {
     if (!aura::AuraXrResolveInstanceEntries(instance_)) {
         AURA_LOGE("createInstance: instance 相关入口解析失败，无法继续");
         return false;
+    }
+
+    // v2.0.199：初始化手柄输入的动作集（Action 系统）。
+    // ⚠️ 只创建 action set/action 并「建议绑定」；真正生效要等 xrCreateSession
+    //    成功后 XrInputAttach()。此处失败**不阻断**（旧运行时可能没有 Action 系统，
+    //    或本机没有手柄 —— 都不该导致整个 VR 会话起不来）。
+    if (!aura::XrInputInit(instance_)) {
+        AURA_LOGW("createInstance: 手柄输入动作集未就绪（不影响 VR 渲染）");
     }
 
     XrInstanceProperties props{XR_TYPE_INSTANCE_PROPERTIES};

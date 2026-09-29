@@ -236,8 +236,29 @@ bool AuraXrResolveInstanceEntries(XrInstance instance) {
     }
     *e.out = fn;
   }
+
+  // ----- v2.0.199：批量解析其余可选入口（用 AURA_XR_FUNCS 一键覆盖）-----
+  // 上面手写的那 24 个是**必需**的（缺了会崩）；这里补的是**可选**入口：
+  //   · Action 系统（手柄输入）—— 旧运行时可能不支持
+  //   · 华为扩展（xrIsControllerAvailableHW 等）—— 非华为设备必然没有
+  // 故缺失只记日志、不失败；调用方用前判空即可。
+#define AURA_XR_TRY(name)                                            \
+  if (pfn_##name == nullptr) {                                       \
+    PFN_xrVoidFunction fn = nullptr;                                 \
+    XrResult rr = pfn_xrGetInstanceProcAddr(instance, #name, &fn);   \
+    if (XR_SUCCEEDED(rr) && fn != nullptr) {                         \
+      pfn_##name = reinterpret_cast<PFN_##name>(fn);                 \
+      ++optionalOk;                                                  \
+    }                                                                \
+  }
+  int optionalOk = 0;
+  AURA_XR_FUNCS(AURA_XR_TRY)
+#undef AURA_XR_TRY
+  AURA_LOGI("AuraXrLoader: 可选入口解析到 %d 个（Action/华为扩展，缺失不影响主流程）",
+            optionalOk);
+
   if (missing > 0) {
-    AURA_LOGE("AuraXrLoader: 有 %d 个入口未解析，后续调用会崩溃", missing);
+    AURA_LOGE("AuraXrLoader: 有 %d 个必需入口未解析，后续调用会崩溃", missing);
     return false;
   }
   AURA_LOGI("AuraXrLoader: instance 相关入口全部解析完成（%zu 个）",

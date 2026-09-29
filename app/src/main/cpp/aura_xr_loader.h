@@ -42,6 +42,16 @@
 #include <openxr.h>
 #include <openxr_platform.h>
 
+// v2.0.199：华为扩展（手柄可用性/类型探测：xrIsControllerAvailableHW 等）。
+// ⚠️ 只有华为 SDK 提供该头，且它只在与华为头同一 include path 下才可用 ——
+//    用 __has_include 兜底，避免未来换 SDK 时编译中断。
+#if defined(__has_include)
+#if __has_include(<openxr_hw.h>)
+#include <openxr_hw.h>
+#define AURA_HAVE_OPENXR_HW 1
+#endif
+#endif
+
 // ============================================================================
 // 兼容补丁：华为 SDK 的 openxr_platform.h **不含** XR_KHR_loader_init_android
 // ----------------------------------------------------------------------------
@@ -142,7 +152,30 @@ bool AuraXrResolveInstanceEntries(XrInstance instance);
   X(xrAcquireSwapchainImage)                \
   X(xrWaitSwapchainImage)                   \
   X(xrReleaseSwapchainImage)                \
-  X(xrGetOpenGLESGraphicsRequirementsKHR)
+  X(xrGetOpenGLESGraphicsRequirementsKHR)   \
+  /* v2.0.199：OpenXR Action 系统（手柄/输入）。 */ \
+  /* 华为手柄（3DoF + 触摸板）走标准 Action 系统读取， */ \
+  /* 这些入口同样是 instance 相关，必须第二阶段解析。 */ \
+  X(xrCreateActionSet)                      \
+  X(xrDestroyActionSet)                     \
+  X(xrCreateAction)                         \
+  X(xrDestroyAction)                        \
+  X(xrStringToPath)                          \
+  X(xrPathToString)                          \
+  X(xrSuggestInteractionProfileBindings)    \
+  X(xrAttachSessionActionSets)              \
+  X(xrSyncActions)                          \
+  X(xrGetActionStateBoolean)                \
+  X(xrGetActionStateFloat)                  \
+  X(xrGetActionStateVector2f)               \
+  X(xrCreateActionSpace)                    \
+  X(xrLocateSpace)                          \
+  X(xrGetCurrentInteractionProfile)         \
+  X(xrEnumerateBoundSourcesForAction)       \
+  X(xrGetInputSourceLocalizedName)          \
+  /* 华为扩展（openxr_hw.h）：手柄可用性/类型探测 */ \
+  X(xrIsControllerAvailableHW)              \
+  X(xrGetControllerTypeHW)
 
 // 声明函数指针（定义在 aura_xr_loader.cpp）
 // ⚠️ 变量名统一加 pfn_ 前缀，避免与下方「同名重定向宏」冲突
@@ -180,3 +213,24 @@ AURA_XR_FUNCS(AURA_XR_DECLARE)
 #define xrWaitSwapchainImage pfn_xrWaitSwapchainImage
 #define xrReleaseSwapchainImage pfn_xrReleaseSwapchainImage
 #define xrGetOpenGLESGraphicsRequirementsKHR pfn_xrGetOpenGLESGraphicsRequirementsKHR
+// v2.0.199：Action 系统（手柄输入）
+#define xrCreateActionSet pfn_xrCreateActionSet
+#define xrDestroyActionSet pfn_xrDestroyActionSet
+#define xrCreateAction pfn_xrCreateAction
+#define xrDestroyAction pfn_xrDestroyAction
+#define xrStringToPath pfn_xrStringToPath
+#define xrPathToString pfn_xrPathToString
+#define xrSuggestInteractionProfileBindings pfn_xrSuggestInteractionProfileBindings
+#define xrAttachSessionActionSets pfn_xrAttachSessionActionSets
+#define xrSyncActions pfn_xrSyncActions
+#define xrGetActionStateBoolean pfn_xrGetActionStateBoolean
+#define xrGetActionStateFloat pfn_xrGetActionStateFloat
+#define xrGetActionStateVector2f pfn_xrGetActionStateVector2f
+#define xrCreateActionSpace pfn_xrCreateActionSpace
+#define xrLocateSpace pfn_xrLocateSpace
+#define xrGetCurrentInteractionProfile pfn_xrGetCurrentInteractionProfile
+#define xrEnumerateBoundSourcesForAction pfn_xrEnumerateBoundSourcesForAction
+#define xrGetInputSourceLocalizedName pfn_xrGetInputSourceLocalizedName
+// 华为扩展（openxr_hw.h）—— 手柄可用性/类型探测
+#define xrIsControllerAvailableHW pfn_xrIsControllerAvailableHW
+#define xrGetControllerTypeHW pfn_xrGetControllerTypeHW
