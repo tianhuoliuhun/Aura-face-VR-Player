@@ -106,6 +106,8 @@ set(AURAVR_SOURCES
     aura_vr_jni.cpp
     aura_vr_session.cpp
     aura_vr_log.cpp
+    # v2.0.195：多 OpenXR loader 运行时选择（dlopen + 函数指针重定向）
+    aura_xr_loader.cpp
 )
 
 add_library(auravr SHARED ${AURAVR_SOURCES})
@@ -115,17 +117,18 @@ target_include_directories(auravr PRIVATE
     ${HUAWEI_VR_INCLUDE_DIR}
 )
 
-# 链接：华为 OpenXR Loader + Android 系统库 + EGL/GLES
-add_library(huawei_openxr_loader SHARED IMPORTED)
-set_target_properties(huawei_openxr_loader PROPERTIES
-    IMPORTED_LOCATION "${HUAWEI_VR_LIB_DIR}/libxr_loader.so")
-
+# 链接：Android 系统库 + EGL/GLES
+# ⚠️ v2.0.195：**不再链接** huawei_openxr_loader —— 改为运行时 dlopen
+#    （见 aura_xr_loader.cpp）。原因：链接会把 libauravr.so 的 DT_NEEDED 钉死在
+#    某一个 loader 上，而一份 APK 要同时支持华为 / PICO 新老固件 / Quest。
+#    华为的 libxr_loader.so 仍会被**拷贝进 APK**（见本文件末尾的 POST_BUILD），
+#    因为 dlopen 需要它在 libs/<abi>/ 下存在；dl 库本身来自 Android 系统，无需链接。
 target_link_libraries(auravr
-    huawei_openxr_loader
     android
     log
     EGL
     GLESv3      # ⚠️ 华为要求 GLES 3.2，用 GLESv3（提供 ES 3.x 符号）
+    dl          # v2.0.195：dlopen/dlsym
 )
 
 # 华为 SDK 用 XR_USE_PLATFORM_ANDROID / XR_USE_GRAPHICS_API_OPENGL_ES 开关，

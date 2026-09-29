@@ -15,6 +15,12 @@
 #include "aura_vr_session.h"
 #include "aura_vr_log.h"
 
+// v2.0.195：多 OpenXR loader 运行时选择。
+// ⚠️ 必须在 aura_vr_session.h（其中含 openxr.h）之后包含 —— 本头文件会把
+//    xrCreateInstance 等入口 `#define` 到同名函数指针，此后本文件里所有
+//    xrXxx(...) 调用自动走运行时解析，不再依赖链接期符号。
+#include "aura_xr_loader.h"
+
 #include <cstring>
 #include <cstdio>
 #include <chrono>
@@ -435,6 +441,14 @@ void AuraVrSession::unbindEyeFramebuffer() {
 bool AuraVrSession::createInstance() {
     AURA_LOGI("创建 OpenXR instance…");
 
+    // v2.0.195：先按设备选择并 dlopen 合适的 OpenXR loader。
+    // ⚠️ 这一步是**必需的前置**：本文件里的 xrXxx(...) 已全部重定向到函数指针
+    //    （见 aura_xr_loader.h 的宏），loader 未加载时它们全是空指针 → 直接崩溃。
+    if (!aura::AuraXrSelectAndLoad()) {
+        AURA_LOGE("createInstance: 未找到可用的 OpenXR loader，无法继续");
+        return false;
+    }
+
     // 先探测扩展，避免 xrCreateInstance 直接失败时日志难读
     uint32_t extCount = 0;
     XrResult r = xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
@@ -484,6 +498,13 @@ bool AuraVrSession::createInstance() {
     if (XR_FAILED(r)) {
         formatXrError(lastError_, sizeof(lastError_), "xrCreateInstance 失败", r);
         AURA_LOGE("%s", lastError_);
+        return false;
+    }
+
+    // v2.0.195：instance 创建成功后才可能解析 instance 相关入口（OpenXR 规定）。
+    // ⚠️ 必须在这里做：之后所有 xrGetSystem / xrCreateSession / 帧循环调用都依赖它们。
+    if (!aura::AuraXrResolveInstanceEntries(instance_)) {
+        AURA_LOGE("createInstance: instance 相关入口解析失败，无法继续");
         return false;
     }
 

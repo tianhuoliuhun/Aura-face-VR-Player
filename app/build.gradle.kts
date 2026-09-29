@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 194
-    versionName = "2.0.194"
+    versionCode = 195
+    versionName = "2.0.195"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
