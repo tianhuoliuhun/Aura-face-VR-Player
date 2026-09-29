@@ -59,10 +59,10 @@
         <package android:name="com.huawei.hvrsdkserverapp" />
         <intent>
             <action android:name="com.huawei.android.vr.PROMPT" />
+        </intent>
         <!-- PICO / 标准 OpenXR：运行时服务发现（API 30+ 包可见性要求） -->
         <intent>
             <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
-        </intent>
         </intent>
     </queries>
 
