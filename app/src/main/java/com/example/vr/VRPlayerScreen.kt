@@ -913,6 +913,9 @@ fun VRPlayerScreen(
         beautyGpEyeZoom,
         gpuPixelVrFaceBeauty,
         gpuPixelHalfResBeauty,
+        // v2.0.188 审计修复：beautyPreset 此前不在 key 列表 → 切换美颜预设不会触发写回
+        // effect，导致 beauty_preset_id 永不落盘（重启后预设丢失）。
+        beautyPreset,
         brightnessLevel,
         contrastLevel,
         beautyWhitening,

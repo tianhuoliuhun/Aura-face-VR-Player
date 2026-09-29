@@ -140,6 +140,22 @@ object GpuPixelBeauty {
         @Volatile var resultTextureId = 0
         @Volatile var resultSerial = 0L
 
+        /**
+         * v2.0.188：GPUPixel **锐化**级别（0~1）。
+         *
+         * 由上层在参数同步处赋值（而不是给每个 process 方法加参数，避免签名四处扩散）。
+         *
+         * ⚠️ 依赖 fork 给 `BeautyFaceFilter` **注册**的 `sharpen` 属性：上游只在 Init() 里
+         * 注册了 `whiteness` / `skin_smoothing`，虽然 `SetSharpen()` 方法一直存在，
+         * 但未注册时 `SetProperty("sharpen", ...)` 会被 `Filter::SetProperty` **静默忽略**
+         * （只打一条 LOG_WARN）—— 这正是「GPUPixel 锐化」滑块此前完全无效的原因。
+         * fork 侧已补注册（`beauty_face_filter.cc`）。
+         */
+        @Volatile var sharpenLevel = 0f
+
+        /** 锐化值缓存：仅在变化时 SetProperty（与其它参数同策略） */
+        private var lastSharpen = Float.NaN
+
         // ===== v2.0.186（P0-B）：检测与 GL 处理分离，支持两线程并行 =====
         /**
          * GL 管线锁：保护 source / beauty / reshape / sink 这一串 GPUPixel 调用。
@@ -290,6 +306,10 @@ object GpuPixelBeauty {
             }
             if (white != lastWhite) {
                 b?.SetProperty("whiteness", white); lastWhite = white
+            }
+            // v2.0.188：锐化（依赖 fork 注册的 `sharpen` 属性；未注册时会被静默忽略）
+            if (sharpenLevel != lastSharpen) {
+                b?.SetProperty("sharpen", sharpenLevel); lastSharpen = sharpenLevel
             }
             // 美型：landmark 引用未变则不重复下发（检测降频时会连续几帧同引用）
             val hasFace = landmarks != null && landmarks.isNotEmpty()
