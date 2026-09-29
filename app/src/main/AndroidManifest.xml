@@ -117,6 +117,22 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- ====================================================================
+             PoC（临时，2026-09-29）：验证「共享 EGLContext 下 texture 互通 +
+             跨 context fence 同步」是否可靠 —— 这是 GPUPixel texture 通道方案
+             （见 GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md）唯一的未知项。
+             验证结论落定后本段与 com.example.vr.poc 包可整体删除，不影响主功能。
+
+             启动：adb shell am start -n \
+               com.aistudio.vrplayer.vrmjpy/com.example.vr.poc.PocSharedContextActivity
+             判据：统计行中 失配=0、GL错误=0、超时=0。
+             ==================================================================== -->
+        <activity
+            android:name="com.example.vr.poc.PocSharedContextActivity"
+            android:exported="true"
+            android:label="PocSharedContext"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|density|uiMode" />
     </application>
 
 </manifest>
