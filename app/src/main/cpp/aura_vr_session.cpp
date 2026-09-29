@@ -159,6 +159,61 @@ bool AuraVrSession::initialize(JavaVM* vm, jobject activity, int renderScalePerc
     return false;
 #else
     // ---- 真实路径（顺序与官方示例一致）----
+    // 0) v2.0.197：先选/加载 OpenXR loader，再把它需要的 JVM + Activity 交给它。
+    //
+    //    ⚠️ 顺序不能颠倒、也不能省：
+    //       · 标准 Khronos loader（PICO / Quest 用）**必须**先调 xrInitializeLoaderKHR，
+    //         它要靠这组参数做 JNI 调用去查 runtime service；不调则 xrCreateInstance 必失败。
+    //       · 而 xrInitializeLoaderKHR 这个入口本身**只能从已加载的 loader 里取**，
+    //         所以必须先 AuraXrSelectAndLoad()。
+    //       · 华为 loader 没有这个入口 → 内部静默跳过，不影响原有流程。
+    {
+        // 缓存 JVM/Activity：切换 loader（回退 legacy）时要用同一组参数重新初始化
+        cachedVm_ = vm;
+        if (activity != nullptr) {
+            JNIEnv* envForRef = nullptr;
+            bool attachedForRef = false;
+            if (vm != nullptr) {
+                if (vm->GetEnv(reinterpret_cast<void**>(&envForRef), JNI_VERSION_1_6) != JNI_OK) {
+                    if (vm->AttachCurrentThread(&envForRef, nullptr) == JNI_OK) {
+                        attachedForRef = true;
+                    }
+                }
+            }
+            if (envForRef != nullptr) {
+                if (cachedActivity_ != nullptr) {
+                    envForRef->DeleteGlobalRef(cachedActivity_);
+                }
+                cachedActivity_ = envForRef->NewGlobalRef(activity);
+                if (attachedForRef) {
+                    vm->DetachCurrentThread();
+                }
+            }
+        }
+
+        aura::AuraXrSelectAndLoad();  // 幂等；createInstance() 内部会再调一次
+
+        JNIEnv* env = nullptr;
+        bool attached = false;
+        if (vm != nullptr) {
+            if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+                // 当前线程是 Java 调进来的，通常已经 attach；兜底再 attach 一次
+                if (vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                    attached = true;
+                }
+            }
+        }
+        if (env != nullptr && activity != nullptr) {
+            aura::AuraXrInitAndroidLoader(env, activity);
+        } else {
+            AURA_LOGW("initialize: 无 JNIEnv/Activity，跳过 xrInitializeLoaderKHR"
+                      "（标准 loader 可能因此失败）");
+        }
+        if (attached && vm != nullptr) {
+            vm->DetachCurrentThread();
+        }
+    }
+
     // 1) OpenXR instance
     if (!createInstance()) { state_.store(AuraVrState::ERROR); return false; }
     state_.store(AuraVrState::INSTANCE_CREATED);
@@ -515,6 +570,29 @@ bool AuraVrSession::createInstance() {
                       curLoader ? curLoader : "?");
             if (aura::AuraXrLoadByName("libopenxr_loader_legacy.so")) {
                 instance_ = XR_NULL_HANDLE;
+
+                // ⚠️ 关键：换了 loader 就要**重新做一次 xrInitializeLoaderKHR** ——
+                //    「把 JVM/Activity 交给 loader」是与 loader 实例绑定的动作，
+                //    刚加载的 legacy loader 还没拿到 JVM，不重新交一次它仍会失败。
+                if (cachedVm_ != nullptr && cachedActivity_ != nullptr) {
+                    JNIEnv* env = nullptr;
+                    bool attached = false;
+                    if (cachedVm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+                        if (cachedVm_->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                            attached = true;
+                        }
+                    }
+                    if (env != nullptr) {
+                        aura::AuraXrInitAndroidLoader(env, cachedActivity_);
+                    }
+                    if (attached) {
+                        cachedVm_->DetachCurrentThread();
+                    }
+                } else {
+                    AURA_LOGW("legacy 重试：无缓存的 JVM/Activity，"
+                              "xrInitializeLoaderKHR 未重新执行（可能再次失败）");
+                }
+
                 // ⚠️ 扩展列表沿用上一次的：用的都是标准扩展
                 //    （XR_KHR_android_create_instance / XR_KHR_opengl_es_enable），跨版本兼容
                 r = xrCreateInstance(&createInfo, &instance_);

@@ -182,6 +182,13 @@ private:
     jobject        javaSurface_ = nullptr;   // 全局引用
     ANativeWindow* nativeWindow_ = nullptr;
 
+    // v2.0.197：缓存 JVM + Activity，供**切换 loader 后重新做 xrInitializeLoaderKHR** 用。
+    // 背景：xrInitializeLoaderKHR 是「把 JVM/Activity 交给某个 loader」的动作，它与
+    // loader 实例绑定 —— 一旦回退到 legacy loader，必须用这组参数再交给新 loader，
+    // 否则新 loader 拿不到 JVM，xrCreateInstance 仍会失败。
+    JavaVM* cachedVm_ = nullptr;
+    jobject cachedActivity_ = nullptr;       // 全局引用（需 DeleteGlobalRef 释放）
+
     // EGL
     EGLDisplay eglDisplay_ = EGL_NO_DISPLAY;
     EGLConfig  eglConfig_  = nullptr;
