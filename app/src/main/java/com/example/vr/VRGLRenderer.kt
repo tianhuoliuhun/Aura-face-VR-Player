@@ -119,6 +119,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 val h = if (huaweiEyeHeight > 0) huaweiEyeHeight else displayHeight
                 GLES20.glViewport(0, 0, w, h)
                 drawEyeWithOpenXrMatrices(eye, w, h, targets)
+
+                // v2.0.203：叠加 VR UI（准星 + 控制条）。
+                // ⚠️ 必须在 drawEyeWithOpenXrMatrices **之后** —— 否则会被视频画面盖住。
+                // UI 顶点在**视图空间**定义，靠该眼的 view×projection 投到裁剪空间；
+                // 两个矩阵是 renderer 的字段，刚刚在上面那次绘制里被填好。
+                val eyeVp = FloatArray(16)
+                Matrix.multiplyMM(eyeVp, 0, projectionMatrix, 0, viewMatrix, 0)
+                HuaweiVrNative.vrUiRender(eyeVp)
+
                 drewAny = true
             } finally {
                 HuaweiVrNative.unbindEyeFramebuffer()

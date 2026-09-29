@@ -284,8 +284,22 @@ class HuaweiVrActivity : Activity() {
     @Volatile
     var onVrSelect: (() -> Unit)? = null
 
+    /**
+     * v2.0.203：控制条项被**射线命中并单击**时的回调。
+     *
+     * 取值与 native 的 `aura::VrUiItem` 对齐：
+     *   0 = 快退 10s    1 = 播放/暂停    2 = 快进 10s    3 = 更多（主菜单）
+     *
+     * 上层挂载后即可把这些动作接到播放器上。
+     */
+    @Volatile
+    var onVrUiAction: ((Int) -> Unit)? = null
+
     /** 上一次的 inputReady，用于只在状态变化时打一次日志（避免每帧刷屏） */
     private var lastInputLogged = false
+
+    /** v2.0.203：上一帧时间戳，用于算 dt（UI 淡入淡出需要） */
+    private var lastFrameNanos = 0L
 
     /**
      * 轮询一次手柄状态（帧泵每帧调用）。
@@ -308,7 +322,29 @@ class HuaweiVrActivity : Activity() {
                 else "手柄动作集未就绪（无 Action 系统或非华为设备）"
             )
         }
-        if (st.pressedEdge) {
+
+        // ===== v2.0.203：把射线喂给 VR UI，并消费命中项 =====
+        val now = System.nanoTime()
+        val dt = if (lastFrameNanos == 0L) 0.016f
+                 else ((now - lastFrameNanos) / 1_000_000_000.0).toFloat().coerceIn(0f, 0.1f)
+        lastFrameNanos = now
+
+        val ray = try { HuaweiVrNative.aimRay() } catch (t: Throwable) { null }
+        // 无有效姿态时（aimRay 给出正前方 (0,0,-1)）让 native 走「视野中心」兜底分支
+        val hasAim = ray != null && !(ray[0] == 0f && ray[1] == 0f && ray[2] == -1f)
+        val dir = ray ?: floatArrayOf(0f, 0f, -1f)
+        val hit = try {
+            HuaweiVrNative.vrUiUpdate(dir, hasAim, st.pressedEdge, dt)
+        } catch (t: Throwable) {
+            -1
+        }
+        if (hit >= 0) {
+            Log.i(TAG, "控制条项 $hit 被触发 → 转交上层")
+            onVrUiAction?.invoke(hit)
+        }
+
+        // 保留原有「任意点击」回调（未命中控制条时）
+        if (st.pressedEdge && hit < 0) {
             Log.i(TAG, "手柄 select 按下（累计 ${st.selectCount}）→ 转交上层")
             onVrSelect?.invoke()
         }

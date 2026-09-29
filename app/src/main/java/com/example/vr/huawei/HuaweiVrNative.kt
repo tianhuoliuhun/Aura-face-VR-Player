@@ -248,6 +248,52 @@ object HuaweiVrNative {
 
     private external fun nativePollVrInput(): IntArray?
 
+    // ===== v2.0.203：VR UI（控制条 / 准星）=====
+
+    private external fun nativeVrUiRender(eyeViewProj: FloatArray)
+    private external fun nativeVrUiUpdate(
+        rayDir: FloatArray, hasAim: Boolean, selectEdge: Boolean, dt: Float
+    ): Int
+    private external fun nativeVrUiSetPlayback(progress: Float, playing: Boolean)
+    private external fun nativeVrUiSetVisible(visible: Boolean)
+
+    /** 手柄射线方向（视图空间，已按「头部姿态 ⊗ 手柄姿态」合成）。无姿态时返回正前方。 */
+    private external fun nativeGetAimRay(): FloatArray?
+
+    /**
+     * 在**逐眼绘制之后**调用：把 VR UI（准星 + 控制条）叠加到该眼画面上。
+     * @param eyeViewProj 该眼的 view×projection（列主序 16 float）
+     */
+    fun vrUiRender(eyeViewProj: FloatArray) {
+        if (!isLibraryLoaded) return
+        runCatching { nativeVrUiRender(eyeViewProj) }
+    }
+
+    /**
+     * 每帧调用一次：喂入射线，返回被触发的控制条项（-1 无）。
+     * 取值与 native 的 aura::VrUiItem 对齐：0=快退10s 1=播放暂停 2=快进10s 3=更多
+     */
+    fun vrUiUpdate(rayDir: FloatArray, hasAim: Boolean, selectEdge: Boolean, dt: Float): Int {
+        if (!isLibraryLoaded) return -1
+        return runCatching { nativeVrUiUpdate(rayDir, hasAim, selectEdge, dt) }.getOrDefault(-1)
+    }
+
+    fun vrUiSetPlayback(progress: Float, playing: Boolean) {
+        if (!isLibraryLoaded) return
+        runCatching { nativeVrUiSetPlayback(progress, playing) }
+    }
+
+    fun vrUiSetVisible(visible: Boolean) {
+        if (!isLibraryLoaded) return
+        runCatching { nativeVrUiSetVisible(visible) }
+    }
+
+    /** 取射线方向（3 float，视图空间）。失败返回 null，调用方应回退到视野正前方。 */
+    fun aimRay(): FloatArray? {
+        if (!isLibraryLoaded) return null
+        return runCatching { nativeGetAimRay() }.getOrNull()
+    }
+
     /**
      * 轮询一次手柄状态。未加载 native 库 / 非华为设备时返回「全 false」的安全值，
      * 调用方无需做判空。

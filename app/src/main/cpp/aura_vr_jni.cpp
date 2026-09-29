@@ -9,6 +9,8 @@
 #include "aura_vr_log.h"
 // v2.0.200：手柄状态轮询（nativePollVrInput）
 #include "aura_vr_input.h"
+// v2.0.203：VR UI 渲染（nativeVrUiRender / nativeVrUiUpdate）
+#include "aura_vr_ui.h"
 
 #include <jni.h>
 #include <string>
@@ -256,6 +258,84 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativePollVrInput(JNIEnv* env, jclass 
     }
     env->SetIntArrayRegion(out, 0, 6, buf);
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// VR UI（v2.0.203）：渲染与更新
+// ---------------------------------------------------------------------------
+// nativeVrUiRender(float[] eyeViewProj) : void
+//   在**逐眼绘制之后**调用，把准星 + 控制条叠加到该眼画面上。
+//   eyeViewProj 是该眼的 view×projection（列主序 16 float）——
+//   UI 顶点在视图空间定义，靠这个矩阵投到裁剪空间。
+JNIEXPORT void JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeVrUiRender(JNIEnv* env, jclass /*clazz*/,
+                                                          jfloatArray mvp) {
+    if (mvp == nullptr || env->GetArrayLength(mvp) < 16) {
+        return;
+    }
+    jfloat buf[16];
+    env->GetFloatArrayRegion(mvp, 0, 16, buf);
+    aura::VrUiRender(buf);
+}
+
+// nativeVrUiUpdate(float[] rayDir, boolean hasAim, boolean selectEdge, float dt) : int
+//   每帧调用：喂入射线方向（视图空间，输入层已用「头部⊗手柄」算好），
+//   返回被触发的控制条项（-1 表示无）。
+JNIEXPORT jint JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeVrUiUpdate(JNIEnv* env, jclass /*clazz*/,
+                                                         jfloatArray rayDir, jboolean hasAim,
+                                                         jboolean selectEdge, jfloat dt) {
+    float dir[3] = {0.f, 0.f, -1.f};
+    if (rayDir != nullptr && env->GetArrayLength(rayDir) >= 3) {
+        env->GetFloatArrayRegion(rayDir, 0, 3, dir);
+    }
+    const aura::VrUiItem hit = aura::VrUiUpdate(
+        dir, hasAim == JNI_TRUE, selectEdge == JNI_TRUE, static_cast<float>(dt));
+    return static_cast<jint>(hit);
+}
+
+// nativeVrUiSetPlayback(float progress, boolean playing) : void
+//   progress < 0 表示未知（不画进度条）
+JNIEXPORT void JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeVrUiSetPlayback(JNIEnv* /*env*/, jclass /*clazz*/,
+                                                              jfloat progress, jboolean playing) {
+    aura::VrUiSetProgress(static_cast<float>(progress));
+    aura::VrUiSetPlaying(playing == JNI_TRUE);
+}
+
+// nativeVrUiSetVisible(boolean) : void
+JNIEXPORT void JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeVrUiSetVisible(JNIEnv* /*env*/, jclass /*clazz*/,
+                                                             jboolean visible) {
+    aura::VrUiSetVisible(visible == JNI_TRUE);
+}
+
+// nativeGetAimRay() : float[]
+//   v2.0.203：从输入层取出「手柄姿态相对头部偏角」合成后的射线方向（视图空间，3 float）。
+//   合成规则：rayDir = 头部姿态 ⊗ 手柄姿态 的 -Z 轴（即手柄指向）。
+//   ⚠️ 无有效手柄姿态时返回视野正前方 (0,0,-1)。
+JNIEXPORT jfloatArray JNICALL
+Java_com_example_vr_huawei_HuaweiVrNative_nativeGetAimRay(JNIEnv* env, jclass /*clazz*/) {
+    float out[3] = {0.f, 0.f, -1.f};
+    const aura::XrInputState& s = aura::XrInputGet();
+    if (s.aimValid && s.headValid) {
+        // 四元数乘法：head ⊗ hand（head 是 s.headOrientation，hand 是 s.aimOrientation）
+        const float* hq = s.headOrientation;
+        const float* gq = s.aimOrientation;
+        const float x = hq[3] * gq[0] + hq[0] * gq[3] + hq[1] * gq[2] - hq[2] * gq[1];
+        const float y = hq[3] * gq[1] - hq[0] * gq[2] + hq[1] * gq[3] + hq[2] * gq[0];
+        const float z = hq[3] * gq[2] + hq[0] * gq[1] - hq[1] * gq[0] + hq[2] * gq[3];
+        const float w = hq[3] * gq[3] - hq[0] * gq[0] - hq[1] * gq[1] - hq[2] * gq[2];
+        // 取合成后四元数的前向轴（-Z）：R * (0,0,-1)
+        out[0] = -(2.f * (x * z + w * y));
+        out[1] = -(2.f * (y * z - w * x));
+        out[2] = -(1.f - 2.f * (x * x + y * y));
+    }
+    jfloatArray arr = env->NewFloatArray(3);
+    if (arr != nullptr) {
+        env->SetFloatArrayRegion(arr, 0, 3, out);
+    }
+    return arr;
 }
 
 } // extern "C"
