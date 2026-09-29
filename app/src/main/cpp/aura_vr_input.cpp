@@ -16,6 +16,14 @@ namespace {
 XrInstance g_instance = XR_NULL_HANDLE;
 XrActionSet g_actionSet = XR_NULL_HANDLE;
 XrAction g_actionSelect = XR_NULL_HANDLE;
+// v2.0.201：手柄 aim 姿态（射线指向用）
+XrAction g_actionAim = XR_NULL_HANDLE;
+XrSpace g_spaceAim = XR_NULL_HANDLE;
+XrPath g_pathAimRight = XR_NULL_PATH;
+// v2.0.201：定 aim 姿态需要的坐标系上下文（由 session 每帧提供）
+// ⚠️ 必须与头部姿态用**同一个**参考空间（LOCAL），否则「头部⊗手柄」的合成没意义
+XrSpace g_spaceLocal = XR_NULL_HANDLE;
+XrTime g_frameTime = 0;
 bool g_attached = false;
 bool g_ready = false;
 
@@ -131,6 +139,24 @@ bool XrInputInit(XrInstance instance) {
     return false;
   }
 
+  // ---- 2b) v2.0.201：aim 姿态动作（射线指向）----
+  // ⚠️ 华为 3DoF 手柄**有旋转姿态**（IMU），所以 aim pose 能给方向；
+  //    没有平移（手不会在空间里被追踪到位置），所以射线原点不能用它 ——
+  //    射线原点由 UI 层定为头部，方向取「头部姿态 ⊗ 手柄姿态」（用户选定的偏角方案）。
+  XrActionCreateInfo aimInfo{XR_TYPE_ACTION_CREATE_INFO};
+  aimInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+  std::snprintf(aimInfo.actionName, XR_MAX_ACTION_NAME_SIZE, "aim");
+  std::snprintf(aimInfo.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE,
+                "Aim");
+  aimInfo.countSubactionPaths = 0;
+  aimInfo.subactionPaths = nullptr;
+  r = pfn_xrCreateAction(g_actionSet, &aimInfo, &g_actionAim);
+  if (XR_FAILED(r)) {
+    // 不致命：没有 aim 就没有射线，退化为「焦点式导航」
+    AURA_LOGW("XrInput: xrCreateAction(aim) 失败（0x%x），射线指向不可用", r);
+    g_actionAim = XR_NULL_HANDLE;
+  }
+
   // ---- 3) 建议绑定（KHR simple_controller，兜底且必备）----
   XrPath profilePath = P("/interaction_profiles/khr/simple_controller");
   XrPath clickLeft = P("/user/hand/left/input/select/click");
@@ -140,16 +166,30 @@ bool XrInputInit(XrInstance instance) {
     AURA_LOGE("XrInput: 绑定路径转换失败，手柄输入不可用");
     return false;
   }
-  XrActionSuggestedBinding bindings[2] = {};
+  XrActionSuggestedBinding bindings[4] = {};
   bindings[0].action = g_actionSelect;
   bindings[0].binding = clickLeft;
   bindings[1].action = g_actionSelect;
   bindings[1].binding = clickRight;
+  int bindingCount = 2;
+  // v2.0.201：aim 姿态绑定（右手优先；拿不到右手再退左手 —— 见下方 fallback）
+  g_pathAimRight = P("/user/hand/right/input/aim/pose");
+  XrPath aimLeft = P("/user/hand/left/input/aim/pose");
+  if (g_actionAim != XR_NULL_HANDLE && g_pathAimRight != XR_NULL_PATH) {
+    bindings[bindingCount].action = g_actionAim;
+    bindings[bindingCount].binding = g_pathAimRight;
+    ++bindingCount;
+  }
+  if (g_actionAim != XR_NULL_HANDLE && aimLeft != XR_NULL_PATH) {
+    bindings[bindingCount].action = g_actionAim;
+    bindings[bindingCount].binding = aimLeft;
+    ++bindingCount;
+  }
 
   XrInteractionProfileSuggestedBinding suggested{
       XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
   suggested.interactionProfile = profilePath;
-  suggested.countSuggestedBindings = 2;
+  suggested.countSuggestedBindings = static_cast<uint32_t>(bindingCount);
   suggested.suggestedBindings = bindings;
   r = pfn_xrSuggestInteractionProfileBindings(instance, &suggested);
   if (XR_FAILED(r)) {
@@ -175,7 +215,7 @@ bool XrInputInit(XrInstance instance) {
     XrInteractionProfileSuggestedBinding hwSuggested{
         XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     hwSuggested.interactionProfile = hwPath;
-    hwSuggested.countSuggestedBindings = 2;
+    hwSuggested.countSuggestedBindings = static_cast<uint32_t>(bindingCount);
     hwSuggested.suggestedBindings = bindings;
     XrResult hr = pfn_xrSuggestInteractionProfileBindings(instance, &hwSuggested);
     AURA_LOGI("XrInput: 尝试华为 profile %s -> %s", prof,
@@ -203,6 +243,22 @@ bool XrInputAttach(XrSession session) {
     return false;
   }
   g_attached = true;
+
+  // v2.0.201：aim 动作空间必须在 session 就绪后创建（xrCreateActionSpace 要求 session）
+  if (g_actionAim != XR_NULL_HANDLE && pfn_xrCreateActionSpace != nullptr &&
+      g_spaceAim == XR_NULL_HANDLE) {
+    XrActionSpaceCreateInfo sci{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    sci.action = g_actionAim;
+    sci.subactionPath = XR_NULL_PATH;
+    sci.poseInActionSpace.orientation.w = 1.f;  // 单位四元数（无额外偏移）
+    XrResult sr = pfn_xrCreateActionSpace(session, &sci, &g_spaceAim);
+    if (XR_FAILED(sr)) {
+      AURA_LOGW("XrInput: xrCreateActionSpace(aim) 失败（0x%x），射线指向不可用", sr);
+      g_spaceAim = XR_NULL_HANDLE;
+    } else {
+      AURA_LOGI("XrInput: aim 动作空间已创建（射线指向可用）");
+    }
+  }
   // 无论能否读到华为扩展，都打印一次手柄可用性（诊断）
   // ⚠️ 华为扩展签名是 (XrInstance, XrPath, int32_t*) —— 不是 session！
   if (pfn_xrIsControllerAvailableHW != nullptr && g_instance != XR_NULL_HANDLE) {
@@ -263,9 +319,46 @@ void XrInputSync(XrSession session) {
   g_lastSelectRight = anyRight;
 
   RefreshProfile(session);
+
+  // v2.0.201：读取 aim 姿态（射线方向的数据源）
+  // ⚠️ 用 LOCAL 空间定位：与头部姿态（同样 LOCAL）在同一坐标系下，
+  //    这样「头部姿态 ⊗ 手柄姿态」的合成才有意义。
+  if (g_spaceAim != XR_NULL_HANDLE && pfn_xrLocateSpace != nullptr) {
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    XrResult lr = pfn_xrLocateSpace(g_spaceAim, g_spaceLocal, g_frameTime,
+                                    &loc);
+    const XrSpaceLocationFlags need =
+        XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
+        XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+    if (XR_SUCCEEDED(lr) && (loc.locationFlags & need) == need) {
+      g_state.aimValid = true;
+      g_state.aimOrientation[0] = loc.pose.orientation.x;
+      g_state.aimOrientation[1] = loc.pose.orientation.y;
+      g_state.aimOrientation[2] = loc.pose.orientation.z;
+      g_state.aimOrientation[3] = loc.pose.orientation.w;
+      g_state.aimPosition[0] = loc.pose.position.x;
+      g_state.aimPosition[1] = loc.pose.position.y;
+      g_state.aimPosition[2] = loc.pose.position.z;
+    } else {
+      g_state.aimValid = false;
+    }
+  }
 }
 
 const XrInputState& XrInputGet() { return g_state; }
+
+void XrInputSetFrameContext(XrSpace localSpace, XrTime frameTime) {
+  g_spaceLocal = localSpace;
+  g_frameTime = frameTime;
+}
+
+void XrInputSetHeadOrientation(const XrQuaternionf& o) {
+  g_state.headOrientation[0] = o.x;
+  g_state.headOrientation[1] = o.y;
+  g_state.headOrientation[2] = o.z;
+  g_state.headOrientation[3] = o.w;
+  g_state.headValid = true;
+}
 
 bool XrInputReady() { return g_ready; }
 

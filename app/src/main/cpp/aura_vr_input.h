@@ -45,6 +45,28 @@ struct XrInputState {
   char profile[128] = {0};
   /** 自启动以来收到的 select 次数（诊断，用于确认链路是否通） */
   unsigned long long selectCount = 0;
+
+  // ===== v2.0.201：射线指向所需的手柄姿态 =====
+  /**
+   * 手柄 aim 姿态是否有效（本帧 xrLocateSpace 成功且位姿被 tracked）。
+   * ⚠️ 华为 3DoF 手柄只有**旋转**没有平移，所以只用它的 orientation；
+   *    position 即使有值也不可靠（可能是 runtime 编的固定值）。
+   */
+  bool aimValid = false;
+  /** aim 姿态的方向四元数（x,y,z,w）。世界空间；算射线方向时取它的前向 -Z 轴 */
+  float aimOrientation[4] = {0.f, 0.f, 0.f, 1.f};
+  /** aim 姿态的位置（诊断用；3DoF 下不可信，**不要**拿它当射线原点） */
+  float aimPosition[3] = {0.f, 0.f, 0.f};
+
+  /**
+   * 本帧的头部姿态四元数（由 session 侧的 xrLocateViews 结果填入，x,y,z,w）。
+   * 用于按「手柄相对头部的偏角」生成射线：
+   *     射线方向 = 头部姿态 ⊗ 手柄姿态
+   * 这样手柄"往前指"时射线也朝正前方，符合直觉；
+   * 若直接用世界空间的手柄姿态，转头后射线会把 UI 甩到视野外。
+   */
+  float headOrientation[4] = {0.f, 0.f, 0.f, 1.f};
+  bool headValid = false;
 };
 
 /** 初始化动作集（需 instance 已创建）；可重复调用，幂等 */
@@ -55,6 +77,18 @@ bool XrInputAttach(XrSession session);
 
 /** 每帧调用：同步并刷新内部状态快照 */
 void XrInputSync(XrSession session);
+
+/**
+ * v2.0.201：告诉输入模块本帧的坐标系上下文（射线姿态定位需要）。
+ *
+ * @param localSpace 会话的 LOCAL 参考空间 —— ⚠️ 必须与头部姿态用同一个，
+ *                   否则「头部姿态 ⊗ 手柄姿态」的合成会因坐标系不一致而错乱
+ * @param frameTime  本帧的 predictedDisplayTime（与 xrLocateViews 用同一个）
+ */
+void XrInputSetFrameContext(XrSpace localSpace, XrTime frameTime);
+
+/** v2.0.201：由 session 在 xrLocateViews 之后填入头部姿态（用于射线合成） */
+void XrInputSetHeadOrientation(const XrQuaternionf& orientation);
 
 /** 取当前状态快照（只读） */
 const XrInputState& XrInputGet();
