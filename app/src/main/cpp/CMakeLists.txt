@@ -110,6 +110,8 @@ set(AURAVR_SOURCES
     aura_xr_loader.cpp
     # v2.0.199：华为 VR Glass 手柄输入（OpenXR Action 系统）
     aura_vr_input.cpp
+    # v2.0.202：VR 内 UI 层（控制条 / 准星 / 射线求交，native GL 绘制）
+    aura_vr_ui.cpp
 )
 
 add_library(auravr SHARED ${AURAVR_SOURCES})

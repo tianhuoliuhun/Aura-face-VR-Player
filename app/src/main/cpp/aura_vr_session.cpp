@@ -22,6 +22,8 @@
 #include "aura_xr_loader.h"
 // v2.0.199：华为 VR Glass 手柄输入（OpenXR Action 系统）
 #include "aura_vr_input.h"
+// v2.0.202：VR 内 UI 层（控制条 / 准星）
+#include "aura_vr_ui.h"
 
 #include <cstring>
 #include <cstdio>
@@ -225,6 +227,12 @@ bool AuraVrSession::initialize(JavaVM* vm, jobject activity, int renderScalePerc
 
     // 3) EGL：display/config/context（必须在 xrCreateSession 之前）
     if (!createEglContext()) { state_.store(AuraVrState::ERROR); return false; }
+
+    // v2.0.202：EGL 上下文就绪后初始化 VR UI 的 GL 资源（着色器/缓冲）。
+    // ⚠️ 必须在有当前 GL 上下文时做；失败不阻断（退化为无 UI，视频照常播放）。
+    if (!aura::VrUiInit()) {
+        AURA_LOGW("VR UI 初始化失败（控制条不可用，不影响视频渲染）");
+    }
 
     // 4) 从 Java Surface 建 window surface 并 makeCurrent
     //    ⚠️ 官方示例走这条路；若 Surface 还没到（surfaceCreated 未触发），
@@ -1020,6 +1028,16 @@ bool AuraVrSession::renderFrame() {
     // 1) wait / begin
     XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
     XrResult r = xrWaitFrame(session_, &waitInfo, &currentFrameState_);
+    // v2.0.202：先把坐标系上下文与头部姿态交给输入模块，再同步手柄。
+    // ⚠️ 顺序：射线方向 =「头部姿态 ⊗ 手柄姿态」，两者必须来自**同一个 LOCAL 空间**；
+    //    这里用 viewState_（上一帧 xrLocateViews 的结果）—— 差一帧肉眼无感知，
+    //    换来的是不必把 setter 塞进两处 locateViews 的深处。
+    aura::XrInputSetFrameContext(appSpace_, currentFrameState_.predictedDisplayTime);
+    // ⚠️ views 不在 XrViewState 里 —— 它是 xrLocateViews 的独立出参，
+    //    session 把它存在 views_（std::vector<XrView>）
+    if (!views_.empty()) {
+        aura::XrInputSetHeadOrientation(views_[0].pose.orientation);
+    }
     // v2.0.200：每帧同步手柄动作状态（必须在 waitFrame 之后、读取状态之前）。
     // 内部已做「未附加则直接返回」的保护，不会因无手柄而报错。
     aura::XrInputSync(session_);
@@ -1120,6 +1138,16 @@ bool AuraVrSession::renderFrameExternal() {
     // 1) wait / begin
     XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
     XrResult r = xrWaitFrame(session_, &waitInfo, &currentFrameState_);
+    // v2.0.202：先把坐标系上下文与头部姿态交给输入模块，再同步手柄。
+    // ⚠️ 顺序：射线方向 =「头部姿态 ⊗ 手柄姿态」，两者必须来自**同一个 LOCAL 空间**；
+    //    这里用 viewState_（上一帧 xrLocateViews 的结果）—— 差一帧肉眼无感知，
+    //    换来的是不必把 setter 塞进两处 locateViews 的深处。
+    aura::XrInputSetFrameContext(appSpace_, currentFrameState_.predictedDisplayTime);
+    // ⚠️ views 不在 XrViewState 里 —— 它是 xrLocateViews 的独立出参，
+    //    session 把它存在 views_（std::vector<XrView>）
+    if (!views_.empty()) {
+        aura::XrInputSetHeadOrientation(views_[0].pose.orientation);
+    }
     // v2.0.200：每帧同步手柄动作状态（必须在 waitFrame 之后、读取状态之前）。
     // 内部已做「未附加则直接返回」的保护，不会因无手柄而报错。
     aura::XrInputSync(session_);
