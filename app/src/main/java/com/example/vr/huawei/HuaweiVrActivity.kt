@@ -3,11 +3,13 @@ package com.example.vr.huawei
 import android.app.Activity
 import android.content.Intent
 import android.graphics.SurfaceTexture
+import android.media.MediaPlayer
 import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.os.Process
 import android.util.Log
 import android.view.Gravity
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.FrameLayout
@@ -59,6 +61,7 @@ class HuaweiVrActivity : Activity() {
 
         /** 渲染分辨率档位（相对 Runtime 推荐值） */
         const val EXTRA_RENDER_SCALE = "render_scale_percent"
+        const val EXTRA_VIDEO_PATH = "video_path"
 
         /**
          * 是否由 Kotlin 负责把画面画进 swapchain texture（真机 3D 贴片通路）。
@@ -110,6 +113,8 @@ class HuaweiVrActivity : Activity() {
 
         val renderScale = intent?.getIntExtra(EXTRA_RENDER_SCALE, 100) ?: 100
         externalRenderer = intent?.getBooleanExtra(EXTRA_EXTERNAL_RENDERER, true) ?: true
+        // v2.0.204：VR 要播的文件（调试期用 --es video_path /sdcard/xxx.mp4 指定）
+        intent?.getStringExtra(EXTRA_VIDEO_PATH)?.let { setVrVideoPath(it) }
 
         // 官方示例在 Activity 创建时先调一次 LibUpdateClient.runUpdate()，
         // 用于向系统登记/刷新本应用的 VR 能力（hvrbridge.jar 提供）。
@@ -148,6 +153,10 @@ class HuaweiVrActivity : Activity() {
                     runCatching { onVideoSurfaceNeeded?.invoke(st) }
                         .onFailure { Log.e(TAG, "视频源接线失败", it) }
                 }
+                // v2.0.204：VR 独立播放器也用同一块纹理 —— 有视频路径就开
+                // ⚠️ st 是 SurfaceTexture，MediaPlayer.setSurface 要的是 Surface
+                vrVideoSurface = Surface(st)
+                ensureVrPlayer()
             } else {
                 // 非 external 模式：视频帧只用于姿态跟随期的预览，不接线
                 Log.i(TAG, "非 external 渲染模式，跳过视频源接线")
@@ -273,6 +282,66 @@ class HuaweiVrActivity : Activity() {
      */
     // ===== v2.0.200：手柄业务映射钩子 =====
 
+    // ===== v2.0.204：VR 独立播放器（用户决策：归 HuaweiVrActivity）=====
+    // 与 2D 侧（VRPlayerScreen）不共享实例；VR 会话退出即随 Activity 销毁。
+    // 解码用系统 MediaPlayer：够用、零依赖；若后续要硬解/4K 再换 MediaCodec/ExoPlayer。
+    private var vrPlayer: MediaPlayer? = null
+    private var vrVideoPath: String? = null
+    private var vrVideoSurface: Surface? = null
+
+    /** 由 Intent 传入要播的文件；也可在调试时用 adb shell am start 的 --es 指定 */
+    fun setVrVideoPath(path: String) { vrVideoPath = path; ensureVrPlayer() }
+
+    private fun ensureVrPlayer() {
+        if (vrPlayer != null) return
+        val path = vrVideoPath ?: run {
+            Log.w(TAG, "ensureVrPlayer: 未指定视频路径（--es video_path ...），暂不播放")
+            return
+        }
+        val st = vrVideoSurface ?: run {
+            Log.w(TAG, "ensureVrPlayer: 视频纹理尚未就绪，等 onVideoSurfaceCreated 再试")
+            return
+        }
+        runCatching {
+            vrPlayer = MediaPlayer().apply {
+                setDataSource(path)
+                setSurface(st)
+                isLooping = true
+                setOnPreparedListener { mp ->
+                    Log.i(TAG, "VR 播放器就绪：$path")
+                    mp.start()
+                }
+                setOnErrorListener { mp, what, extra ->
+                    Log.e(TAG, "VR 播放器错误 what=$what extra=$extra")
+                    true
+                }
+                prepareAsync()
+            }
+        }.onFailure { Log.e(TAG, "开播放器失败", it) }
+    }
+
+    /** 控制条项 1：播放/暂停 */
+    fun vrToggle() {
+        val p = vrPlayer ?: return
+        if (p.isPlaying) p.pause() else p.start()
+    }
+
+    /** 控制条项 0 / 2：快退 / 快进（毫秒） */
+    fun vrSeekBy(ms: Int) {
+        val p = vrPlayer ?: return
+        val dur = if (p.duration > 0) p.duration else 0
+        p.seekTo((p.currentPosition + ms).coerceIn(0, dur))
+    }
+
+    /** 供 VR UI 进度条：0~1；无播放器/时长未知返回 -1（native 侧不画进度条） */
+    private fun vrProgress(): Float {
+        val p = vrPlayer ?: return -1f
+        val d = p.duration
+        return if (d <= 0) -1f else p.currentPosition.toFloat() / d
+    }
+
+    private fun vrIsPlaying(): Boolean = vrPlayer?.isPlaying ?: false
+
     /**
      * 手柄 select（点击 / 触摸板按下）的**一次性**回调。
      *
@@ -340,8 +409,18 @@ class HuaweiVrActivity : Activity() {
         }
         if (hit >= 0) {
             Log.i(TAG, "控制条项 $hit 被触发 → 转交上层")
+            // v2.0.204：控制条动作接线到 VR 播放器
+            when (hit) {
+                0 -> vrSeekBy(-10_000)                     // 快退 10s
+                1 -> vrToggle()                            // 播放/暂停
+                2 -> vrSeekBy(10_000)                      // 快进 10s
+                3 -> Log.i(TAG, "「更多」→ 主菜单尚未实现") // 待 VrUiLayer 主菜单
+            }
             onVrUiAction?.invoke(hit)
         }
+
+        // v2.0.204：把播放进度/状态喂给 VR UI（native 侧据此画进度条与播放/暂停图标）
+        HuaweiVrNative.vrUiSetPlayback(vrProgress(), vrIsPlaying())
 
         // 保留原有「任意点击」回调（未命中控制条时）
         if (st.pressedEdge && hit < 0) {
