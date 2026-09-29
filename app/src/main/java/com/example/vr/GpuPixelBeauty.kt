@@ -104,6 +104,39 @@ object GpuPixelBeauty {
         private var sink: GPUPixelSinkRawData? = null
         private var detector: FaceDetector? = null
 
+        // ===== v2.0.186（P0-B）：检测与 GL 处理分离，支持两线程并行 =====
+        /**
+         * GL 管线锁：保护 source / beauty / reshape / sink 这一串 GPUPixel 调用。
+         *
+         * ⚠️ 为什么不用 `@Synchronized`（= 锁 Pipeline 实例）：检测（Mars-Face，纯 CPU）
+         * 与 GL 处理（走 GPUPixel 独立 EGL context）使用的是**完全不同的底层资源**，
+         * 仅共享只读的输入像素数组 —— 若共用一把实例锁，两段就会被强制串行，
+         * 并行的意义（T_proc ≈ max 而非 sum）就没了。故拆成两把独立锁。
+         */
+        private val glLock = Any()
+
+        /** 检测锁：Mars-Face 检测器非线程安全，但其调用者只有检测线程，锁用于兜底 */
+        private val detectLock = Any()
+
+        // ===== v2.0.186（P2-E2）：属性值缓存，仅在变化时 SetProperty =====
+        // 原先每帧无条件 SetProperty（每次 = JNI 往返 + std::string 构造 + map 查找），
+        // 而这些值只在用户拖动滑条时才变 —— 稳态下 100% 是重复劳动。
+        private var lastSmooth = Float.NaN
+        private var lastWhite = Float.NaN
+        private var lastSlim = Float.NaN
+        private var lastEye = Float.NaN
+        private var lastHasFace: Boolean? = null
+        /** 上次喂给 reshape 的 landmarks 引用；引用未变则无需重复 SetProperty */
+        private var lastLandmarks: FloatArray? = null
+
+        // ===== v2.0.186（P1-D）：landmarks 时序平滑（alpha-beta 预测-校正） =====
+        // 比简单 lerp 更适合「检测降频」场景：降频后 landmark 呈阶梯状更新，
+        // 预测项 v 能在两次真检之间把位置推着走，观感比纯保持/纯插值都平滑。
+        private val smPos = FloatArray(1024)
+        private val smVel = FloatArray(1024)
+        private var smCount = 0
+        private var smInit = false
+
         @Synchronized
         private fun ensure() {
             if (source != null && sink != null) return
@@ -119,11 +152,72 @@ object GpuPixelBeauty {
         }
 
         /**
-         * 对一帧 RGBA 做独立检测 + 美颜。
+         * **只做检测**（v2.0.186 从 [process] 拆出）：Mars-Face 推理 + alpha-beta 平滑。
+         *
+         * 返回值每次都是**新数组**（平滑结果被拷贝一份）—— 因为调用方（GL 处理线程）
+         * 会在下一帧检测期间继续读它，必须与平滑内部缓冲解耦。
+         *
+         * @return 平滑后的 landmarks（归一化，2 float/点）；未检出返回 null
+         */
+        fun detect(rgba: ByteArray, w: Int, h: Int, stride: Int): FloatArray? {
+            if (!GpuPixelBeauty.available) return null
+            return try {
+                ensure()
+                val det = detector ?: FaceDetector.Create().also { detector = it }
+                val raw = synchronized(detectLock) {
+                    det.detect(
+                        rgba, w, h, stride,
+                        FaceDetector.GPUPIXEL_MODE_FMT_VIDEO,
+                        FaceDetector.GPUPIXEL_FRAME_TYPE_RGBA
+                    )
+                }
+                if (raw == null || raw.isEmpty()) {
+                    // 丢失 → 复位平滑器，避免再次出现时用旧速度"拽"一下
+                    smInit = false
+                    null
+                } else {
+                    smoothLandmarks(raw)
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "GPUPixel detect failed", e)
+                null
+            }
+        }
+
+        /** alpha-beta 滤波：pred = pos + vel → 用测量值校正，同时更新速度估计 */
+        private fun smoothLandmarks(raw: FloatArray): FloatArray {
+            val n = minOf(raw.size, smPos.size)
+            if (!smInit || smCount != n) {
+                for (i in 0 until n) {
+                    smPos[i] = raw[i]
+                    smVel[i] = 0f
+                }
+                smCount = n
+                smInit = true
+                return raw.copyOf()
+            }
+            val alpha = 0.55f
+            val beta = 0.22f
+            for (i in 0 until n) {
+                val pred = smPos[i] + smVel[i]
+                val err = raw[i] - pred
+                smPos[i] = pred + alpha * err
+                smVel[i] += beta * err
+            }
+            val out = raw.copyOf()
+            for (i in 0 until n) out[i] = smPos[i]
+            return out
+        }
+
+        /**
+         * **只做 GL 处理**（v2.0.186 从 [process] 拆出）：磨皮/美白 + 美型 + 回读结果。
+         *
+         * 与 [detect] 分别在两个线程上运行，故不共享实例锁（见 [glLock] 说明）。
          *
          * ⚠️⚠️ property 名必须是 C++ 端 `RegisterProperty` **注册的名字**，
-         * 不是内部字段名 —— 传错 key 时 native 静默忽略，表现就是「美颜完全不生效」
-         * （v2.0.160~163 踩过：blur_alpha / white / thin_face_delta / big_eye_delta 全是错的）。
+         * 不是内部字段名 —— 传错 key 时 native 静默忽略（只打 LOG_WARN），表现就是
+         * 「美颜完全不生效」（v2.0.160~163 踩过：blur_alpha / white / thin_face_delta /
+         * big_eye_delta 全是错的）。
          *
          * | 目标 | 正确 key | 对应 C++ setter |
          * |---|---|---|
@@ -136,10 +230,73 @@ object GpuPixelBeauty {
          * 取值范围（官方文档）：磨皮 / 美白 / 瘦脸 / 大眼 均 0~1（0 = 不生效）。
          * 注：`BeautyFaceFilter` 未注册 sharpen / radius，故不提供锐化。
          *
-         * @param stride 每行字节数（= w * 4）
+         * @param landmarks 由 [detect] 产出（可为 null / 空 → 美型级别归零）
          * @return 处理后的 RGBA（同尺寸）；任何失败返回 null（上层保持原帧不变）
          */
-        @Synchronized
+        fun processFrame(
+            rgba: ByteArray,
+            w: Int,
+            h: Int,
+            stride: Int,
+            smooth: Float,
+            white: Float,
+            slim: Float,
+            eyeZoom: Float,
+            landmarks: FloatArray?
+        ): ByteArray? {
+            if (!GpuPixelBeauty.available) return null
+            return try {
+                ensure()
+                synchronized(glLock) {
+                    // v2.0.186（P2-E2）：值变了才设 —— 稳态下（滑条不动）这几行全部跳过
+                    val b = beauty
+                    if (smooth != lastSmooth) {
+                        b?.SetProperty("skin_smoothing", smooth); lastSmooth = smooth
+                    }
+                    if (white != lastWhite) {
+                        b?.SetProperty("whiteness", white); lastWhite = white
+                    }
+                    // 美型：landmark 引用未变则不重复下发（检测降频时会连续几帧同引用）
+                    val hasFace = landmarks != null && landmarks.isNotEmpty()
+                    val r = reshape
+                    if (hasFace) {
+                        val lm = landmarks!!
+                        if (lm !== lastLandmarks) {
+                            r?.SetProperty("face_landmark", lm)
+                            lastLandmarks = lm
+                        }
+                        if (slim != lastSlim) {
+                            r?.SetProperty("thin_face", slim); lastSlim = slim
+                        }
+                        if (eyeZoom != lastEye) {
+                            r?.SetProperty("big_eye", eyeZoom); lastEye = eyeZoom
+                        }
+                    } else if (lastHasFace != false) {
+                        // v2.0.182：检测失败必须显式归零，否则 reshape 会沿用上一帧的
+                        // landmarks 对已不存在的脸做形变（画面出现诡异局部扭曲）
+                        r?.SetProperty("thin_face", 0f)
+                        r?.SetProperty("big_eye", 0f)
+                        lastSlim = 0f; lastEye = 0f
+                        lastLandmarks = null
+                    }
+                    lastHasFace = hasFace
+
+                    source?.ProcessData(
+                        rgba, w, h, stride,
+                        GPUPixelSourceRawData.FRAME_TYPE_RGBA
+                    )
+                    sink?.GetRgbaBuffer()
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "GPUPixel processFrame failed", e)
+                null
+            }
+        }
+
+        /**
+         * 一体式入口（检测 + 处理，串行）—— 保留给「不需要并行」或回退场景使用。
+         * 正常路径见 [detect] / [processFrame] 的双线程并行。
+         */
         fun process(
             rgba: ByteArray,
             w: Int,
@@ -150,42 +307,8 @@ object GpuPixelBeauty {
             slim: Float,
             eyeZoom: Float
         ): ByteArray? {
-            if (!GpuPixelBeauty.available) return null
-            return try {
-                ensure()
-                beauty?.SetProperty("skin_smoothing", smooth)
-                beauty?.SetProperty("whiteness", white)
-                // 独立检测：Mars-Face（不复用 MediaPipe）。
-                // ⚠️ 参数顺序：Java 签名 detect(data, w, h, stride, format(MODE_FMT), frameType(FRAME_TYPE))
-                val det = detector ?: FaceDetector.Create().also { detector = it }
-                val landmarks = det.detect(
-                    rgba, w, h, stride,
-                    FaceDetector.GPUPIXEL_MODE_FMT_VIDEO,
-                    FaceDetector.GPUPIXEL_FRAME_TYPE_RGBA
-                )
-                // 关键点非空才喂（官方文档也是这个条件）；多张脸的关键点由库自行处理
-                // v2.0.182：全覆盖模式下（尤其 VR 整屏 = 并排双画面）Mars-Face **可能检测失败**，
-                // 此时必须显式把美型级别归零 —— 否则 reshape 滤镜会沿用上一帧的 face_landmark，
-                // 对着一张已经移动/不存在的脸做形变，画面会出现诡异的局部扭曲。
-                // 磨皮 / 美白（上面已 SetProperty）**不依赖人脸检测**，整屏照常生效 —— 这正是
-                // 「检测失败也不会退回『只有一块被美颜』」的保证。
-                if (landmarks != null && landmarks.isNotEmpty()) {
-                    reshape?.SetProperty("face_landmark", landmarks)
-                    reshape?.SetProperty("thin_face", slim)
-                    reshape?.SetProperty("big_eye", eyeZoom)
-                } else {
-                    reshape?.SetProperty("thin_face", 0f)
-                    reshape?.SetProperty("big_eye", 0f)
-                }
-                source?.ProcessData(
-                    rgba, w, h, stride,
-                    GPUPixelSourceRawData.FRAME_TYPE_RGBA
-                )
-                sink?.GetRgbaBuffer()
-            } catch (e: Throwable) {
-                Log.e(TAG, "GPUPixel process failed", e)
-                null
-            }
+            val lm = detect(rgba, w, h, stride)
+            return processFrame(rgba, w, h, stride, smooth, white, slim, eyeZoom, lm)
         }
 
         @Synchronized
@@ -203,6 +326,11 @@ object GpuPixelBeauty {
             reshape = null
             sink = null
             detector = null
+            // v2.0.186：清空属性/平滑缓存，避免下次创建时沿用旧值导致「跳过首次下发」
+            lastSmooth = Float.NaN; lastWhite = Float.NaN
+            lastSlim = Float.NaN; lastEye = Float.NaN
+            lastHasFace = null; lastLandmarks = null
+            smInit = false; smCount = 0
         }
     }
 }

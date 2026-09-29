@@ -275,6 +275,80 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private val faceExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
+    // ===== v2.0.186（P0-B）：GPUPixel 检测 / GL 处理 双线程流水线 =====
+    /**
+     * 独立的检测线程：跑 Mars-Face（纯 CPU 推理）。
+     *
+     * 背景：原先 [GpuPixelBeauty.Pipeline.process] 内部「检测 → GPU 链 → 回读」三段串行，
+     * 检测期间 GPU 空转、GPU 处理期间 CPU 空转（实测检测段占 T_proc 的 40~60%）。
+     * 拆成两条线程后，T_proc ≈ max(检测, GPU) 而非二者之和。
+     */
+    private val gpDetectExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /**
+     * GPUPixel 路径的在途任务计数（检测 + GL 处理各算 1）。
+     *
+     * ⚠️ 这就是 GPUPixel 路径的「忙」判据（替代原先的 [isDetectingFace]）：
+     * 只要 > 0 就说明还有线程在**读取本帧的像素数组**，此时 GL 线程既不该回读
+     * （回读会取走帧池里那块正被读的数组 → 数据被覆盖），也不会有新结果可贴回。
+     * 归零时才允许下一帧回读，并把帧归还池 —— 顺序上保证「读完之后才复用」。
+     */
+    private val gpInFlight = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** 检测线程产出、GL 处理线程消费（volatile 发布；数组本身不可变，引用换代即"新值"） */
+    @Volatile private var gpCachedLandmarks: FloatArray? = null
+
+    /** 连续检测失败次数：达阈值才清缓存（对齐 GLSL 路径 faceMissStreak 的防抖思想） */
+    private var gpDetectMissStreak = 0
+
+    /** 检测降频计数器与间隔（每 N 帧真检一次；其余帧复用上次 landmarks） */
+    private var gpFrameTick = 0
+    @Volatile private var gpDetectInterval = 2
+
+    // ===== v2.0.186：分段性能诊断（每 120 帧一行）=====
+    // 用于验证「检测与 GL 处理并行」的实际收益：detect 与 gpu 两段应互不叠加，
+    // 二者最大值 ≈ 单帧处理周期。rb（read-back）是 **GL 线程**上花在回读上的时间，
+    // 同步与 PBO 两条路径都记，便于 A/B 对比哪种更省。
+    private var gpProfFrames = 0
+    private var gpProfDetectNanos = 0L
+    private var gpProfGpuNanos = 0L
+    private var gpProfReadbackNanos = 0L
+    private var gpProfPboWaitFrames = 0
+
+    private fun gpProfLogDetect(nanos: Long) {
+        gpProfDetectNanos += nanos
+    }
+
+    private fun gpProfLogGpu(nanos: Long) {
+        gpProfGpuNanos += nanos
+        gpProfFrames++
+        if (gpProfFrames >= 120) {
+            val n = gpProfFrames.toLong()
+            Log.i(
+                TAG,
+                "GP profile(120f): detect=${gpProfDetectNanos / n / 1_000_000} ms, " +
+                    "gpu=${gpProfGpuNanos / n / 1_000_000} ms, " +
+                    "rb=${gpProfReadbackNanos / n / 1_000_000} ms, " +
+                    "pboWait=$gpProfPboWaitFrames/$gpProfFrames, " +
+                    "downscale=${if (gpDownscaleNow > 0) gpDownscaleNow else gpReadDownscale}, " +
+                    // ⚠️ 必须同时看开关与运行时探测标志，只看 gpPboEnabled 会在
+                    //    开关关闭时误报 "on"（gpPboEnabled 默认就是 true）
+                    "pbo=${if (gpAsyncReadback && gpPboEnabled) "on" else "off"}"
+            )
+            gpProfFrames = 0
+            gpProfDetectNanos = 0
+            gpProfGpuNanos = 0
+            gpProfReadbackNanos = 0
+            gpProfPboWaitFrames = 0
+        }
+    }
+
+    /** @param waited 本帧是否因 fence 未就绪而放弃（仅 PBO 路径可能为 true） */
+    private fun gpProfLogReadback(nanos: Long, waited: Boolean) {
+        gpProfReadbackNanos += nanos
+        if (waited) gpProfPboWaitFrames++
+    }
+
     /** v2.0.156：MediaPipe 实例改为后台创建（原先在 GL 线程同步创建，会造成首帧明显卡顿） */
     private val faceInitExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val isDetectingFace = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -456,9 +530,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // v2.0.183：后台线程写入、GL 线程读取 —— 加 @Volatile 保证可见性（配合 gpRegionPending 的 volatile 写）
     @Volatile private var gpRegionW = 0
     @Volatile private var gpRegionH = 0
-    /** v2.0.182 性能：GPUPixel 输出拷贝复用池（单块，avoid 每帧分配） */
-    private var gpRegionPool: ByteArray? = null
-    private val gpRegionPoolLock = Any()
+    // v2.0.186：删除 gpRegionPool 复用池 —— JNI 侧 nativeGetRgbaBuffer 每次都
+    // NewByteArray + SetByteArrayRegion（jni_sink_raw_data.cc:97-104），Java 拿到的
+    // 必然是全新数组，"native 复用输出 buffer" 对 Java 层不成立。原先再 arraycopy
+    // 一份纯属多余（每帧 2.07~8.3 MB 白拷），现直接把 sink 返回值移交 GL 线程。
 
     // ===== v2.0.185：修复「全屏闪烁」—— 保底帧（stable result）机制 =====
     /**
@@ -627,7 +702,45 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var gpBlitProgram = 0
     private var gpBlitPosLoc = 0
     private var gpBlitTexLoc = 0
+    /** v2.0.186（P2-E1）：aTex 的 attrib location 缓存（原先每帧 glGetAttribLocation） */
+    private var gpBlitTexAttrLoc = 0
     private var gpBlitQuad: java.nio.FloatBuffer? = null
+
+    // ===== v2.0.186（P1-C）：PBO + fence 异步回读 =====
+    // glReadPixels 同步读会让 GL 线程 flush 整条 GPU 管线并等像素落内存（Adreno 上
+    // 960×540 典型 0.5~2 ms）。改为「本帧提交到 PBO、下帧用 fence 收割」，GL 线程只
+    // 做一次非阻塞的 glClientWaitSync(0) —— 代价是回读结果晚 1 帧到位（本就存在
+    // 1~2 帧管线延迟，不可感知），换掉每帧的硬阻塞。
+    private val gpPboIds = IntArray(2)
+    private val gpPboFence = LongArray(2)
+    private var gpPboCapBytes = 0
+    /** 下一个要写入的 PBO 槽（收割的是 1 - gpPboIdx） */
+    private var gpPboIdx = 0
+    /** 是否有已提交、尚未收割的回读 */
+    private var gpPboActive = false
+    /** 上一次提交的回读字节数与尺寸（用于检测"尺寸变化 → 在途数据作废"） */
+    private var gpPboPendingBytes = 0
+    private var gpPboPendingW = 0
+    private var gpPboPendingH = 0
+    /** 运行时探测：一旦某步 GL 调用出错就永久回退同步读（护旧驱动） */
+    @Volatile private var gpPboEnabled = true
+    /** fence 连续未就绪的帧数：达阈值判定驱动异常，回退同步读（正常应在一帧内 signal） */
+    private var gpPboStall = 0
+    /**
+     * PBO 异步回读总开关（默认开）。
+     *
+     * ⚠️ 代价说明：异步化让回读结果**再晚 1 帧**到位（原本同步路径已延迟 1 帧，
+     * 现在共 2 帧 ≈ 33 ms @60fps）。磨皮/美白是低频效果、不可感知；但**瘦脸/大眼的
+     * 形变**在快速运动/快速摇镜时可能出现极轻微滞后。若实机观感有异，把此开关
+     * 置 false 即可瞬时回到同步路径，无需改代码。
+     *
+     * 实测（MuMu，1080p / downscale=1，8.29 MB 回读，各 1200+ 帧）：
+     *   PBO 开 → rb=8~9 ms / gpu=19~20 ms；PBO 关（同步）→ rb=9 ms / gpu=18~19 ms。
+     *   即在本模拟器上两者**基本持平**（rb 的主体是 8.29 MB 的 memcpy，两条路径都要付），
+     *   PBO 省下的只是 glReadPixels 的管线同步等待，而该等待在模拟器 GPU 直通下本就很小。
+     *   真机（管线更深、等待更长）预期收益为正，故默认保持开启；随时可关。
+     */
+    @Volatile var gpAsyncReadback = true
 
     // ===== v104 LUT 视频滤镜 =====
     @Volatile var lutMix = 0f                  // 0=关闭 ~ 1=完全应用（VRPlayerScreen 控制）
@@ -2291,6 +2404,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         try {
             faceExecutor.shutdownNow()
             faceInitExecutor.shutdownNow()
+            // v2.0.186（P0-B）：GPUPixel 检测线程也要一并关闭
+            gpDetectExecutor.shutdownNow()
             mediaPipeManager?.release()
             mediaPipeManager = null
             if (lutTextureId != -1) {
@@ -2418,6 +2533,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         releaseGpHalfFbo()    // v2.0.183：降采样 FBO 随主 FBO 一起释放
         releaseGpUploadTex()  // v2.0.182：中转纹理随 FBO 一起释放
         releaseGpResultFbo()  // v2.0.185：保底帧随 FBO 一起释放
+        releaseGpPbo()        // v2.0.186：PBO + 在途 fence 随 FBO 一起释放
     }
 
     // ===== v2.0.183：降采样 FBO（glBlitFramebuffer 真缩放，修 v2.0.182 错位） =====
@@ -2594,6 +2710,199 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return true
     }
 
+    // ===== v2.0.186（P1-C）：PBO 异步回读的三个辅助函数 =====
+
+    /**
+     * 按需创建/重建两个 STREAM_READ 类型的 PBO（双缓冲轮转）。
+     *
+     * 创建后立刻检查 `glGetError`：部分老驱动（尤其 Mali 的早期 ES3 实现）对
+     * `GL_PIXEL_PACK_BUFFER` 支持不完整，出错就永久回退到同步读。
+     *
+     * @return 是否可继续使用 PBO 路径
+     */
+    private fun ensureGpPbo(bytes: Int): Boolean {
+        if (!gpPboEnabled) return false
+        if (gpPboIds[0] != 0 && gpPboIds[1] != 0 && gpPboCapBytes >= bytes) return true
+        releaseGpPbo()
+        // 先 drain 历史错误，避免把上一次调用遗留的错误误判成本次失败
+        while (GLES20.glGetError() != GLES20.GL_NO_ERROR) { /* drain */ }
+        val ids = IntArray(2)
+        GLES30.glGenBuffers(2, ids, 0)
+        if (ids[0] == 0 || ids[1] == 0) {
+            Log.w(TAG, "PBO glGenBuffers failed, fallback to sync readback")
+            gpPboEnabled = false
+            return false
+        }
+        for (id in ids) {
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, id)
+            // ⚠️ Android 的 glBufferData(int target, int size, Buffer, int usage) 的 size 是 **Int**
+            GLES30.glBufferData(
+                GLES30.GL_PIXEL_PACK_BUFFER, bytes, null, GLES30.GL_STREAM_READ
+            )
+        }
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        val err = GLES20.glGetError()
+        if (err != GLES20.GL_NO_ERROR) {
+            Log.w(TAG, "PBO alloc failed err=$err, fallback to sync readback")
+            for (id in ids) GLES30.glDeleteBuffers(1, intArrayOf(id), 0)
+            gpPboEnabled = false
+            return false
+        }
+        gpPboIds[0] = ids[0]
+        gpPboIds[1] = ids[1]
+        gpPboCapBytes = bytes
+        gpPboIdx = 0
+        gpPboActive = false
+        Log.i(TAG, "GPUPixel async readback (PBO+fence) enabled, ${bytes} bytes/eye")
+        return true
+    }
+
+    /** 释放 PBO 与在途 fence（也用于「尺寸变化 → 在途作废」的重置） */
+    private fun releaseGpPbo() {
+        discardGpPboPending()
+        for (i in 0..1) {
+            if (gpPboIds[i] != 0) {
+                GLES30.glDeleteBuffers(1, intArrayOf(gpPboIds[i]), 0)
+                gpPboIds[i] = 0
+            }
+        }
+        gpPboCapBytes = 0
+        gpPboIdx = 0
+    }
+
+    /** 丢弃在途 fence 与尺寸记账（PBO 本体保留，可继续复用） */
+    private fun discardGpPboPending() {
+        for (i in 0..1) {
+            if (gpPboFence[i] != 0L) {
+                GLES30.glDeleteSync(gpPboFence[i])
+                gpPboFence[i] = 0L
+            }
+        }
+        gpPboActive = false
+        gpPboPendingBytes = 0
+        gpPboPendingW = 0
+        gpPboPendingH = 0
+    }
+
+    /**
+     * 收割上一帧提交的回读（**非阻塞**）。
+     *
+     * 返回语义（调用方必须配合 [gpPboActive] 判断）：
+     *  - 返回非 null：已就绪并拷出数据，[gpPboActive] 置 false
+     *  - 返回 null 且 [gpPboActive] 仍为 true：**GPU 还没拷完** → 本帧没有新输入，
+     *    调用方应把本帧交给保底帧（不阻塞、不丢帧）
+     *  - 返回 null 且 [gpPboActive] 为 false：本来就没有在途任务（首帧 / 刚重置）
+     */
+    private fun collectGpPbo(need: Int): ByteArray? {
+        if (!gpPboActive) return null
+        val prev = 1 - gpPboIdx
+        val st = GLES30.glClientWaitSync(
+            gpPboFence[prev], GLES30.GL_SYNC_FLUSH_COMMANDS_BIT, 0L
+        )
+        if (st == GLES30.GL_WAIT_FAILED) {
+            Log.w(TAG, "glClientWaitSync failed, fallback to sync readback")
+            gpPboEnabled = false
+            releaseGpPbo()
+            return null
+        }
+        if (st != GLES30.GL_ALREADY_SIGNALED && st != GLES30.GL_CONDITION_SATISFIED) {
+            // 正常情况 GPU 应在一个帧间隔内拷完；连续多帧不就绪说明驱动/环境异常，
+            // 回退同步读以保证「总会有新数据」，而不是长期停在保底帧上。
+            gpPboStall++
+            if (gpPboStall >= 60) {
+                Log.w(TAG, "PBO fence stalled $gpPboStall frames, fallback to sync readback")
+                gpPboEnabled = false
+                releaseGpPbo()
+            }
+            return null  // 仍在途：gpPboActive 保持 true
+        }
+        gpPboStall = 0
+        GLES30.glDeleteSync(gpPboFence[prev])
+        gpPboFence[prev] = 0L
+
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, gpPboIds[prev])
+        val mapped = GLES30.glMapBufferRange(
+            GLES30.GL_PIXEL_PACK_BUFFER, 0, need, GLES30.GL_MAP_READ_BIT
+        )
+        if (mapped == null) {
+            Log.w(TAG, "glMapBufferRange returned null, fallback to sync readback")
+            glUnbindPackBufferAndDisable()
+            return null
+        }
+        val mb = mapped as java.nio.ByteBuffer
+        mb.position(0)
+        mb.limit(need)
+        val recycled = synchronized(faceFrameLock) {
+            faceFramePool?.takeIf { it.size >= need }?.also { faceFramePool = null }
+        }
+        val f = recycled ?: ByteArray(need)
+        mb.get(f, 0, need)
+        GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER)
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        if (GLES20.glGetError() != GLES20.GL_NO_ERROR) {
+            Log.w(TAG, "PBO map/unmap error, fallback to sync readback")
+            glUnbindPackBufferAndDisable()
+            return null
+        }
+        gpPboActive = false
+        return f
+    }
+
+    private fun glUnbindPackBufferAndDisable() {
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        gpPboEnabled = false
+        releaseGpPbo()
+    }
+
+    /**
+     * 提交本帧回读到 PBO（不等待 GPU），只挂一个 fence 供下一帧收割。
+     *
+     * ⚠️ `glReadPixels(..., offset=0L)` 的 offset 形式**只在绑定了
+     * `GL_PIXEL_PACK_BUFFER` 时有效**（ES3 语义），故绑定/解绑必须成对。
+     *
+     * @return 是否提交成功（失败则由调用方回退同步路径）
+     */
+    private fun submitGpPboRead(
+        srcIsHalf: Boolean, x0: Int, y0: Int, rw: Int, rh: Int, need: Int
+    ): Boolean {
+        val pbo = gpPboIds[gpPboIdx]
+        if (pbo == 0) return false
+        while (GLES20.glGetError() != GLES20.GL_NO_ERROR) { /* drain */ }
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, pbo)
+        GLES20.glBindFramebuffer(
+            GLES20.GL_FRAMEBUFFER,
+            if (srcIsHalf) gpHalfFboId else gpFboId
+        )
+        GLES30.glReadPixels(
+            if (srcIsHalf) 0 else x0,
+            if (srcIsHalf) 0 else y0,
+            rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE,
+            // ⚠️ Android 的重载是 glReadPixels(..., int offset)（偏移量用 Int 表达），
+            //    不是 GL 规范里的 void*；写成 0L 会因无匹配重载而编译失败。
+            0
+        )
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        val err = GLES20.glGetError()
+        if (err != GLES20.GL_NO_ERROR) {
+            Log.w(TAG, "glReadPixels(PBO) failed err=$err")
+            return false
+        }
+        // ⚠️ fence 的 condition 常量是 GL_SYNC_GPU_COMMANDS_COMPLETE（没有 ..._BIT 这个名字）
+        val fence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        if (fence == 0L) {
+            Log.w(TAG, "glFenceSync failed")
+            return false
+        }
+        gpPboFence[gpPboIdx] = fence
+        gpPboIdx = 1 - gpPboIdx
+        gpPboActive = true
+        gpPboPendingBytes = need
+        gpPboPendingW = rw
+        gpPboPendingH = rh
+        return true
+    }
+
     /** 极简上屏 pass：把 FBO 纹理 1:1 画回屏幕（FBO 与屏幕同为 GL 左下原点约定，直接对应即可） */
     private fun ensureBlitProgram() {
         if (gpBlitProgram != 0) return
@@ -2611,6 +2920,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         gpBlitProgram = prog
         gpBlitPosLoc = GLES20.glGetAttribLocation(prog, "aPos")
         gpBlitTexLoc = GLES20.glGetUniformLocation(prog, "uTex")
+        // v2.0.186（P2-E1）：aTex 的 attrib location 也一并缓存 —— 原先 blitToScreen /
+        // blitScaledIntoFbo 每帧各调一次 glGetAttribLocation（JNI 往返 + 字符串查表），
+        // program 在进程内不变，location 恒定，无需逐帧查询。
+        gpBlitTexAttrLoc = GLES20.glGetAttribLocation(prog, "aTex")
         if (gpBlitQuad == null) {
             // TRIANGLE_STRIP：左下、右下、左上、右上（pos x,y + tex u,v）
             gpBlitQuad = java.nio.ByteBuffer.allocateDirect(4 * 4 * 4)
@@ -2921,8 +3234,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         if (srcTex == 0) return
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
         GLES20.glViewport(0, 0, gpFboW, gpFboH)
-        GLES20.glClearColor(0f, 0f, 0f, 1f)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        // v2.0.186（P2-E3）：全屏 quad 完整铺满 viewport 时无需 glClear —— 这是每帧一次
+        // 的全屏写带宽（1080p ≈ 8.3 MB）纯浪费。仅当 viewport 与 surface 尺寸不一致
+        // （quad 无法铺满，四周会残留上一帧像素）才 clear 兜底黑边。
+        // 注：glClear 不受 viewport 限制，清的是整个 framebuffer，故兜底语义正确。
+        if (gpFboW != displayWidth || gpFboH != displayHeight) {
+            GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        }
         GLES20.glUseProgram(gpBlitProgram)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, srcTex)
@@ -2931,13 +3250,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         q.position(0)
         GLES20.glVertexAttribPointer(gpBlitPosLoc, 2, GLES20.GL_FLOAT, false, 16, q)
         GLES20.glEnableVertexAttribArray(gpBlitPosLoc)
-        val texAttr = GLES20.glGetAttribLocation(gpBlitProgram, "aTex")
-        q.position(2)
-        GLES20.glVertexAttribPointer(texAttr, 2, GLES20.GL_FLOAT, false, 16, q)
-        GLES20.glEnableVertexAttribArray(texAttr)
+        // v2.0.186（P2-E1）：用缓存的 location，不再每帧 glGetAttribLocation
+        val texAttr = gpBlitTexAttrLoc
+        if (texAttr >= 0) {
+            q.position(2)
+            GLES20.glVertexAttribPointer(texAttr, 2, GLES20.GL_FLOAT, false, 16, q)
+            GLES20.glEnableVertexAttribArray(texAttr)
+        }
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(gpBlitPosLoc)
-        GLES20.glDisableVertexAttribArray(texAttr)
+        if (texAttr >= 0) GLES20.glDisableVertexAttribArray(texAttr)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
@@ -2957,13 +3279,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private fun uploadPendingGpRegion() {
         val bytes = gpRegionPending ?: return
         gpRegionPending = null
-        try {
-            if (gpFboTexId != 0 && gpRegionW > 0 && gpRegionH > 0) {
-                doUploadGpRegion(bytes)
-            }
-        } finally {
-            // v2.0.182 性能：用完把缓冲还池，供下一帧拷贝复用（省掉每帧 2.1 MB 分配）
-            synchronized(gpRegionPoolLock) { gpRegionPool = bytes }
+        // v2.0.186（P0-A）：不再有输出复用池 —— 每帧的 bytes 是 sink 新建的独立数组，
+        // 上传后交由 GC 回收（原"还池"逻辑已随 gpRegionPool 一并删除）。
+        if (gpFboTexId != 0 && gpRegionW > 0 && gpRegionH > 0) {
+            doUploadGpRegion(bytes)
         }
     }
 
@@ -3074,13 +3393,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         GLES20.glVertexAttribPointer(gpBlitPosLoc, 2, GLES20.GL_FLOAT, false, 16, verts)
         GLES20.glEnableVertexAttribArray(gpBlitPosLoc)
-        verts.position(2)
-        val texAttr = GLES20.glGetAttribLocation(gpBlitProgram, "aTex")
-        GLES20.glVertexAttribPointer(texAttr, 2, GLES20.GL_FLOAT, false, 16, verts)
-        GLES20.glEnableVertexAttribArray(texAttr)
+        // v2.0.186（P2-E1）：用缓存的 location，不再每帧 glGetAttribLocation
+        val texAttr = gpBlitTexAttrLoc
+        if (texAttr >= 0) {
+            verts.position(2)
+            GLES20.glVertexAttribPointer(texAttr, 2, GLES20.GL_FLOAT, false, 16, verts)
+            GLES20.glEnableVertexAttribArray(texAttr)
+        }
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(gpBlitPosLoc)
-        GLES20.glDisableVertexAttribArray(texAttr)
+        if (texAttr >= 0) GLES20.glDisableVertexAttribArray(texAttr)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
     }
 
@@ -3299,7 +3621,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 跳过后本帧不会产生新的贴回，gpFbo 里只有**未经 GPUPixel 处理的原始渲染结果**；
         // 若照常上屏，画面便在「美颜帧 ↔ 原始帧」之间交替（处理耗时 > 帧时长时必然发生，
         // 模拟器/低端机尤其明显）。故此处**必须记账**，让上屏阶段改用保底帧复现上一张美颜画面。
-        if (gpFullFrame && isDetectingFace.get()) {
+        //
+        // v2.0.186：判据由 isDetectingFace 改为 gpInFlight —— 检测与 GL 处理现在跑在两条
+        // 线程上，必须两者都做完才算「不忙」（见 gpInFlight 的说明）。
+        if (gpFullFrame && gpInFlight.get() > 0) {
             gpSkipReadThisFrame = true
             return
         }
@@ -3388,11 +3713,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         try {
             val need = rw * rh * 4
-            val buf = faceReadBuffer?.takeIf { it.capacity() >= need }
-                ?: java.nio.ByteBuffer.allocateDirect(need)
-                    .order(java.nio.ByteOrder.nativeOrder())
-                    .also { faceReadBuffer = it }
-            buf.clear()
 
             // v2.0.183：降采样回读必须先「真正缩放」再读 —— glReadPixels 只裁剪不缩放。
             // 用 glBlitFramebuffer 把主 FBO 的 [gpReadUv*] 区域缩小渲染到降采样 FBO，
@@ -3404,46 +3724,107 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // 现改为：blit 失败即视为「本帧不回读」，交给保底帧显示上一张美颜画面 ——
             // 既不放大也不闪烁，下一帧会自动重试。
             val needsDownscale = gpFullCoverageThisFrame && (rw < w || rh < h)
-            if (needsDownscale && !blitFboToHalf(
-                    gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
+
+            // ===== v2.0.186（P1-C）：先试 PBO 异步回读（消除 GL 线程硬阻塞） =====
+            // 节奏：本帧「收割上一帧（非阻塞）→ blit → 提交本帧」，数据下一帧到位。
+            var pboHandled = false
+            if (gpAsyncReadback && gpPboEnabled && ensureGpPbo(need)) {
+                // 回读尺寸变化（降采样档位切换 / 分辨率变化）→ 在途数据尺寸不匹配，作废
+                if (gpPboActive && gpPboPendingBytes != need) discardGpPboPending()
+
+                val tw0 = System.nanoTime()
+                val collected = collectGpPbo(need)
+                gpProfLogReadback(System.nanoTime() - tw0, gpPboActive)
+                if (gpPboEnabled) {
+                    if (gpPboActive) {
+                        // 在途 fence 未 signal（GPU 还没拷完）→ 本帧没有新输入可投递，
+                        // 交给保底帧复现上一张美颜画面（不阻塞、不闪烁）
+                        gpSkipReadThisFrame = true
+                        return
+                    }
+                    if (collected != null) {
+                        synchronized(faceFrameLock) {
+                            pendingFaceFrame = collected
+                            pendingFaceFrameW = gpPboPendingW
+                            pendingFaceFrameH = gpPboPendingH
+                        }
+                        triggerBackgroundFaceDetection()
+                    }
+                    // 本帧的降采样 blit 必须在提交回读之前完成
+                    if (needsDownscale && !blitFboToHalf(
+                            gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
+                        )
+                    ) {
+                        gpSkipReadThisFrame = true
+                        return
+                    }
+                    pboHandled = submitGpPboRead(needsDownscale, x0, y0, rw, rh, need)
+                    if (!pboHandled) {
+                        Log.w(TAG, "PBO submit failed, fallback to sync readback")
+                        gpPboEnabled = false
+                        releaseGpPbo()
+                    }
+                }
+            }
+
+            if (!pboHandled) {
+                // ===== 同步回读（原路径 / PBO 不可用或失败时的回退）=====
+                val tr0 = System.nanoTime()
+                val buf = faceReadBuffer?.takeIf { it.capacity() >= need }
+                    ?: java.nio.ByteBuffer.allocateDirect(need)
+                        .order(java.nio.ByteOrder.nativeOrder())
+                        .also { faceReadBuffer = it }
+                buf.clear()
+
+                if (needsDownscale && !blitFboToHalf(
+                        gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
+                    )
+                ) {
+                    gpSkipReadThisFrame = true
+                    return
+                }
+                // 降采样成功 → 从降采样 FBO 全图读；否则（本就 1:1）从 gpFbo 的 (x0,y0) 读同尺寸区域
+                GLES20.glBindFramebuffer(
+                    GLES20.GL_FRAMEBUFFER,
+                    if (needsDownscale) gpHalfFboId else gpFboId
                 )
-            ) {
-                gpSkipReadThisFrame = true
-                return
-            }
-            // 降采样成功 → 从降采样 FBO 全图读；否则（本就 1:1）从 gpFbo 的 (x0,y0) 读同尺寸区域
-            GLES20.glBindFramebuffer(
-                GLES20.GL_FRAMEBUFFER,
-                if (needsDownscale) gpHalfFboId else gpFboId
-            )
-            GLES20.glReadPixels(
-                if (needsDownscale) 0 else x0,
-                if (needsDownscale) 0 else y0,
-                rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
-            )
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            buf.rewind()
+                GLES20.glReadPixels(
+                    if (needsDownscale) 0 else x0,
+                    if (needsDownscale) 0 else y0,
+                    rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+                )
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+                buf.rewind()
 
-            // 从池里取一块装这一帧（所有权转移给后台线程，用完后归还）
-            val recycled = synchronized(faceFrameLock) {
-                faceFramePool?.takeIf { it.size >= need }?.also { faceFramePool = null }
-            }
-            val frame = recycled ?: ByteArray(need)
-            buf.get(frame, 0, need)
+                // 从池里取一块装这一帧（所有权转移给后台线程，用完后归还）
+                val recycled = synchronized(faceFrameLock) {
+                    faceFramePool?.takeIf { it.size >= need }?.also { faceFramePool = null }
+                }
+                val frame = recycled ?: ByteArray(need)
+                buf.get(frame, 0, need)
+                gpProfLogReadback(System.nanoTime() - tr0, false)
 
-            synchronized(faceFrameLock) {
-                pendingFaceFrame = frame
-                pendingFaceFrameW = rw
-                pendingFaceFrameH = rh
+                synchronized(faceFrameLock) {
+                    pendingFaceFrame = frame
+                    pendingFaceFrameW = rw
+                    pendingFaceFrameH = rh
+                }
+                triggerBackgroundFaceDetection()
             }
-            triggerBackgroundFaceDetection()
         } catch (e: Exception) {
             // Ignore transient surface resizing safety errors
         }
     }
 
     private fun triggerBackgroundFaceDetection() {
-        if (isDetectingFace.get()) return // Processing previous face detection
+        // v2.0.186：两条路径的「忙」判据不同
+        //   - GPUPixel：gpInFlight（检测 + GL 处理跑在两条线程，都做完才算空闲）
+        //   - MediaPipe：isDetectingFace（单线程，原语义）
+        if (isGpuPixelActive()) {
+            if (gpInFlight.get() > 0) return
+        } else if (isDetectingFace.get()) {
+            return
+        }
 
         var frame: ByteArray? = null
         var fw = 0
@@ -3457,35 +3838,85 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val rgbaData = frame ?: return
         if (fw <= 0 || fh <= 0) return
 
-        isDetectingFace.set(true)
-        faceExecutor.execute {
-            try {
-                // v2.0.160：GPUPixel 引擎分支 —— 独立检测（Mars-Face）+ 局部处理，不碰 MediaPipe。
-                // 一次回读的像素可以同时作为两套引擎的输入（共享的是像素，不是检测结果）。
-                if (isGpuPixelActive()) {
-                    // v2.0.185：实测处理耗时（含 Mars-Face 检测 + GPUPixel 链 + 拷贝），
-                    // 供自适应降采样使用 —— T_proc 越大越要降采样，以压低跳帧率。
+        // ===== v2.0.186（P0-B）：GPUPixel 走「检测 ∥ GL 处理」双线程流水线 =====
+        // 一次回读的像素同时作为两套资源的输入（共享的是像素，不是检测结果）：
+        //   · gpDetectExecutor → Mars-Face（纯 CPU）
+        //   · faceExecutor     → GPUPixel GL 链（独立 EGL context）
+        // 两者读同一块 rgbaData（只读），由 gpInFlight 保证读完前不被复用。
+        if (isGpuPixelActive()) {
+            val stride = fw * 4
+            // 检测降频：landmark 是「形变」的唯一输入，滞后 ≤ gpDetectInterval 帧
+            // （叠加回读/贴回本身的 1~2 帧延迟，同量级，视觉不可感知）；
+            // 磨皮/美白完全不依赖检测，降频对它们零影响。
+            val interval = gpDetectInterval.coerceAtLeast(1)
+            val doDetect = gpCachedLandmarks == null || (gpFrameTick % interval == 0)
+            gpFrameTick++
+
+            gpInFlight.addAndGet(if (doDetect) 2 else 1)
+
+            if (doDetect) {
+                gpDetectExecutor.execute {
+                    try {
+                        // v2.0.186：分段计时 —— 这一段是纯 Mars-Face 检测（含首次模型加载）
+                        val td0 = System.nanoTime()
+                        val lm = GpuPixelBeauty.getOrCreatePipeline().detect(rgbaData, fw, fh, stride)
+                        gpProfLogDetect(System.nanoTime() - td0)
+                        if (lm != null && lm.isNotEmpty()) {
+                            gpDetectMissStreak = 0
+                            gpCachedLandmarks = lm
+                        } else {
+                            gpDetectMissStreak++
+                            // v2.0.186 防抖：连续 3 次拿不到脸才清空缓存。
+                            // 单次失败（遮挡/侧脸/运动模糊）不再瞬间把美型归零 ——
+                            // 这既是稳定性提升，也避免了「形变忽有忽无」的抖动。
+                            if (gpDetectMissStreak >= 3) gpCachedLandmarks = null
+                        }
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "GPUPixel background detect failed", e)
+                    } finally {
+                        finishGpTask(null)
+                    }
+                }
+            }
+
+            faceExecutor.execute {
+                try {
+                    // v2.0.185：实测处理耗时供自适应降采样使用。
+                    // v2.0.186：这里只剩 **GL 段**（检测已移到 gpDetectExecutor），
+                    // 故 EMA 反映的是纯 GPU 开销，降采样决策比之前更准确。
                     val t0 = System.nanoTime()
-                    val out = GpuPixelBeauty.getOrCreatePipeline().process(
-                        rgbaData, fw, fh, fw * 4,
-                        beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom
+                    val out = GpuPixelBeauty.getOrCreatePipeline().processFrame(
+                        rgbaData, fw, fh, stride,
+                        beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                        gpCachedLandmarks
                     )
-                    updateGpAdaptiveDownscale(System.nanoTime() - t0)
+                    val glNanos = System.nanoTime() - t0
+                    updateGpAdaptiveDownscale(glNanos)
+                    gpProfLogGpu(glNanos)
                     if (out != null) {
                         gpRegionW = fw
                         gpRegionH = fh
-                        // v2.0.182 性能：GPUPixel 内部会复用它的输出 buffer，必须拷一份再交 GL 线程。
-                        // 原先用 out.copyOf() 每次都分配新数组（全覆盖下 2.1 MB/帧 → GC 压力大），
-                        // 改为「双缓冲交换」：从池里取一块可复用缓冲，拷完交出去，用过的还回池。
-                        val need = out.size
-                        val dst = synchronized(gpRegionPoolLock) {
-                            gpRegionPool?.takeIf { it.size == need }?.also { gpRegionPool = null }
-                        } ?: ByteArray(need)
-                        System.arraycopy(out, 0, dst, 0, need)
-                        gpRegionPending = dst
+                        // v2.0.186（P0-A）：直接移交所有权，**不再 arraycopy**。
+                        // 依据：jni_sink_raw_data.cc nativeGetRgbaBuffer 每次都
+                        // env->NewByteArray(size) + SetByteArrayRegion 拷进新数组，
+                        // 故 out 是本次调用独有的新数组（native 侧 rgba_buffer_ 的复用
+                        // 被 JNI 边界隔离），GL 线程下一帧消费它不存在竞争。
+                        // 省掉每帧 2.07 MB（全覆盖 + 2 档降采样）的纯 memcpy。
+                        gpRegionPending = out
                     }
-                    return@execute
+                } catch (e: Throwable) {
+                    Log.e(TAG, "GPUPixel background process failed", e)
+                } finally {
+                    finishGpTask(rgbaData)
                 }
+            }
+            return
+        }
+
+        // ===== MediaPipe（GLSL 引擎）路径：单线程，原逻辑 =====
+        isDetectingFace.set(true)
+        faceExecutor.execute {
+            try {
                 // v84 性能优化：复用 Bitmap/数组缓冲（faceExecutor 单线程，安全）
                 val area = fw * fh
                 if (faceArgBuffer == null || faceArgBuffer!!.size < area) {
@@ -3581,6 +4012,22 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 synchronized(faceFrameLock) { faceFramePool = rgbaData }
                 isDetectingFace.set(false)
             }
+        }
+    }
+
+    /**
+     * v2.0.186（P0-B）：GPUPixel 双线程流水线的任务收尾。
+     *
+     * 计数归零意味着**所有读取者都已读完**本帧像素，此时才能：
+     *  ① 把帧归还池，供下一帧回读复用；
+     *  ② 让 GL 线程重新开始回读（[maybeScheduleFaceSampling] 的节流判据）。
+     *
+     * 传入 `null` 的任务（检测）不归还帧 —— 帧只由「处理」侧归还，
+     * 避免两个任务同时写池。
+     */
+    private fun finishGpTask(rgbaData: ByteArray?) {
+        if (gpInFlight.decrementAndGet() <= 0 && rgbaData != null) {
+            synchronized(faceFrameLock) { faceFramePool = rgbaData }
         }
     }
 }
