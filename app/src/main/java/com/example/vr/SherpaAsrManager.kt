@@ -595,8 +595,21 @@ object SherpaAsrManager {
     fun modelChoiceFor(context: Context, langKey: String): String =
         choicePrefs(context).getString("asr_model_choice_$langKey", "") ?: ""
 
+    /**
+     * 模型选择版本号：**任何一次 [setModelChoice] 都会自增**。
+     *
+     * 识别器重建的 LaunchedEffect 必须把它加进 key ——
+     * 同一语言下换模型时 `langCode` 不变，仅靠 langCode 做 key **不会触发重建**
+     * （v2.0.208 实测：点英语2 后识别仍在用英语1 的模型）。
+     * 放在 Manager 而非 UI 局部状态，是因为语言 chip 有**两处渲染**
+     * （设置面板 + 字幕快捷面板），两处触发都要能联动重建。
+     */
+    var modelChoiceVersion: Int by mutableStateOf(0)
+        private set
+
     fun setModelChoice(context: Context, langKey: String, modelId: String) {
         choicePrefs(context).edit().putString("asr_model_choice_$langKey", modelId).apply()
+        modelChoiceVersion++
     }
 
     /**

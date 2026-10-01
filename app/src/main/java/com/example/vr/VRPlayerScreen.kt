@@ -737,10 +737,9 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getString("sherpa_lang_code", "auto") ?: "auto" else "auto"
         )
     }
-    // v2.0.208：模型选择版本号 —— 同一语言下切换模型（code 不变）时也要触发
-    // 识别器重建。把它加进相关 LaunchedEffect 的 key（见实时字幕引擎处）。
-    // ⚠️ 若只依赖 sherpaLangCode 做 key，会出现「点了英语2、识别还在用英语1 的模型」。
-    var asrModelChoiceVersion by remember { mutableIntStateOf(0) }
+    // v2.0.208：模型选择版本号在 SherpaAsrManager.modelChoiceVersion（object 级状态）——
+    // 语言 chip 有两处渲染（设置面板 + 字幕快捷面板），版本号必须全局共享才能两处联动重建。
+    // （本地 remember 版本号在快捷面板触发时不生效，已废弃。）
     // v127e：SenseVoice 推理线程数（1~10，推荐 4~6）
     var asrThreads by remember {
         mutableIntStateOf(
@@ -2491,7 +2490,7 @@ fun VRPlayerScreen(
     // v126：实时 AI 字幕（方案文档「边播边生成」）
     // 开启后后台滚动预读：独立解码音频 → VAD 分段 → ASR → 内存缓存；
     // 播放头只需查缓存即可显示，不再等整片转写完成。
-    LaunchedEffect(isRealtimeSubtitleEnabled, selectedMediaItem.uri, asrEngineType, sherpaLangCode, asrModelChoiceVersion) {
+    LaunchedEffect(isRealtimeSubtitleEnabled, selectedMediaItem.uri, asrEngineType, sherpaLangCode, SherpaAsrManager.modelChoiceVersion) {
         // v127f：切语言/切媒体/开关都会重跑本 effect，必须把**全部**相关状态清干净，
         // 否则屏上会残留上一轮的字幕或进度（会让用户以为"改了语言没反应"）。
         realtimeCues = emptyList()
@@ -5424,7 +5423,6 @@ fun VRPlayerScreen(
                                                                                 changeAsrLanguage(code)
                                                                                 lang.modelId?.let { mId ->
                                                                                     SherpaAsrManager.setModelChoice(context, code, mId)
-                                                                                    asrModelChoiceVersion++
                                                                                 }
                                                                             }
                                                                             .padding(vertical = 5.dp),
@@ -5481,7 +5479,6 @@ fun VRPlayerScreen(
                                                                                 changeAsrLanguage(code)
                                                                                 lang.modelId?.let { mId ->
                                                                                     SherpaAsrManager.setModelChoice(context, code, mId)
-                                                                                    asrModelChoiceVersion++
                                                                                 }
                                                                             }
                                                                             .padding(vertical = 4.dp),
