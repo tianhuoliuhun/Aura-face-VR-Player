@@ -10,244 +10,19 @@
 
 ---
 
-## ✨ 核心功能 / Features
+## ✨ 功能亮点 / Highlights
 
-### 🥽 VR 播放能力 / VR Playback
-- 多投影模式：标准平面 / 鱼眼 / 360° 球面 / 180° 穹幕，一键切换
-  - Projection modes: Standard / Fisheye / 360° Sphere / 180° Dome
-- 3D 立体支持：Side-by-Side（左右）与 Top-and-Bottom（上下）3D 视频
-  - 3D stereo: Side-by-Side and Top-and-Bottom formats
-- 体感操控：陀螺仪视角跟随，支持手动偏移、重置视角中心
-  - Gyro control: head-tracking view, manual offset, recenter
-- 陀螺仪朝向模式：**手持横屏** / **VR 眼镜平放**两种轴向映射；另提供「反转陀螺仪转向」开关适配个别机型（v125）
-  - Gyro orientation: handheld landscape / VR-box modes, plus a direction-inversion toggle (v125)
-- 8K 硬解实验（默认关闭，设置内按需开启）：SPS level 适配、强制硬解选择器、分辨率头欺骗、缩小输出缓冲、补充解码参数注入、硬解失败自动切软解
-  - Experimental 8K decoding (off by default): SPS level patch, forced hardware selector, resolution spoofing, downscaled output, codec param injection, auto software fallback
-- 触控交互：单指拖曳查看、双指缩放、捏合旋转，UI 误操作 2 秒自动隐藏
-  - Touch: drag to look around, pinch to zoom, UI auto-hides after 2s idle
-- 曲面沉浸：圆柱面曲率可调，双中心变形（Warp Dual Center）优化
-  - Immersive: adjustable cylinder curvature, dual-center warp distortion
+> 每个功能的完整说明见 **[功能详解](docs/FEATURES.md)**；画质增强另有 **[专题文档](docs/VIDEO_ENHANCE_MEMC_FSR.md)**。
 
-### ⚡ 画质增强 / Video Enhancement（v2.0.206 起）
-- **MEMC 运动补偿插帧**：在相邻两帧之间生成中间帧，让运动更顺滑
-  - 目标帧率 **48 / 60 / 72 / 90 / 120** 可选
-  - 运动估计（3 步菱形搜索 + ±1 精修）+ 双向运动补偿 + 遮挡检测（遮挡处退化为线性混合，宁可糊也不撕裂）
-  - **场景切换自动跳过插帧**（1×1 帧差检测），避免两个场景叠加的鬼影；相位由**时间**驱动，渲染循环与源帧率不同步时也不抖动
-  - **Motion-compensated frame interpolation**: target 48 / 60 / 72 / 90 / 120 fps; block-matching ME + bidirectional MC with occlusion handling; automatic scene-cut skip via a 1×1 frame-diff read-back; time-driven phase so it never jitters when the render loop is out of sync with the source frame rate
-- **FSR 超分**：EASU（边缘自适应上采样）+ RCAS（对比度自适应锐化）
-  - **默认规则**：源 >1440p 不启用；=1080p → 1440p；其余 → 1080p（另加保护：目标不高于源时不启用，避免降画质）
-  - **自定义规则**：720p / 1080p / 1440p / 2160p / 3840p / 4320p 六档，**完全接管**默认规则
-  - 档位语义为「目标高度」，宽度按**源宽高比**推导 → 非 16:9 片源不会变形；目标超出 GPU 纹理上限时自动降级为不超分（防静默黑屏）
-  - **FSR upscaling**: EASU + RCAS. The default rule disables upscaling above 1440p, maps 1080p → 1440p and everything else → 1080p (plus a guard that refuses targets not higher than the source); a custom rule **fully overrides** it with 720p / 1080p / 1440p / 2160p / 3840p / 4320p. Tiers define a target *height* and the width derives from the source aspect ratio, so non-16:9 footage is never stretched; targets beyond `GL_MAX_TEXTURE_SIZE` degrade to a no-op rather than going silently black
-- 管线顺序 **MEMC → 超分**（时间域在前、空间域在后：ME 成本 ∝ 像素数 × 半径²，先超分再估运动会贵 16 倍，且会去匹配超分生成的假细节）
-  - Pipeline order is **MEMC then upscaling** — temporal before spatial (motion estimation costs scale with pixel count × radius², so upscaling first would be ~16× more expensive and would match against detail that was synthesised rather than captured)
-- ⚠️ 两者**仅在视频播放时生效**；图片 / 全景浏览模式下开关打开也不参与
-  - Both only apply during **video playback**; the toggles stay inert in image / panoramic browsing
-- 📖 **完整规则口径、实现细节、性能与已知限制见 [`docs/VIDEO_ENHANCE_MEMC_FSR.md`](docs/VIDEO_ENHANCE_MEMC_FSR.md)**
-  - Full rule semantics, implementation notes, performance and limitations: [`docs/VIDEO_ENHANCE_MEMC_FSR.md`](docs/VIDEO_ENHANCE_MEMC_FSR.md)
-
-### ✨ 实时 AI 美颜 / Real-time AI Beauty（GLES 着色器）
-- 通用美颜：磨皮（双边滤波）、美白、亮度/对比度微调——2D/3D 模式均生效
-  - General beauty: skin smoothing (bilateral filter), whitening, brightness/contrast — works in 2D/3D
-- 2D 人像精修（MediaPipe **478 点**面部关键点）：瘦脸、大眼、去黑眼圈、鼻梁塑形、嘴型调整、牙齿美白、口红、腮红、眉毛
-  - 2D portrait retouch (MediaPipe **478** face landmarks): face slimming, big eyes, dark-circle removal, nose shaping, mouth adjust, teeth whitening, lipstick, blush, eyebrows
-- 美颜预设：自然 / 淡妆 / 浓妆 / 自定义（**已持久化**，切语言也不会失配），支持对比原图（一键关美颜）
-  - Presets: Natural / Light / Heavy / Custom (persisted); one-tap before/after compare
-- **跟踪一致性修复（v2.0.156）**：人脸坐标会先由「采样窗口」换算回**整幅画面**再驱动妆容与变形（此前直接混用两套坐标 —— 脸一偏离画面中心，口红/腮红/大眼/瘦脸就会整体跑偏）；分屏 VR 下也持续跟踪；**只在开启依赖人脸的效果时才做检测**（只用磨皮或美白不再白付开销），采样缓冲与数组均已复用
-  - Landmark coordinates are now mapped from the sampling window back to full-frame space before driving cosmetics and warping (the two spaces used to be mixed, which made cosmetics drift as soon as the face left the centre); tracking also runs in split-screen VR, sampling only happens when a face-dependent effect is enabled, and the sampling buffers/arrays are reused
-- **双引擎可切换（v2.0.160 起）**：默认「GLSL 内置」纯着色器管线，低功耗、零额外库体积；另有「GPUPixel」可选引擎（预编译 AAR，含 Mars-Face 人脸关键点，端上 GPU 后处理），2D 覆盖整个视频画面、VR / 全景覆盖整个物理屏幕，并可独立开关「VR 下是否启用」
-  - **Dual switchable engines (since v2.0.160)**: default "Built-in GLSL" pure-shader pipeline — low power, zero extra libs; plus an optional "GPUPixel" engine (prebuilt AAR with Mars-Face landmarks, on-device GPU post-processing). Its coverage spans the whole video frame in 2D and the entire physical screen in VR / panoramic, with an independent "enable in VR" toggle
-
-### 🎨 3D LUT 电影调色 / LUT Color Grading
-> ✅ **v1.0.117 起已生效**（修复 `.cube` 关键字解析后链路打通）
-> Working since v1.0.117 — earlier versions parsed `LUT_3D_SIZE` incorrectly and failed silently.
-- 36 款内置 LUT，按用途分为两组平铺展示（纯文字网格，一眼看全）
-  - **人像美颜**（24 款）：暖调人像、明亮日光、通透清新、纯色胶片、柔杏肤、淡雅胶片、柯达波特拉 400/160/800、柯达爱泰 100VS、柯达丽彩 400、柯达克罗姆 64、琉璃通透、鎏金暖肤、苍翠清透、澄明明亮、轻纱柔雾、骑楼活力、千禧暖金、放映柔光、夜灯暖光、银盐高级灰、林荫清爽、暮潮冷调
-  - **风格滤镜**（12 款）：经典青橙、电影暗调、柔和胶片、日系清新、暖阳日落、冷蓝夜色、复古胶片、赛博朋克、黑白电影、强烈青橙、柔和青绿、高对比
-  - 36 bundled LUTs in two tiled groups — Portrait beauty (24): Warm Portrait, Bright Daylight, Clear & Open, Pure Hue Film, Soft Almond Skin, Subtle Film, Kodak Portra 400/160/800, Ektachrome 100VS, Elite Color 400, Kodachrome 64, Glaze, Gilt, Viride, Clear, Voile, Arcade, Tinsel, Splice, Sodium, Argent, Canopy, Dusk Tide; Style filters (12): Classic Teal-Orange, Cinematic Dark, Soft Film, JP Fresh, Warm Sunset, Cool Blue Night, Retro Film, Cyberpunk, B&W, Strong Teal-Orange, Soft Teal-Green, High Contrast
-- 手机自选 LUT：可导入任意 `.cube` 文件（系统会弹出文件选择器）
-  - Import any custom `.cube` file from your phone
-- 强度调节：0–100% 混合强度滑杆，实时预览
-  - Intensity slider (0–100%) with live preview
-- 全部 LUT 由项目自研脚本（numpy）程序化生成，无第三方版权
-  - All LUTs are self-generated via numpy scripts (no third-party copyright)
-
-### 🗣️ 字幕与语音转写 / Subtitles & ASR
-- 离线语音识别：**SenseVoice-Small**（sherpa-onnx，CPU int8）
-  - 中/英/日/韩/粤 5 语言，自带标点，RTF 0.026
-  - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载
-  - Offline ASR: SenseVoice-Small bundled in the APK — zh/en/ja/ko/yue with punctuation, no download needed
-- 🌍 **多语言扩展识别（共 17 种语言）/ Multi-language ASR (17 languages)**
-  - 内置 5 语之外，可在设置里**按需下载**官方离线模型：越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
-  - Beyond the 5 bundled languages, more official offline models can be **downloaded on demand** in Settings: Vietnamese / Russian / French / German / Spanish / Belarusian / Croatian / Italian / Polish / Ukrainian / Thai
-  - **模型不打进 APK**（否则安装包会涨到 1GB+），下载到**应用私有目录**，因此**不需要任何存储权限**
-  - Models are **NOT bundled** (the APK would exceed 1GB) and are downloaded into the **app-private directory**, so **no storage permission is required**
-  - 11 种语言共用同一份 FastConformer 模型 → **下载一次，这 11 种语言全部可用**
-  - The 11 languages share a single FastConformer model — **download once, all 11 become available**
-- **实时 AI 字幕**：边播边生成，不写临时文件
-  - 独立解码音频（AudioTee）+ **Silero VAD** 分段 + 按优先级全局生成
-  - 优先补当前播放点（**含前 5 秒回补**）及其后内容，再回头补齐其余；跳转后可即时命中已生成部分
-  - 推理线程数可调（1–10，推荐 4–6）；字幕悬浮窗支持一键「重新生成」
-  - Realtime subtitles generated while playing — independent audio decode + Silero VAD, priority-based global generation
-- **字幕导出**：一键导出 SRT（直接由内存字幕缓存生成）；启用翻译时文件名**带语言后缀**（如 `影片_20260920-110000_zh.srt`，双语再加 `_bi`），**内容同步使用已有译文**（仅译文＝译文；双语＝原文+译文），同一部片子的多语言字幕互不覆盖；尚未翻译的条目按原文写入，并在提示里告知条数
-  - One-tap SRT export from the in-memory subtitle cache; when translation is on the filename carries a **language suffix** (e.g. `movie_20260920-110000_zh.srt`, plus `_bi` for bilingual) and the **content uses the cached translations** (target-only = translation; bilingual = source + translation); entries not translated yet fall back to the source text and the toast tells you how many
-- **去除标点**（v2.0.154，默认开启，可关）：**屏幕显示与导出的 SRT 都不带标点**。只作用于「显示/导出」层，内部原文保留标点 → **字幕断句与翻译质量不受影响**；英文句点只去句尾，`3.14`、`U.S.`、`192.168.1.1` 里的点保留
-  - Optional toggle (on by default) — both on-screen subtitles and exported SRT omit punctuation. Applied only at the render/export layer, so the source text keeps its punctuation and **segmentation / translation quality are unaffected**; English dots are removed only at sentence end (`3.14`, `U.S.`, `192.168.1.1` stay intact)
-- 整片转写：后台生成带时间轴的 SRT 字幕（静音断句 + 标点断句 + 14 字智能换行）
-  - Full-video transcription to timed SRT (silence/punctuation segmentation, 14-char line wrap)
-- 转写策略：离线模型按**语音段整段识别**（Silero VAD 断句：静音 0.5s 或单段满 8s）
-  - Segment-level offline inference (Silero VAD: 0.5s silence or 8s max per segment)
-- 长句自动切分：单条超过 20 字或 5 秒时按标点拆成多条，按字数比例分配时间
-  - Results >20 chars or >5s are split by punctuation with proportional timing
-- 翻译：**预读翻译**（提前翻译播放点前方 60 秒内的字幕）+ 磁盘缓存（换视频/重启后仍命中）
-  - Translation: ahead-of-playback prefetch + on-disk cache
-- **模型下载**：进度显示、**断点续传（Range）**、**5 次重试**、读超时 90 秒自动重连；
-  无「按文件」源的模型（如泰语）走 **tar.bz2 整包下载 + 流式解压**（只保留所需文件后删包）
-  - Downloads: progress, resume, 5 retries, 90s read-timeout reconnect; tar.bz2 whole-package fallback with streaming extract
-- 字幕样式：字体/字号/位置/描边自定义，内置 MiSans、OPPO Sans 等中文字体；**字号为无级连续调节**
-  - Subtitle styles: font/size/position/outline customizable (stepless size slider); bundled MiSans / OPPO Sans
-
-#### 🌍 多语言识别支持矩阵 / ASR Language Matrix
-
-| 语言 / Language | 模型 / Model | 体积 / Size | 下载源 / Source |
-|---|---|---|---|
-| 自动·中·英·日·韩·粤<br>Auto / zh / en / ja / ko / yue | SenseVoice-Small（**已内置 / bundled**） | 随 APK（229MB）<br>in APK (229MB) | 无需下载 / none |
-| 越南语 / Vietnamese | `sherpa-onnx-zipformer-vi-int8` | ≈74MB | hf-mirror |
-| 俄·法·德·西·白俄·克·意·波·乌<br>ru / fr / de / es / be / hr / it / pl / uk | `NeMo FastConformer 20k int8`<br>（**一个模型覆盖 11 语 / one model, 11 languages**） | 整包 102MB → 解压 ≈132MB<br>pkg 102MB → ≈132MB extracted | GitHub releases |
-| 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
-
-### 🌐 字幕在线翻译 / Online Translation
-- **10 种引擎**：必应翻译（免费） / **Google 免密** / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
-  - 10 engines: Bing (free) / Google keyless / MyMemory (free) / LibreTranslate (free, self-hostable) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
-- 显示模式：**双语（原文+译文）** 与 **仅译文** 一键切换，选择**已持久化**
-  - Display modes: bilingual / translation-only, both persisted
-- MyMemory：匿名额度 **5000 字符/天**，程序内置**串行限速 + 错误文案识别 + 配额冷却 10 分钟 + 超长句跳过**，避免触发其限流
-  - MyMemory: built-in pacing, error-text detection and 10-min cooldown to respect its quota limits
-- LibreTranslate：标准 `/translate` 协议，设置面板可填 Base URL 指向**私有实例**
-  - LibreTranslate follows the standard protocol; Base URL configurable for a private instance
-- **Google 免密端点**（clients5）：`GET https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=…&q=…`，**无需 API Key、无需登录**；返回格式随 `sl` 变化（`sl=auto` → `[["译文","en"]]`，显式指定源语言 → `["译文"]`），解析统一取「每项里的第一个字符串」，两种都兼容；Base URL 可改为镜像
-  - **Google keyless endpoint** (clients5): no API key or sign-in required; the response shape depends on `sl` (`sl=auto` → `[["text","en"]]`, explicit `sl` → `["text"]`), so the parser takes the first string of each item; Base URL is configurable for mirrors
-- 必应翻译参考 [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api)（MIT，自研 Kotlin HTTP 实现，未直接引入 npm 包）
-  - Bing translation inspired by [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api) (MIT; self-written Kotlin HTTP, npm package NOT bundled)
-- **引擎 / 目标语言 / API Key / Base URL / 模型名 / 显示模式全部持久化**（重启不丢）
-  - Engine, target language, API key, base URL, model and display mode are all persisted
-- **本地翻译词库（缓存）**：内存 + 磁盘双层，**按目标语言分文件**（`translation/cache_<语言>.tsv`，启动只加载当前语言），单语言上限 **32MB（约 20 万条）**，跨视频、跨重启都命中，因此同一句话只翻一次
-- **缓存失效策略**：条目带「最近使用时间 + 命中次数」→ 压缩时按 **LRU** 淘汰（低频且久未用优先，替代原先的随机淘汰）+ **TTL 180 天**过期；文件头带**版本号**，译文口径变更时可整份作废（旧文件改名 `.stale` 留档）
-- 缓存键做**空白归一化**（多余空格/换行差异视为同一句）；设置里可看**缓存统计**（各语言条目数/体积、命中率、会话用量）并**按语言清空**
-  - Local translation memory: in-memory + on-disk, **one file per target language** (`translation/cache_<lang>.tsv`; only the current language is loaded at startup), 32MB / ~200k entries per language, survives restarts
-  - Invalidation: each entry stores last-used time + hit count → **LRU eviction** (least-used & least-recent first, replacing the old random drop) + **180-day TTL**; the file header carries a **version tag** so a change in translation convention can invalidate the cache wholesale (renamed `.stale`, kept for reference)
-  - Cache keys are whitespace-normalized; Settings shows **cache stats** (per-language entries/size, hit rate, session usage) with per-language clearing
-
-### 📁 局域网与远程播放 / LAN & Remote Playback
-- SMB 协议（jcifs-ng）：浏览局域网共享、直连播放 NAS/PC 视频
-  - SMB (jcifs-ng) browsing & direct playback from NAS/PC
-- **远程视频 seek 优化**：HTTP 分支包 `CacheDataSource` + `SimpleCache`（512MB LRU），
-  即使对方不支持 Range 也能边下边播、正常拖动；moov 在尾部的 MP4 也能先读 moov
-  - Remote seek: HTTP path wrapped with a 512MB LRU cache, enabling seek even without Range support
-- **远程视频也能生成实时字幕/转写**：`AudioTee` 对 `http(s)://` 走框架 MediaExtractor、对 `smb://` 用 jcifs 随机访问封装 `MediaDataSource`
-  - Realtime subtitles work for http and SMB sources too
-
----
-
-## 🏗️ 技术架构 / Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│  UI 层（Jetpack Compose + Material3）               │
-│  VRPlayerScreen（播放器主界面/设置面板/快捷面板）     │
-│  ＋ AsrBatchSection / PlayerControlBar /            │
-│    BeautySettingsSections（v120–v121 按功能拆出）    │
-├─────────────────────────────────────────────────────┤
-│  渲染层（GLSurfaceView + 自定义 GLES 着色器管线）     │
-│  VRGLRenderer：投影变形/立体映射/美颜/LUT/字幕叠加     │
-├─────────────────────────────────────────────────────┤
-│  播放内核（Media3 ExoPlayer + Transformer）          │
-│  硬解 8K、变速播放、音轨/字幕轨选择、缓存数据源        │
-├─────────────────────────────────────────────────────┤
-│  智能模块 / Intelligence                             │
-│  MediaPipe Face Landmarker（人脸关键点 468 点）      │
-│  SenseVoice + 多语言 transducer + Silero VAD        │
-│  10 引擎字幕翻译                                      │
-│  Room 持久化（设置记忆/字幕缓存）                     │
-└─────────────────────────────────────────────────────┘
-```
-
-### 关键组件 / Key Components
-
-| 模块 | 技术 | 说明 |
-|---|---|---|
-| `VRGLRenderer.kt` | OpenGL ES 2.0 Shader | 核心渲染：投影、变形、美颜、LUT、合成 |
-| `VRPlayerScreen.kt` | Compose | 播放器主界面 + 设置面板（v120/v121 已按功能拆分） |
-| `AsrBatchSection.kt` | Compose | 后台转写区块（设置面板与字幕快捷面板复用，v121 拆出） |
-| `PlayerControlBar.kt` | Compose | 播放控制栏三组按钮 + 宽窄屏自适应布局（v121 拆出） |
-| `BeautySettingsSections.kt` | Compose | 美颜/模式提示/对比原图/预设等设置区块（v120–v121 拆出） |
-| `VRPlayerComponents.kt` | Compose | 通用组件：`TooltipIconButton` / `BeautySliderItem` / `ExperimentalSwitchRow` |
-| `MediaPipeFaceManager.kt` | MediaPipe Tasks | 468 点人脸关键点检测（arm64 真机） |
-| `SherpaAsrManager.kt` | sherpa-onnx | 识别器管理：内置 SenseVoice + **可下载的多语言扩展模型（transducer）**；含断点续传 / 整包解压 / 尺寸校验 |
-| `AsrExtModels.kt` | 自研 | **多语言扩展模型注册表**（语言 → 文件名清单 / 下载源 / 校验体积）；支持**多语言共用一个模型** |
-| `RealtimeSubtitleEngine.kt` | 自研 | 实时字幕引擎：独立音频解码 + Silero VAD + 优先级调度 + seek 处理 |
-| `SubtitleCache.kt` | 自研 | 字幕稀疏时间索引（TreeMap + 二分查找，O(log n)） |
-| `SubtitleExporter.kt` | 自研 | SRT 导出（由内存字幕缓存生成） |
-| `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（**10 种引擎**可切换，含 MyMemory 限速与配额冷却、Google 免密端点） |
-| `LutUtils.kt` | 自研 | .cube 解析 + 三线性重采样 + 512×512 网格打包 |
-| `SchemeRoutingDataSource.kt` | 自研 | 按 scheme 分流数据源（`smb://` → jcifs，其余 → HTTP + 缓存） |
-
----
-
-## 📂 目录结构 / Directory Layout
-
-```
-Aura-face-VR-Player/
-├── app/
-│   ├── build.gradle.kts            # 构建配置（版本/签名/依赖）
-│   ├── libs/
-│   │   └── sherpa-onnx-1.13.6.aar  # sherpa-onnx ASR 引擎
-│   └── src/main/
-│       ├── java/com/example/vr/   # Kotlin 源码
-│       ├── assets/
-│       │   ├── luts/              # 36 款内置 3D LUT（.cube，v117 起生效；人像美颜 24 + 风格滤镜 12）
-│       │   ├── gpupixel/          # GPUPixel 引擎资源（⚠️ 不可删！7 张 lookup png + 2 个 .mars_model）
-│       │   ├── face_landmarker.task  # MediaPipe 人脸模型
-│       │   ├── silero_vad.onnx    # Silero VAD 语音活动检测（629KB）
-│       │   ├── sense-voice/       # SenseVoice 识别模型（内置；model.int8.onnx 由 scripts/fetch_asr_model.py 拉取）
-│       │   └── licenses.json      # 开源许可清单（自动生成）
-│       ├── cpp/                   # 华为 VR Glass 的 OpenXR 原生会话层
-│       └── res/                   # 资源与字体（MiSans/OPPO Sans）
-├── third_party/gpupixel/          # GPUPixel（git submodule，源码级集成；其 src/res 亦为 assets/gpupixel 的来源）
-├── docs/                          # 专题文档（见下方「文档索引」）
-├── gradle/libs.versions.toml      # 依赖版本目录
-├── scripts/fetch_asr_model.py     # 内置 ASR 模型拉取脚本（hf-mirror，支持断点续传）
-├── scripts/gen_licenses.py        # 许可清单生成脚本
-├── LICENSE                        # Apache License 2.0
-├── RELEASE_SIGNING.md             # 签名与发布流程
-├── FIREBASE_ANALYTICS.md          # 统计接入说明
-└── README.md
-```
-
-### 📚 文档索引 / Document Index
-
-README 只保留**结论与用法**；展开的规则口径、实现细节与实验记录都在下列专题文档里。
-
-The README keeps **conclusions and usage**; expanded rules, implementation notes and experiment records live in the topic documents below.
-
-| 文档 / Document | 内容 / Contents |
+| 功能 / Feature | 亮点 / Highlights |
 |---|---|
-| [`docs/VIDEO_ENHANCE_MEMC_FSR.md`](docs/VIDEO_ENHANCE_MEMC_FSR.md) | **画质增强（MEMC 插帧 / FSR 超分）** — 完整规则口径、默认与自定义的优先级、判定边界与保护、管线顺序、实现要点、性能与已知限制、诊断日志判读 |
-| [`docs/HUAWEI_VR_UI_DESIGN.md`](docs/HUAWEI_VR_UI_DESIGN.md) | 华为 VR Glass 的 UI 设计 |
-| [`HUAWEI_VR_ENGINE_PLAN_2026-09-26.md`](HUAWEI_VR_ENGINE_PLAN_2026-09-26.md) | 华为 VR Engine（OpenXR）接入规划与实施记录 |
-| [`GPUPIXEL_PERF_FACE_OPTIMIZATION_2026-09-29.md`](GPUPIXEL_PERF_FACE_OPTIMIZATION_2026-09-29.md) | GPUPixel 美颜性能与人脸检测优化专题 |
-| [`GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md`](GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md) | GPUPixel 纹理零拷贝通道可行性验证 |
-| [`BEAUTY_EVALUATION_2026-09-23.md`](BEAUTY_EVALUATION_2026-09-23.md) | 美颜算法评估报告（椭圆遮罩、频域分离磨皮等的依据） |
-| [`BEAUTY_DUAL_ENGINE_PLAN_2026-09-23.md`](BEAUTY_DUAL_ENGINE_PLAN_2026-09-23.md) | 美颜双引擎（GLSL / GPUPixel）规划 |
-| [`DEPENDENCY_MAP.md`](DEPENDENCY_MAP.md) | 模块依赖图 |
-| [`BUG_AUDIT_2026-09-12.md`](BUG_AUDIT_2026-09-12.md) | 缺陷审计记录 |
-| [`RELEASE_SIGNING.md`](RELEASE_SIGNING.md) | Release 签名与发布流程 |
-| [`FIREBASE_ANALYTICS.md`](FIREBASE_ANALYTICS.md) | 用户统计接入说明 |
-
-> 专题文档记录的是**当时**的设计与结论，实现可能已随版本演进 —— 请以源码为准。
-> Topic documents capture the design and findings **at the time**; the implementation may have moved on, so the source remains authoritative.
-
-> 多语言扩展模型**不在仓库内**，由 App 运行时按需下载到设备私有目录。
+| 🥽 **VR 播放**<br>VR Playback | 360°/180° 全景、鱼眼、标准平面四种投影；3D SBS/TAB 立体；陀螺仪跟随与手动偏移；圆柱曲面沉浸；8K 硬解实验（默认关）<br>Four projection modes, SBS/TAB stereo, gyro tracking, cylinder curvature, experimental 8K decoding |
+| ⚡ **画质增强**<br>Video Enhancement | **MEMC 运动补偿插帧**（48/60/72/90/120 fps）+ **FSR 超分**（EASU + RCAS，默认规则与自定义 6 档，自定义完全接管）<br>Motion-compensated interpolation plus FSR upscaling with default and fully-overriding custom rules |
+| ✨ **实时 AI 美颜**<br>Real-time AI Beauty | **GLSL / GPUPixel 双引擎**可切换；478 点人像精修（瘦脸/大眼/去黑眼圈/鼻梁/嘴型/牙齿/口红/腮红/眉毛）；磨皮为频域分离 + 可调皮肤质感<br>Dual switchable engines, 478-landmark portrait retouch, frequency-separation smoothing |
+| 🎨 **3D LUT 调色**<br>LUT Color Grading | 36 款内置 LUT（人像美颜 24 + 风格滤镜 12，全部自研/开源可商用）；可导入自定义 `.cube`<br>36 bundled LUTs plus custom `.cube` import |
+| 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **SenseVoice 已内置**（开箱即用）；**17 种语言**（11 种运行时按需下载）；实时生成、整片转写、SRT 导出、去标点<br>Bundled offline ASR with 17 languages, realtime generation, batch transcription and SRT export |
+| 🌐 **字幕在线翻译**<br>Online Translation | **10 种引擎**（4 个免密/免费：必应 / Google 免密 / MyMemory / LibreTranslate）；本地词库缓存（LRU + TTL + 按语言分文件）<br>10 engines including 4 keyless/free, with a local per-language translation memory |
+| 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
 
 ---
 
@@ -276,103 +51,27 @@ The README keeps **conclusions and usage**; expanded rules, implementation notes
 
 ---
 
-## 🔧 构建 / Build
-
-### 环境要求 / Requirements
-- JDK 17+（本机实测 JDK 21）
-- Android SDK（compileSdk 36, minSdk 24, targetSdk 36）
-- Gradle 9.6.1
-
-> ⚠️ **本仓库不包含 Gradle Wrapper**（没有 `gradlew` / `gradlew.bat`）。
-> 请用本机安装的 Gradle 直接调用，并设置 `JAVA_HOME`：
->
-> ```powershell
-> $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot"   # 按本机路径调整
-> & "C:\Users\<你>\.gradle\dist\gradle-9.6.1\bin\gradle.bat" -p . assembleRelease
-> ```
->
-> This repo has **no Gradle Wrapper** — invoke your local Gradle installation instead of `gradlew`.
-
-### 第一步：拉取内置 ASR 模型（首次 clone 后必做）/ Fetch bundled ASR model
-
-`model.int8.onnx`（约 228MB）超过 GitHub 单文件 100MB 限制，**不纳入 git**，
-需先跑脚本拉到 `app/src/main/assets/sense-voice/`，否则 APK 不会内置模型
-（仍能编译，但离线字幕会退回运行时下载模式）。
+## 🚀 快速开始 / Quick Start
 
 ```powershell
-python scripts/fetch_asr_model.py          # 缺失才下载，支持断点续传
-python scripts/fetch_asr_model.py --check  # 只检查是否就绪
-```
+# 0) 环境：JDK 17+、Android SDK、Gradle 9.6.1
+#    ⚠️ 本仓库不含 Gradle Wrapper（无 gradlew），请直接调用本机 gradle
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot"   # 按本机路径调整
 
-> 镜像源为 `hf-mirror.com`；不可达时脚本会提示手动下载地址（HuggingFace 官方仓库）。
-> 多语言（17 语）模型中只有 SenseVoice 需要随包：**其余 11 种语言由 App 运行时按需下载**。
->
-> Mirror: `hf-mirror.com`; the script prints a manual download URL when unreachable.
-> Of the 17 languages, **only SenseVoice ships inside the APK** — the other 11 are downloaded on demand at runtime.
+# 1) 首次 clone 后必做：拉取内置 ASR 模型（约 228MB，超 GitHub 单文件限制故不入 git）
+python scripts/fetch_asr_model.py
 
-### 构建命令 / Commands
-
-```powershell
-# Debug 包（开发测试）
-gradle.bat assembleDebug
-
-# Release 包（正式分发，必须！见 RELEASE_SIGNING.md）
-# 产物：app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk（单包全架构，含内置模型）
+# 2) 构建正式包
 gradle.bat assembleRelease
-
-# 依赖许可证清单导出
-gradle.bat :app:dumpDependencies
-python scripts/gen_licenses.py
+# 产物：app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk（单包全架构，含内置模型）
 ```
 
-> ⚠️ **正式分发只允许 Release 包**：Release 使用项目私有签名（`my-upload-key.jks`），
-> Debug 包使用公开的 Android debug key（密码 `android`），外发 Debug 包可被任何人重签伪造更新。
+> ⚠️ **正式分发只允许 Release 包** —— Debug 包使用公开的 Android debug key（密码 `android`），
+> 外发可被他人重签伪造更新。
 >
-> ⚠️ **Only release APKs for distribution**: debug keys use the publicly known password `android`.
-
----
-
-## 🔒 隐私与数据统计 / Privacy & Analytics
-
-- **本地优先**：视频播放、美颜、LUT、离线语音转写均在设备本地完成
-  - Local-first: playback, beauty, LUT, and offline ASR all run on-device
-- **可选匿名统计（Firebase Analytics，免费）**：仅在你**首次启动明确同意后**才采集设备型号/系统版本/启动与活跃次数；拒绝或随时关闭后不再采集
-  - Optional anonymous analytics (Firebase Analytics, free): collects device model / OS version / launches & active counts **only after you explicitly agree**; can be disabled anytime
-- **云端数据（可选）**：字幕翻译（用户自配 API Key 或免费公共端点）、多语言 ASR 模型下载、Firebase 统计
-  - Optional cloud data: subtitle translation, multi-language ASR model download, Firebase analytics
-- **不采集**：任何个人身份信息、视频内容、字幕内容
-  - Never collected: personal identity, video content, subtitle content
-- 接入说明 / Integration guide: [FIREBASE_ANALYTICS.md](FIREBASE_ANALYTICS.md)
-
----
-
-## 📦 依赖与开源许可 / Dependencies & Licenses
-
-本项目基于 Google AI Studio 生成的项目骨架，核心功能均为自研实现。
-Built on a Google AI Studio generated skeleton; core features are self-developed.
-
-| 依赖 / Dependency | 许可证 / License | 用途 / Usage |
-|---|---|---|
-| Jetpack Compose / Material3 | Apache-2.0 | UI 框架 |
-| Media3 ExoPlayer / Transformer | Apache-2.0 | 播放内核 + 缓存数据源 |
-| MediaPipe Tasks Vision | Apache-2.0 | 人脸关键点（GLSL 引擎） |
-| [GPUPixel](https://github.com/pixpark/gpupixel) | Apache-2.0 | 可选美颜引擎（预编译 AAR，含 Mars-Face 关键点 + `libgpupixel.so`；**仅 arm64-v8a / armeabi-v7a**） |
-| sherpa-onnx | Apache-2.0 | 离线语音识别（SenseVoice + 多语言 transducer） |
-| commons-compress | Apache-2.0 | tar.bz2 整包解压（多语言模型兜底下载） |
-| Retrofit / OkHttp / Moshi | Apache-2.0 | 网络与 JSON |
-| jcifs-ng | LGPL-2.1 | SMB 局域网播放 |
-| JNA | LGPL-2.1 / Apache-2.0 | 原生库桥接 |
-| Room | Apache-2.0 | 本地持久化 |
-| [bing-translate-api](https://github.com/plainheart/bing-translate-api)（参考） | MIT | 必应翻译免费端点（自研 Kotlin 实现） |
-
-**资源 / Resources**：MiSans / OPPO Sans 字体（免费商用授权）、MediaPipe 模型（Apache-2.0）、GPUPixel AAR 内置的 **Mars-Face** 人脸关键点模型（MIT）、36 款内置 LUT —— 前 12 款风格滤镜为项目自研 numpy 脚本生成（无第三方版权）；19~24、31~42 共 18 款取自 [t0saki/lumix-original-looks](https://github.com/t0saki/lumix-original-looks)（**MIT**）；25~30 共 6 款（柯达胶片仿真）取自 [scernst13/HaldCLUT-Cube-Files](https://github.com/scernst13/HaldCLUT-Cube-Files)（**CC0-1.0 公共领域**）。全部仅做格式规范化，数值未改动，许可均允许商用。
-
-**Assets**：MiSans / OPPO Sans fonts (free commercial licence), MediaPipe models (Apache-2.0), **Mars-Face (MIT) bundled inside the GPUPixel AAR**, and 36 bundled LUTs — the first 12 style filters are generated in-house by a numpy script (no third-party rights); 18 come from [t0saki/lumix-original-looks](https://github.com/t0saki/lumix-original-looks) (**MIT**); 6 Kodak film emulations come from [scernst13/HaldCLUT-Cube-Files](https://github.com/scernst13/HaldCLUT-Cube-Files) (**CC0-1.0**, public domain). All are format-normalised only with values untouched, and every licence permits commercial use.
-
-**ASR 模型许可 / ASR model licenses**：SenseVoice、zipformer、NeMo FastConformer 均为 Apache-2.0；泰语 zipformer 模型源自 `icefall-asr-gigaspeech2`，亦为 Apache-2.0。
-All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo FastConformer ones — are Apache-2.0; the Thai zipformer derives from `icefall-asr-gigaspeech2` (also Apache-2.0).
-
-完整许可清单见应用内「设置 → 关于与开源许可」或 `app/src/main/assets/licenses.json`。
+> ⚠️ **Ship release APKs only** — debug builds are signed with the publicly known `android` key.
+>
+> 完整环境要求、签名配置、许可清单生成与常见问题见 **[构建与发布](docs/BUILD_AND_RELEASE.md)**。
 
 ---
 
@@ -392,96 +91,39 @@ All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo 
 
 ---
 
-## 📜 版本历史 / Changelog
+## 📚 文档导航 / Documentation
 
-| 版本 / Version | 更新内容 / Changes |
+README 只保留**总览与上手**；展开的说明都拆在下列文档里。
+
+The README keeps only the **overview and getting started**; everything else is split into the documents below.
+
+### 本项目文档 / In this repo
+
+| 文档 / Document | 内容 / Contents |
 |---|---|
-| v86 | ASR 重构：移除实时识别，专注整片转写 / ASR refactor: batch transcription focus |
-| v90 | 设置面板二级菜单 / Settings accordion groups |
-| v91 | 字幕模块提级为主入口 / Subtitles promoted to main entry |
-| v94 | 快捷面板点击外部关闭 / Quick panel closes on outside tap |
-| v100 | 字幕智能断句换行 / Smart subtitle line-breaking |
-| v101 | 转写断句+换行+时间：超时/标点断句、SRT 14 字换行 / SRT segmentation + 14-char wrapping |
-| v102 | 移除 GPUPixel，改用纯 Shader 美颜 / GPUPixel removed, pure shader beauty |
-| v103 | 悬浮球拖动不误触，速度提示条 1 秒 / Floating ball drag UX fixes |
-| v104 | LUT 视频滤镜框架接入（资源+框架，链路未完成）/ LUT filter scaffolding (assets + framework; pipeline incomplete) |
-| v105 | LUT slice 计算修复（仍未生效）/ LUT slice fix (still not working) |
-| v106 | 开源许可声明页 + Release 签名流程 / Open-source licenses page + Release signing flow |
-| v107 | Firebase Analytics 用户统计（免费，隐私弹窗）/ Firebase Analytics (free, privacy consent) |
-| v108 | Vosk 模型下载进度提示 + 3 次重试 / Vosk model download progress + 3 retries |
-| v109 | 下载进度 UI 优化 / Download progress UI improvements |
-| v110 | 新增 Qwen3-ASR 引擎（sherpa-onnx）+ 引擎选择 UI / New Qwen3-ASR engine (sherpa-onnx) + engine selector UI |
-| v111 | SenseVoice QNN 引擎 + ASR 语言选择（中英日韩）+ ABI 分包发布 / SenseVoice QNN engine + ASR language selector + ABI split APKs |
-| v112 | 快捷面板语言同步 + 模型解压目录嵌套修复 + 中文大模型更新 / Quick-panel language sync, unzip path fix, larger ZH model |
-| v113 | MPEG-L2 软件解码回退（兼容 K80 Pro 等机型）/ Software decode fallback for MPEG-L2 |
-| v114 | 输出缓冲队列修复 / Output buffer queue fix |
-| v115 | 音频提取重写为标准 MediaCodec / Audio extraction rewritten on MediaCodec |
-| v116 | MPEG-L2 软件解码器回退策略完善 / Refined MPEG-L2 fallback (c2.android → OMX.google) |
-| v117 | 修复 4 条 P0；切换解码设置不再重置视角 / 4 P0 fixes; decode setting no longer resets view |
-| v118 | SenseVoice QNN 修复（ADSP 路径 + 运行库落盘 + SoC 自动匹配）/ SenseVoice QNN fixes |
-| v119 | 修复 #7 播放位置恢复语义混乱 + #8 内嵌字幕跨媒体残留 / Playback-position restore + stale embedded subtitle fixes |
-| v120 | VRPlayerScreen.kt 按功能拆分（5765 → 5372 行，纯重构）/ VRPlayerScreen split by feature (pure refactor) |
-| v121 | 第二轮拆分：ASR 区块 / 控制栏 / 美颜小组件外置（累计 -963 行）/ Second split pass (cumulative −963 lines) |
-| v122 | Qwen3-ASR 优化：离线模型改为按语音段整段识别，推理次数 -99.6% / Qwen3-ASR: segment-level inference (~99.6% fewer passes) |
-| v123 | Vosk 转写优化（断句 reset / 400ms 喂入 / 模型缓存）+ 修复「模型不可用」死锁 / Vosk optimization + “model unavailable” deadlock fix |
-| v124 | 修复 8K 输入缓冲被拒后退回 1MB（一帧都放不下）/ Fix 8K input buffer rejected → fallback to 1MB |
-| v125 | 修复陀螺仪方向上下左右全部反向（另附转向反转开关）/ Fix inverted gyroscope direction (+ inversion toggle) |
-| **v1.0.126** | **实时 AI 字幕落地**：边播边生成（独立解码 + Silero VAD + 优先级全局生成，当前点前 5 秒回补）/ 翻译预读 + 磁盘缓存 / 整片转写停用 / 只保留 SenseVoice 引擎（移除 Vosk·Qwen3·QNN 与 136MB QNN 运行库）/ 修复 SRT 导出 / 推理线程 1–10 可调 / 字幕重新生成 · **Realtime AI subtitles**: decode-on-the-fly with Silero VAD & priority scheduling, translation prefetch + disk cache, SenseVoice-only (Vosk/Qwen3/QNN removed), SRT export fix, 1–10 threads |
-| **v2.0.127** | **ASR 模型内置**（SenseVoice 打进 APK，开箱即用，无需下载）/ 启动时自动清理已废弃引擎（Vosk·Qwen3·QNN）遗留的模型目录 / 下载链路保留为兜底与更新通道 · **Bundled ASR model** (off-the-shelf, no download) + auto-cleanup of legacy model dirs |
-| **v2.0.128** | 修复**字幕开关不记忆**（自动加载字幕时会把用户关掉的字幕重新打开）/ 修复**字幕翻译开关不记忆**（只写不读 + 字幕面板内的开关未落盘）/ 字幕设置面板改为**限高滚动并带滚动条** · Fixed subtitle & translation toggle not persisting; scrollable subtitle settings panel |
-| **v2.0.129** | **界面多语言（第一批）**：支持简体中文 / 繁体中文 / English，默认跟随系统，设置里可手动切换（切换后重建界面）。首批覆盖字幕快捷面板与完整字幕设置面板共 45 条文案 · **i18n (batch 1)**: zh-CN / zh-TW / en, follows system by default with in-app switch |
-| **v2.0.130** | **界面多语言（第二批，累计 352 条）**：繁体改为**大陆用词+繁体字形**（线程/缓存/视频/搜索/导出，非台灣慣用詞）；翻译范围扩到播放控制栏、视频信息、降级转码、8K 硬解、悬浮球、解码器、美颜分区、开源许可、隐私弹窗与全部 Toast 提示 · **i18n batch 2**: traditional Chinese now uses mainland terminology; 352 strings localized |
-| **v2.0.131** | 切换语言**不再重建 Activity**（当前视频/进度/预览图全部保留）/ 语言选项移入「UI 主题」分区 / 新增**日语、韩语**（五语各 400 条）/ 枚举选项名（字幕字体·颜色·描边·背景、投影/Warp/分辨率/立体/解码器）完成多语言 · **i18n**: ja/ko added, language switch keeps playback, 400 strings x 5 languages |
-| **v2.0.132** | **修复 v2.0.131 切语言闪退**：`LanguageManager.wrap` 改为只覆盖 `getResources()`、base 仍指向 Activity 的 `ContextWrapper`，恢复 `rememberLauncherForActivityResult` 顺着 LocalContext 找 `ActivityResultRegistryOwner` 的链路 |
-| **v2.0.133** | 修复切语言后**语言选项高亮停留原语言**：`currentLangTag` 改用 `remember(context)`（context=LocalContext.current，切语言后是新的 localizedContext 对象）重算，高亮实时跟随当前语言 |
-| **v2.0.134** | ① 修复**五语格式占位符双写 `%%`** 致参数被丢弃、界面显示 `%1$s` 字面（「已就绪 %1$s」、导出 SRT 等），5 语统一修正 58~63 处/语，英文 `//n`→`\n`；② 修复**实时字幕生成卡在 99% 不完成**：单窗口解码/识别异常会穿透预读循环中断整条生成链路，已将该窗口处理包 try/catch、失败仅跳过并继续；③ 修复**看一会儿字幕就消失**：`onSeek` 之前只清缓存未同步清理「已扫描区间」记录，导致被清掉的后方字幕不再补回（新增 `trimScannedAfter`）；且播放位置同步 effect 以 `isVideoPlaying` 为 key，暂停/恢复重启会把基准误判成 >2s 大跳而误触发 seek 清空缓存，已改为首帧仅初始化基准 |
-| **v2.0.135** | 实测（logcat）推翻 v2.0.134 ③ 的判断：生成速度仅 **≈1x 实时**，seek 清掉前沿后播放头 12s 内必然追上、字幕必消失。① **`onSeek` 不再清任何缓存/扫描记录**（seek 后前方已生成字幕依然正确，清掉再按 1x 补回纯属浪费；往回拖瞬时命中、往前拖直接可用）；② 修 `firstGapIn` **1ms 滑移**（已扫描区间闭区间末尾被当新 gap，每窗重复解码上窗末尾 1ms）；③ 解码窗口 20s→60s（摊薄每窗 seek 到关键帧+flush 的固定开销，提升生成吞吐） |
-| **v2.0.136** | ① **修复引擎重启后多预读协程并发踩踏**（logcat 实证：同一窗口被重复识别 2~3 遍、进度倒跳、窗口边界每轮 -1ms）：引入**代际 token**——旧代协程在窗口处理完成后发现已被新一代取代立即退出且不写共享状态；`scannedRanges` 全部访问加锁；② 实时字幕**全片生成完成后自动保存** `subtitles/<视频名>_<时间戳>.srt`（应用 data 目录，多次生成不覆盖）；③ **打开视频时自动加载**该目录下匹配的最新一份；④ 字幕悬浮窗新增**字幕源选择器**：实时 AI 生成 / 历史保存字幕一键切换（五语适配） |
-| **v2.0.137** | 修复**设置面板字幕浮窗**底部大片空白、语言选择与水印/主题卡片重叠、以及硬编码的中文颜色名（如「青橙」「赛博朋克」）；浮窗布局改为自适应高度 · Settings subtitle panel: whitespace/overlap fixes + hardcoded color-name cleanup |
-| **v2.0.138** | **设置面板硬编码中文全面多语言化（五语）**：翻译引擎（必应/DeepSeek/通义/智谱/MIMO/OpenAI/自定义）、目标语言、ASR 语言、12 款 LUT 滤镜、ASR 模型状态、字幕翻译状态、实时字幕状态、各类 Toast，以及投影/立体/解码器/分辨率模式名，全部迁入 `values-*` 字符串资源并适配简/繁/英/日/韩 · **Settings-panel i18n**: all hardcoded Chinese (engines, languages, LUTs, ASR/translation/realtime statuses, toasts, projection/stereo/decoder/resolution modes) moved to string resources, 5 languages |
-| **v2.0.139** | ① **修复第三方文件管理器（MT 管理器等）经 FTP/SMB 远程打开视频无法播放**：MT 对远程文件经本地回环 HTTP 代理（`http://127.0.0.1:port/...`）交给播放器，而 `DefaultDataSource` 只处理 file/asset/content、其余 scheme 全部落到 base 数据源——base 固定为 SmbDataSource 导致 http URI 被拿去 SMB 连接 127.0.0.1 而失败。新增 `SchemeRoutingDataSource` 按 scheme 分流：`smb://` → jcifs，其余 → `DefaultHttpDataSource`；并开启 `usesCleartextTraffic` 允许回环明文 HTTP；② **SMB 播放 seek 改真随机访问**：`SmbFileInputStream.skip()` 对大偏移要顺序读丢数据、长视频拖动极慢，改用 `SmbRandomAccessFile` |
-| **v2.0.140** | 修复远程视频（MT 回环代理）**实时字幕/批量转写误报「该视频没有可用的音轨」**：`AudioTee.open()` 第一步 `openFileDescriptor(uri)` 对 `http://` URI 必然抛异常、且临时文件兜底同样依赖它，导致 http 源永远报无音轨。现 http/https 先走框架 `MediaExtractor.setDataSource(context, uri, null)`（原生 HTTP 栈、支持 Range seek，无需下载），失败再回退经代理整文件下载到缓存打开；批量转写复用 AudioTee 一并修复 · Realtime/batch subtitle: fix false "no audio track" for remote http sources |
-| **v2.0.141** | 解码器列表新增 **MPV 占位项**：`DecoderEngine.MPV` 出现在选择器并标注为「占位」，**尚未真实接入**（选中会回退到内置解码器），为后续接入预留入口 · MPV decoder **placeholder** (selectable & labeled as placeholder; not yet wired, falls back to the built-in decoder) |
-| **v2.0.142** | ① **应用内 SMB 浏览器播放也能生成实时字幕/批量转写**：`AudioTee.open()` 新增 `smb://` 分支，用 jcifs `SmbRandomAccessFile` 包成 framework `MediaDataSource` 真随机访问喂给 `MediaExtractor`（直连失败再回退 jcifs 整文件下载到缓存），修掉「该视频没有可用的音轨」误报（v2.0.140 只修了 http）；② **远程视频 seek 优化**：`SchemeRoutingDataSource` 的 http 分支包 `CacheDataSource`+`SimpleCache`（512MB LRU），回环 HTTP 代理即使不支持 Range 也能按需拉取字节、正常 seek（边下边播），moov 在尾部的 MP4 也能先读 moov；③ **硬编码中文收尾审计**：活跃源码已无用户可见漏网硬编码中文（UI 全走 `labelRes`/`R.string`，仅保留 LLM prompt 与母语名等故意项） · SMB realtime subtitle + remote seek cache |
-| **v2.0.143** | **翻译引擎新增两个免费源**：① **MyMemory**（无需 key，实测可用）——`GET .../get?q=…&langpair=Autodetect 到 zh-CN`，支持自动识别来源语言、简/繁目标；② **LibreTranslate**（自托管或公共实例，标准 `/translate` 协议，可选 api_key）——新增设置面板「Base URL」输入便于指向私有实例。两者均接入统一缓存与限流出口，UI 引擎列表自动出现 · Add free translation engines: MyMemory + LibreTranslate |
-| **v2.0.144** | ① **翻译设置全面固化**：此前只有「字幕翻译」开关落盘，**引擎选择**、**「双语/仅译文」显示模式**、目标语言、API Key、Base URL、模型名重启即回默认（用户以为"选了没用"）；现全部持久化，并加「已恢复」门控，避免写回 effect 用默认值覆盖已存设置；② **美颜预设固化**：预设高亮改用稳定 id 落盘、恢复时按当前语言映射回本地化名（切语言不失配）；③ **字幕字号移到「字重」正下方**：原埋在「布局与时间」区不易发现，现为无级连续 slider（12~40）；④ **MyMemory 降速防报错**（依 usagelimits：匿名 5000 字符/天、按调用频率限流、超限以 HTTP 200 回错误文案）：新增「串行 + 最小间隔」限速、错误文案识别（不入缓存）、配额冷却 10 分钟、超 500 字节长句跳过 · Persist all translation settings + beauty preset; move font-size slider under font-weight; throttle MyMemory |
-| **v2.0.145** | **多语言 ASR（越南语样板）**：ASR 语言选择在 SenseVoice 之外支持**可下载的离线扩展模型**——新增 `AsrExtModels` 注册表 + `SherpaAsrManager` 扩展通道（按需下载到 `filesDir`、离线 transducer 识别、多文件断点续传、逐文件尺寸校验防残缺）；越南语用 `sherpa-onnx-zipformer-vi-int8`（encoder/joiner int8 + decoder fp32 + tokens，≈74MB，hf-mirror 源，**不需新增权限**）；语言 chips 与模型状态区改为**随所选语言动态**，语言过多时每行 4 个自动换行 · Multi-language ASR sample: Vietnamese via downloadable offline zipformer transducer |
-| **v2.0.146** | **多语言 ASR 补齐 ru / fr / de / es / th**：① ru/fr/de/es 起初共用 `nemo-parakeet-tdt-0.6b-v3-int8`（≈639MB）；② **泰语没有可按文件下载的源** → 新增**整包兜底**：下载官方 tar.bz2（664MB）后**流式解压只提取需要的 int8 文件**（≈154MB）再删包（`BZip2CompressorInputStream` + `TarArchiveInputStream`，按 basename 匹配）；③ 识别语言增至 12 项 · Multi-language ASR: Thai via tar.bz2 whole-package extract fallback |
-| **v2.0.147** | **修复多语言模型「下载不动」**：设备实测日志 `encoder.int8.onnx HTTP 401` —— **hf-mirror 的「按文件」源按出口 IP / 缓存命中区别对待**，未被缓存的仓库在真机上直接 401（沙箱 IP 却是 206），导致 639MB 的 parakeet 根本下不来。① **ru/fr/de/es 改用官方同门 NeMo FastConformer**：`nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8`，**一个包覆盖 ru/de/es/fr**，整包 **102MB**、解压后 ≈132MB，走 **GitHub releases**（不再依赖 hf-mirror 按文件源）；② **下载加固**：读超时 600s→**90s**（卡住即抛超时→自动重试并按 **Range 续传**）、重试 **3→5** 次、请求统一带浏览器 UA；③ 整包完成判定改为 **97% 体积**，避免半包被当完整包、到解压才失败 · Fix "download stuck": hf-mirror per-file source 401s by egress IP; switch to a 102MB FastConformer + download hardening |
-| **v2.0.148** | **补齐 FastConformer 包全部语言**：该包名 `…-be-de-en-es-fr-hr-it-pl-ru-uk-…` 共覆盖 **11 种**语言。在已有 ru/de/es/fr 之外，新增 **be 白俄罗斯语 / hr 克罗地亚语 / it 意大利语 / pl 波兰语 / uk 乌克兰语**（en 英语不重复登记，内置 SenseVoice 已覆盖）。全部条目共用同一目录 → **下载一次（102MB），这 11 种语言全部可用**；识别语言由此增至 **17 项** · Add all remaining languages of the FastConformer package (be/hr/it/pl/uk) |
-| **v2.0.149** | **泰语改用更小的 Whisper-tiny**：泰语专用模型官方只有 **664MB 整包**（且 hf-mirror 对它的按文件源一律 401，只能整包下载再解压），体积代价过大 → 改用 **Whisper-tiny int8**（`tiny-encoder.int8.onnx` 12.9MB + `tiny-decoder.int8.onnx` 89.9MB + `tiny-tokens.txt` 0.8MB ≈ **99MB**，**hf-mirror 支持按文件下载**，体积降到 1/6.7）；识别器新增 **Whisper 分支**（`OfflineWhisperModelConfig` + `language=th`，多语言模型须显式指定语言）；代价是 tiny 精度弱于专用 zipformer · Thai switched to Whisper-tiny int8 (~99MB, per-file download) instead of the 664MB Thai zipformer package<br>⚠️ **本条已于 v2.0.152 撤回** / **reverted in v2.0.152** |
-| **v2.0.150** | **翻译缓存优化（增大本地词库）**：① 磁盘缓存压缩阈值 **4MB → 32MB**（约可存 20 万条）—— 原值偏小，稍长的剧集就会把缓存文件顶到阈值以上，而原实现重写后文件仍大于阈值，**导致此后每次翻译都要做一次全量重写写盘**（几 MB/次，既慢又费电），这是个真问题；② `rewriteDiskCache` 增加**软上限裁剪**（重写前把内存缓存裁到 20 万条），使重写后文件回落到阈值以下，写入恢复为 O(1) 追加；③ 启动加载改用 `readLine` 循环并加**最大行数保护**（60 万行），避免超大缓存拖慢首屏；④ 加载/重写日志补充条数与 MB/KB，便于观察词库规模 · Translation cache: threshold 4MB→32MB, soft-cap trim on rewrite (fixes repeated full rewrites), load-time line cap, richer logs |
-| **v2.0.151** | **翻译缓存命中率优化（缓存键归一化）**：字幕里同一句话常因**多余空格 / 换行**差异被当成两条（`"Hello  world"` vs `"Hello world"`），从而重复调用翻译接口。现所有缓存键统一经 `makeCacheKey()` **折叠连续空白（含全角空格）并去首尾空白**后再入库/查找，**5 处 key 构造点全部收口**；加载旧磁盘缓存时也按新规则归一化，**升级后老词条仍能命中并自动去重**。⚠️ 刻意**不做**大小写折叠与标点归一：那会把语义不同的句子混到同一 key（问句/陈述句、`12:30` 与 `1230`），返回不合适译文的代价比多翻一次更大 · Translation cache hit-rate: keys are whitespace-normalized via a single `makeCacheKey()` choke point (5 call sites), legacy on-disk entries migrated on load; case/punctuation intentionally NOT normalized to avoid false hits |
-| **v2.0.152** | **撤回 v2.0.149 的泰语改动（保留 v2.0.150 / v2.0.151）**：v2.0.149 曾把泰语从 `sherpa-onnx-zipformer-thai-2024-06-20`（整包 664MB）改为 Whisper-tiny（≈99MB、按文件下载），本次**整体撤回**该改动 —— 泰语恢复为**专用 zipformer + 整包兜底**方案（`AsrExtModels.kt` / `SherpaAsrManager.kt` 回到 v2.0.148 状态，含移除 `whisperLanguage` 字段与 Whisper 识别分支）。v2.0.150（翻译缓存 32MB / 软上限裁剪）与 v2.0.151（缓存键空白归一化）**不受影响，完整保留** · Revert the Thai change from v2.0.149 (Whisper-tiny → back to the dedicated Thai zipformer with tar.bz2 fallback); v2.0.150/v2.0.151 caching work kept intact |
-| **v2.0.153** | **翻译缓存重构 + 缓存统计面板**：① **按目标语言分文件**落盘（`filesDir/translation/cache_<lang>.tsv`，启动只加载当前语言 → 首屏更快、可单独清空），旧单文件自动按语言前缀拆分迁移（原文件改名 `.migrated` 留档）；② **失效策略升级**：条目记录「最近使用时间 + 命中次数」→ 压缩时按 **LRU** 淘汰（低频且久未用优先，替换原先按 HashMap 迭代序的随机淘汰）+ **TTL 180 天**过期 + 文件头**版本号**（译文口径变更时可整份作废，改名 `.stale`）；③ 修复 `clearCache()` **只清内存不清磁盘**（清空后重启缓存"复活"，等于没清）；④ **修复目标语言选择器只显示前 5 种**（fr / de / es / ru 在 UI 上根本选不到），改为每行 5 个自动换行；⑤ **导出字幕按语言命名**（`_zh` / `_zh_bi`），历史字幕加载优先匹配当前语言；⑥ 新增**缓存统计面板**（各语言条目数与体积、命中率、会话用量、按语言/全部清空） · Translation cache rebuilt: per-language files, LRU + TTL + version invalidation, stats panel, language-suffixed SRT export |
-| **v2.0.154** | **字幕去除标点（开关，默认开）**：屏幕显示与导出 SRT 都不带标点。① 新增 `SubtitlePunctuation.strip()` 统一净化 —— 删除中英常见标点 + **智能去句尾句点**（仅当 `.` 后跟空白或位于行尾，故 `3.14` / `U.S.` / `192.168.1.1` 不受影响）+ 折叠标点删后残留的空格；② **只在「渲染前」与「写 SRT 前」净化，内部原文一字不改** → `SubtitledText` 的智能断行与翻译质量不受影响；③ 设置 → 字幕与样式设置新增开关（prefs `subtitle_strip_punct`，受记忆模式门控）；④ 顺带**修复一个丢失的功能**：`SubtitleOverlay` 里原有的 `stripPunctuation()` / `PUNCT_REGEX` 实为**死代码**（有定义、全项目无调用点 —— 译文去标点在早前重构中掉了），本次清理并改为对「原文 + 译文」统一生效 · Per-subtitle punctuation stripping (toggle, on by default) applied at render/export only, with smart sentence-end dot handling so decimals and abbreviations survive |
-| **v2.0.155** | **修复字幕 / 翻译链路 4 处问题**（代码审计后集中修复）：① 🔴 **导出 SRT 内容与文件名不符** —— 开启翻译后导出 `_zh.srt`，写进去的却是原文（译文只活在显示层的局部状态里）；现在导出经 `SubtitleTranslator.exportTextFor()` 取**已有译文**（按显示模式输出「仅译文」或「原文+译文」），未命中回退原文并**在提示里告知未翻译条数**；② 🟠 **自动加载的历史字幕不批量翻译**（此前只有「导入文件 / 在线搜索 / 点按钮」三处触发）→ 补上 `translateCuesBatch`，消除「字幕先原文、后译文」的闪烁；③ 🟠 **会话翻译上限改为按引擎区分**：MyMemory 保持 600（匿名仅 5000 字符/天），其余引擎 **600 → 2000** —— 长片字幕常有 800~1500 条，原先后半段永远翻不到；④ 🟡 `SubtitleOverlay` 的翻译 effect key 从整个 `config` 收敛为 5 个真正相关字段，避免改任何设置都重翻当前条；⑤ 清理 `SubtitleOverlay` 中 6 个未使用的历史残留（`TypewriterText` / `commonPrefixLen` / `commonSuffixLen` / `AppearingRow` / `AsrHighlight` / `DiffHighlight`，共 122 行死代码） · Fix subtitle & translation chain: export content now matches its language-suffixed filename, auto-loaded subtitles get batch translation, session limit is per-engine (2000 vs 600 for MyMemory), tighter effect keys, dead code removed |
-| **v2.0.156** | **修复美颜链路 8 处问题**（代码审计后集中修复）：① 🔴 **坐标空间混用** —— MediaPipe 在「屏幕中心 512×512 采样裁剪图」上算坐标，却被当作**整幅画面 UV** 直接使用 → 脸一偏离中心，妆容与变形就整体错位（1080p 下最大偏差约 ±0.27 屏宽）；现统一经 `mapCropX/YToViewport()` 换算回视口 UV（含 y 轴翻转 —— `glReadPixels` 行序被按行直接填进 Bitmap，导致图像上下颠倒），并把着色器里 `fUnit` 的 clamp 由 `0.05~0.35` 调整为 `0.02~0.25`；② 🟠 **采样缓冲每 8 帧新建 2MB**（1MB DirectByteBuffer + 1MB ByteArray）→ 改为 ByteBuffer 复用 + 数组池归还；③ 🟠 **`glReadPixels` 无条件回读** → 改为**仅在开启依赖人脸的效果时采样**（只用磨皮/美白、或处于「对比原图」模式时完全跳过；本项目是 GLES2 无 PBO，故以此控制同步回读代价）；④ 🟡 **MediaPipe 在 GL 线程同步创建**（首帧卡顿）→ 移到独立后台线程，就绪前自动走 FaceDetector 兜底；⑤ 🟡 **分屏 VR 不采样**（人脸跟踪冻结在最后一次结果）→ 改为在单眼视口内采样；⑥ 🟡 **`beautyPreset` 存本地化名 + 11 处硬编码中文 `"自定义"`**（切界面语言即高亮失配）→ 全面改用稳定 id（`BEAUTY_PRESET_*`），本地化只发生在 `BeautyPresetRow` 内部；⑦ 🟡 **磨皮半径过小**（3×3 双边滤波步长仅 2 像素，靠 0.9 混合强度硬拉、观感发糊）→ 步长提到 3 像素扩大等效半径；⑧ ⚪ 清理小瑕疵：`FaceResult.detault()` 拼写、FaceDetector 与结果数组复用、冗余局部变量 · Fix 8 beauty-pipeline issues: crop→viewport coordinate mapping (cosmetics no longer drift), buffer reuse, sampling only when a face effect is on, off-thread MediaPipe init, split-screen tracking, stable preset ids, wider smoothing radius |
-| **v2.0.157** | **翻译引擎新增 Google 免密端点（clients5）**：`GET https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=…&q=…`，**无需 API Key、无需登录**，实测可直连（另一常见端点 `translate.googleapis.com/…/single?client=gtx` 在同环境返回 429，故未采用）。解析兼容两种返回形态 —— `sl=auto` 时是 `[["译文","en"]]`、显式 `sl` 时是 `["译文"]`，统一取每项里的第一个字符串；语言码映射简中→`zh-CN`、繁中→`zh-TW`。UI 侧：引擎列表由写死的 `take(3)/drop(3)` 两行改为**每行 3 个自动换行**（末行用等宽占位保持列宽一致），免密引擎**隐藏无意义的 API Key 输入框**、保留 Base URL 便于填镜像。另修复一处**缓存 key 未归一化的写入路径**：`fetchTranslation` 里用裸拼接 `"$lang:$text"` 落缓存，而读取端一律经 `makeCacheKey()` 折叠空白 → 原文含连续空格/全角空格差异时该条缓存永不命中、每次都重翻 · Add Google keyless (clients5) engine; fix a cache-key normalization hole in the write path |
-| **v2.0.158** | **优化设置页「字幕 / 翻译」区块的展开逻辑**：① 去掉字幕面板的**内层滚动** —— 原先「限高 420dp + 内部滚动 + 自绘滚动条」与设置页外层滚动形成**嵌套滚动**，在面板里滑动时手势互相打架、也难判断该滚哪一层；现改为跟随外层滚动，面板长度由折叠状态控制；② 区块**展开状态跨会话记忆**（写入 prefs，下次打开设置保持上次的样子），并新增「**全部展开 / 全部折叠**」快捷键；③ 折叠时在标题右侧显示**当前值摘要**（如「实时翻译 · Google 免密 · 简体中文」「显示样式 · 22sp」），不展开也能看到现状；④ 展开/收起加过渡动画，长列表不再瞬间跳变；⑤ 默认展开调整为「字幕文件」+「实时翻译」（翻译是高频入口，原先默认折叠着） · Settings: subtitle & translation sections now remember their expanded state (persisted), show current-value summaries while collapsed, animate open/close, and no longer nest a scroll area inside the settings scroller |
-| **v2.0.159** | **美颜算法升级（阶段 1+2，依据 `BEAUTY_EVALUATION_2026-09-23.md` 评估报告）**：① **妆容区域由「正圆」改为贴合形状的椭圆软遮罩** —— 新增 `ellipseMask()`（带倾角 + 边界羽化），`FaceResult` 扩展嘴部形状（半宽 / 半高 / 倾角，取自 MediaPipe 唇部关键点 0、17、61、291），口红 / 眉毛 / 腮红 / 眼袋 / 牙齿共 5 处判定全部椭圆化（此前嘴唇这种横向长条用正圆判定，必然「圆小涂不到嘴角、圆大溢出到下巴」）；② **磨皮改为频域分离** —— 低频（大半径保边均值 ±6 像素）承载色块与光影、高频（原图−低频）承载毛孔纹理，新增**「皮肤质感」参数**（0.5~1.3）把「磨皮强度」与「纹理保留度」解耦，< 1 更平滑、> 1 相当于 USM 锐化，不再靠 0.9 混合强度硬拉出「糊脸」；③ **美白 / 去黑眼圈改「保高光提亮」** `color += w * (1 - color)`，消除鼻尖 / 额头的高光溢出；④ **腮红 / 口红改 soft-light 上色**（保留底层明暗与高光），眉毛改柔化 multiply，所有妆容边界改 `smoothstep` 羽化；⑤ 新增「皮肤质感」滑块并持久化 · Beauty upgrade (phase 1+2): ellipse masks for lipstick / brows / blush / eye-bags / teeth with soft feathering, frequency-separation skin smoothing with a decoupled "skin texture" parameter (also serves as USM), highlight-preserving whitening, soft-light makeup blending |
-| **v2.0.160** | **美颜双引擎落地（P0–P3 按规划实施）**：新增 **GPUPixel 可选引擎**（官方 v1.3.1 预编译 AAR 约 5MB：含 arm64-v8a / armeabi-v7a 的 `libgpupixel.so` 与 Mars-Face 模型；**不含 x86_64**，模拟器上初始化失败会**弹提示并自动回退 GLSL**）；**「对比原图」改为「美颜总开关」**（默认开，关闭 = 直通原图）；两套引擎**检测与参数完全独立**（GLSL = MediaPipe478 + FaceDetector + `beauty_*` 参数；GPUPixel = Mars-Face + `beauty_gp_*` 参数），设置面板按当前引擎只显示各自的滑块；GPUPixel 走 **raw-data 模式**（绕开 EGL 上下文共享这一最高风险项）+ **离屏 FBO** + **仅人脸区域**回读 / 处理 / `glTexSubImage2D` 贴回（采样节奏保持 8 帧）；新增 **VR 视频人脸美颜**一键开关（屏幕空间后处理，默认关） · Dual beauty engines: GPUPixel (prebuilt AAR) + built-in GLSL, fully independent detectors and per-engine params, master beauty switch replacing compare mode, face-region-only processing via offscreen FBO, and an opt-in VR face-beauty toggle |
-| **v2.0.165** | **界面上下反转 + 快进/后退悬浮球**：① 播控栏在「屏幕旋转」旁新增「**上下反转**」按钮（同款样式与联动），对**画面与 UI 同步上下镜像**，适配「屏幕颠倒后使用」的场景 —— ⭐ 实测发现 `GLSurfaceView` 是 SurfaceView、**有独立合成层**，父容器的 `graphicsLayer` 只翻 Compose 内容而画面不动，故**两层各翻一次**（画面走投影矩阵 `scaleM(1,-1,1)`，UI 走根容器 `graphicsLayer{scaleY=±1}`，作用层不同不会抵消）；② 新增**快进 / 后退悬浮球**（参照加速球样式，各自独立开关、默认关）：**单击** seek ±步长（延迟 280ms 与双击区分）、**双击**循环 5/10/15/30 秒、**长按**进入拖动且不触发单击，拖动边界与加速球一致，三个球初始位置错开；开关在「悬浮球控速与播放倍速」区块、**层级恒在播控组件之上**；③ 修正新球的玻璃主题底色（补 `isLiquidGlass` 半透明白底分支，与倍速球对齐） · Add UI+video vertical flip (screen-upside-down scenario; SurfaceView needs a separate projection-matrix flip) and opt-in forward/rewind floating balls with tap / double-tap step cycling / long-press drag |
-| **v2.0.166** | **「上下反转」改为「旋转 180°」**：v2.0.165 实现的是上下**镜像**（文字左右仍正常），按用户澄清需求实际是**旋转 180°**（画面与 UI 整体转过来）。画面：投影矩阵 `scaleM(1,-1,1)` → `scaleM(-1,-1,1)`（x、y 同时取反 ≡ 绕 z 轴 180°）；UI：根容器 `graphicsLayer{scaleY=±1}` → `graphicsLayer{rotationZ = 180f/0f}`；命名/文案/图标一并改为旋转语义（`rotate180` / `is_rotated_180` / `cd_rotate180_*` / `Icons.RotateRight`）。判定特征：镜像时文字左右正常，旋转 180° 时文字上下左右都倒且左右位置互换 · Switch the button from vertical mirroring to a true 180° rotation for the whole screen (video + UI) |
-| **v2.0.172** | **悬浮球记忆开关 + 倍速球双击 + 美颜默认关并全屏生效**：① 修复快进/后退悬浮球开关与步长**从不落盘**的问题（集中写回 LaunchedEffect 的 key 列表缺失这 4 个状态，顺带补齐美颜总开关/引擎/GPUPixel 参数等共 14 个缺失 key）→ 现为真正的记忆开关；② 加速悬浮球新增**双击手势**（280ms 窗口、touchSlop 区分拖动），在 1.5X/2.0X/3.0X 间循环切换；③ 美颜总开关**默认改为关**且状态记忆；④ GPUPixel 引擎美颜作用范围从「视口中央 512×512」扩到**整个播放视口**（回读整帧处理，磨皮/美白全画面生效，瘦脸/大眼由 Mars-Face 定位）；⑤ 设置页悬浮球/美颜相关文案 5 语同步更新 · Floating-ball switches now truly persist (14 missing write-back keys fixed), double-tap on the speed ball cycles 1.5X/2.0X/3.0X, beauty defaults OFF and GPUPixel beauty now covers the full viewport |
-| **v2.0.173** | **美颜闪烁修复**：① GPUPixel 全屏美颜改为**每帧**采样处理 —— 此前沿用 8 帧节奏，贴回间隔 > 1 帧导致画面在「整幅美颜帧 / 原始帧」之间交替闪烁；每帧处理后屏幕恒为最新美颜帧（仅整体 1~2 帧延迟，不可感知）；后台处理中跳过回读，贴回间隔自适应 = max(1 帧, 处理耗时)；② GLSL 引擎人脸检测加**防抖**：连续 3 次失败（≈半秒）才判定丢失，单次失败不再让妆容/变形瞬间消失；③ shader 妆容段补 `uFaceDetected == 1` 门控，检测丢失时不再按默认中心把口红/腮红画到画面中央 · Anti-flicker: GPUPixel full-frame beauty now processes every frame (was every 8th → full-screen strobing), face-detection dropout debounce (3 misses ≈ 0.5s), and makeup gated on detection |
-| **v2.0.174** | **华为 VR Glass 接入（OpenXR）**：新增 NDK 原生会话层（`app/src/main/cpp/`），基于官方 `hvrsdk-openxr-3.5.0.79`。① 完整 OpenXR 链路 instance → system → EGL → session → swapchain → 帧循环；EGL 走 Java Surface 的 window surface（华为要求，不能用 pbuffer），`environmentBlendMode` 用 `ALPHA_BLEND`，并正确处理 READY/STOPPING/EXITING 会话状态机；② 新增 **external 渲染模式**：native `acquire` → Kotlin 用现有 shader 画进 swapchain texture → native `release` + `endFrame`，即画面可直接进眼镜；③ `XrPosef` 四元数 → 列主序视图矩阵，提供**真实头姿**数据；④ 缺 SDK 时自动退化为可运行桩，**不影响其他设备构建**；⑤ 设置页新增「华为 VR」开关（默认关、受记忆模式门控）+ 渲染分辨率档位 + 6DoF 偏好，播放页顶栏新增「进入华为 VR」入口，Runtime 缺失时自动降级回内置分屏 VR（不黑屏）；⑥ `onStop` 严格先落盘再 `finishAndRemoveTask` + `killProcess`（华为 Runtime 铁律）· Huawei VR Glass support via OpenXR: full native session layer (instance/system/EGL/session/swapchain/frame loop), window-surface EGL as Huawei requires, external renderer mode letting existing shaders draw straight into the eye swapchain, true head pose from quaternion→view matrix, graceful stub fallback without the SDK, and a new opt-in setting + player entry with auto-fallback to built-in split-screen VR |
-| **v2.0.175** | **华为 VR Glass：视频画面真正接入双眼（P1 完成）**：① native 新增**逐眼 FBO 绑定**接口 `bindEyeFramebuffer/unbindEyeFramebuffer`（把本帧 acquire 到的 swapchain texture 挂到 FBO，按 `XrSwapchainImageOpenGLESKHR.image` 取纹理），配套 `nativeEyeTargetsEx()`（40 个 float = 每眼 16 视图矩阵 + 4 FOV）与 `nativeHasPendingFrame()`；② `VRGLRenderer` 新增**华为双眼直渲通路** `drawHuaweiVrFrame()` —— 每帧先 `updateTexImage()` 消费真实视频帧，再逐眼 `bindEyeFramebuffer` → `glViewport` → `drawEyeWithOpenXrMatrices` → `unbindEyeFramebuffer`，投影矩阵用**通用倾斜视锥**形式（OpenXR 的 FOV 四边不对称，`Matrix.frustumM` 不适用），视图矩阵直接取 Runtime 头姿，**不再叠陀螺仪**（避免转两次），美颜/投影 uniform 与内置路径完全同步；③ 新增**帧泵线程**把 `native.acquire → GL 线程画 → native.release + xrEndFrame` 串成严格配对（`CountDownLatch` 等绘制完成，超时 100ms 跳帧避免死等）；④ **视频源跨 Activity 接线** —— 华为侧 `SurfaceTexture` 就绪后把正在播放的 ExoPlayer 输出切过去（尺寸沿用 `renderer.videoWidth/Height`），接线回调在 `setRenderer()` 之前挂载（否则会错过 GL 线程的一次性回调 → 恒定黑屏）；⑤ EGL 上下文切换 `setExternalEglContext`：把会话内 EGL 切到 Kotlin 的 GLSurfaceView 上下文，否则 swapchain texture 属于 native 上下文、Kotlin 写不进去（全黑且无报错） · Huawei VR Glass P1: video now actually renders into both eyes — per-eye FBO binding of acquired swapchain textures, a dedicated Huawei dual-eye path using the general oblique-frustum projection (OpenXR FOVs are asymmetric), true head pose without stacking the gyroscope, a strictly paired frame pump (acquire → GL draw → release + endFrame), and cross-Activity wiring of the live ExoPlayer output into Huawei's SurfaceTexture |
-| **v2.0.176** | **GLES 上下文统一到 ES3**：把普通播放路径的 `setEGLContextClientVersion(2)` 改为 `(3)`，与华为 VR 路径（`HuaweiVrActivity` 已是 3）一致。此前同一个 `VRGLRenderer` 跑在两个不同版本的上下文里 —— 普通路径 ES2、华为路径 ES3 —— 导致任何一处 shader 改动都必须同时在 ES2 与 ES3 下可编译，否则会出现「华为路径能过、普通路径黑屏」（或反之）这类极难定位的问题；统一后该陷阱消失。**shader 零改动**：ES3 向后兼容 GLSL ES 1.00（ESSL 100），6 个内联 shader 照常编译；`GLES20.*` 的 279 处调用、`GLES11Ext` 的 OES 纹理均无需修改。另新增 `GL_VERSION` / `VENDOR` 启动日志（`GL_MAJOR_VERSION` 在 ES2 上下文查询无效，故只用版本字符串），便于日后排查「A 设备能编译、B 设备黑屏」。实测（MuMu / Adreno 640）：`GL_VERSION = OpenGL ES 3.2 v334 R`，无 shader 编译错误、无 GL error、MediaPipe 人脸引擎初始化正常 · Unify GLES context version to ES3 across both paths (the phone path now matches the Huawei VR path), removing the maintenance trap where a single `VRGLRenderer` ran under two different context versions; shaders are untouched since ES3 is backward-compatible with GLSL ES 1.00, and a `GL_VERSION`/`VENDOR` startup log was added for future GPU-compatibility triage |
-| **v2.0.177** | **美颜「只渲染变化区域」性能优化（四项一起做）**：① **磨皮先判皮肤再采样** —— 旧实现先把 8 个远邻域（±6 像素）全采样完，最后才按 `isSkin` 决定混合强度（皮肤 1.0 / 非皮肤 0.25），而非皮肤区（背景、头发、衣物）占画面 60~80%，这些像素白付 8 次纹理采样、只换来一个肉眼不可见的轻微降噪。改为皮肤判定前置后，非皮肤区采样数 **9 → 1**，加权总采样量降 55~70%（1080p60 下约 6.5 亿次/秒的无效采样被消掉）；这是「失败即退化」优化 —— `isSkin` 误判只是退回全采样，只损失收益不会画错；② **磨皮半分辨率离屏 pass** —— 新增 down（降采样 1/2）→ blur（半分辨率 8 邻域保边均值，低频层）→ blend（全分辨率原图 + 半分辨率低频，按皮肤×强度合成上屏）三 pass，磨皮片元数降到 **1/4**；磨皮处理的是低频视觉信息，高频细节仍从全分辨率原图按 `uTextureDetail` 叠回，纹理保留度不受影响；③ **GPUPixel 回读收窄到人脸 ROI** —— 旧实现每帧回读 1920×1080×4 ≈ **8.29 MB** 且 `glReadPixels` 同步阻塞（GL 线程停下等 GPU），之后还要再拷一份 ≈16 MB/帧内存流量；改为按 `uFaceCenter`/`uEyeDistance` 算人脸包围盒（余量 3.2×，为瘦脸/大眼形变留溢出空间），典型 640×640 ≈ 1.6 MB（**↓80%**），实测远景小脸可降到 384×384（↓97%）。配套四道防抖：ROI 尺寸**量化到固定档位**、中心**低通跟随**（0.25）、向外**对齐 16 像素**、检测失败**沿用上一帧 ROI**（上限 24 帧）；`interval` 恒为 1（间隔 > 1 帧会让 ROI 边缘出现会呼吸的矩形闪烁，是 v2.0.173 的教训）；④ **妆容 gate 到人脸包围盒** —— 美白/黑眼圈/眉毛/口红/腮红/白牙共 10+ 次 `ellipseMask`（含 cos/sin/length/smoothstep）在画面 80%+ 的像素上算完即丢，先做一次包围盒剔除（1.5×fUnit / 1.8×fUnit）跳过整段 · Beauty "only render what changes" optimization, four items at once: (1) skin test now happens **before** the 8 neighbour taps so non-skin pixels (60–80% of frame) skip them entirely (9 → 1 samples, a fail-to-degrade optimization); (2) smoothing moved to a half-resolution off-screen pass (down → 8-tap edge-preserving blur → blend with full-res detail), cutting that pass's fragment work to 1/4; (3) GPUPixel read-back narrowed from the full viewport (8.29 MB/frame, synchronous) to a tracked face ROI (~1.6 MB, ↓80%) with size quantisation, centre low-pass, 16-px alignment and hold-last-ROI on detection loss; (4) makeup gated behind a face bounding box |
-| **v2.0.178** | **修复「美颜只显示一小块区域」+ 内置 6 款免费人像 LUT**：① **根因** —— v2.0.177 让非皮肤像素**完全不做**磨皮（省 8 次采样），但 `isSkin` 是 RGB 阈值判定，实测真实视频（1920×1080，人物占中下 3/4）**总通过率仅 35%**：上 1/4 的粉/紫背景通过率 **0%**，中下人物区 20~93%。于是皮肤被磨皮、背景完全没动，肉眼就是「美颜只在一小块生效」，且皮肤/背景交界处出现可见分界。现改为**非皮肤像素也做轻度降噪**，但只采 2 个垂直邻域（采样数 9 → 3，仍远低于旧版 9 次），权重 0.25 保持「背景不过度处理」，分界线消失；半分辨率 blend pass 同步修复（复用低频层，零额外采样）；② **内置 6 款免费人像 LUT** —— 取自开源项目 `t0saki/lumix-original-looks`（**MIT 许可，可商用**），在 OKLab/OKLCh 空间参数化生成、全套共用「肤色保护窗」（色相 30–70° 羽化）故人脸表现一致，白点严格映射 [1,1,1]、灰轴严格单调（不丢高光）。仅做格式规范化（重写 TITLE / 统一 CRLF / 补齐 6 位小数），数值逐条原样保留。新增：**暖调人像 / 明亮日光 / 通透清新 / 纯色胶片 / 柔杏肤 / 淡雅胶片**（内置 LUT 总数 12 → **18**，5 语同步） · Fix "beauty only affects a small patch": v2.0.177 made non-skin pixels skip smoothing entirely, but the RGB-threshold skin test passes only **35%** of a real 1080p frame (0% on the pink/purple backdrop, 20-93% on the people) - so skin got smoothed, the background did not, and the result looked like a small patch with a visible seam. Non-skin pixels now get a light 2-tap vertical denoise (9 to 3 samples, still far below the old 9), removing the seam; the half-res blend pass is fixed the same way at zero extra cost. Also bundles 6 free portrait LUTs from the MIT-licensed `t0saki/lumix-original-looks` (OKLab/OKLCh parametric, shared skin-protection window, white maps to exactly [1,1,1]) - Warm Portrait, Bright Daylight, Clear & Open, Pure Hue Film, Soft Almond Skin, Subtle Film (built-ins 12 to **18**, all 5 locales updated) |
-| **v2.0.179** | **LUT 独立分区 + 平铺网格 + 内置 36 款（+18）**：① **UI 改版** —— 原来是 `LazyRow` 横向滚动的文字 Chip，18 款挤一行必须左右滑才看得全。现改为**纯文字网格平铺**（每行 4 列等宽、自动换行、末行补齐空格对齐），一眼看全、无需滑动；并把内置款按用途拆成**同面板内的两个独立分区**：**人像美颜**（24 款）与**风格滤镜**（12 款），各带短竖条小标题 + 数量角标，便于用户按需选择；「无滤镜」独立成项。② **新增 18 款人像美颜 LUT**（内置总数 18 → **36**）：25~30 为**柯达经典胶片仿真**（Portra 400/160/800、Ektachrome 100VS、Elite Color 400、Kodachrome 64），取自开源仓库 `scernst13/HaldCLUT-Cube-Files`（**CC0-1.0 公共领域**，可自由商用，原始 HaldCLUT 出自 darktable/RawTherapee 社区，Portra 系列以柔和低反差肤色著称、是公认的人像片）；31~42 为 **LUMIX 原创 look**（Glaze/Gilt/Viride/Clear/Voile/Arcade/Tinsel/Splice/Sodium/Argent/Canopy/DuskTide），取自 `t0saki/lumix-original-looks`（**MIT**，与 v2.0.178 的 6 款同源），主打通透、柔雾、明亮，肤色友好。两来源均只做格式规范化（重写 TITLE / 统一 CRLF / 数据保留 6 位小数），数值逐条原样保留、未做任何色调改动；**许可为 CC0 / MIT，均可商用**。③ 修正 `lut_current` 文案（此前误写「内置 24 款」，实际应为 **36** 款），5 语同步更新 · LUT section redesigned and expanded: the built-ins moved from a horizontally scrolling `LazyRow` to an **even text grid** (4 equal columns, wraps automatically, last row padded so columns stay aligned) so all options are visible at a glance, and are now split into **two in-panel groups** - **Portrait beauty** (24) and **Style filters** (12) - each with its own label and count badge, with "No filter" kept as a separate row. Also adds **18 new portrait/beautifying LUTs** (18 to **36** built-ins): items 25-30 are classic **Kodak film emulations** (Portra 400/160/800, Ektachrome 100VS, Elite Color 400, Kodachrome 64) from `scernst13/HaldCLUT-Cube-Files` (**CC0-1.0**, free for commercial use; the Portra line is famous for soft, low-contrast skin tones), and items 31-42 are **LUMIX original looks** from the **MIT**-licensed `t0saki/lumix-original-looks` (same upstream as the v2.0.178 six), covering clear/soft-haze/bright renders that flatter skin. Both sources are only format-normalised (TITLE rewritten, CRLF unified, 6-decimal data) with every value preserved verbatim - no colour grading was altered - and both licenses (**CC0 / MIT**) permit commercial use. Finally, the `lut_current` label (which wrongly said "24 built-in") now reads **36** across all 5 locales |
-| **v2.0.180** | **缩略图 / 演示图加载性能优化**：① **内置演示图加 LruCache 缓存** —— 5 张合成测试卡是完全确定性的（同 id 每次绘制结果一致），原先每次切到该媒体都重新 `createBitmap` + 全量 Canvas 绘制（最大 2048×1024 ARGB_8888 = **8 MB**，内部还重复 `drawTestingPortrait` 最多 3 次、每次都 new 十几个 `Paint` 并重复 `Color.parseColor`）→ 单次几十~上百 ms，连续切换产生大量大对象触发 GC 抖动。现按 id 缓存**母本**，命中时仅复制一份副本，绘制工作 **1 次/张**（此后 0 次）。② **Paint 与颜色常量化** —— 一次生成原本可 new 出十几个 `Paint` + 几十次 `parseColor`，现全部提为 object 级复用常量，绘制期零重复分配。③ **绘制尺寸下调 ~50%** —— 测试卡最终只是上传成 GL 纹理再做 `GL_LINEAR` 采样，原先 2048/1280 的宽度远超需要；现统一按 ~1024 上限等比缩放（**宽高比严格保持**，因为 `VRGLRenderer.imageWidth/Height` 靠宽高比决定投影），显存与生成耗时同降约 44~75%。④ **修复一处既有崩溃** —— 渲染器原先在 `texImage2D` 后 `recycle()` 传入的位图，而导入图片的 `customBitmap` 在「切走再切回」时**复用同一实例** → 第二次上传必然命中已回收位图抛 `IllegalStateException`。现改为由提供方管理生命周期（渲染器只读不回收），并在 `onPrev/onNext` 切换时显式回收导入图，消除泄漏。⑤ **拖动预览缩略图（进度条悬停帧）三处优化** —— 原先 `hoverTimeMs` 一变就重启 effect：每帧都 `new MediaMetadataRetriever` + `setDataSource` + `getFrameAtTime` + `createScaledBitmap` + `release()`，且无任何缓存、160×90 分辨率在高密度屏上被放大到 160dp 显得模糊。现改为**节流 120ms** + **时间量化到 1 秒**（对齐关键帧，配合 `OPTION_CLOSEST_SYNC` 大幅提高命中率）+ **LruCache（24 张，key 带视频标识防跨片串味）** + **分辨率提升到 320×180**（非 16:9 源等比缩放后居中裁切，避免人脸变形）；换视频时自动清缓存与残影 · Thumbnail / demo-image loading optimised: the 5 deterministic composite test cards are now **LruCache-backed** (previously every switch re-ran a full Canvas redraw of up to 2048x1024 ARGB_8888 = 8 MB, re-invoking `drawTestingPortrait` up to 3 times and allocating a dozen `Paint`s plus repeated `parseColor` calls each time - tens to hundreds of ms per switch, with GC thrash on rapid switching); `Paint`s and colours are hoisted to object-level constants so generation allocates nothing extra; draw sizes were halved (now capped near 1024 px, **aspect ratio strictly preserved** since the renderer derives its projection from `imageWidth/Height`), cutting memory and generation time by ~44-75%; a pre-existing crash was fixed where the renderer recycled the uploaded bitmap while a re-imported `customBitmap` reused the same instance (second upload hit a recycled bitmap); and the seek-bar hover preview got a 120 ms throttle, 1-second time quantisation (aligned to keyframes), a 24-entry LruCache keyed with the video identity, and a bump to 320x180 with aspect-correct centre-cropping |
-| **v2.0.181** | **内置演示图精简为 1 张（恢复 v2.0.179 的 360° 全景画廊）+ 高清化 + 大图上传/纹理正确性修复**：① **只保留 1 张演示图，且沿用 v2.0.179 的第一张**（用户定稿：「从 179 里提取第一张」）——即 `demo_360_beauty`「【全景360°】美颜环密画廊」，原画法完整保留（深色星空背景 + 经纬网格 + 三处经度标注 + 三个展台位的「美白对比人像」，含下巴阴影 / 腮红 / 瞳孔高光 / 三段发帽 / 微笑嘴 / 8 个淡褐斑点供磨皮验证）。② **高清化**：原 2048×1024 → **4096×2048**（仍为 2:1 等距圆柱比例，投影语义不变），所有坐标与字号按 2× 等比缩放（原代码是硬编码像素值，只改分辨率会让内容缩到 1/4），半径相关元素改用相对比例，避免再次硬编码。③ **默认投影回到 VR_360** —— 这张是 2:1 等距圆柱全景图，只有在 360° 球面投影下才是「环视画廊」；用 STANDARD 平面看会被压成屏幕中间的窄带（v2.0.181 中途一度改成 STANDARD，现已随图片一起回退）。④ **新增大图分块上传**（`uploadImageChunked`）：`GLUtils.texImage2D` 在上传前会 `copyPixelsToBuffer` 出一份**等大**像素缓冲，4096×2048 下会出现「Java 堆 32 MB + GLUtils 临时 32 MB + 显存 32 MB」约 **96 MB** 的瞬态峰值，低端机 / 模拟器极易 OOM 或长卡。现改为 `glTexImage2D(..., null)` 先开显存、再按 **64 行一条带** `getPixels` → 拆包 RGBA（含 un-premultiply）→ `glTexSubImage2D` 覆盖，Java 侧峰值降到条带级（约 1 MB）且**与整图尺寸解耦**；显存开辟失败自动回退一次性上传，保证有画面；面积 ≥ 2048×2048 自动启用，缓冲复用、稳态近零分配。⑤ **修复图片模式 texel 步长错误**：`uTexelSize` 原先固定传视口的 `1/W、1/H`，而图片分辨率（现 4096）与视口（如 1920）不同量级时，shader 里所有以它为步长的邻域采样（磨皮模糊核、边缘检测等）会取错范围 → 在 4096 宽的图上按 1/1920 步长采样会跨出 2 像素外，**反而更糊**。现图片模式改用**图片自身**的 texel 步长（内置与华为两条通路都已修）。⑥ **华为 VR 通路低清回退**：华为路径每帧 `glReadPixels` 回读人脸 ROI 且每眼一块 swapchain，扛不住 32 MB 测试卡 → 进入 `HuaweiVrActivity` 时自动降到 **2048×1024**，返回主界面 `onResume` 复位高清。⑦ **单元素列表不再空转**：内置列表只剩 1 项，原先「上一个/下一个」会**回绕到自身**并白白 `recycle` + 重建一次 32 MB 位图，现直接短路跳过。⑧ **缓存上限不再按堆比例**：单张母本 32 MB，若按「1/8 可用堆」算上限，LruCache 会同时留住好几张 32 MB 母本、反而更易 OOM；现改为固定「2 张 + 余量」额度 · Built-in demo media trimmed to a single image, restored from **v2.0.179's first entry** (`demo_360_beauty`, the equirectangular 360 panorama gallery) per the user's final decision, with its original drawing code kept intact (dark starfield, lat/long grid, three longitude labels and three 'beauty comparison' portrait booths with chin shadow, blush, pupil highlights, hair cap, smile and eight pale-brown spots for smoothing validation). It is now **4096x2048** (still 2:1 equirectangular, so projection semantics are unchanged), with every hardcoded pixel coordinate and font size scaled 2x and radius-relative elements de-hardcoded. The default projection is back to **VR_360**, since a 2:1 equirectangular panorama only reads as a wraparound gallery under 360-degree spherical projection - in flat STANDARD it collapses to a narrow band (it was briefly switched to STANDARD mid-release, and is now reverted along with the image). Adds **chunked texture upload** (`uploadImageChunked`), avoiding the ~96 MB transient peak of `GLUtils.texImage2D` (32 MB heap + 32 MB internal copy + 32 MB VRAM) by allocating VRAM first and streaming 64-row bands through `getPixels` to RGBA unpack (with un-premultiply) to `glTexSubImage2D`, keeping the Java-side peak at band scale (~1 MB) and independent of image size, with automatic fallback to the one-shot path if VRAM allocation fails. Fixes the **image-mode `uTexelSize`**, which was hardwired to the viewport and made all neighbour sampling step incorrectly on images whose resolution differs in magnitude from the viewport - itself a source of blur (fixed on both the built-in and Huawei OpenXR paths). Huawei VR Glass drops to **2048x1024** (it glReadPixels a face ROI every frame per eye) and restores hi-res in `onResume`. Prev/next no longer spin on a single-element list, and the cache cap is no longer derived from heap size (a single master is 32 MB, so a proportional cap would keep several of them alive and invite OOM) but fixed at 'two images plus headroom'. |
-| **v2.0.182** | **GPUPixel 美颜覆盖范围改为「2D 全视频 / 3D·VR 全屏」+ 全范围下的性能优化**：① **覆盖范围（用户要求）** —— 原先 GPUPixel 只回读「人脸 ROI 那一小块」（v2.0.177 为省性能引入），在 VR / 全景下会出现「只有中间一块被美颜」的矩形分界。现改为：**平面（STANDARD / FISHEYE）覆盖整个视频画面，3D / VR（VR_360 / VR_180 / VR_BOX 等）覆盖整个物理屏幕**（双眼并排一次处理）。② **降采样回读把性能代价压回去** —— 全覆盖后每帧回读量从 640×640≈1.6 MB 涨到 1920×1080≈8.3 MB，而 `glReadPixels` 是**同步阻塞**的。现按 **0.5 倍降采样**回读（1920×1080 → 960×540，流量降到 1/4 ≈ 2.1 MB），处理完再由 **GPU 线性上采样**贴回；磨皮 / 美白是低频效果几乎无感，瘦脸 / 大眼在 1/2 分辨率下人脸仍 ≥100 px，定位可靠。VR 侧因屏幕内容更高频（球面网格线、几何边缘），降采样档位比平面更保守。③ **缩放贴回（新增中转纹理 + blit 上采样）** —— 降采样结果**不能**用 `glTexSubImage2D` 按同尺寸覆盖（只会填住左上角一块），故新增一张中转纹理 + 带缩放的 blit pass：先零拷贝上传处理结果，再用 GPU 线性采样拉伸铺满回读区对应的全分辨率矩形。矩形用 **UV 语义**表达（`gpReadUv*`），与人脸 ROI 模式共用同一套代码路径。④ **修掉一个必然踩的坑** —— 判断「是否需要缩放」时**不能用** `gpRegionW == gpLastReadW`（两者恒等，会永远走直通路径、降采样结果只填左上角），改用「回读尺寸 vs 目标矩形尺寸」比较。⑤ **性能优化** —— GPUPixel 输出拷贝原先每帧 `out.copyOf()` 新分配（全覆盖下 2.1 MB/帧 → GC 压力大），改为**双缓冲交换 + 复用池**：从池里取一块、拷完交出去、GL 线程用完还回池，稳态近零分配。⑥ **VR 不再要求显式开关** —— 原先 VR 下要手动打开「VR 视频人脸美颜」才生效；现在 GPUPixel 在 VR 下就是**屏幕空间全覆盖后处理**，与投影模式无关，去掉该前提（开关保留用于 UI 兼容与持久化，但不再是激活条件），`isGpuPixelActive()` 简化为「总开关 + 引擎 + 初始化成功」。⑦ **检测失败不再扭曲画面** —— VR 整屏是「并排双画面」，Mars-Face 可能检测不到人脸；此时显式把 `thin_face` / `big_eye` 归零，避免 reshape 滤镜沿用上一帧关键点对已移动的脸做形变。**磨皮 / 美白不依赖人脸检测**，检测失败时仍整屏生效 —— 这正是「不会退回『只有一块被美颜』」的保证。⑧ **保留降级通道** —— 新增 `gpCoverageFull` 开关（默认 true），低端设备可一键退回「仅人脸 ROI」省电模式。⑨ 5 语（zh / en / zh-rTW / ja / ko）同步更新「VR 视频人脸美颜」的说明文案 · GPUPixel beauty coverage is now **full-frame in 2D and full-screen in 3D/VR**. Previously only a face ROI was read back (a v2.0.177 performance measure), which in VR / panoramic modes produced a visible rectangle where only the middle strip was beautified; flat projections (STANDARD / FISHEYE) now cover the whole video frame and 3D / VR projections cover the entire physical screen (both eyes side by side in one pass). To absorb the cost, read-back is **half-resolution** (1920x1080 to 960x540, quartering the traffic to ~2.1 MB/frame instead of 8.3 MB) with **GPU linear upsampling** on the way back - imperceptible for the low-frequency smoothing/whitening, while slim/big-eye still have >=100 px faces to landmark. VR uses a more conservative downscale since its content is higher-frequency. Because a downscaled result cannot be `glTexSubImage2D`'d back at its own size (that would only fill the top-left corner), a staging texture plus a scaled blit pass is added, addressing the destination rectangle in **UV space** so both coverage modes share one code path; the scale test compares read-back size against target rectangle size rather than `gpRegionW == gpLastReadW`, which is always true and would permanently take the passthrough branch. Frame copies switch from `out.copyOf()` to a **double-buffered pool** (near-zero steady-state allocation), VR no longer requires the explicit 'VR face beauty' switch since GPUPixel is now a projection-agnostic full-screen post-process, and a failed Mars-Face detection now zeroes `thin_face`/`big_eye` so the reshape filter cannot warp a moved face with stale landmarks - smoothing/whitening need no detection and keep working across the whole screen, which is what guarantees the 'only a block is beautified' symptom cannot return. A `gpCoverageFull` flag (default true) preserves the old ROI mode as a fallback, and the five locales' 'VR face beauty' description strings are updated accordingly |
-| **v2.0.183** | **修复 GPUPixel 美颜错位（降采样回读根本性错误）+ 真·GPU 降采样**：① **根因** —— v2.0.182 的「降采样回读」实现是错的：`glReadPixels(x0, y0, rw, rh)` **只做区域裁剪、不做缩放**。想在全屏 FBO 上写 `glReadPixels(0, 0, 960, 540)` 读到的其实是**屏幕左下角那 960×540 区域的原尺寸像素**，而不是「整屏的缩略图」。后果：美颜只作用在左下角 1/4 区域，贴回时又被拉伸到全屏 → **画面被放大 2 倍、美颜效果与实际内容整体错位**。② **正确做法** —— 新增一张**降采样 FBO**（`gpHalfFbo*`），先用 `GLES30.glBlitFramebuffer` 把主 FBO 的 目标区域**真正缩放渲染**过去（`GL_LINEAR` 线性滤波，GPU 完成缩小），再从这张 FBO 读像素 —— 此时读到的才是「整屏缩略图」，坐标与视口 UV 一一对应。本项目 EGL 上下文本就是 ES3（`VRGLSurfaceView` / `HuaweiVrActivity` 均 `setEGLContextClientVersion(3)`），`glBlitFramebuffer` 可直接用。③ **失败即降级** —— `glBlitFramebuffer` 报错（驱动不支持 / FBO 不完整）时自动退回**全分辨率回读**，保证有画面且不错位，只是性能差一点。④ **线程可见性** —— `gpRegionW` / `gpRegionH` 由后台检测线程写入、GL 线程读取，补 `@Volatile` 消除时序隐患。⑤ 降采样 FBO 随主 FBO（`releaseGpFbo`）与中转纹理一起释放，尺寸变化时自动重建。· Fixes GPUPixel beauty misalignment - the v2.0.182 downscaled read-back was fundamentally wrong: `glReadPixels(x0, y0, rw, rh)` only **crops, it does not scale**. Asking for `glReadPixels(0, 0, 960, 540)` on a full-screen FBO returns the **bottom-left 960x540 region at native resolution**, not a thumbnail of the whole frame - so beauty was applied to a quarter of the screen and then stretched back over the full frame, magnifying the image 2x and misaligning the effect against the actual content. The fix adds a dedicated **downscale FBO** and uses `GLES30.glBlitFramebuffer` to genuinely rescale the source region into it (`GL_LINEAR`, GPU-side downsampling), reading pixels from there instead - only then does the read-back correspond one-to-one with the viewport UVs. The project already runs an ES3 context, so `glBlitFramebuffer` is available; if it errors out the code falls back to a full-resolution read (correct but slower), and `gpRegionW/H` are now `@Volatile` since they cross the detection/GL thread boundary. The downscale FBO is released alongside the main FBO and rebuilt on size changes |
-| **v2.0.184** | **美颜开关全量记忆化 + VR 美颜开关恢复为真开关 + 开源声明补 GPUPixel**：① **全部美颜开关记忆化** —— 此前「总开关 / 引擎选择 / 磨皮 / 美白 / 瘦脸 / 大眼 / VR 人脸美颜」等开关在「记忆模式」下**只写不读**（写回块有 `put*`，但读回 `LaunchedEffect` 的 key 列表里没有它们）→ 关掉应用再打开一律回到默认值；且关闭记忆模式时 `else` 分支也**没有** `remove(...)` 这些 key，残留旧值会在下次开启记忆模式时被「恢复」成过期状态。本轮把三处契约（key 列表 + `put*` 写回块 + `else` 删除块）逐个校准补齐，美颜相关设置现在真正跟随记忆模式开关。② **VR 美颜开关恢复为真开关（默认开）** —— v2.0.182 曾把「VR 视频人脸美颜」从 `isGpuPixelActive()` 的激活条件里拿掉（当时理由是 GPUPixel 在 VR 下已是屏幕空间全覆盖后处理、与投影无关），副作用是该开关退化成 **UI 占位符**（拨来拨去毫无效果）。现重新纳入激活条件：关掉它 VR 下就不跑 GPUPixel，只走 GLSL 引擎；同时把默认值改为**开**（`true`），保持与 v2.0.182 相同的「开箱即用」观感。③ **GPUPixel 选项调研结论：无可加项** —— 逐行核对官方源码，`BeautyFaceFilter::Init()` 只注册 `whiteness` 与 `skin_smoothing` 两个属性，`FaceReshapeFilter::Init()` 只注册 `thin_face` / `big_eye` / `face_landmark` 三个；`SetSharpen` / `SetHighPassDelta` / `SetRadius` 虽有方法但**未注册成属性**，无法经 `SetProperty` 调用（本项目已直接调用这 5 个注册属性，无遗漏可补）。④ **开源声明补全** —— README 修正「v102 起移除 GPUPixel」的过时表述（v2.0.160 已把 GPUPixel 作为可选引擎加回），依赖表新增 GPUPixel 行（**Apache-2.0**，注明仅 arm64-v8a / armeabi-v7a）；`licenses.json` 手工补 2 条（GPUPixel + 其内置的 Mars-Face 关键点模型，MIT），179 → **181** 项 —— 该清单由脚本从 Gradle 缓存 POM 自动生成，而 GPUPixel 是本地 AAR（`app/libs/gpupixel-release.aar`）不走 POM 解析，故必须手工补，否则应用内「设置 → 关于与开源许可」会漏掉它 · Beauty toggles fully memoised, the VR beauty toggle restored to a real switch, and the open-source notices completed. Every beauty toggle (master switch, engine choice, smoothing, whitening, slim-face, big-eye, VR face beauty) was previously **written on exit but never read back** - the `put*` calls existed while the restoring `LaunchedEffect` key list did not include them, so all of them silently reset to defaults on restart; turning memory mode off also failed to `remove` them, leaving stale values to be "restored" later. All three parts of the contract (key list, write-back block, removal branch) are now aligned. The VR face-beauty toggle, which v2.0.182 had dropped from `isGpuPixelActive()` and thereby reduced to a no-op UI element, is active again (and defaults to on, matching v2.0.182's out-of-the-box behaviour). A line-by-line audit of GPUPixel's source confirms there are **no further options to expose**: only `whiteness`/`skin_smoothing` and `thin_face`/`big_eye`/`face_landmark` are registered as properties - `SetSharpen`, `SetHighPassDelta` and `SetRadius` exist as methods but are not registered, so `SetProperty` cannot reach them. Finally, the README's stale "GPUPixel removed since v102" line was corrected (it returned as an optional engine in v2.0.160), GPUPixel (**Apache-2.0**) was added to the dependency table, and `licenses.json` gained two manual entries (GPUPixel and its bundled MIT-licensed Mars-Face landmark model), 179 to **181** - the list is auto-generated from Gradle POMs, but GPUPixel ships as a local AAR and would otherwise be missing from the in-app notice |
-| **v2.0.185** | **修复 GPUPixel「整个画面全屏闪烁」+ 自适应降采样**：① **根因 —— 贴回与回读不成对**。`onDrawFrame` 把整帧先画进离屏 `gpFbo`，再回读→后台处理→贴回，最后把 `gpFboTexId` **整张**上屏。而 `maybeScheduleFaceSampling()` 开头有一句「后台仍在处理上一帧就直接 `return`」—— **该帧既不回读、也不会产生新的贴回**，于是 `gpFbo` 里只剩**未经 GPUPixel 处理的原始渲染**，它照样被上屏。结果屏幕在「美颜帧 ↔ 原始帧」之间交替 = 肉眼看到的**全屏闪烁**。闪烁频率 ≈ `1000 / T_proc`（T_proc = Mars-Face 检测 + GPUPixel 链 + 2.1 MB 拷贝）；MuMu 是 x86_64 跑 houdini 转译 arm64 native，T_proc 估 20~50 ms，远超 16.7 ms 的帧时长，且与 60 Hz 刷新不同步会产生**拍频**，观感更刺眼 —— 这正是模拟器上尤其严重的原因。注：v2.0.173 已修过同类病根（当时是「8 帧节奏」让贴回间隔 > 1 帧），把那次的 `interval` 恒置为 1；但本处「后台忙则跳过回读」在 T_proc > 帧时长时**等效地把贴回间隔又拉回 > 1 帧**，同一病根换入口复发。② **修法 —— 保底帧（stable result）机制**：新增一张与主 FBO 同尺寸的 `gpResultFbo`，每次**成功贴回后**用 `glBlitFramebuffer`（`GL_NEAREST`，1:1 同尺寸搬运，比回读像素再上传便宜一个数量级）把 `gpFbo` 整帧快照过去；上屏时若**本帧没有产生新的美颜结果**，就改为重播这张保底帧 —— 屏幕内容恒定，闪烁消失，代价仅为画面时间上略旧 1~2 帧。③ **判据修正**：判断「本帧画面是否可用」只看 `gpRegionPending`（本帧是否真的贴回了新结果），**不能**用「是否跳过了回读」——「未跳读但后台尚未完成」的帧同样没有新结果、同样会闪，是闪烁的另一半来源。④ **修掉一处必然踩的坑**：原「`glBlitFramebuffer` 失败」的分支只改了 FBO 绑定，却仍按 `rw×rh` 在**左上角**裁剪，随后又被 `needsScale` 判定为需缩放、把这一小块拉伸铺满全屏 → 该帧画面异常放大。现改为：blit 失败即视为「本帧不回读」，交给保底帧显示上一张 —— 既不放大也不闪烁，下一帧自动重试。⑤ **补 FBO 完整性校验**：主 FBO、降采样 FBO、保底帧 FBO 创建后均查 `glCheckFramebufferStatus`，不完整则回收并告警（原实现未查，失败会静默黑屏/花屏）；`glBlitFramebuffer` 的 `glGetError()` 改为**先取错误再解绑**（`glBindFramebuffer` 本身会改写错误状态，原顺序会把真实错误清掉导致漏判），并在 blit 前先排空历史错误。⑥ **自适应降采样**：实测每次 GPUPixel 处理耗时（指数滑动平均，权重 0.7/0.3），以 33 ms（≈30fps）为帧预算 —— 超过 1.4 倍则降采样档位 +1（1→2→3→4，画面变软但更流畅），低于 0.5 倍则 −1（有余量时优先保清晰度），带滞回避免档位横跳。目的是把 T_proc 压回帧时长附近，从源头减少跳帧、提升画面更新率。 · Fixes full-screen flicker with GPUPixel beauty, plus adaptive downscaling. Root cause: the read-back and the paste-back were **not paired**. Each frame renders into an offscreen `gpFbo`, then reads back, processes asynchronously and pastes the result in, finally blitting `gpFboTexId` to the screen in full; but `maybeScheduleFaceSampling()` starts with "if the background is still processing the previous frame, return" - that frame neither reads back nor yields a new paste, so `gpFbo` holds nothing but the **unprocessed raw render**, which is still blitted. The screen therefore alternates between "beautified frame" and "raw frame": the full-screen flicker. Its frequency is roughly `1000 / T_proc` (Mars-Face detection + GPUPixel chain + 2.1 MB copy); MuMu runs houdini-translated arm64 natives on x86_64, so T_proc is an estimated 20-50 ms against a 16.7 ms frame, and beating against the 60 Hz refresh makes it worse - which is why the emulator shows it so prominently. v2.0.173 had fixed the same root cause once (an 8-frame cadence with paste intervals > 1 frame); pinning `interval` to 1 did not help here because "skip the read-back while the background is busy" effectively pushes the paste interval back above 1 frame whenever T_proc exceeds the frame time. The fix adds a **stable-result FBO**: after every successful paste the whole `gpFbo` is snapshotted into it with `glBlitFramebuffer` (`GL_NEAREST`, 1:1, an order of magnitude cheaper than reading pixels back), and any frame that produces no new beauty result replays that snapshot instead of showing raw content - the screen stays constant and the flicker is gone, at the cost of the image being 1-2 frames stale. The decision now keys on `gpRegionPending` (did we actually paste a new result) rather than on whether the read-back was skipped, since a frame that did read back but whose background job has not finished yet is equally raw. The old `glBlitFramebuffer` failure path also only rebound the FBO while still cropping `rw×rh` from the top-left and then stretching that patch across the screen (magnifying the frame); it now treats a failed blit as "no read-back this frame" and falls back to the stable result. Framebuffer completeness is now checked (`glCheckFramebufferStatus`) for all three FBOs, and `glGetError()` is sampled before unbinding since `glBindFramebuffer` itself rewrites the error state. Finally, downscale tiers adapt to the measured processing time (exponential moving average, 33 ms budget) with hysteresis, to pull T_proc back toward the frame time and reduce how often frames are skipped |
-| **v2.0.186** | **GPUPixel 性能优化（去冗余拷贝 / 检测与处理并行 / 异步回读）+ 人脸识别稳定性优化**：① **删除每帧冗余拷贝** —— JNI 侧 `nativeGetRgbaBuffer`（`jni_sink_raw_data.cc`）每次都 `NewByteArray` + `SetByteArrayRegion` 写入**新数组**，故 Java 拿到的输出与 native 内部缓冲无关；原实现再加一次 `System.arraycopy`（配一个「复用池」）纯属多余，直接移交所有权即可，**每帧省下 2.07 MB（全覆盖 + 2 档降采样）纯 memcpy**。② **检测与 GL 处理拆成两条线程并行** —— 原先 `Pipeline.process()` 内部「Mars-Face 检测（CPU）→ GPUPixel GL 链 → 回读」三段串行，检测时 GPU 空转、GPU 处理时 CPU 空转；现拆为 `detect()`（新增 `gpDetectExecutor`）与 `processFrame()`（`faceExecutor`）两个入口，二者只用两把**独立锁**保护各自的底层资源（检测器 vs GL 管线，互不相干），**T_proc 从「两段之和」变为「两段最大值」**。在途任务用 `gpInFlight` 计数（检测 + 处理各 1），归零才允许下一帧回读并归还帧池 —— 顺序上保证「读完之后才复用」。③ **PBO + fence 异步回读** —— `glReadPixels` 同步读会让 GL 线程 flush 整条 GPU 管线并等像素落内存（Adreno 上 960×540 典型 0.5~2 ms）；改为双 PBO 轮转「本帧提交、下帧收割」，GL 线程只做一次非阻塞 `glClientWaitSync(0)`，未就绪就把本帧交给保底帧（复用 v2.0.185 机制，不阻塞不闪烁）。带三重回退保护：分配/映射/同步任一步 GL 出错 → 永久回退同步读；fence 连续 60 帧不就绪 → 判定驱动异常回退；回读尺寸变化 → 在途数据作废重建。总开关 `gpAsyncReadback` 可运行时关闭。**代价：回读结果再晚 1 帧到位（共约 2 帧 ≈ 33 ms），磨皮/美白不可感知；瘦脸/大眼形变在快速摇镜时可能有极轻微滞后。** ④ **检测降频 + 防抖 + 时序平滑** —— 检测由「每帧必跑」改为每 2 帧一次（landmark 滞后 ≤ 2 帧，与既有 1~2 帧管线延迟同量级）；连续 3 次拿不到脸才清空缓存（单次遮挡/侧脸不再瞬间把美型归零）；新增 **alpha-beta 预测-校正滤波**平滑 landmarks（比简单 lerp 更适合降频场景，降频后轨迹反而更平滑）。**磨皮/美白不依赖检测，完全不受影响。** ⑤ **逐帧固定开销清理** —— `aTex` 的 attrib location 改为缓存（原先每帧 `glGetAttribLocation`，JNI 往返 + 字符串查表）；`SetProperty` 改为**值变化才下发**（含 landmark 引用比对，稳态下滑条不动则全部跳过）；`blitToScreen` 的 `glClear` 仅在 viewport 与 surface 尺寸不一致时兜底（全屏 quad 已 100% 覆盖，原先每帧白搭一次全屏写带宽）。⑥ **新增分段性能诊断**：每 120 帧输出一行 `detect / gpu / pboWait` 平均值与等待占比，用于量化验证并行收益与降采样决策 · GPUPixel performance work (redundant copies removed, detection and GL processing parallelised, async read-back) plus face-tracking stability. The JNI sink always allocates a **fresh** byte array (`NewByteArray` + `SetByteArrayRegion`), so the Java-side `System.arraycopy` and its recycling pool were pure overhead - ownership is now transferred directly, saving 2.07 MB of memcpy per frame. `Pipeline` was split into `detect()` (new `gpDetectExecutor`) and `processFrame()` (`faceExecutor`) so Mars-Face inference and the GPUPixel GL chain run on two threads with **independent locks** (the detector and the GL pipeline share nothing); T_proc becomes max(detection, GPU) instead of their sum, with an in-flight counter gating read-back and frame re-use. Read-back now uses double-buffered PBOs with a fence: submit this frame, harvest the previous one, and block only on a non-blocking `glClientWaitSync(0)` - if the fence has not signalled, the frame falls back to the stable result (v2.0.185) rather than stalling. Three fallbacks protect older drivers (GL error, 60-frame stall, size change), and a runtime switch `gpAsyncReadback` disables it. The cost is one extra frame of latency (~33 ms total), imperceptible for smoothing/whitening and only marginally relevant for reshape during fast pans. Detection is throttled to every 2nd frame with a 3-miss debounce and an alpha-beta predictor-corrector for landmark smoothing, which actually reduces jitter compared with the previous per-frame behaviour; smoothing/whitening do not depend on detection at all. Finally, per-frame fixed costs were trimmed (cached `aTex` attribute location, `SetProperty` only on change, conditional `glClear`), and a 120-frame diagnostic line reports detect/gpu/pboWait averages |
+| **[功能详解](docs/FEATURES.md)** | VR 播放、画质增强、实时美颜、LUT 调色、字幕与 ASR、在线翻译、局域网播放 —— 每项功能的完整说明与参数 |
+| **[画质增强专题](docs/VIDEO_ENHANCE_MEMC_FSR.md)** | MEMC 插帧与 FSR 超分：默认/自定义规则、优先级、判定边界与保护、管线顺序、实现要点、性能与限制、诊断日志判读 |
+| **[技术架构与目录结构](docs/ARCHITECTURE.md)** | 分层架构图、关键组件职责表、仓库目录布局 |
+| **[构建与发布](docs/BUILD_AND_RELEASE.md)** | 环境要求、内置 ASR 模型拉取、构建命令、签名与分发纪律 |
+| **[隐私与开源许可](docs/PRIVACY_AND_LICENSES.md)** | 本地优先原则、匿名统计的采集范围与关闭方式、依赖与许可清单 |
+| **[版本历史](docs/CHANGELOG.md)** | 逐版变更记录（早期简略、近期详细） |
+| **[华为 VR Glass UI 设计](docs/HUAWEI_VR_UI_DESIGN.md)** | 华为 VR Glass 侧的界面设计 |
 
-| **v2.0.187 – v2.0.205** | **本区间未逐版登记进本表**（期间以专题文档 + `git log` 为准）。要目：**GPUPixel 改为源码级集成**（`third_party/gpupixel` submodule，不再依赖预编译 AAR），其性能优化与纹理零拷贝通道的可行性验证见仓库根 `GPUPIXEL_PERF_FACE_OPTIMIZATION_2026-09-29.md`、`GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md`；华为 VR Glass 的 UI 设计见 `docs/HUAWEI_VR_UI_DESIGN.md`、接入规划见 `HUAWEI_VR_ENGINE_PLAN_2026-09-26.md`；美颜专题见 `BEAUTY_*` 系列 · **This range is not itemised here** — it is covered by the topic documents at the repository root plus `git log`. Highlights: GPUPixel moved to **source-level integration** (git submodule instead of a prebuilt AAR), with its performance work and texture zero-copy feasibility study documented separately, and the Huawei VR Glass UI/engine plans |
-| **v2.0.206** | **新增「画质增强」：MEMC 插帧 + FSR 超分**（设置 → 画质增强）。① **MEMC**：目标帧率 `48/60/72/90/120`，3 步菱形块匹配运动估计 + 双向运动补偿 + 遮挡检测（遮挡处退化为线性混合），**场景切换自动跳过插帧**（1×1 帧差回读），相位由**时间**驱动；② **FSR**：EASU（边缘自适应上采样）+ RCAS（对比度自适应锐化），**默认规则**（>1440p 不启用 / 1080p→1440p / 其余→1080p，另加「目标不高于源时不启用」的保护）与**自定义 6 档**（`720p~4320p`，**完全接管**），判定基线为**视频源分辨率短边**；③ **主 shader 零改动接入** —— 增强纹理走 `imageProgram`（非 OES 变体）的 `sampler2D` 槽位 + `uIsVideo=1`，避开改动主 shader 内 15 处采样点的回归风险；④ 目标帧率节流**只复用纹理、不跳过 `onDrawFrame` 绘制**，VR 转头依旧跟手；⑤ 管线顺序 **MEMC → 超分**（时间域在前）。规则口径与实现细节详见 [`docs/VIDEO_ENHANCE_MEMC_FSR.md`](docs/VIDEO_ENHANCE_MEMC_FSR.md) · **Video enhancement: MEMC interpolation + FSR upscaling** under Settings → Video enhancement. MEMC offers 48–120 fps targets with block-matching ME, bidirectional MC, occlusion fallback to a linear blend, automatic scene-cut skipping via a 1×1 frame-diff read-back, and time-driven phase. FSR uses EASU + RCAS with a default rule (>1440p off, 1080p→1440p, others→1080p, plus a guard against downscaling) and a fully-overriding six-tier custom rule, keyed off the source's short side. Wired in with **zero main-shader changes** by routing the enhanced texture through the non-OES `imageProgram`'s `sampler2D` slot. Frame-rate throttling reuses the previous texture without skipping the draw, so head rotation stays responsive. See [`docs/VIDEO_ENHANCE_MEMC_FSR.md`](docs/VIDEO_ENHANCE_MEMC_FSR.md) |
-| **v2.0.207** | **修复 v2.0.206 装机实测暴露的三个问题**（均为真机 logcat 定位）。① 🔴 **GPUPixel 引擎闪退（SIGABRT）** —— v2.0.187 从 AAR 依赖改为源码级集成时**漏了 assets**：`BeautyFaceUnitFilter::Init()` 需加载 4 张 lookup 图，而 `GPUPixel.copyResource()` 是把 **APK assets 内的文件**按扩展名扁平拷进 `<externalFilesDir>/gpupixel/`，assets 里没有它们 → native `assert(false)` → `abort()`；又因引擎选择已持久化，**重启后继续崩**（连崩 4 次）。修复：补齐 **9 个资产**（7 png + 2 `.mars_model`）到 `app/src/main/assets/gpupixel/`，并新增 Kotlin 侧预检 `nativeAssetsReady()` —— **native 的 `assert` 是进程级中止，`try/catch` 完全拦不住**，必须在创建滤镜之前拦住（资源不齐则跳过 GPUPixel、退回 GLSL）。② 🔴 **MEMC 插帧从未发生** —— 相位公式中的 `currTime` 就是本帧刚取的 `now`，导致 `(now-prev)/(curr-prev)` **恒等于 1**；渲染循环帧率 ≥ 源帧率时每帧都命中该分支（现象：logcat 连续打印 `phase=1.00`）。改用「显示时刻 = `now` − 一个源帧间隔」计算（代价是输出延迟一个源帧间隔，属 MEMC 固有代价）。实测修复后 `phase` 在 `0/0.31/0.47/0.52` 之间变化、插帧帧数稳定增长（约 49% 的帧命中）。③ 🟠 **FSR 目标宽高比与源不一致导致画面变形** —— 档位宽高按 16:9 写死，源 `1920×960`（2:1）被输出到 `7680×4320`（16:9），主 shader 再按 UV 采样即被拉伸。改为**档位只定高度、宽度按源宽高比推导**（新增 `targetSizeForHeight()`），UI 副标题改为显示**真实生效尺寸**。实测 `1920×960 + 4320p → 8640×4320`、`320×176 + 默认规则 → 1964×1080`。④ 新增**增强链诊断日志**（状态变更 / 每 120 帧统计 / **增强纹理接入** —— 打印 `texId` + program 类型 + uniform location），其价值在于把「pass 在跑」与「主 shader 真的采样了」两件事分开验证（`uSamplerVideo` 为 `-1` 即说明 sampler 被驱动优化掉、采样退回原图）。实测 `texId=5 / prog=image(2D) / uSamplerVideo=39` 确认通路正常 · **Fixes three issues found by testing v2.0.206 on device.** (1) The GPUPixel engine aborted with SIGABRT: v2.0.187's switch from an AAR dependency to source-level integration dropped the assets that the native initialiser loads — nine assets restored, plus a Kotlin-side precondition check, because a native `assert` is a process-level abort that `try/catch` cannot catch. (2) MEMC interpolation never actually happened — the phase formula evaluated to a constant 1 because `currTime` was the `now` sampled in the same frame; it now measures "display time = `now` − one source frame interval". (3) FSR stretched non-16:9 footage because tier sizes hard-coded 16:9; tiers now define a target height and derive the width from the source aspect. Also adds diagnostics that separate "the pass runs" from "the main shader actually sampled the result" |
+### 仓库根专题文档 / Topic documents
+
+这些是开发过程中的规划与实验记录，记录的是**当时**的设计与结论，实现可能已随版本演进。
+
+| 文档 / Document | 内容 / Contents |
+|---|---|
+| [HUAWEI_VR_ENGINE_PLAN_2026-09-26.md](HUAWEI_VR_ENGINE_PLAN_2026-09-26.md) | 华为 VR Engine（OpenXR）接入规划与实施记录 |
+| [GPUPIXEL_PERF_FACE_OPTIMIZATION_2026-09-29.md](GPUPIXEL_PERF_FACE_OPTIMIZATION_2026-09-29.md) | GPUPixel 美颜性能与人脸检测优化 |
+| [GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md](GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md) | GPUPixel 纹理零拷贝通道可行性验证 |
+| [BEAUTY_EVALUATION_2026-09-23.md](BEAUTY_EVALUATION_2026-09-23.md) | 美颜算法评估报告（椭圆遮罩、频域分离磨皮的依据） |
+| [BEAUTY_DUAL_ENGINE_PLAN_2026-09-23.md](BEAUTY_DUAL_ENGINE_PLAN_2026-09-23.md) | 美颜双引擎（GLSL / GPUPixel）规划 |
+| [RELEASE_SIGNING.md](RELEASE_SIGNING.md) | Release 签名与发布流程（细节） |
+| [DEPENDENCY_MAP.md](DEPENDENCY_MAP.md) | 模块依赖图 |
+| [BUG_AUDIT_2026-09-12.md](BUG_AUDIT_2026-09-12.md) | 缺陷审计记录 |
+| [FIREBASE_ANALYTICS.md](FIREBASE_ANALYTICS.md) | 用户统计接入说明 |
 
 ---
 
@@ -506,3 +148,4 @@ All ASR models — the bundled SenseVoice and the downloadable zipformer / NeMo 
 
 本项目采用 **Apache License 2.0** 开源（见 [LICENSE](LICENSE)），Copyright © 2026 tianhuoliuhun。
 可自由使用、修改、商用与再分发（保留版权与许可声明即可）。
+
