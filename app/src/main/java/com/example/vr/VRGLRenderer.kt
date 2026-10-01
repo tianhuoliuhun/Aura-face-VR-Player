@@ -588,6 +588,23 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /** MEMC 目标帧率的节流计时（毫秒） */
     private var memcThrottleMs = 0L
 
+    // ===== v2.0.206 诊断：低频日志，用于实机验证增强链是否**真的在跑** =====
+    // 设计原则：状态变化时打一行 + 每 120 帧一行统计。
+    // 这样既能证明「开关真的传到了渲染层、ME/MC 真的在算」，又不会刷屏淹没其他日志。
+    private var lastEnhanceStateKey = ""
+    private var memcFrameCount = 0L
+    private var fsrFrameCount = 0L
+    private var memcSceneCutCount = 0L
+
+    /** 相位落在 (0.05, 0.95) 的帧数 —— 「插帧真的发生了」的直接证据 */
+    private var memcInterpCount = 0L
+
+    /** 上一次诊断打印时用的增强纹理 id，变化时才重新打印（避免刷屏） */
+    private var lastDiagEnhanceTex = -1
+    private var lastDiagProgKind = ""
+    private var fsrSrcW = 0
+    private var fsrSrcH = 0
+
     private val halfQuad: java.nio.FloatBuffer = java.nio.ByteBuffer.allocateDirect(4 * 4 * 4)
         .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer().apply {
             put(floatArrayOf(
@@ -1859,6 +1876,25 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // Bind active textures
         bindActiveTextures(prog, enhanceTexId)
+
+        // v2.0.206 诊断：验证增强纹理到底有没有走到主 shader。
+        // ⚠️ 判据：
+        //   · prog 必须是 **image(2D)** —— 只有它那个槽位被声明成 sampler2D，能接 2D 纹理；
+        //     video(OES) 的槽位是 samplerExternalOES，绑 2D 纹理属未定义行为。
+        //   · `uSamplerVideo` 的 location 必须是 **非 -1**。若是 -1，说明该 sampler 被驱动
+        //     优化掉了，采样器退回默认 unit 0（= 原图），表现就是
+        //     「FSR/MEMC 的 pass 明明在跑、画面却毫无变化」。
+        val progKind = if (prog === videoProgram) "video(OES)" else "image(2D)"
+        if (hasEnhanceTex && (enhanceTexId != lastDiagEnhanceTex || progKind != lastDiagProgKind)) {
+            lastDiagEnhanceTex = enhanceTexId
+            lastDiagProgKind = progKind
+            Log.i(
+                TAG,
+                "增强纹理接入: texId=$enhanceTexId prog=$progKind " +
+                    "loc[uSamplerVideo=${prog.hSamplerVideo} uIsVideo=${prog.hIsVideo} " +
+                    "uSamplerImage=${prog.hSamplerImage}]"
+            )
+        }
 
         // v104 LUT 视频滤镜：绑定 512x512 LUT 纹理到 TEXTURE2 并同步强度
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
@@ -3742,6 +3778,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             memcLastOutputMs = nowMs
         }
 
+        // 状态变化时打一行 —— 这是「开关有没有真的传到渲染层」最直接的证据。
+        // 若用户拨了开关但这里没打印，说明 LaunchedEffect 没触发（例如 videoSource 未更新）。
+        val stateKey = "MEMC=$memcEnabled@${memcTargetFps}fps FSR=$fsrEnabled@${fsrTargetWidth}x${fsrTargetHeight}"
+        if (stateKey != lastEnhanceStateKey) {
+            lastEnhanceStateKey = stateKey
+            Log.i(TAG, "画质增强状态变更: $stateKey")
+        }
+
         var tex = 0
 
         // ---------- 第一段：MEMC ----------
@@ -3831,16 +3875,34 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
             // 场景切换检测：只在新帧时做一次（prev/curr 只在这时变化）
             memcSceneCut = detectSceneCut()
+            if (memcSceneCut) memcSceneCutCount++
         }
 
         // ---- 相位 ----
-        val span = (memcCurrTimeMs - memcPrevTimeMs).toFloat()
-        var phase = if (span < 1f) 1f else ((now - memcPrevTimeMs) / span).coerceIn(0f, 1f)
-        val newVideoArrived = memcCurrTimeMs != memcPrevTimeMs
-        if (!newVideoArrived) phase = 1f
+        // ⚠️ 必须用「显示时刻 = now − 一个源帧间隔」来算，**不能直接用 now**。
+        //    判例（v2.0.206 装机实测，2026-10-01）：此前写的是
+        //        phase = (now - prevTime) / (currTime - prevTime)
+        //    而 currTime 就是「本帧刚取到的 now」（新帧分支里 memcCurrTimeMs = now），
+        //    于是新帧到达那一帧恒得 1.0；渲染循环帧率 ≥ 源帧率时每一帧都踩中该分支
+        //    → **相位永远钉在 1，插帧从头到尾没发生过**
+        //    （logcat 连续 15 次打印 `phase=1.00` 证实）。
+        //    减去一个源帧间隔后，相位才会真正在 [0,1] 之间推进：
+        //        新帧刚到达      → phase = 0（显示 prev）
+        //        下一帧到来之前  → phase → 1（显示 curr）
+        //        中间时刻        → phase ∈ (0,1)  ← 插帧真正发生的地方
+        //    代价是输出延迟一个源帧间隔（MEMC 的固有代价；30fps 源约 33ms，肉眼不可察）。
+        val span = memcCurrTimeMs - memcPrevTimeMs
+        var phase = if (span <= 0L) {
+            // 首帧 / 时间戳未推进（还没攒够两帧）→ 直接显示 curr
+            1f
+        } else {
+            ((now - span - memcPrevTimeMs).toFloat() / span.toFloat()).coerceIn(0f, 1f)
+        }
         // 场景切换 → 不插帧，直接显示 curr（否则会插出两个场景叠加的鬼影）
         if (memcSceneCut) phase = 1f
         memcLastPhase = phase
+        // 相位落在中间区间才算「插帧真的发生了」—— 比 phase 的瞬时值更硬的证据
+        if (phase > 0.05f && phase < 0.95f) memcInterpCount++
 
         // ---- ME 两次（前向 / 反向）----
         runMemcMe(memcPrevTex, memcCurrTex, memcMvFFbo)
@@ -3861,6 +3923,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         setEnhanceFloat(pMemcMc, "uOcclusionThresh", memcOcclusionThresh)
         drawEnhanceQuad(pMemcMc)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+
+        // 每 120 帧一行统计。
+        // ⚠️ 判读要点：phase 必须**在 0~1 之间变化**；若恒为 1.00，说明插帧没有生效
+        //    （最常见原因：currTime 没更新 → span 恒负 → 被 clamp 成 1）。
+        //    「场景切换累计」在正常播放时应缓慢增长；若疯长说明阈值偏低、频繁误判。
+        memcFrameCount++
+        if (memcFrameCount == 1L || memcFrameCount % 120L == 0L) {
+            Log.i(
+                TAG,
+                "MEMC 运行中 #$memcFrameCount phase=${"%.2f".format(memcLastPhase)} " +
+                    "插帧帧数=$memcInterpCount 场景切换累计=$memcSceneCutCount " +
+                    "工作=${memcW}x${memcH} MV=${memcMvW}x${memcMvH}"
+            )
+        }
 
         return memcOutTex
     }
@@ -3970,6 +4046,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         setEnhanceFloat(pFsrRcas, "uSharpness", fsrRcasSharpness)
         drawEnhanceQuad(pFsrRcas)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+
+        fsrSrcW = srcW
+        fsrSrcH = srcH
+        fsrFrameCount++
+        if (fsrFrameCount == 1L || fsrFrameCount % 120L == 0L) {
+            Log.i(TAG, "FSR 运行中 #$fsrFrameCount ${srcW}x${srcH} -> ${fsrW}x${fsrH}")
+        }
 
         return fsrTexB
     }

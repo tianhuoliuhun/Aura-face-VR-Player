@@ -78,8 +78,15 @@ enum class FsrTargetResolution(
     P3840("3840p", 7680, 3840),
     P4320("4320p", 7680, 4320);
 
-    /** UI 展示用：「2160p (3840×2160)」 */
-    val label: String get() = "$id ($width×$height)"
+    /**
+     * UI 展示用：只给档位名。
+     *
+     * ⚠️ 刻意**不显示宽高** —— 实际目标是按「档位高度 + **源宽高比**」推导出来的
+     * （见 [VideoEnhanceRules.targetSizeForHeight]）。若在这里写死 16:9 的参考宽高
+     * （如 2160p 写成 3840×2160），遇到 1920x960 这类 2:1 片源就会误导用户。
+     * 真实生效尺寸由 UI 另行显示，不在这里假装。
+     */
+    val label: String get() = id
 
     companion object {
         fun fromId(id: String?): FsrTargetResolution = values().find { it.id == id } ?: P1080
@@ -134,12 +141,13 @@ object VideoEnhanceRules {
     /** 默认规则里被特殊照顾的分辨率（1080p 提升到 1440p，而不是 1080p） */
     const val SPECIAL_SOURCE_HEIGHT = 1080
 
-    /** 默认规则下 1080p 源的目标 */
-    const val FHD_TARGET_WIDTH = 2560
+    /**
+     * 默认规则的目标**高度**。
+     * ⚠️ 只定高度 —— 宽度一律由 [targetSizeForHeight] 按源宽高比推导。
+     *    此前写死的 16:9 宽度（2560 / 1920）已删除：遇到 1920x960 这类
+     *    非 16:9 片源会把画面拉伸变形（2026-10-01 实测踩到）。
+     */
     const val FHD_TARGET_HEIGHT = 1440
-
-    /** 默认规则下「其余分辨率」的目标 */
-    const val OTHER_TARGET_WIDTH = 1920
     const val OTHER_TARGET_HEIGHT = 1080
 
     /** MEMC 目标帧率可选档位（用户要求范围 48~120，取常见刷新率档） */
@@ -155,6 +163,27 @@ object VideoEnhanceRules {
     /** 把任意读到的帧率收敛到合法区间 */
     fun clampMemcTargetFps(raw: Int): Int =
         raw.coerceIn(MEMC_TARGET_FPS_MIN, MEMC_TARGET_FPS_MAX)
+
+    /**
+     * 按「目标高度 + 源宽高比」推导 FSR 的目标尺寸。
+     *
+     * ⚠️ 为什么不能直接用档位里写死的宽高（实测踩到，2026-10-01）：
+     *    `FsrTargetResolution` 的宽高是按 **16:9** 定的（2160p = 3840x2160）。
+     *    但片源未必是 16:9 —— 实测有一路 **1920x960（2:1）** 的源，被输出到
+     *    7680x4320(16:9) 后，主 shader 再按 UV 采样这张纹理，画面就被**拉伸变形**了。
+     *    FSR 只能改变分辨率、**不能改变画面比例**，宽度必须跟着源走。
+     *
+     * 于是档位的语义明确为「**目标高度**」，宽度一律由源宽高比推出：
+     *   1920x1080 源选 2160p → 3840x2160（恰好等于 16:9 的参考值）
+     *   1920x960  源选 2160p → 4320x2160（保持 2:1，不变形）
+     *
+     * @return (目标宽, 目标高)；源尺寸无效时返回 (0, 0)，调用方应视为「不启用」
+     */
+    fun targetSizeForHeight(srcWidth: Int, srcHeight: Int, targetHeight: Int): Pair<Int, Int> {
+        if (srcWidth <= 0 || srcHeight <= 0 || targetHeight <= 0) return 0 to 0
+        val w = Math.round(targetHeight.toFloat() * srcWidth.toFloat() / srcHeight.toFloat())
+        return w.coerceAtLeast(1) to targetHeight
+    }
 
     /**
      * 取「画面分辨率」的判定短边。
@@ -184,12 +213,16 @@ object VideoEnhanceRules {
         // 自定义规则：完全接管，不看默认规则，也不做「目标是否更高」的保护
         // （用户明确选择了「自定义完全接管」—— 选了 720p 就按 720p 走）
         if (ruleMode == FsrRuleMode.CUSTOM) {
-            return FsrDecision(
-                enabled = true,
-                targetWidth = customTarget.width,
-                targetHeight = customTarget.height,
-                reason = FsrReason.CUSTOM_TARGET
-            )
+            // 高度取档位值，宽度按**源宽高比**推导（见 targetSizeForHeight）
+            val (tw, th) = targetSizeForHeight(sourceWidth, sourceHeight, customTarget.height)
+            return if (tw > 0) {
+                FsrDecision(true, tw, th, FsrReason.CUSTOM_TARGET)
+            } else {
+                // 源尺寸还没拿到（尚未开始播放）→ 先不启用，等拿到源信息再算尺寸。
+                // 注意这不违反「自定义完全接管」：接管的是**规则判定**，
+                // 而算尺寸本来就离不开源。
+                FsrDecision.OFF_NO_SOURCE
+            }
         }
 
         // 默认规则：需要有效源分辨率
@@ -201,15 +234,12 @@ object VideoEnhanceRules {
         }
 
         // ② 1080p 提到 1440p；③ 其余（含 1440p 本身）提到 1080p
-        val targetW: Int
         val targetH: Int
         val reason: FsrReason
         if (srcShort == SPECIAL_SOURCE_HEIGHT) {
-            targetW = FHD_TARGET_WIDTH
             targetH = FHD_TARGET_HEIGHT
             reason = FsrReason.FHD_TO_1440P
         } else {
-            targetW = OTHER_TARGET_WIDTH
             targetH = OTHER_TARGET_HEIGHT
             reason = FsrReason.OTHERS_TO_1080P
         }
@@ -221,6 +251,8 @@ object VideoEnhanceRules {
             return FsrDecision(false, 0, 0, FsrReason.TARGET_NOT_HIGHER)
         }
 
+        // ⑤ 宽度按**源宽高比**推导 —— 不能沿用 16:9 的写死值，否则非 16:9 片源会变形
+        val (targetW, _) = targetSizeForHeight(sourceWidth, sourceHeight, targetH)
         return FsrDecision(true, targetW, targetH, reason)
     }
 }

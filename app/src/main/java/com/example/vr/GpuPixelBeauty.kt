@@ -90,14 +90,63 @@ object GpuPixelBeauty {
             return false
         }
         return try {
-            // GPUPixel.Init 会把 AAR assets 里的 Mars-Face 模型拷到应用外部目录
+            // GPUPixel.Init 会把 **assets 里的 GPUPixel 资源**（lookup 图 + Mars-Face 模型）
+            // 拷到应用外部目录 gpupixel/ 下，再 nativeSetResourcePath 指过去。
+            // ⚠️ 资产清单见 app/src/main/assets/gpupixel/。
+            //    判例（v2.0.206，2026-10-01）：v2.0.187 把 GPUPixel 从 aar 依赖改成
+            //    **源码级集成**（`implementation(files("libs/gpupixel-release.aar"))` 被注释掉）时，
+            //    aar 自带的 assets 不再合并进 APK，而没人把资产补进 app/src/main/assets/ ——
+            //    于是 gpupixel/res/ 里没有 lookup_gray.png 等 4 张图，
+            //    native 的 BeautyFaceUnitFilter::Init() 直接 assert(false) → abort → 闪退
+            //    （且因为引擎选择已持久化，重启后继续崩，连崩 4 次）。
             GPUPixel.Init(context.applicationContext)
-            available = true
-            Log.i(TAG, "GPUPixel initialized")
-            true
+
+            // ⚠️ 必须在**创建任何滤镜之前**拦住：
+            //    native 的 SourceImage::Create() 在文件缺失时走 assert(false) → abort()，
+            //    是**进程级中止**，Kotlin 的 try/catch 完全无效。
+            //    这里用 native 的同一套查找路径（GetResourcePath()/res/）做预检。
+            if (!nativeAssetsReady(context)) {
+                lastFailedMs = android.os.SystemClock.uptimeMillis()
+                Log.e(
+                    TAG,
+                    "GPUPixel 资源未就位（gpupixel/res 缺 lookup_*.png）→ 跳过本引擎。" +
+                        "保持 GLSL，避免 native abort 杀进程。检查 app/src/main/assets/gpupixel/"
+                )
+                false
+            } else {
+                available = true
+                Log.i(TAG, "GPUPixel initialized")
+                true
+            }
         } catch (e: Throwable) {
             lastFailedMs = android.os.SystemClock.uptimeMillis()
             Log.e(TAG, "GPUPixel init failed", e)
+            false
+        }
+    }
+
+    /**
+     * 确认 native 侧需要的资源真的已经落地。
+     *
+     * ⚠️ 为什么必须做这一步：native 的 `SourceImage::Create()` 在文件不存在时走的是
+     *    `assert(false)` → `abort()`，属于**进程级中止**，Kotlin 侧 try/catch 拦不住
+     *    （这一点是本项目 v2.0.206 闪退的直接教训）。
+     *
+     * 判据直接对齐 native 的查找路径：`Util::GetResourcePath() / "res" / <file>`，
+     * 而 resource path 由 `GPUPixel.copyResource()` 设为 `<externalFilesDir>/gpupixel`。
+     * 所以只要检查 `<externalFilesDir>/gpupixel/res/` 下这 4 张图在不在即可。
+     *
+     * 不足 4 张就宁可不用 GPUPixel —— 退回 GLSL 只是画质方案不同，
+     * 而 native abort 是直接闪退，代价完全不对等。
+     */
+    private fun nativeAssetsReady(context: Context): Boolean {
+        return try {
+            val resDir = java.io.File(context.getExternalFilesDir(null), "gpupixel/res")
+            listOf(
+                "lookup_gray.png", "lookup_origin.png", "lookup_skin.png", "lookup_light.png"
+            ).all { java.io.File(resDir, it).exists() }
+        } catch (e: Throwable) {
+            Log.w(TAG, "GPUPixel 资源预检失败", e)
             false
         }
     }

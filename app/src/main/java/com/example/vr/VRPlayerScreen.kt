@@ -5155,7 +5155,16 @@ fun VRPlayerScreen(
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(stringResource(R.string.fsr_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                            Text(stringResource(fsrDecision.reason.labelRes), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                            // 副标题 = 判定原因 +（启用时）**实际生效的目标尺寸**。
+                                            // ⚠️ 实际尺寸按「档位高度 × 源宽高比」推出，非 16:9 片源
+                                            //    会与档位的 16:9 参考值不同，必须显示真实值 ——
+                                            //    否则用户（或下次排查的我）会以为设置没生效。
+                                            //    ⚠️ stringResource 先算成 val 再用 if —— 别把它写进 if/else 分支里。
+                                            val baseReason = stringResource(fsrDecision.reason.labelRes)
+                                            val reasonLine = if (fsrDecision.enabled) {
+                                                "$baseReason · ${fsrDecision.targetWidth}×${fsrDecision.targetHeight}"
+                                            } else baseReason
+                                            Text(reasonLine, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
                                         }
                                         Switch(
                                             checked = isFsrEnabled,
