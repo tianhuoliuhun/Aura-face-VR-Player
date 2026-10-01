@@ -188,14 +188,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
-            <!-- 调试期：让图标出现在**手机桌面**（点图标即可启动）。
-                 官方公告：HarmonyOS 3.0 起若不显式声明 LAUNCHER，
-                 应用只在「华为 VR - 内容库」里显示，手机桌面看不到。
-                 正式发布时若不想暴露手机桌面图标，可移除本 intent-filter。 -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+            <!-- v2.0.205：**已移除**手机桌面的 MAIN/LAUNCHER 入口（用户要求）。
+                 官方公告：HarmonyOS 3.0 起不声明 LAUNCHER 时，应用只在
+                 「华为 VR - 内容库」里显示，手机桌面不出现图标 —— 即当前期望的行为。
+                 如需调试期从手机桌面直接启动，可用 adb：
+                   adb shell am start -n com.aistudio.vrplayer.vrmjpy/com.example.vr.huawei.HuaweiVrActivity -->
         </activity>
 
         <!-- ====================================================================

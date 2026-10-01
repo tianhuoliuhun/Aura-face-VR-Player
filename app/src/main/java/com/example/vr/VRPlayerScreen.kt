@@ -345,6 +345,17 @@ fun VRPlayerScreen(
     // 运行时可用性缓存在状态里：开关行与路由都要读，避免每帧查 PackageManager
     val huaweiVrRuntimeAvailable = remember { isHuaweiVrRuntimeAvailable(context) }
 
+    // v2.0.205：机型是否为华为/荣耀 —— 用户要求「机型非华为、荣耀不显示 VR Glass 开关」。
+    // ⚠️ 用 manufacturer + brand 双字段（部分华为设备 brand 会是第三方渠道名），
+    //    忽略大小写；缓存进 remember，避免每次重组都读 Build。
+    val isHuaweiOrHonorDevice = remember {
+        val mfr = android.os.Build.MANUFACTURER ?: ""
+        val brand = android.os.Build.BRAND ?: ""
+        listOf("huawei", "honor").any {
+            mfr.contains(it, ignoreCase = true) || brand.contains(it, ignoreCase = true)
+        }
+    }
+
     // Playback state
     var isVideoPlaying by remember { mutableStateOf(false) }
     var videoPlaybackProgress by remember { mutableFloatStateOf(0f) }
@@ -2956,7 +2967,8 @@ fun VRPlayerScreen(
                         // v2.0.174：华为 VR Glass 显式入口。
                         // 仅在「华为 VR 开关已开」或「本机检测到华为 VR 运行时」时出现，
                         // 避免在普通机型上多出一个点不动的按钮。
-                        if (huaweiVrEnabled || huaweiVrRuntimeAvailable) {
+                        // v2.0.205：机型非华为/荣耀 → 整个 VR Glass 入口不显示（用户要求）
+                        if ((huaweiVrEnabled || huaweiVrRuntimeAvailable) && isHuaweiOrHonorDevice) {
                             IconButton(
                                 onClick = {
                                     keepUiAlight()
