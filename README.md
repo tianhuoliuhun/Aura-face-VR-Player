@@ -1,10 +1,19 @@
 # 🎬 Aura美颜VR播放器 / Aura face VR Player
 
 > 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体视频，
-> 内置实时 AI 人脸美颜、3D LUT 电影调色、**17 种语言的离线语音转字幕**、10 引擎在线翻译与局域网 SMB 播放。
+> 内置实时 AI 人脸美颜、3D LUT 电影调色、**60+ 种语言与方言的离线语音转字幕**、10 引擎在线翻译与局域网 SMB 播放。
 >
 > A professional mobile VR player with real-time AI beauty filters, 3D LUT color grading,
-> offline ASR subtitles (**17 languages**), 10-engine online translation and LAN (SMB) playback.
+> offline ASR subtitles (**60+ languages & dialects**), 10-engine online translation and LAN (SMB) playback.
+
+> **版本里程碑 / Milestones**：
+> **v1.0** 完成 VR 播放的基本功能（投影 / 立体 / 陀螺仪 / LUT 调色）·
+> **v2.0** 完成 AI 语音识别与翻译（实时字幕 / 离线 ASR / 在线翻译 / AI 美颜双引擎）·
+> **v2.1** 修复美颜引擎的问题（GPUPixel 闪退 / 覆盖范围 / 闪烁与性能），并引入画质增强（MEMC 插帧 / FSR 超分）与多语言 ASR 大扩展。
+>
+> **v1.0** delivered the core VR playback (projection / stereo / gyro / LUT) ·
+> **v2.0** delivered AI speech recognition & translation (realtime subtitles, offline ASR, online translation, dual-engine beauty) ·
+> **v2.1** fixed the beauty-engine issues (GPUPixel crash, coverage, flicker & performance) and added video enhancement (MEMC / FSR) plus a major ASR language expansion.
 
 ![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 

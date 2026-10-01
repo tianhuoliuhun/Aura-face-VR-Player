@@ -8,7 +8,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineDolphinModelConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
@@ -142,23 +144,88 @@ object SherpaAsrManager {
         else -> context.getString(R.string.asr_source_unavailable)
     }
 
-    /** ASR 语言/模型条目（code 同时作为 `sherpa_lang_code` 与扩展模型 key） */
-    data class SherpaLang(val code: String, val labelResId: Int)
+    /**
+     * ASR 语言/模型 chip。
+     *
+     * ⚠️ v2.0.208 起**同一语言可以出现多条 chip**（每个候选模型一条），
+     * chip 显示「语言名+序号」（如 英语1 / 英语2 / 英语3），
+     * 点击 = 「切语言 + 选模型」一步完成。
+     */
+    data class SherpaLang(
+        val code: String,             // 语言键（sherpa_lang_code）
+        val labelResId: Int,
+        /** 该 chip 绑定的模型 id：`builtin` / 扩展模型的 `dirName`；null = 不涉及选模型 */
+        val modelId: String? = null,
+        /** 显示后缀（同语言多 chip 时为 "1"/"2"…，单 chip 语言为 null） */
+        val suffix: String? = null,
+        val group: AsrExtModels.AsrLangGroup
+    )
 
     /**
-     * 可选语言列表 = SenseVoice 内置语言 + 扩展模型语言。
+     * 可选语言 chip 列表 = SenseVoice 内置 + 扩展模型语言。
      *
-     * v2.0.145：扩展语言（越南语等）由 [AsrExtModels] 注册表驱动，需按需下载，
-     * 不占用 APK 体积；选中后由 [createRecognizer] 自动分叉到 transducer 识别器。
+     * v2.0.208：**重复语言分开标**（用户决策）——
+     * 英语有 3 个候选（内置 / FastConformer 轻量 / Parakeet v3 全量）→ 3 条 chip；
+     * 俄法德西等 8 种重叠语言 → 各 2 条 chip。
+     * 点击 chip = `changeAsrLanguage(code)` + `setModelChoice(code, modelId)` 一步完成。
      */
-    val sherpaLanguages = listOf(
-        SherpaLang("auto", R.string.asr_lang_auto),
-        SherpaLang("zh", R.string.asr_lang_zh),
-        SherpaLang("en", R.string.asr_lang_en),
-        SherpaLang("ja", R.string.asr_lang_ja),
-        SherpaLang("ko", R.string.asr_lang_ko),
-        SherpaLang("yue", R.string.asr_lang_yue)
-    ) + AsrExtModels.ALL.map { SherpaLang(it.key, it.labelResId) }
+    val sherpaLanguages: List<SherpaLang> = buildList {
+        // —— 内置 SenseVoice 覆盖的语言 ——
+        add(SherpaLang("auto", R.string.asr_lang_auto, modelId = "builtin", group = AsrExtModels.AsrLangGroup.COMMON))
+        add(SherpaLang("zh", R.string.asr_lang_zh, modelId = "builtin", group = AsrExtModels.AsrLangGroup.CHINESE))
+        add(SherpaLang("ja", R.string.asr_lang_ja, modelId = "builtin", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("ko", R.string.asr_lang_ko, modelId = "builtin", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("yue", R.string.asr_lang_yue, modelId = "builtin", group = AsrExtModels.AsrLangGroup.CHINESE))
+        // —— 英语：3 个候选分开标（内置 / 轻量 / 全量），全部放「常用」组便于对比 ——
+        // —— 英语：3 个候选分开标 ——
+        //    「英语1（内置）」放常用组；「英语2/3」的模型是欧洲包（FC/V3），归入欧洲组，
+        //    避免常用组里堆 3 个英语让首屏变乱（用户 2026-10-01 要求整理）。
+        add(SherpaLang("en", R.string.asr_lang_en, modelId = "builtin", suffix = "1", group = AsrExtModels.AsrLangGroup.COMMON))
+        add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.FASTCONF_DIR, suffix = "2", group = AsrExtModels.AsrLangGroup.EUROPE))
+        add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.PARAKEET_V3_DIR, suffix = "3", group = AsrExtModels.AsrLangGroup.EUROPE))
+        // —— 其余扩展语言：按候选数生成 chip（多候选加序号，单候选无后缀）——
+        //    en 已在上面手动处理，这里跳过；Dolphin 的 54 条与 vi/th/FastConformer 9 语在此生成。
+        AsrExtModels.ALL
+            .filter { it.key != "en" }
+            .groupBy { it.key }
+            .forEach { (key, models) ->
+                val labelRes = models.first().labelResId
+                val grp = AsrExtModels.LANG_OPTIONS.firstOrNull { it.key == key }?.group
+                    ?: AsrExtModels.AsrLangGroup.OTHER
+                models.forEachIndexed { i, m ->
+                    add(
+                        SherpaLang(
+                            key, labelRes,
+                            modelId = m.dirName,
+                            suffix = if (models.size > 1) "${i + 1}" else null,
+                            group = grp
+                        )
+                    )
+                }
+            }
+    }
+
+    /** 按语区收纳后的 chip 分组（供 UI 折叠渲染），已按语区 sortOrder 排序 */
+    fun groupedChips(): List<Pair<AsrExtModels.AsrLangGroup, List<SherpaLang>>> =
+        sherpaLanguages.groupBy { it.group }
+            .entries
+            .sortedBy { it.key.sortOrder }
+            .map { it.key to it.value }
+
+    /**
+     * 按**模型**收纳：`(模型 id, 该模型覆盖的语言 chips)`。
+     *
+     * 「按模型」是「多模型对比」的入口：同一语言出现在多个模型下
+     * （如英语 = builtin + FastConformer + Parakeet v3 三条 chip），
+     * 用户从这里能直观看到每个模型覆盖哪些语言、各自多大体积。
+     */
+    fun groupedByModel(): List<Pair<String, List<SherpaLang>>> {
+        val byId = LinkedHashMap<String, MutableList<SherpaLang>>()
+        sherpaLanguages.forEach { chip ->
+            chip.modelId?.let { id -> byId.getOrPut(id) { mutableListOf() } += chip }
+        }
+        return byId.map { (id, chips) -> id to chips }
+    }
 
     /** 模型是否就绪：下载版或内置版任一可用即可 */
     fun isModelReady(context: Context): Boolean =
@@ -376,9 +443,10 @@ object SherpaAsrManager {
         language: String = "auto",
         threads: Int = 0
     ): OfflineRecognizer? {
-        // v2.0.145：扩展语言（越南语等）走各自独立的离线 transducer 模型，
-        // 与内置 SenseVoice 完全隔离，互不影响。
-        AsrExtModels.byKey(language)?.let { ext ->
+        // v2.0.145：扩展语言（越南语等）走各自独立的离线模型，与内置 SenseVoice 完全隔离，互不影响。
+        // v2.0.208：**尊重用户在「选择模型」里的选择** ——
+        //   解析结果为 null 时走内置 SenseVoice（用户选了内置、或该语言没有扩展候选）。
+        resolveExtModel(context, language)?.let { ext ->
             return createExtRecognizer(context, ext, threads)
         }
         lastInitError = null
@@ -441,42 +509,146 @@ object SherpaAsrManager {
     // 这些模型**不内置进 APK**，由用户按需下载到 filesDir/sherpa_models/ext-<dirName>。
     // 下载源与文件清单见 [AsrExtModels]（各模型文件名不统一，必须逐个写死）。
 
-    /** 扩展模型落盘目录 */
-    private fun extDir(context: Context, m: AsrExtModel): File =
-        File(context.filesDir, "sherpa_models/ext-${m.dirName}")
+    /** 按目录名取落盘目录（`filesDir/sherpa_models/ext-<dirName>`） */
+    private fun extSubDir(context: Context, dirName: String): File =
+        File(context.filesDir, "sherpa_models/ext-$dirName")
 
-    /** 扩展模型的期望文件表：按文件下载用 [AsrExtModel.files]，整包回退用 [AsrExtArchive.wanted] */
-    private fun expectedFiles(m: AsrExtModel): Map<String, Long> =
-        if (m.files.isNotEmpty()) m.files.associate { it.name to it.minBytes }
-        else m.archive?.wanted ?: emptyMap()
+    /** 扩展模型**自身**的落盘目录 */
+    private fun extDir(context: Context, m: AsrExtModel): File = extSubDir(context, m.dirName)
+
+    /**
+     * 某个文件的落盘位置。
+     *
+     * ⚠️ 两点不能想当然（v2.0.208 引入 CTC 后踩到）：
+     * 1. **落盘名取 basename** —— 远端可能带子目录（`hi/model.int8.onnx`），
+     *    但那只是 URL 定位用，本地不该生成 `ext-indic-hi/hi/model.onnx` 这种嵌套。
+     * 2. **落盘目录可能不是模型自己的目录** —— IndicConformer 的 22 语共用一份
+     *    `tokens.txt`，它要落到共享目录 `ext-indic-shared/`，
+     *    否则每种语言都要重下一份 67KB（危害不大但没意义）。
+     */
+    private fun fileOf(context: Context, m: AsrExtModel, f: AsrExtFile): File =
+        File(extSubDir(context, f.dir ?: m.dirName), File(f.name).name)
+
+    /**
+     * 扩展模型的期望文件表：`File -> 期望最小字节数`。
+     * 按文件下载用 [AsrExtModel.files]，整包回退用 [AsrExtArchive.wanted]（整包解出的文件都落在模型目录）。
+     */
+    private fun expectedFiles(context: Context, m: AsrExtModel): List<Pair<File, Long>> =
+        if (m.files.isNotEmpty()) {
+            m.files.map { fileOf(context, m, it) to it.minBytes }
+        } else {
+            val dir = extDir(context, m)
+            (m.archive?.wanted ?: emptyMap()).map { (name, min) -> dir.resolve(name) to min }
+        }
 
     /** 扩展模型是否就绪（逐文件尺寸校验，防中断下载的残缺文件被误判） */
     fun isExtModelReady(context: Context, m: AsrExtModel): Boolean {
-        val dir = extDir(context, m)
-        val expect = expectedFiles(m)
-        return expect.isNotEmpty() && expect.all { (name, min) ->
-            val file = dir.resolve(name)
+        val expect = expectedFiles(context, m)
+        return expect.isNotEmpty() && expect.all { (file, min) ->
             file.exists() && file.length() >= min
         }
     }
 
-    /** 指定语言键的模型是否就绪（SenseVoice 语言 → 内置模型；扩展语言 → 对应扩展模型） */
+    /** 指定语言键的模型是否就绪（SenseVoice 语言 → 内置模型；扩展语言 → **任一候选**就绪即算就绪） */
     fun isModelReadyFor(context: Context, langKey: String): Boolean {
-        val ext = AsrExtModels.byKey(langKey)
-        return if (ext != null) isExtModelReady(context, ext) else isModelReady(context)
+        val cands = AsrExtModels.candidatesByKey(langKey)
+        return if (cands.isNotEmpty()) cands.any { isExtModelReady(context, it) }
+        else isModelReady(context)
     }
 
-    /** 指定语言键的模型展示信息：名称 / 体积MB / 是否为需下载的扩展模型 */
-    fun modelInfoFor(langKey: String): Triple<String, Int, Boolean> {
-        val ext = AsrExtModels.byKey(langKey)
-        return if (ext != null) Triple(ext.dirName, ext.sizeMb, true)
-        else Triple("SenseVoice-Small INT8", SVC_MODEL_MB, false)
+    /**
+     * 指定语言键的模型展示信息：名称 / 体积MB / 是否为需下载的扩展模型。
+     *
+     * v2.0.208：新增 [context]。多候选时优先取**第一个尚未就绪**的 ——
+     * 这样提示文案里的体积正是「还需要下多大」，对用户最有信息量；
+     * 全都就绪时退回第一个（此时体积已不重要）。
+     */
+    fun modelInfoFor(context: Context, langKey: String): Triple<String, Int, Boolean> {
+        val cands = AsrExtModels.candidatesByKey(langKey)
+        if (cands.isEmpty()) return Triple("SenseVoice-Small INT8", SVC_MODEL_MB, false)
+        val pick = cands.firstOrNull { !isExtModelReady(context, it) } ?: cands.first()
+        return Triple(pick.dirName, pick.sizeMb, true)
+    }
+
+    // =======================================================================
+    // v2.0.208：多模型选择（同一语言有多个候选模型时的「选择模型」交互）
+    // =======================================================================
+
+    /** 一条模型候选（供「选择模型」UI 展示） */
+    data class AsrModelCandidate(
+        /** 候选标识：`builtin` 或扩展模型的 `dirName` */
+        val id: String,
+        /** 展示名 */
+        val label: String,
+        /** 体积 MB；**0 = 内置（无需下载）** */
+        val sizeMb: Int,
+        val builtin: Boolean
+    )
+
+    /** SenseVoice 内置覆盖的语言（这些语言的候选列表最前面会带一条内置） */
+    private val BUILTIN_LANGS = setOf("zh", "en", "ja", "ko", "yue")
+
+    private fun choicePrefs(context: Context) =
+        context.getSharedPreferences("vr_player_prefs", Context.MODE_PRIVATE)
+
+    /** 用户为某语言选中的模型 id；空串 = 未选择（自动取第一个已就绪的） */
+    fun modelChoiceFor(context: Context, langKey: String): String =
+        choicePrefs(context).getString("asr_model_choice_$langKey", "") ?: ""
+
+    fun setModelChoice(context: Context, langKey: String, modelId: String) {
+        choicePrefs(context).edit().putString("asr_model_choice_$langKey", modelId).apply()
+    }
+
+    /**
+     * 指定语言的**全部候选模型**（内置 SenseVoice 在前，扩展模型在后）。
+     *
+     * 这正是「多模型对比」的数据源：同一语言（如英语）可能同时被
+     * 内置 SenseVoice、FastConformer、Parakeet v3 覆盖 ——
+     * 用户在这里能直观看到「有哪些模型可选、各占多大体积」。
+     */
+    fun modelCandidatesFor(context: Context, langKey: String): List<AsrModelCandidate> {
+        val out = mutableListOf<AsrModelCandidate>()
+        if (langKey in BUILTIN_LANGS) {
+            out += AsrModelCandidate("builtin", "SenseVoice-Small INT8", 0, true)
+        }
+        AsrExtModels.candidatesByKey(langKey).forEach { ext ->
+            out += AsrModelCandidate(ext.dirName, ext.dirName, ext.sizeMb, false)
+        }
+        return out
+    }
+
+    /**
+     * 解析「该语言实际应该用哪个候选」：
+     * 用户选择 → 校验（候选存在且已就绪）→ 生效；无效则回退到自动选择。
+     *
+     * 返回 `null` = 走内置 SenseVoice 通路（没有扩展候选，或用户选了内置）。
+     */
+    fun resolveExtModel(context: Context, langKey: String): AsrExtModel? {
+        val cands = AsrExtModels.candidatesByKey(langKey)
+        if (cands.isEmpty()) return null
+
+        val choice = modelChoiceFor(context, langKey)
+        // 用户明确选了某个扩展模型（非 builtin）→ 只认它
+        if (choice.isNotEmpty() && choice != "builtin") {
+            cands.firstOrNull { it.dirName == choice }?.let { return it }
+        }
+        // 用户选了内置 → 不走扩展（即使用户已下载了扩展模型）
+        if (choice == "builtin") return null
+
+        // 自动：第一个已就绪的扩展模型
+        return cands.firstOrNull { isExtModelReady(context, it) }
     }
 
     /** 按语言键下载对应模型（扩展语言 → 扩展模型；其余 → SenseVoice 兜底通道） */
     fun startDownloadFor(context: Context, langKey: String) {
-        val ext = AsrExtModels.byKey(langKey)
-        if (ext != null) startExtModelDownload(context, ext) else startModelDownload(context)
+        val cands = AsrExtModels.candidatesByKey(langKey)
+        if (cands.isEmpty()) {
+            startModelDownload(context)
+            return
+        }
+        // 已有任一候选就绪 → 无需再下；否则下「第一个未就绪」的
+        if (cands.any { isExtModelReady(context, it) }) return
+        startExtModelDownload(context, cands.first())
     }
 
     fun startExtModelDownload(context: Context, m: AsrExtModel) {
@@ -517,9 +689,15 @@ object SherpaAsrManager {
             val totalMin = m.files.sumOf { it.minBytes }.coerceAtLeast(1L)
             var doneMin = 0L
             for (f in m.files) {
+                // ⚠️ 用 fileOf() 而不是 dir.resolve(f.name)：
+                //    ① 远端名可能带子目录（`hi/model.int8.onnx`），本地只取 basename；
+                //    ② 共享文件（IndicConformer 的 tokens）要落到 ext-indic-shared/，
+                //       那个目录可能还没建，所以必须 mkdirs。
+                val dest = fileOf(context, m, f)
+                dest.parentFile?.mkdirs()
                 val ok = downloadFileWithResume(
                     url = f.url,
-                    dest = dir.resolve(f.name),
+                    dest = dest,
                     progressBase = doneMin.toFloat() / totalMin,
                     progressSpan = f.minBytes.toFloat() / totalMin,
                     expectMinBytes = f.minBytes,
@@ -643,22 +821,64 @@ object SherpaAsrManager {
         val auto = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
         val numThreads = if (threads in MIN_THREADS..MAX_THREADS) threads else auto
         val dir = extDir(context, m)
-        Log.i(TAG, "ext ASR (${m.key}): dir=$dir type=${m.modelType} threads=$numThreads")
+        // 主模型与 tokens **可能不在同一目录**（IndicConformer 的 tokens 是 22 语共享的，
+        // 落在 ext-indic-shared/），所以 tokens 必须按 effectiveTokensDir 定位，
+        // 不能简单用 dir.resolve(m.tokens)。
+        val modelPath = dir.resolve(m.encoder).absolutePath
+        val tokensPath = extSubDir(context, m.effectiveTokensDir).resolve(m.tokens).absolutePath
+        Log.i(
+            TAG,
+            "ext ASR (${m.key}): type=${m.modelType} single=${m.isSingleModel} " +
+                "model=$modelPath tokens=$tokensPath threads=$numThreads"
+        )
         return try {
-            val config = OfflineRecognizerConfig(
-                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-                modelConfig = OfflineModelConfig(
+            val modelConfig = when (m.modelType) {
+                // —— Dolphin（亚洲 40 语 + 中文 22 方言）：单一 model.int8.onnx
+                // ⚠️ 字段名是 `dolphin`（已用 javap 核对 AAR，不是猜测）；
+                //    modelType 用 sherpa 约定的 `dolphin`。
+                //    与 CTC 的唯一区别就是这两个名字，结构同为「单文件」。
+                "dolphin" -> OfflineModelConfig(
+                    dolphin = OfflineDolphinModelConfig(model = modelPath),
+                    modelType = "dolphin",
+                    tokens = tokensPath,
+                    numThreads = numThreads,
+                    debug = false,
+                    provider = "cpu",
+                )
+
+                // —— CTC（IndicConformer 南亚语）：**单一 model.onnx**，无 encoder/decoder/joiner 三分。
+                // ⚠️ 必须填 `nemo` 字段（而不是 transducer）：填错字段时 sherpa 会因为
+                //    「transducer 的 decoder/joiner 路径不存在」而直接初始化失败。
+                //    ⚠️ 字段名是 `nemo` 而**不是** `nemoCtc`（后者是 Java 类名 OfflineNemoEncDecCtc
+                //       带给人的直觉，但 Kotlin data class 的形参名就是 `nemo`）——
+                //       写错会得到 `No parameter with name 'nemoCtc' found`，已实测。
+                // ⚠️ modelType 用 sherpa 约定的 `nemo_ctc`，不是注册表里的简化名 `ctc`。
+                "ctc" -> OfflineModelConfig(
+                    nemo = OfflineNemoEncDecCtcModelConfig(model = modelPath),
+                    modelType = "nemo_ctc",
+                    tokens = tokensPath,
+                    numThreads = numThreads,
+                    debug = false,
+                    provider = "cpu",
+                )
+                // —— transducer（vi / th）与 nemo_transducer（FastConformer / Parakeet v3）：
+                //    encoder + decoder + joiner + tokens 四文件结构
+                else -> OfflineModelConfig(
                     transducer = OfflineTransducerModelConfig(
-                        encoder = dir.resolve(m.encoder).absolutePath,
+                        encoder = modelPath,
                         decoder = dir.resolve(m.decoder).absolutePath,
                         joiner = dir.resolve(m.joiner).absolutePath,
                     ),
                     modelType = m.modelType,
-                    tokens = dir.resolve(m.tokens).absolutePath,
+                    tokens = tokensPath,
                     numThreads = numThreads,
                     debug = false,
                     provider = "cpu",
-                ),
+                )
+            }
+            val config = OfflineRecognizerConfig(
+                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                modelConfig = modelConfig,
                 decodingMethod = "greedy_search",
             )
             OfflineRecognizer(null, config).also {

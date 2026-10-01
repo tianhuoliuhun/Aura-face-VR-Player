@@ -737,6 +737,10 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getString("sherpa_lang_code", "auto") ?: "auto" else "auto"
         )
     }
+    // v2.0.208：模型选择版本号 —— 同一语言下切换模型（code 不变）时也要触发
+    // 识别器重建。把它加进相关 LaunchedEffect 的 key（见实时字幕引擎处）。
+    // ⚠️ 若只依赖 sherpaLangCode 做 key，会出现「点了英语2、识别还在用英语1 的模型」。
+    var asrModelChoiceVersion by remember { mutableIntStateOf(0) }
     // v127e：SenseVoice 推理线程数（1~10，推荐 4~6）
     var asrThreads by remember {
         mutableIntStateOf(
@@ -2487,7 +2491,7 @@ fun VRPlayerScreen(
     // v126：实时 AI 字幕（方案文档「边播边生成」）
     // 开启后后台滚动预读：独立解码音频 → VAD 分段 → ASR → 内存缓存；
     // 播放头只需查缓存即可显示，不再等整片转写完成。
-    LaunchedEffect(isRealtimeSubtitleEnabled, selectedMediaItem.uri, asrEngineType, sherpaLangCode) {
+    LaunchedEffect(isRealtimeSubtitleEnabled, selectedMediaItem.uri, asrEngineType, sherpaLangCode, asrModelChoiceVersion) {
         // v127f：切语言/切媒体/开关都会重跑本 effect，必须把**全部**相关状态清干净，
         // 否则屏上会残留上一轮的字幕或进度（会让用户以为"改了语言没反应"）。
         realtimeCues = emptyList()
@@ -5294,42 +5298,208 @@ fun VRPlayerScreen(
                                         lineHeight = 11.sp
                                     )
                                     // sherpa-onnx 引擎语言选择（v111；v127 含 SenseVoice CPU）
+                                    // v2.0.208：多级收纳 —— 支持「按语言 / 按模型」两种分组视角，
+                                    //           语区可折叠，同语言多模型时支持选择模型。
                                     run {
-                                        // v2.0.145：语言变多（含越南语等扩展语言）后单行放不下，改为每行 4 个自动换行
+                                        // —— 收纳状态（局部 remember，不持久化：折叠态没必要跨会话）——
+                                        var groupModeByModel by remember { mutableStateOf(false) }
+                                        // 折叠逻辑 v2.0.208：**默认只展开「常用语言」**，其余语区全部折叠（▶）——
+                                        // 87 个 chip 全铺开要 22 行，首屏太长。用户点开某语区后，
+                                        // 折叠状态在本面板会话内保持（不持久化：折叠只是临时浏览状态）。
+                                        var collapsedGroups by remember {
+                                            mutableStateOf(
+                                                AsrExtModels.AsrLangGroup.values()
+                                                    .filter { it != AsrExtModels.AsrLangGroup.COMMON }
+                                                    .map { it.name }
+                                                    .toSet()
+                                            )
+                                        }
+                                        fun toggleGroup(id: String) {
+                                            collapsedGroups = if (id in collapsedGroups) {
+                                                collapsedGroups - id
+                                            } else {
+                                                collapsedGroups + id
+                                            }
+                                        }
+
                                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                             Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-                                            SherpaAsrManager.sherpaLanguages.chunked(4).forEach { rowLangs ->
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    rowLangs.forEach { lang ->
-                                                        val code = lang.code
-                                                        val label = stringResource(lang.labelResId)
-                                                        val sel = sherpaLangCode == code
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .weight(1f)
-                                                                .clip(RoundedCornerShape(6.dp))
-                                                                .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                                .clickable {
-                                                                    keepUiAlight()
-                                                                    changeAsrLanguage(code)
+
+                                            // —— 收纳视角切换：按语言 / 按模型 ——
+                                            //    「按模型」是「多模型对比」的入口：同一个语言在哪些模型里有、各占多大，一眼看全。
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                listOf(
+                                                    false to stringResource(R.string.asr_group_by_lang),
+                                                    true to stringResource(R.string.asr_group_by_model)
+                                                ).forEach { (byModel, label) ->
+                                                    val sel = groupModeByModel == byModel
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
+                                                            .clickable { groupModeByModel = byModel; keepUiAlight() }
+                                                            .padding(vertical = 4.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = label,
+                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.75f),
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            // 当前生效模型统一解析一次（chips 与下方状态区共用）：
+                                            // resolveExtModel 返回 null = 内置 SenseVoice 生效。
+                                            val activeModelId =
+                                                SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName
+                                                    ?: "builtin"
+                                            // ⚠️ 诊断（用户报「英语1/2/3 同时高亮」）：每次重组打印一次，
+                                            //    核对 activeModelId 与 choice 的取值。确认修复后可删。
+                                            Log.i(
+                                                "VRPlayerScreen",
+                                                "语言面板: code=$sherpaLangCode activeModelId=$activeModelId " +
+                                                    "choice=${SherpaAsrManager.modelChoiceFor(context, sherpaLangCode)}"
+                                            )
+                                            if (!groupModeByModel) {
+                                                // ================= 按语区分组（可折叠） =================
+                                                // v2.0.208：**重复语言分开标** —— 同语言多模型时每个候选一条 chip
+                                                //（英语1/英语2/英语3），点击 = 切语言 + 选模型一步完成。
+                                                SherpaAsrManager.groupedChips().forEach { (group, langs) ->
+                                                    val gCollapsed = group.name in collapsedGroups
+                                                    // 分组标题行（点击折叠/展开；展示数量）
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(Color.White.copy(alpha = 0.05f))
+                                                            .clickable { toggleGroup(group.name); keepUiAlight() }
+                                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(
+                                                            text = stringResource(group.labelRes),
+                                                            color = Color.White.copy(alpha = 0.85f),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                        Text(
+                                                            text = "${langs.size}  ${if (gCollapsed) "▶" else "▼"}",
+                                                            color = Color.White.copy(alpha = 0.5f),
+                                                            fontSize = 9.sp
+                                                        )
+                                                    }
+                                                    if (!gCollapsed) {
+                                                        langs.chunked(4).forEach { rowLangs ->
+                                                            Row(
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                rowLangs.forEach { lang ->
+                                                                    val code = lang.code
+                                                                    val label = stringResource(lang.labelResId) +
+                                                                        (lang.suffix?.let { " $it" } ?: "")
+                                                                    // ⚠️ 选中判定 = **uid 精确匹配**（语言@模型）：
+                                                                    //    同语言的多个 chip 的 uid 互不相同
+                                                                    //    （en@builtin / en@nemo-fast… / en@parakeet…），
+                                                                    //    从结构上杜绝「多个一起亮」。
+                                                                    val sel = "$code@${lang.modelId ?: "builtin"}" == "$sherpaLangCode@$activeModelId"
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .weight(1f)
+                                                                            .clip(RoundedCornerShape(6.dp))
+                                                                            .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
+                                                                            .clickable {
+                                                                                keepUiAlight()
+                                                                                // ⚠️ 顺序不能反：先切语言、再选模型。
+                                                                                //    另外同 code 换模型时 changeAsrLanguage 会
+                                                                                //    直接 return，全靠下面的 version++ 触发重建。
+                                                                                changeAsrLanguage(code)
+                                                                                lang.modelId?.let { mId ->
+                                                                                    SherpaAsrManager.setModelChoice(context, code, mId)
+                                                                                    asrModelChoiceVersion++
+                                                                                }
+                                                                            }
+                                                                            .padding(vertical = 5.dp),
+                                                                        contentAlignment = Alignment.Center
+                                                                    ) {
+                                                                        Text(
+                                                                            text = label,
+                                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
+                                                                            fontSize = 9.sp,
+                                                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                                                                            textAlign = TextAlign.Center
+                                                                        )
+                                                                    }
                                                                 }
-                                                                .padding(vertical = 5.dp),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Text(
-                                                                text = label,
-                                                                color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
-                                                                fontSize = 9.sp,
-                                                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                                                textAlign = TextAlign.Center
-                                                            )
+                                                                repeat(4 - rowLangs.size) {
+                                                                    Spacer(modifier = Modifier.weight(1f))
+                                                                }
+                                                            }
                                                         }
                                                     }
-                                                    repeat(4 - rowLangs.size) {
-                                                        Spacer(modifier = Modifier.weight(1f))
+                                                }
+                                            } else {
+                                                // ================= 按模型分组（多模型对比视角） =================
+                                                // 每个模型一组：模型名 + 体积 + 它覆盖的语言 chips。
+                                                // 同一语言出现在多个模型下 = 该语言有多个候选可切换。
+                                                SherpaAsrManager.groupedByModel().forEach { (modelId, langs) ->
+                                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                        Text(
+                                                            text = "▸ " +
+                                                                (if (modelId == "builtin") "SenseVoice（内置）" else modelId) +
+                                                                "  ·  ${langs.size}",
+                                                            color = Color.White.copy(alpha = 0.7f),
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                        langs.chunked(4).forEach { rowLangs ->
+                                                            Row(
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                rowLangs.forEach { lang ->
+                                                                    val code = lang.code
+                                                                    val label = stringResource(lang.labelResId) +
+                                                                        (lang.suffix?.let { " $it" } ?: "")
+                                                                    // 选中 = uid 精确匹配（与「按语区」视角同一套逻辑）
+                                                                    val sel = "$code@${lang.modelId ?: "builtin"}" == "$sherpaLangCode@$activeModelId"
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .weight(1f)
+                                                                            .clip(RoundedCornerShape(6.dp))
+                                                                            .background(if (sel) AccentColor else Color.White.copy(alpha = 0.05f))
+                                                                            .clickable {
+                                                                                keepUiAlight()
+                                                                                changeAsrLanguage(code)
+                                                                                lang.modelId?.let { mId ->
+                                                                                    SherpaAsrManager.setModelChoice(context, code, mId)
+                                                                                    asrModelChoiceVersion++
+                                                                                }
+                                                                            }
+                                                                            .padding(vertical = 4.dp),
+                                                                        contentAlignment = Alignment.Center
+                                                                    ) {
+                                                                        Text(
+                                                                            text = label,
+                                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.7f),
+                                                                            fontSize = 9.sp,
+                                                                            textAlign = TextAlign.Center
+                                                                        )
+                                                                    }
+                                                                }
+                                                                repeat(4 - rowLangs.size) {
+                                                                    Spacer(modifier = Modifier.weight(1f))
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -5340,7 +5510,7 @@ fun VRPlayerScreen(
                                         // v2.0.145：模型信息与就绪状态随所选语言变化
                                         // （扩展语言如越南语是独立模型，需单独下载，不能沿用 SenseVoice 的判断）
                                         val langKey = sherpaLangCode
-                                        val modelInfo = SherpaAsrManager.modelInfoFor(langKey)
+                                        val modelInfo = SherpaAsrManager.modelInfoFor(context, langKey)
                                         val sherpaReady = remember(langKey) { mutableStateOf(SherpaAsrManager.isModelReadyFor(context, langKey)) }
                                         LaunchedEffect(langKey, SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
                                             sherpaReady.value = SherpaAsrManager.isModelReadyFor(context, langKey)
@@ -5348,6 +5518,8 @@ fun VRPlayerScreen(
                                         val modelName = modelInfo.first
                                         val modelDesc = if (modelInfo.third) stringResource(R.string.asr_ext_model_tag) else stringResource(R.string.asr_sensevoice_tag)
                                         val modelSizeMB = modelInfo.second
+                                        // ⚠️ v2.0.208：多模型的选择已上移到语言 chips（英语1/英语2/英语3
+                                        //    点谁用谁，见上方按语区分组处），这里不再重复显示候选单选。
                                         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                             // 模型信息
                                             Row(

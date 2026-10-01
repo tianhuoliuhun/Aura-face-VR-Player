@@ -108,7 +108,7 @@ fun BatchTranscribeSection(
                     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                         Text(
                             // v2.0.145：模型名随所选语言变化（扩展语言是独立模型）
-                            SherpaAsrManager.modelInfoFor(sherpaLangCode).first,
+                            SherpaAsrManager.modelInfoFor(context, sherpaLangCode).first,
                             color = Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold
@@ -117,7 +117,7 @@ fun BatchTranscribeSection(
                             // v2.0.127：模型内置，这里显示实际生效来源（下载版优先于内置版）
                             // v2.0.145：扩展语言无内置版，就绪即显示「已就绪」
                             text = if (modelReady)
-                                if (SherpaAsrManager.modelInfoFor(sherpaLangCode).third) stringResource(R.string.asr_ready)
+                                if (SherpaAsrManager.modelInfoFor(context, sherpaLangCode).third) stringResource(R.string.asr_ready)
                                 else stringResource(R.string.asr_model_ready_source, SherpaAsrManager.activeModelSource(context))
                             else stringResource(R.string.asr_model_unavailable),
                             color = if (modelReady) accentColor.copy(alpha = 0.9f)
