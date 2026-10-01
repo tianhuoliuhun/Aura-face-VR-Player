@@ -220,6 +220,7 @@
     <string name="group_title_floating_ball">フローティングボールと速度</string>
     <string name="group_title_decoder">デコーダとフレームレート</string>
     <string name="group_title_subtitle">字幕機能の設定</string>
+    <string name="group_title_enhance">画質強化</string>
     <string name="group_title_about">アプリについてとオープンソースライセンス</string>
     <string name="licenses_title">オープンソースライセンス</string>
     <string name="licenses_desc">本アプリが利用しているオープンソース、フォント、モデルを確認できます</string>
@@ -573,4 +574,22 @@
     <string name="asr_vocab_label">語彙</string>
     <string name="beauty_gp_half_res">半分の解像度で美顔処理</string>
     <string name="beauty_gp_half_res_desc">美顔を 1/2 解像度で処理します。負荷は下がりますが細部はやや軟らかくなります。オフにするとフル解像度処理（画質最優先・負荷大）。GPUPixel エンジンのみ有効</string>
+
+<!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
+    <string name="settings_group_enhance">5. 画質強化</string>
+    <string name="memc_enabled">MEMC フレーム補間</string>
+    <string name="memc_target_fps">目標フレームレート</string>
+    <string name="memc_desc">動き補償によるフレーム補間：隣接フレーム間に中間フレームを生成し、動きを滑らかにします（動画再生時のみ有効）</string>
+    <string name="fsr_enabled">FSR 超解像</string>
+    <string name="fsr_rule_mode">超解像ルール</string>
+    <string name="fsr_rule_default">デフォルト</string>
+    <string name="fsr_rule_custom">カスタム</string>
+    <string name="fsr_target_resolution">目標解像度</string>
+    <string name="fsr_reason_source_above_1440p">元の解像度が 1440p 超のため、デフォルトでは超解像しません</string>
+    <string name="fsr_reason_fhd_to_1440p">1080p → 1440p</string>
+    <string name="fsr_reason_others_to_1080p">その他の解像度 → 1080p</string>
+    <string name="fsr_reason_target_not_higher">目標解像度が元以下 のためスキップ（画質低下を回避）</string>
+    <string name="fsr_reason_custom">カスタム目標解像度</string>
+    <string name="fsr_reason_no_source">動画情報を待機中</string>
+    <string name="enhance_perf_hint">補間と超解像は GPU 負荷を大きく増やします。低性能端末ではコマ落ちすることがあります</string>
 </resources>

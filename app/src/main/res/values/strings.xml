@@ -236,6 +236,7 @@
     <string name="group_title_floating_ball">悬浮球与播放倍速</string>
     <string name="group_title_decoder">解码内核与帧率</string>
     <string name="group_title_subtitle">字幕功能设置</string>
+    <string name="group_title_enhance">画质增强</string>
     <string name="group_title_about">关于与开源许可</string>
     <string name="licenses_title">开源软件许可</string>
     <string name="licenses_desc">查看本项目使用的开源组件、字体与模型</string>
@@ -605,4 +606,22 @@
     <string name="asr_vocab_label">词表</string>
     <string name="beauty_gp_half_res">半分辨率美颜处理</string>
     <string name="beauty_gp_half_res_desc">美颜在 1/2 分辨率上处理：开销更低、画面细节略软化。关闭则按全分辨率处理，画质最佳但开销更大（仅 GPUPixel 引擎生效）</string>
+
+<!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
+    <string name="settings_group_enhance">5. 画质增强</string>
+    <string name="memc_enabled">MEMC 插帧</string>
+    <string name="memc_target_fps">目标帧率</string>
+    <string name="memc_desc">运动补偿插帧：在相邻两帧之间生成中间帧，让运动更顺滑（仅视频播放时生效）</string>
+    <string name="fsr_enabled">FSR 超分</string>
+    <string name="fsr_rule_mode">超分规则</string>
+    <string name="fsr_rule_default">默认规则</string>
+    <string name="fsr_rule_custom">自定义</string>
+    <string name="fsr_target_resolution">目标分辨率</string>
+    <string name="fsr_reason_source_above_1440p">源分辨率高于 1440p，默认规则不启用超分</string>
+    <string name="fsr_reason_fhd_to_1440p">1080p → 1440p</string>
+    <string name="fsr_reason_others_to_1080p">其余分辨率 → 1080p</string>
+    <string name="fsr_reason_target_not_higher">目标分辨率不高于源，已跳过（避免降画质）</string>
+    <string name="fsr_reason_custom">自定义目标分辨率</string>
+    <string name="fsr_reason_no_source">等待视频信息</string>
+    <string name="enhance_perf_hint">插帧与超分会显著增加 GPU 负载，低端设备可能掉帧</string>
 </resources>

@@ -474,6 +474,50 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getInt("max_fps", 0) else 0
         )
     }
+
+    // ===== v2.0.206：画质增强（MEMC 插帧 / FSR 超分）=====
+    // 规则语义与档位定义见 VideoEnhanceConfig.kt；这里只保存用户的**选择**，
+    // 「当前实际会不会生效」一律由 VideoEnhanceRules.resolveFsr 现算，
+    // 避免出现「UI 显示 1440p、渲染却在用 1080p」这种两套逻辑对不上的情况。
+    var isMemcEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("memc_enabled", false) else false
+        )
+    }
+    var memcTargetFps by remember {
+        mutableIntStateOf(
+            if (isMemoryModeEnabled) {
+                // ⚠️ 读回时必须收敛到 [48,120] —— 老版本可能存过非法值，
+                //    直接信 prefs 会让渲染侧拿到 0 或 9999。
+                VideoEnhanceRules.clampMemcTargetFps(
+                    prefs.getInt("memc_target_fps", VideoEnhanceRules.MEMC_TARGET_FPS_DEFAULT)
+                )
+            } else VideoEnhanceRules.MEMC_TARGET_FPS_DEFAULT
+        )
+    }
+    var isFsrEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("fsr_enabled", false) else false
+        )
+    }
+    var fsrRuleMode by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) FsrRuleMode.fromId(prefs.getString("fsr_rule_mode", null))
+            else FsrRuleMode.DEFAULT
+        )
+    }
+    var fsrCustomTarget by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) FsrTargetResolution.fromId(prefs.getString("fsr_target_resolution", null))
+            else FsrTargetResolution.P1080
+        )
+    }
+    // 视频源分辨率：FSR 默认规则的判定基准。
+    // ⚠️ 必须是 state —— 它由 onVideoSizeChanged 回调写入，若只存在 renderer 里，
+    //    尺寸变化不会触发重组，UI 上的判定结果会永远停在初始值（0）上。
+    var videoSourceWidth by remember { mutableIntStateOf(0) }
+    var videoSourceHeight by remember { mutableIntStateOf(0) }
+
     var isSoftwareDecoding by remember {
         mutableStateOf(
             if (isMemoryModeEnabled) prefs.getBoolean("is_software_decoding", false) else false
@@ -963,6 +1007,13 @@ fun VRPlayerScreen(
         floatingBallSpeed,
         basePlaybackSpeed,
         maxFps,
+        // v2.0.206：画质增强（MEMC / FSR）—— ⚠️ 漏加进 key 列表 = 改这些状态不会触发
+        // 写回 effect，prefs 永不落盘（用户看到的就是「改了但重启就丢」）。
+        isMemcEnabled,
+        memcTargetFps,
+        isFsrEnabled,
+        fsrRuleMode,
+        fsrCustomTarget,
         isSoftwareDecoding,
         decoderEngine,
         isSubtitleEnabled,
@@ -1055,6 +1106,13 @@ fun VRPlayerScreen(
                 putFloat("floating_ball_speed", floatingBallSpeed)
                 putFloat("base_playback_speed", basePlaybackSpeed)
                 putInt("max_fps", maxFps)
+                // v2.0.206：画质增强（MEMC / FSR）
+                putBoolean("memc_enabled", isMemcEnabled)
+                putInt("memc_target_fps", memcTargetFps)
+                putBoolean("fsr_enabled", isFsrEnabled)
+                // 枚举一律存 id 字符串，绝不存 ordinal（增删枚举会错位）
+                putString("fsr_rule_mode", fsrRuleMode.id)
+                putString("fsr_target_resolution", fsrCustomTarget.id)
                 putBoolean("is_software_decoding", isSoftwareDecoding)
                 putInt("decoder_engine_id", decoderEngine.id)
                 putBoolean("is_subtitle_enabled", isSubtitleEnabled)
@@ -1082,6 +1140,13 @@ fun VRPlayerScreen(
                 putBoolean("add_codec_params_enabled", addCodecParamsEnabled)
                 putBoolean("auto_fallback_soft_enabled", autoFallbackSoftEnabled)
             } else {
+                // v2.0.206：画质增强的 key —— 必须与上面的写回成对出现，
+                // 否则关闭记忆模式后旧值会残留在 prefs，下次开启被「恢复」成过期状态。
+                remove("memc_enabled")
+                remove("memc_target_fps")
+                remove("fsr_enabled")
+                remove("fsr_rule_mode")
+                remove("fsr_target_resolution")
                 remove("projection_mode")
                 remove("stereo_mode")
                 remove("beauty_level")
@@ -1489,6 +1554,27 @@ fun VRPlayerScreen(
 
     LaunchedEffect(maxFps, currentGlSurfaceView) {
         currentGlSurfaceView?.renderer?.maxFps = maxFps
+    }
+
+    // v2.0.206：画质增强（MEMC / FSR）参数实时同步到渲染器。
+    // ⚠️ FSR 的「是否真正启用 + 目标尺寸」在这里用 VideoEnhanceRules 现算后写入，
+    //    渲染侧只消费结果、不再自己判一次 —— 这是保证「UI 显示 == 实际行为」的关键。
+    //    例如源是 1440p 时判定为「目标不高于源 → 不启用」，此时 fsrEnabled 写 false，
+    //    即便用户把总开关打开了也不会白跑一遍超分。
+    LaunchedEffect(
+        isMemcEnabled, memcTargetFps, isFsrEnabled, fsrRuleMode, fsrCustomTarget,
+        videoSourceWidth, videoSourceHeight, currentGlSurfaceView
+    ) {
+        val r = currentGlSurfaceView?.renderer ?: return@LaunchedEffect
+        r.memcEnabled = isMemcEnabled
+        r.memcTargetFps = memcTargetFps
+        val decision = VideoEnhanceRules.resolveFsr(
+            videoSourceWidth, videoSourceHeight, fsrRuleMode, fsrCustomTarget
+        )
+        val active = isFsrEnabled && decision.enabled
+        r.fsrEnabled = active
+        r.fsrTargetWidth = if (active) decision.targetWidth else 0
+        r.fsrTargetHeight = if (active) decision.targetHeight else 0
     }
     var showResolutionTip by remember { mutableStateOf(false) }
     var resolutionTipText by remember { mutableStateOf("") }
@@ -2041,6 +2127,11 @@ fun VRPlayerScreen(
                                     r.videoWidth = width
                                     r.videoHeight = height
                                 }
+                                // v2.0.206：同步进 state 供 FSR 默认规则判定与 UI 显示。
+                                // ⚠️ 只写 renderer 是不会触发重组的 —— 那样 FSR 的判定结果
+                                //    会永远停在初始的 0x0（「等待视频信息」），开关看起来失灵。
+                                videoSourceWidth = width
+                                videoSourceHeight = height
                                 Log.d("VRPlayerScreen", "ExoPlayer onVideoSizeChanged: updated surface texture buffer to ${width}x${height}")
                                 
                                 // Smart projection detection: only while the user has not
@@ -4969,7 +5060,199 @@ fun VRPlayerScreen(
                                     }
                                 }
                                 }
-                                /** 区块 5：字幕功能设置（SubtitleSettingsPanel：字体/位置/ASR/翻译入口） */
+                                /** 区块 5：画质增强（MEMC 插帧 / FSR 超分） */
+                                @Composable
+                                fun SettingsSectionEnhance() {
+
+                                // FSR 的「当前判定结果」—— 与渲染侧用**同一个纯函数**算出来，
+                                // 这样 UI 上显示的原因文案与 renderer 的实际行为永远不会打架。
+                                val fsrDecision = remember(
+                                    videoSourceWidth, videoSourceHeight, fsrRuleMode, fsrCustomTarget
+                                ) {
+                                    VideoEnhanceRules.resolveFsr(
+                                        videoSourceWidth, videoSourceHeight, fsrRuleMode, fsrCustomTarget
+                                    )
+                                }
+
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.settings_group_enhance),
+                                        color = AccentColor,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+
+                                    // ===== MEMC 插帧 =====
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(10.dp))
+                                            .clickable { isMemcEnabled = !isMemcEnabled; keepUiAlight() }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(stringResource(R.string.memc_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(stringResource(R.string.memc_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                        }
+                                        Switch(
+                                            checked = isMemcEnabled,
+                                            onCheckedChange = { isMemcEnabled = it; keepUiAlight() },
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = AccentOnColor,
+                                                checkedTrackColor = AccentColor,
+                                                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
+                                                uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                                            ),
+                                            modifier = Modifier.scale(0.8f)
+                                        )
+                                    }
+
+                                    // 目标帧率：仅插帧打开时才显示（关闭时它没有任何作用对象）
+                                    if (isMemcEnabled) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(stringResource(R.string.memc_target_fps), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                VideoEnhanceRules.MEMC_TARGET_FPS_OPTIONS.forEach { fps ->
+                                                    val isSelected = memcTargetFps == fps
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .height(28.dp)
+                                                            .background(
+                                                                if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
+                                                                shape = RoundedCornerShape(6.dp)
+                                                            )
+                                                            .clickable { memcTargetFps = fps; keepUiAlight() },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = "$fps",
+                                                            color = if (isSelected) AccentOnColor else Color.White,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // ===== FSR 超分 =====
+                                    // 副标题直接显示「当前会怎样」，用户不用猜规则有没有生效
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(10.dp))
+                                            .clickable { isFsrEnabled = !isFsrEnabled; keepUiAlight() }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(stringResource(R.string.fsr_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(stringResource(fsrDecision.reason.labelRes), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                        }
+                                        Switch(
+                                            checked = isFsrEnabled,
+                                            onCheckedChange = { isFsrEnabled = it; keepUiAlight() },
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = AccentOnColor,
+                                                checkedTrackColor = AccentColor,
+                                                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
+                                                uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                                            ),
+                                            modifier = Modifier.scale(0.8f)
+                                        )
+                                    }
+
+                                    if (isFsrEnabled) {
+                                        // 规则模式：默认规则 / 自定义（自定义一旦选中即完全接管）
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(stringResource(R.string.fsr_rule_mode), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                FsrRuleMode.values().forEach { mode ->
+                                                    val isSelected = fsrRuleMode == mode
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .height(30.dp)
+                                                            .background(
+                                                                if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
+                                                                shape = RoundedCornerShape(8.dp)
+                                                            )
+                                                            .clickable { fsrRuleMode = mode; keepUiAlight() },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = stringResource(mode.labelRes),
+                                                            color = if (isSelected) AccentOnColor else Color.White,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // 自定义目标分辨率：仅在自定义规则下出现。
+                                        // 档位按 3 列排布，label 里带上实际宽高（如「2160p (3840×2160)」），
+                                        // 避免 3840p 这类非标准命名产生歧义。
+                                        if (fsrRuleMode == FsrRuleMode.CUSTOM) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text(stringResource(R.string.fsr_target_resolution), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                                val allRes = FsrTargetResolution.values().toList()
+                                                allRes.chunked(3).forEach { rowRes ->
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        rowRes.forEach { res ->
+                                                            val isSelected = fsrCustomTarget == res
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .weight(1f)
+                                                                    .height(28.dp)
+                                                                    .background(
+                                                                        if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
+                                                                        shape = RoundedCornerShape(6.dp)
+                                                                    )
+                                                                    .clickable { fsrCustomTarget = res; keepUiAlight() },
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Text(
+                                                                    text = res.label,
+                                                                    color = if (isSelected) AccentOnColor else Color.White,
+                                                                    fontSize = 8.sp,
+                                                                    fontWeight = FontWeight.SemiBold
+                                                                )
+                                                            }
+                                                        }
+                                                        repeat(3 - rowRes.size) {
+                                                            Spacer(modifier = Modifier.weight(1f))
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text(
+                                        text = stringResource(R.string.enhance_perf_hint),
+                                        color = Color.White.copy(alpha = 0.35f),
+                                        fontSize = 9.sp
+                                    )
+                                }
+                                }
+
+                                /** 区块 6：字幕功能设置（SubtitleSettingsPanel：字体/位置/ASR/翻译入口） */
                                 @Composable
                                 fun SettingsSectionSubtitle() {
 
@@ -5499,12 +5782,14 @@ BatchTranscribeSection(
                                         }
                                     }
 
-                                    // 左列分组（二级菜单）：主题 → 投影 → 8K → 倍速 → 解码 → 字幕
+                                    // 左列分组（二级菜单）：主题 → 投影 → 8K → 倍速 → 解码 → 画质增强 → 字幕
                                     SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme") { SettingsSection0() }
                                     SettingsGroup(stringResource(R.string.group_title_projection), "proj") { SettingsSection1() }
                                     SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k") { SettingsSection8K() }
                                     SettingsGroup(stringResource(R.string.group_title_floating_ball), "ball") { SettingsSection3() }
                                     SettingsGroup(stringResource(R.string.group_title_decoder), "decode") { SettingsSection4() }
+                                    // v2.0.206：MEMC 插帧 / FSR 超分
+                                    SettingsGroup(stringResource(R.string.group_title_enhance), "enhance") { SettingsSectionEnhance() }
                                     SettingsGroup(stringResource(R.string.group_title_subtitle), "sub") { SettingsSectionSubtitle() }
                                     // v106：关于与开源许可（合规署名入口）
                                     SettingsGroup(stringResource(R.string.group_title_about), "about") {

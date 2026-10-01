@@ -237,6 +237,7 @@
     <string name="group_title_floating_ball">Floating ball &amp; speed</string>
     <string name="group_title_decoder">Decoder core &amp; FPS</string>
     <string name="group_title_subtitle">Subtitle settings</string>
+    <string name="group_title_enhance">Image enhancement</string>
     <string name="group_title_about">About &amp; open source licenses</string>
     <string name="licenses_title">Open source licenses</string>
     <string name="licenses_desc">Libraries, fonts and models used by this project</string>
@@ -606,4 +607,22 @@
     <string name="asr_vocab_label">Vocab</string>
     <string name="beauty_gp_half_res">Half-resolution beauty</string>
     <string name="beauty_gp_half_res_desc">Process beauty at half resolution: lower cost, slightly softer detail. Turn off for full-resolution processing (best quality, higher cost). GPUPixel engine only</string>
+
+<!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
+    <string name="settings_group_enhance">5. Image enhancement</string>
+    <string name="memc_enabled">MEMC interpolation</string>
+    <string name="memc_target_fps">Target frame rate</string>
+    <string name="memc_desc">Motion-compensated interpolation: synthesises in-between frames so motion looks smoother (video playback only)</string>
+    <string name="fsr_enabled">FSR upscaling</string>
+    <string name="fsr_rule_mode">Upscaling rule</string>
+    <string name="fsr_rule_default">Default</string>
+    <string name="fsr_rule_custom">Custom</string>
+    <string name="fsr_target_resolution">Target resolution</string>
+    <string name="fsr_reason_source_above_1440p">Source is above 1440p; the default rule disables upscaling</string>
+    <string name="fsr_reason_fhd_to_1440p">1080p → 1440p</string>
+    <string name="fsr_reason_others_to_1080p">Other resolutions → 1080p</string>
+    <string name="fsr_reason_target_not_higher">Target is not higher than source; skipped to avoid downscaling</string>
+    <string name="fsr_reason_custom">Custom target resolution</string>
+    <string name="fsr_reason_no_source">Waiting for video info</string>
+    <string name="enhance_perf_hint">Interpolation and upscaling add significant GPU load; low-end devices may drop frames</string>
 </resources>

@@ -146,6 +146,25 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var cylinderCurvature = 0.3f
     @Volatile var videoWidth = 0
     @Volatile var videoHeight = 0
+
+    // ===== v2.0.206：画质增强（MEMC 插帧 / FSR 超分）=====
+    // 开关与档位由 VRPlayerScreen 写入；规则判定（默认/自定义）已在 VideoEnhanceRules 完成，
+    // 这里只消费结果 —— 渲染层不再自己判一次，避免两套逻辑对不上。
+
+    /** MEMC 插帧总开关 */
+    @Volatile var memcEnabled = false
+
+    /** MEMC 目标帧率（48~120）。既用于决定插帧相位密度，也用作渲染输出的节流上限 */
+    @Volatile var memcTargetFps = VideoEnhanceRules.MEMC_TARGET_FPS_DEFAULT
+
+    /** FSR 超分总开关 */
+    @Volatile var fsrEnabled = false
+
+    /** FSR 超分目标宽（0 = 无有效目标，等同于关闭）。由 VideoEnhanceRules.resolveFsr 给出 */
+    @Volatile var fsrTargetWidth = 0
+
+    /** FSR 超分目标高（0 = 无有效目标，等同于关闭） */
+    @Volatile var fsrTargetHeight = 0
     // Dimensions of the currently displayed image (used for 2D aspect fitting)
     @Volatile var imageWidth = 0
     @Volatile var imageHeight = 0
@@ -517,6 +536,58 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var halfFboH = 0
     private var downFboW = 0
     private var downFboH = 0
+
+    // ===== v2.0.206：MEMC / FSR 的 program 与 FBO 资源 =====
+    // FSR：EASU（两级输入变体）→ RCAS，ping-pong 两张目标分辨率纹理
+    private var pFsrEasuOes = 0      // EASU，输入为 ExternalOES（视频源）
+    private var pFsrEasu2d = 0       // EASU，输入为普通 2D（图片源，或 MEMC 的输出）
+    private var pFsrRcas = 0
+    private var fsrTexA = 0
+    private var fsrFboA = 0
+    private var fsrTexB = 0
+    private var fsrFboB = 0
+    private var fsrW = 0
+    private var fsrH = 0
+
+    // MEMC：拷贝 → 双帧持有 → ME → MC，另加一张 1x1 的场景切换检测
+    private var pMemcCopyOes = 0
+    private var pMemcCopy2d = 0
+    private var pMemcMe = 0
+    private var pMemcMc = 0
+    private var pMemcDiff = 0
+    private var memcPrevTex = 0
+    private var memcPrevFbo = 0
+    private var memcCurrTex = 0
+    private var memcCurrFbo = 0
+    private var memcOutTex = 0
+    private var memcOutFbo = 0
+    private var memcMvFTex = 0
+    private var memcMvFFbo = 0
+    private var memcMvBTex = 0
+    private var memcMvBFbo = 0
+    private var memcDiffTex = 0
+    private var memcDiffFbo = 0
+    private var memcW = 0
+    private var memcH = 0
+    private var memcMvW = 0
+    private var memcMvH = 0
+
+    /** 是否已攒够「上一帧」。首帧没有 prev 可插，必须先直通一次 */
+    private var memcHasPrev = false
+
+    /** 记录源帧到达时刻（uptimeMillis），用于按真实时间算插帧相位 */
+    private var memcPrevTimeMs = 0L
+    private var memcCurrTimeMs = 0L
+
+    /** 场景切换标记：为 true 时本帧不插帧（直接输出 curr），由 1x1 帧差检测回读得到 */
+    private var memcSceneCut = false
+
+    /** 本帧实际使用的插帧相位，仅用于日志诊断 */
+    private var memcLastPhase = 0f
+
+    /** MEMC 目标帧率的节流计时（毫秒） */
+    private var memcThrottleMs = 0L
+
     private val halfQuad: java.nio.FloatBuffer = java.nio.ByteBuffer.allocateDirect(4 * 4 * 4)
         .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer().apply {
             put(floatArrayOf(
@@ -1720,12 +1791,23 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
 
         // 2. Fetch new video stream frames from SurfaceTexture on the GL thread
+        // v2.0.206：额外记录「本帧是否真的消费到一个新的视频帧」——
+        // MEMC 的 prev/curr 双帧推进与场景切换检测都依赖这个事实，
+        // 不能靠「onDrawFrame 被调用」推断（渲染循环是 CONTINUOUSLY，帧率远高于源帧率）。
+        var newVideoFrameThisFrame = false
         synchronized(this) {
             if (isVideoFrameAvailable) {
                 videoSurfaceTexture?.updateTexImage()
                 isVideoFrameAvailable = false
+                newVideoFrameThisFrame = true
             }
         }
+
+        // v2.0.206：画质增强（MEMC 插帧 → FSR 超分）。
+        // 必须在主渲染之前跑完：它返回一张可供主 shader 直接采样的纹理
+        // （0 表示未启用增强，走原始通路）。内部已把 framebuffer / viewport
+        // 恢复原状，并持有上一帧结果的引用。
+        val enhanceTexId = runVideoEnhance(newVideoFrameThisFrame)
 
         // v102：GPUPixel 原生美颜已移除，美颜效果全部由 shader 实时处理（下方 uniform 同步）
 
@@ -1761,7 +1843,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
         // v102：视频/图片统一走主程序 shader（美颜在片元着色器内实时计算）
-        val prog = if (isVideoActive) videoProgram else imageProgram
+        // v2.0.206：有增强纹理时必须走 imageProgram —— 它的 uSamplerVideo 是普通
+        //   sampler2D 槽位，正好用来接收 MEMC/FSR 的输出；而 videoProgram（OES 变体）
+        //   的那个槽位声明成 samplerExternalOES，根本绑不了 2D 纹理。
+        val hasEnhanceTex = enhanceTexId != 0
+        val prog = if (isVideoActive && !hasEnhanceTex) videoProgram else imageProgram
         if (prog == null) {
             // Neither main program is available on this driver: use the plain 2D fallback.
             drawFallbackFrame()
@@ -1772,7 +1858,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glUseProgram(prog.programId)
 
         // Bind active textures
-        bindActiveTextures(prog)
+        bindActiveTextures(prog, enhanceTexId)
 
         // v104 LUT 视频滤镜：绑定 512x512 LUT 纹理到 TEXTURE2 并同步强度
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
@@ -2085,8 +2171,23 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 抽成独立函数是因为**华为 VR 双眼通路与内置分屏通路都要用**，
      * 且必须保证两条路径的纹理单元分配完全一致（unit1 = OES 视频、unit2 = LUT）。
      */
-    private fun bindActiveTextures(prog: GLProgram) {
-        if (isVideoActive) {
+    private fun bindActiveTextures(prog: GLProgram, enhanceTexId: Int = 0) {
+        if (enhanceTexId != 0) {
+            // v2.0.206：增强纹理（MEMC / FSR 的输出）走 2D sampler 槽位。
+            // ⚠️ 此时 prog 必然是 imageProgram（调用方已保证尺寸选择），其
+            //    uSamplerVideo 声明为 sampler2D，绑 GL_TEXTURE_2D 才合法；
+            //    OES 变体那个槽位是 samplerExternalOES，绑 2D 纹理属于未定义行为。
+            // ⚠️ uIsVideo 必须置 1 —— 主 shader 里它唯一的用途就是「采样哪张纹理」，
+            //    置 1 才会去读 uSamplerVideo（= 我们的增强纹理）。
+            val base2d = if (imageTextureId != 0) imageTextureId else placeholderTextureId
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, base2d)
+            uniform1i(prog.hSamplerImage, 0)
+            uniform1i(prog.hIsVideo, 1)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, enhanceTexId)
+            uniform1i(prog.hSamplerVideo, 1)
+        } else if (isVideoActive) {
             GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
             uniform1i(prog.hSamplerVideo, 1)
@@ -2505,6 +2606,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             if (pBlurProgram != 0) { GLES20.glDeleteProgram(pBlurProgram); pBlurProgram = 0 }
             if (pBlendProgram != 0) { GLES20.glDeleteProgram(pBlendProgram); pBlendProgram = 0 }
             halfPassReady = false
+            // v2.0.206：画质增强（MEMC / FSR）的 program 与 FBO 清理
+            releaseVideoEnhance()
         } catch (e: Throwable) {
             // ignore
         }
@@ -3427,6 +3530,467 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uBeautyStrength"), beautyLevel)
         GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uTextureDetail"), beautyTextureDetail)
         drawHalfQuad(prog, downTexId, halfLowTexId, 0f, 0f)
+    }
+
+    // ========================================================================
+    // v2.0.206：画质增强（MEMC 插帧 + FSR 超分）
+    // ========================================================================
+    //
+    // 管线顺序：源帧 → MEMC(ME→MC) → FSR(EASU→RCAS) → 主 shader
+    // 「为什么 MEMC 必须在前」的三条理由见 VideoEnhanceShaders 的头部注释。
+    //
+    // 【主 shader 如何拿到增强结果 —— 零 shader 改动】
+    // 主 shader 里 uIsVideo 只有「选哪张纹理采样」这一处用途：
+    //     if (uIsVideo == 1) color = texture2D(uSamplerVideo, tc); else ...
+    // 而 imageProgram（VIDEO_OES 未定义的那份变体）里 uSamplerVideo 被声明为普通
+    // sampler2D。于是只要：
+    //     ① program 选 imageProgram，
+    //     ② 把增强纹理绑到 samplerVideo 的槽位（TEXTURE1），
+    //     ③ uIsVideo 置 1，
+    // 主 shader 就直接采样增强结果 —— 不必给 shader 加任何分支或宏。
+    // 这是本方案相对「改 15 处采样点」最大的风险削减。
+    //
+    // ⚠️ 【一律不在此链路里做截图/回读】，只有 scene-cut 那一处 1x1 回读是必需的。
+    //    全屏 glReadPixels 的教训见项目记忆（v2.0.182/183 的错位事故）。
+
+    /** 缓存 GL_MAX_TEXTURE_SIZE（进程内不变，查一次即可） */
+    private var cachedMaxTexSize = 0
+
+    /** 上一帧输出的增强纹理，用于「目标帧率节流」时复用 */
+    private var lastEnhanceTexId = 0
+
+    /** 上一次输出增强结果的时刻，配合 memcTargetFps 做节流 */
+    private var memcLastOutputMs = 0L
+
+    private val memcBlockSize = 16f
+    private val memcSearchRadius = 16f
+    private val memcSadThreshold = 0.55f
+    private val memcOcclusionThresh = 0.12f
+    private val memcSceneCutDiff = 0.12f
+    private val fsrRcasSharpness = 0.2f
+
+    /** 是否请求了画质增强（任一开关打开即可能生效） */
+    private fun isEnhanceRequested(): Boolean = memcEnabled || fsrEnabled
+
+    /**
+     * 查询 GL_MAX_TEXTURE_SIZE。
+     *
+     * ⚠️ 必须查：自定义规则里用户可以把目标选到 4320p（7680x4320），
+     * 而多数移动 GPU 的上限是 4096 或 8192。超限时 glTexImage2D 会静默失败，
+     * 之后绑到 0 号纹理 → 画面全黑，且没有任何报错。
+     * 宁可降级成「不超分」也绝不能黑屏。
+     */
+    private fun maxTexSize(): Int {
+        if (cachedMaxTexSize > 0) return cachedMaxTexSize
+        val v = IntArray(1)
+        GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, v, 0)
+        cachedMaxTexSize = if (v[0] > 0) v[0] else 4096
+        return cachedMaxTexSize
+    }
+
+    /** 把一张纹理绑到指定 unit 并设置 sampler uniform（location 为 -1 时静默跳过） */
+    private fun bindEnhanceTex(prog: Int, unit: Int, texId: Int, uniformName: String) {
+        if (texId == 0) return
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
+        val loc = GLES20.glGetUniformLocation(prog, uniformName)
+        if (loc != -1) GLES20.glUniform1i(loc, unit)
+    }
+
+    /** 设置一个 float uniform（location 为 -1 时静默跳过） */
+    private fun setEnhanceFloat(prog: Int, name: String, v: Float) {
+        val loc = GLES20.glGetUniformLocation(prog, name)
+        if (loc != -1) GLES20.glUniform1f(loc, v)
+    }
+
+    /** 设置一个 vec2 uniform */
+    private fun setEnhanceVec2(prog: Int, name: String, x: Float, y: Float) {
+        val loc = GLES20.glGetUniformLocation(prog, name)
+        if (loc != -1) GLES20.glUniform2f(loc, x, y)
+    }
+
+    /** 绘制全屏 quad（复用磨皮 pass 的 halfQuad，顶点布局一致） */
+    private fun drawEnhanceQuad(prog: Int) {
+        val posLoc = GLES20.glGetAttribLocation(prog, "aPos")
+        val texLoc = GLES20.glGetAttribLocation(prog, "aTex")
+        halfQuad.position(0)
+        GLES20.glVertexAttribPointer(posLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
+        GLES20.glEnableVertexAttribArray(posLoc)
+        halfQuad.position(2)
+        GLES20.glVertexAttribPointer(texLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
+        GLES20.glEnableVertexAttribArray(texLoc)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(posLoc)
+        GLES20.glDisableVertexAttribArray(texLoc)
+    }
+
+    /** 编译并链接一个全屏增强 pass（复用磨皮 pass 的编译路径） */
+    private fun buildEnhanceProgram(fs: String): Int = buildHalfPassProgram(fs)
+
+    /** 懒加载 MEMC 的全部 program */
+    private fun ensureMemcPrograms() {
+        if (pMemcCopyOes == 0) pMemcCopyOes = buildEnhanceProgram(VideoEnhanceShaders.memcCopyFragment(true))
+        if (pMemcCopy2d == 0) pMemcCopy2d = buildEnhanceProgram(VideoEnhanceShaders.memcCopyFragment(false))
+        if (pMemcMe == 0) pMemcMe = buildEnhanceProgram(VideoEnhanceShaders.MEMC_ME_FS)
+        if (pMemcMc == 0) pMemcMc = buildEnhanceProgram(VideoEnhanceShaders.MEMC_MC_FS)
+        if (pMemcDiff == 0) pMemcDiff = buildEnhanceProgram(VideoEnhanceShaders.MEMC_FRAME_DIFF_FS)
+    }
+
+    /** 懒加载 FSR 的全部 program */
+    private fun ensureFsrPrograms() {
+        if (pFsrEasuOes == 0) pFsrEasuOes = buildEnhanceProgram(VideoEnhanceShaders.fsrEasuFragment(true))
+        if (pFsrEasu2d == 0) pFsrEasu2d = buildEnhanceProgram(VideoEnhanceShaders.fsrEasuFragment(false))
+        if (pFsrRcas == 0) pFsrRcas = buildEnhanceProgram(VideoEnhanceShaders.FSR_RCAS_FS)
+    }
+
+    /** 重建 MEMC 的 FBO 组（工作尺寸或块尺寸变化时调用） */
+    private fun releaseMemcFbos() {
+        for (t in intArrayOf(memcPrevTex, memcCurrTex, memcOutTex, memcMvFTex, memcMvBTex, memcDiffTex)) {
+            if (t != 0) GLES20.glDeleteTextures(1, intArrayOf(t), 0)
+        }
+        for (f in intArrayOf(memcPrevFbo, memcCurrFbo, memcOutFbo, memcMvFFbo, memcMvBFbo, memcDiffFbo)) {
+            if (f != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(f), 0)
+        }
+        memcPrevTex = 0; memcPrevFbo = 0
+        memcCurrTex = 0; memcCurrFbo = 0
+        memcOutTex = 0; memcOutFbo = 0
+        memcMvFTex = 0; memcMvFFbo = 0
+        memcMvBTex = 0; memcMvBFbo = 0
+        memcDiffTex = 0; memcDiffFbo = 0
+        memcW = 0; memcH = 0; memcMvW = 0; memcMvH = 0
+        memcHasPrev = false
+    }
+
+    private fun ensureMemcFbos(w: Int, h: Int) {
+        if (memcPrevTex != 0 && memcW == w && memcH == h) return
+        releaseMemcFbos()
+        memcW = w.coerceAtLeast(2)
+        memcH = h.coerceAtLeast(2)
+        memcPrevTex = createFboTexture(memcW, memcH); memcPrevFbo = createFboFor(memcPrevTex)
+        memcCurrTex = createFboTexture(memcW, memcH); memcCurrFbo = createFboFor(memcCurrTex)
+        memcOutTex = createFboTexture(memcW, memcH); memcOutFbo = createFboFor(memcOutTex)
+        // MV 场按块网格降采样：每个块只存一个 MV，MC 采样时用 LINEAR 自动插值回全分辨率。
+        // 这样 ME 的成本是「块数 × 搜索步数 × 16」，而不是「全分辨率像素数 × ...」。
+        memcMvW = ((memcW + memcBlockSize.toInt() - 1) / memcBlockSize.toInt()).coerceAtLeast(1)
+        memcMvH = ((memcH + memcBlockSize.toInt() - 1) / memcBlockSize.toInt()).coerceAtLeast(1)
+        memcMvFTex = createFboTexture(memcMvW, memcMvH); memcMvFFbo = createFboFor(memcMvFTex)
+        memcMvBTex = createFboTexture(memcMvW, memcMvH); memcMvBFbo = createFboFor(memcMvBTex)
+        memcDiffTex = createFboTexture(1, 1); memcDiffFbo = createFboFor(memcDiffTex)
+        memcHasPrev = false
+    }
+
+    private fun releaseFsrFbos() {
+        if (fsrTexA != 0) GLES20.glDeleteTextures(1, intArrayOf(fsrTexA), 0)
+        if (fsrFboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fsrFboA), 0)
+        if (fsrTexB != 0) GLES20.glDeleteTextures(1, intArrayOf(fsrTexB), 0)
+        if (fsrFboB != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fsrFboB), 0)
+        fsrTexA = 0; fsrFboA = 0; fsrTexB = 0; fsrFboB = 0
+        fsrW = 0; fsrH = 0
+    }
+
+    /** @return 是否成功分配了目标尺寸的 FBO（超限时为 false，调用方需降级） */
+    private fun ensureFsrFbos(w: Int, h: Int): Boolean {
+        if (fsrTexA != 0 && fsrW == w && fsrH == h) return true
+        val limit = maxTexSize()
+        if (w > limit || h > limit) {
+            Log.w(TAG, "FSR 目标 ${w}x${h} 超出 GL_MAX_TEXTURE_SIZE=$limit，本帧降级为不超分")
+            return false
+        }
+        releaseFsrFbos()
+        fsrW = w
+        fsrH = h
+        fsrTexA = createFboTexture(w, h); fsrFboA = createFboFor(fsrTexA)
+        fsrTexB = createFboTexture(w, h); fsrFboB = createFboFor(fsrTexB)
+        Log.i(TAG, "FSR FBO 已建立：${w}x${h}")
+        return true
+    }
+
+    /**
+     * 跑完整条增强链，返回供主 shader 采样的纹理 id。
+     *
+     * ⚠️ 副作用：结束时会把 framebuffer 绑回 0 并恢复 viewport —— 调用方
+     *    可以当作「什么都没发生过」，随后自行绑定主渲染目标。
+     *
+     * @param newVideoFrame 本帧是否刚消费到一个新的视频帧（updateTexImage 被调用）
+     * @return 增强后的纹理 id；0 表示「不启用增强，走原始通路」
+     */
+    private fun runVideoEnhance(newVideoFrame: Boolean): Int {
+        if (!isEnhanceRequested()) {
+            // 关掉开关时清一次跨帧状态，避免下次打开时拿到陈旧的 prev
+            if (memcHasPrev) memcHasPrev = false
+            lastEnhanceTexId = 0
+            return 0
+        }
+        // 华为 VR 走独立帧循环（HuaweiVrActivity 每帧先 acquire swapchain），
+        // 本帧循环不参与绘制，混进来只会把 FBO 绑定搞乱。
+        if (huaweiVrMode) return 0
+
+        // ---- MEMC 目标帧率的节流 ----
+        // 「目标帧率」是用户直接调的输出节奏，必须真的限制输出帧率，而不只是
+        // 影响插帧相位。未到下一帧的时间点就复用上一帧的增强结果。
+        //
+        // ⚠️ 这里只复用纹理、**不跳过 onDrawFrame 的绘制** —— 画面仍按屏幕刷新率
+        //    重绘（投影矩阵、陀螺仪姿态照常更新），所以 VR 下转头依旧跟手，
+        //    只是视频内容停留在上一张。若直接 return 掉整个 onDrawFrame，
+        //    转头的卡顿会非常明显（这是本设计与「限帧即跳帧」的关键区别）。
+        if (memcEnabled && memcTargetFps > 0 && lastEnhanceTexId != 0) {
+            val budgetMs = 1000L / memcTargetFps
+            val nowMs = android.os.SystemClock.uptimeMillis()
+            if (nowMs - memcLastOutputMs < budgetMs) {
+                return lastEnhanceTexId
+            }
+            memcLastOutputMs = nowMs
+        }
+
+        var tex = 0
+
+        // ---------- 第一段：MEMC ----------
+        if (memcEnabled && isVideoActive) {
+            tex = runMemc(newVideoFrame)
+        }
+
+        // ---------- 第二段：FSR ----------
+        if (fsrEnabled && fsrTargetWidth > 0 && fsrTargetHeight > 0) {
+            val out = runFsr(tex)
+            if (out != 0) tex = out
+        }
+
+        // 恢复 GL 状态，交给调用方（默认 framebuffer + 满屏 viewport）
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glViewport(0, 0, displayWidth, displayHeight)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        lastEnhanceTexId = tex
+        return tex
+    }
+
+    /**
+     * MEMC：把当前视频帧插值成「更密的帧」。
+     *
+     * 【为什么必须先把 OES 拷成 2D】
+     * ME/MC 要**同时**持有 prev 与 curr 两张纹理，而 SurfaceTexture 只提供唯一一张
+     * ExternalOES（且 updateTexImage 原地更新）。所以每来一帧都要先落到自己的
+     * 2D 纹理里，才能构成「双帧」。
+     *
+     * 【时间驱动相位，而不是计数驱动】
+     * phase 由「当前渲染时刻落在 [prev, curr] 区间的比例」决定，而不是简单地
+     * 每次 +1/N。这样渲染循环与源帧率不同步（30fps 源 + 90Hz 屏）时也不会出现
+     * 相位跳变/抖动。
+     *
+     * @return 插帧结果纹理；0 表示本帧不具备插帧条件（已退化为直接给 curr）
+     */
+    private fun runMemc(newVideoFrame: Boolean): Int {
+        ensureMemcPrograms()
+        if (pMemcCopyOes == 0 || pMemcMe == 0 || pMemcMc == 0) return 0
+
+        val workW = if (videoWidth > 0) videoWidth else displayWidth
+        val workH = if (videoHeight > 0) videoHeight else displayHeight
+        if (workW <= 0 || workH <= 0) return 0
+        ensureMemcFbos(workW, workH)
+        if (memcPrevTex == 0 || memcOutTex == 0) return 0
+
+        val now = android.os.SystemClock.uptimeMillis()
+
+        if (newVideoFrame || !memcHasPrev) {
+            // 新帧到达：curr 降级为 prev，新帧写入 curr
+            if (memcHasPrev) {
+                // prev ← curr（整帧拷贝）
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcPrevFbo)
+                GLES20.glViewport(0, 0, memcW, memcH)
+                GLES20.glDisable(GLES20.GL_BLEND)
+                GLES20.glUseProgram(pMemcCopy2d)
+                bindEnhanceTex(pMemcCopy2d, 0, memcCurrTex, "uSrc")
+                drawEnhanceQuad(pMemcCopy2d)
+                memcPrevTimeMs = memcCurrTimeMs
+            } else {
+                memcPrevTimeMs = now
+            }
+
+            // 新视频帧 → curr（OES → 2D）
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcCurrFbo)
+            GLES20.glViewport(0, 0, memcW, memcH)
+            GLES20.glDisable(GLES20.GL_BLEND)
+            GLES20.glUseProgram(pMemcCopyOes)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
+            val copyLoc = GLES20.glGetUniformLocation(pMemcCopyOes, "uSrc")
+            if (copyLoc != -1) GLES20.glUniform1i(copyLoc, 0)
+            drawEnhanceQuad(pMemcCopyOes)
+            // ⚠️ 必须在此更新 curr 的时间戳：相位 = (now - prevTime) / (currTime - prevTime)，
+            //    漏了这一行 currTime 永远是 0，span 恒为负 → 相位恒为 1 → 插帧永不生效。
+            memcCurrTimeMs = now
+
+            // 首帧时 prev 与 curr 还不是同一张，直接复制一份，避免第一帧就插出鬼影
+            if (!memcHasPrev) {
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcPrevFbo)
+                GLES20.glViewport(0, 0, memcW, memcH)
+                GLES20.glUseProgram(pMemcCopy2d)
+                bindEnhanceTex(pMemcCopy2d, 0, memcCurrTex, "uSrc")
+                drawEnhanceQuad(pMemcCopy2d)
+                memcHasPrev = true
+            }
+
+            // 场景切换检测：只在新帧时做一次（prev/curr 只在这时变化）
+            memcSceneCut = detectSceneCut()
+        }
+
+        // ---- 相位 ----
+        val span = (memcCurrTimeMs - memcPrevTimeMs).toFloat()
+        var phase = if (span < 1f) 1f else ((now - memcPrevTimeMs) / span).coerceIn(0f, 1f)
+        val newVideoArrived = memcCurrTimeMs != memcPrevTimeMs
+        if (!newVideoArrived) phase = 1f
+        // 场景切换 → 不插帧，直接显示 curr（否则会插出两个场景叠加的鬼影）
+        if (memcSceneCut) phase = 1f
+        memcLastPhase = phase
+
+        // ---- ME 两次（前向 / 反向）----
+        runMemcMe(memcPrevTex, memcCurrTex, memcMvFFbo)
+        runMemcMe(memcCurrTex, memcPrevTex, memcMvBFbo)
+
+        // ---- MC 插帧 ----
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcOutFbo)
+        GLES20.glViewport(0, 0, memcW, memcH)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glUseProgram(pMemcMc)
+        bindEnhanceTex(pMemcMc, 0, memcPrevTex, "uTexPrev")
+        bindEnhanceTex(pMemcMc, 1, memcCurrTex, "uTexCurr")
+        bindEnhanceTex(pMemcMc, 2, memcMvFTex, "uTexMvF")
+        bindEnhanceTex(pMemcMc, 3, memcMvBTex, "uTexMvB")
+        setEnhanceVec2(pMemcMc, "uTexelSize", 1.0f / memcW, 1.0f / memcH)
+        setEnhanceFloat(pMemcMc, "uSearchRadius", memcSearchRadius)
+        setEnhanceFloat(pMemcMc, "uPhase", phase)
+        setEnhanceFloat(pMemcMc, "uOcclusionThresh", memcOcclusionThresh)
+        drawEnhanceQuad(pMemcMc)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+
+        return memcOutTex
+    }
+
+    /** 跑一次 ME：把 (prev, curr) 的 MV 场渲染到 dstFbo */
+    private fun runMemcMe(prevTex: Int, currTex: Int, dstFbo: Int) {
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, dstFbo)
+        GLES20.glViewport(0, 0, memcMvW, memcMvH)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glUseProgram(pMemcMe)
+        bindEnhanceTex(pMemcMe, 0, prevTex, "uTexPrev")
+        bindEnhanceTex(pMemcMe, 1, currTex, "uTexCurr")
+        setEnhanceVec2(pMemcMe, "uTexelSize", 1.0f / memcW, 1.0f / memcH)
+        setEnhanceFloat(pMemcMe, "uSearchRadius", memcSearchRadius)
+        setEnhanceFloat(pMemcMe, "uBlockSize", memcBlockSize)
+        setEnhanceFloat(pMemcMe, "uSadThreshold", memcSadThreshold)
+        drawEnhanceQuad(pMemcMe)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+    }
+
+    /**
+     * 场景切换检测：跑一次 1x1 的帧差 pass 并回读单个像素。
+     *
+     * ⚠️ 这是整条增强链里**唯一**的回读。1 个像素 4 字节，代价可忽略；
+     *    但必须读 —— 场景切换时任何 MV 都是噪声，不跳过插帧就会出鬼影。
+     */
+    private fun detectSceneCut(): Boolean {
+        if (pMemcDiff == 0 || memcDiffFbo == 0) return false
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcDiffFbo)
+        GLES20.glViewport(0, 0, 1, 1)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glUseProgram(pMemcDiff)
+        bindEnhanceTex(pMemcDiff, 0, memcPrevTex, "uTexPrev")
+        bindEnhanceTex(pMemcDiff, 1, memcCurrTex, "uTexCurr")
+        drawEnhanceQuad(pMemcDiff)
+        val buf = java.nio.ByteBuffer.allocateDirect(4).order(java.nio.ByteOrder.nativeOrder())
+        GLES20.glReadPixels(0, 0, 1, 1, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        buf.position(0)
+        val diff = (buf.get(0).toInt() and 0xFF) / 255f
+        return diff > memcSceneCutDiff
+    }
+
+    /**
+     * FSR：把 srcTex（0 表示直接从视频源/图片源取）超分到目标分辨率。
+     *
+     * 两个 pass：EASU 上采样 → RCAS 锐化。
+     * ⚠️ 为什么不做成单 pass：RCAS 需要 EASU 输出结果的**邻域**，
+     *    而单 pass 里拿不到「别的输出像素」的值，只能退化成对 4 个源邻域
+     *    各跑一次 EASU（采样数 ×4）。两 pass 反而更省。
+     *
+     * @return 超分结果纹理；0 表示失败（已降级，调用方应使用原始通路）
+     */
+    private fun runFsr(srcTex: Int): Int {
+        ensureFsrPrograms()
+        if (pFsrRcas == 0) return 0
+        if (!ensureFsrFbos(fsrTargetWidth, fsrTargetHeight)) return 0
+        if (fsrTexA == 0 || fsrTexB == 0) return 0
+
+        // 选择 EASU 程序与输入尺寸：MEMC 输出 / 图片 = 2D；视频源 = OES
+        val fromMemcOrImage = srcTex != 0 || !isVideoActive
+        val easuProg = if (fromMemcOrImage) pFsrEasu2d else pFsrEasuOes
+        if (easuProg == 0) return 0
+
+        val inputTex = when {
+            srcTex != 0 -> srcTex
+            isVideoActive -> videoTextureId
+            else -> imageTextureId
+        }
+        if (inputTex == 0) return 0
+
+        val srcW = when {
+            srcTex != 0 -> memcW
+            isVideoActive -> if (videoWidth > 0) videoWidth else displayWidth
+            else -> if (imageWidth > 0) imageWidth else displayWidth
+        }
+        val srcH = when {
+            srcTex != 0 -> memcH
+            isVideoActive -> if (videoHeight > 0) videoHeight else displayHeight
+            else -> if (imageHeight > 0) imageHeight else displayHeight
+        }
+        if (srcW <= 0 || srcH <= 0) return 0
+
+        // ---- pass 1：EASU 上采样 → fsrFboA ----
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fsrFboA)
+        GLES20.glViewport(0, 0, fsrW, fsrH)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glUseProgram(easuProg)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        val isOesInput = (srcTex == 0 && isVideoActive)
+        if (isOesInput) {
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTex)
+        } else {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, inputTex)
+        }
+        val easuLoc = GLES20.glGetUniformLocation(easuProg, "uSrc")
+        if (easuLoc != -1) GLES20.glUniform1i(easuLoc, 0)
+        setEnhanceVec2(easuProg, "uSrcTexel", 1.0f / srcW, 1.0f / srcH)
+        drawEnhanceQuad(easuProg)
+
+        // ---- pass 2：RCAS 锐化 → fsrFboB ----
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fsrFboB)
+        GLES20.glViewport(0, 0, fsrW, fsrH)
+        GLES20.glUseProgram(pFsrRcas)
+        bindEnhanceTex(pFsrRcas, 0, fsrTexA, "uTex")
+        setEnhanceVec2(pFsrRcas, "uTexel", 1.0f / fsrW, 1.0f / fsrH)
+        setEnhanceFloat(pFsrRcas, "uSharpness", fsrRcasSharpness)
+        drawEnhanceQuad(pFsrRcas)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+
+        return fsrTexB
+    }
+
+    /** 释放画质增强的全部 GL 资源 */
+    private fun releaseVideoEnhance() {
+        try {
+            releaseMemcFbos()
+            releaseFsrFbos()
+            if (pMemcCopyOes != 0) { GLES20.glDeleteProgram(pMemcCopyOes); pMemcCopyOes = 0 }
+            if (pMemcCopy2d != 0) { GLES20.glDeleteProgram(pMemcCopy2d); pMemcCopy2d = 0 }
+            if (pMemcMe != 0) { GLES20.glDeleteProgram(pMemcMe); pMemcMe = 0 }
+            if (pMemcMc != 0) { GLES20.glDeleteProgram(pMemcMc); pMemcMc = 0 }
+            if (pMemcDiff != 0) { GLES20.glDeleteProgram(pMemcDiff); pMemcDiff = 0 }
+            if (pFsrEasuOes != 0) { GLES20.glDeleteProgram(pFsrEasuOes); pFsrEasuOes = 0 }
+            if (pFsrEasu2d != 0) { GLES20.glDeleteProgram(pFsrEasu2d); pFsrEasu2d = 0 }
+            if (pFsrRcas != 0) { GLES20.glDeleteProgram(pFsrRcas); pFsrRcas = 0 }
+            lastEnhanceTexId = 0
+        } catch (e: Throwable) {
+            Log.w(TAG, "releaseVideoEnhance 失败", e)
+        }
     }
 
     /**

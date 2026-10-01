@@ -246,6 +246,7 @@
     <string name="group_title_floating_ball">懸浮球與播放倍速</string>
     <string name="group_title_decoder">解碼內核與幀率</string>
     <string name="group_title_subtitle">字幕功能設置</string>
+    <string name="group_title_enhance">畫質增強</string>
     <string name="group_title_about">關於與開源許可</string>
     <string name="licenses_title">開源軟件許可</string>
     <string name="licenses_desc">查看本項目使用的開源組件、字體與模型</string>
@@ -615,4 +616,22 @@
     <string name="asr_vocab_label">詞表</string>
     <string name="beauty_gp_half_res">半解析度美顏處理</string>
     <string name="beauty_gp_half_res_desc">美顏以 1/2 解析度處理：負載較低、畫面細節略為柔化。關閉則以全解析度處理，畫質最佳但負載較高（僅 GPUPixel 引擎生效）</string>
+
+<!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
+    <string name="settings_group_enhance">5. 畫質增強</string>
+    <string name="memc_enabled">MEMC 補幀</string>
+    <string name="memc_target_fps">目標幀率</string>
+    <string name="memc_desc">運動補償補幀：在相鄰兩幀之間生成中間幀，讓運動更順暢（僅影片播放時生效）</string>
+    <string name="fsr_enabled">FSR 超解析</string>
+    <string name="fsr_rule_mode">超解析規則</string>
+    <string name="fsr_rule_default">預設規則</string>
+    <string name="fsr_rule_custom">自訂</string>
+    <string name="fsr_target_resolution">目標解析度</string>
+    <string name="fsr_reason_source_above_1440p">來源解析度高於 1440p，預設規則不啟用超解析</string>
+    <string name="fsr_reason_fhd_to_1440p">1080p → 1440p</string>
+    <string name="fsr_reason_others_to_1080p">其餘解析度 → 1080p</string>
+    <string name="fsr_reason_target_not_higher">目標解析度不高於來源，已略過（避免降低畫質）</string>
+    <string name="fsr_reason_custom">自訂目標解析度</string>
+    <string name="fsr_reason_no_source">等待影片資訊</string>
+    <string name="enhance_perf_hint">補幀與超解析會明顯增加 GPU 負載，低階裝置可能掉幀</string>
 </resources>

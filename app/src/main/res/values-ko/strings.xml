@@ -220,6 +220,7 @@
     <string name="group_title_floating_ball">플로팅 볼과 재생 속도</string>
     <string name="group_title_decoder">디코더와 FPS</string>
     <string name="group_title_subtitle">자막 기능 설정</string>
+    <string name="group_title_enhance">화질 향상</string>
     <string name="group_title_about">정보와 오픈소스 라이선스</string>
     <string name="licenses_title">오픈소스 라이선스</string>
     <string name="licenses_desc">이 앱이 사용한 오픈소스, 폰트, 모델을 확인할 수 있습니다</string>
@@ -573,4 +574,22 @@
     <string name="asr_vocab_label">어휘</string>
     <string name="beauty_gp_half_res">절반 해상도 미용 처리</string>
     <string name="beauty_gp_half_res_desc">미용을 1/2 해상도로 처리합니다. 부하가 낮아지고 세부 묘사가 다소 부드러워집니다. 끄면 전체 해상도 처리(화질 최우선, 부하 높음). GPUPixel 엔진에서만 적용</string>
+
+<!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
+    <string name="settings_group_enhance">5. 화질 향상</string>
+    <string name="memc_enabled">MEMC 프레임 보간</string>
+    <string name="memc_target_fps">목표 프레임레이트</string>
+    <string name="memc_desc">움직임 보상 보간: 인접 프레임 사이에 중간 프레임을 생성해 움직임을 부드럽게 합니다(동영상 재생 시에만 적용)</string>
+    <string name="fsr_enabled">FSR 업스케일링</string>
+    <string name="fsr_rule_mode">업스케일 규칙</string>
+    <string name="fsr_rule_default">기본 규칙</string>
+    <string name="fsr_rule_custom">사용자 지정</string>
+    <string name="fsr_target_resolution">목표 해상도</string>
+    <string name="fsr_reason_source_above_1440p">원본 해상도가 1440p 초과라 기본 규칙에서는 업스케일하지 않습니다</string>
+    <string name="fsr_reason_fhd_to_1440p">1080p → 1440p</string>
+    <string name="fsr_reason_others_to_1080p">기타 해상도 → 1080p</string>
+    <string name="fsr_reason_target_not_higher">목표 해상도가 원본 이하라 건너뜁니다(화질 저하 방지)</string>
+    <string name="fsr_reason_custom">사용자 지정 목표 해상도</string>
+    <string name="fsr_reason_no_source">동영상 정보 대기 중</string>
+    <string name="enhance_perf_hint">보간과 업스케일은 GPU 부하를 크게 높입니다. 저사양 기기에서는 프레임 드랍이 발생할 수 있습니다</string>
 </resources>
