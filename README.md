@@ -9,7 +9,8 @@
 > **版本里程碑 / Milestones**：
 > **v1.0** 完成 VR 播放的基本功能（投影 / 立体 / 陀螺仪 / LUT 调色）·
 > **v2.0** 完成 AI 语音识别与翻译（实时字幕 / 离线 ASR / 在线翻译 / AI 美颜双引擎）·
-> **v2.1** 修复美颜引擎的问题（GPUPixel 闪退 / 覆盖范围 / 闪烁与性能），并引入画质增强（MEMC 插帧 / FSR 超分）与多语言 ASR 大扩展。
+> **v2.1** 修复美颜引擎的问题（GPUPixel 闪退 / 覆盖范围 / 闪烁与性能），引入画质增强（MEMC 插帧 / FSR 超分）；
+> ASR 扩展至 **87 项语言与方言** 并把 **Dolphin 内置进 APK**（开箱即用），新增时间标记悬浮球与语言选择多级收纳。
 >
 > **v1.0** delivered the core VR playback (projection / stereo / gyro / LUT) ·
 > **v2.0** delivered AI speech recognition & translation (realtime subtitles, offline ASR, online translation, dual-engine beauty) ·
@@ -29,7 +30,7 @@
 | ⚡ **画质增强**<br>Video Enhancement | **MEMC 运动补偿插帧**（48/60/72/90/120 fps）+ **FSR 超分**（EASU + RCAS，默认规则与自定义 6 档，自定义完全接管）<br>Motion-compensated interpolation plus FSR upscaling with default and fully-overriding custom rules |
 | ✨ **实时 AI 美颜**<br>Real-time AI Beauty | **GLSL / GPUPixel 双引擎**可切换；478 点人像精修（瘦脸/大眼/去黑眼圈/鼻梁/嘴型/牙齿/口红/腮红/眉毛）；磨皮为频域分离 + 可调皮肤质感<br>Dual switchable engines, 478-landmark portrait retouch, frequency-separation smoothing |
 | 🎨 **3D LUT 调色**<br>LUT Color Grading | 36 款内置 LUT（人像美颜 24 + 风格滤镜 12，全部自研/开源可商用）；可导入自定义 `.cube`<br>36 bundled LUTs plus custom `.cube` import |
-| 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **SenseVoice 已内置**（开箱即用）；**17 种语言**（11 种运行时按需下载）；实时生成、整片转写、SRT 导出、去标点<br>Bundled offline ASR with 17 languages, realtime generation, batch transcription and SRT export |
+| 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **Dolphin 已内置**（开箱即用）：**40 种东方语言 + 22 种中文方言**，自带语种识别；实时生成、整片转写、SRT 导出、去标点<br>Bundled offline ASR (Dolphin): 40 Eastern languages + 22 Chinese dialects with auto language detection, realtime generation, batch transcription and SRT export |
 | 🌐 **字幕在线翻译**<br>Online Translation | **10 种引擎**（4 个免密/免费：必应 / Google 免密 / MyMemory / LibreTranslate）；本地词库缓存（LRU + TTL + 按语言分文件）<br>10 engines including 4 keyless/free, with a local per-language translation memory |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
 
@@ -50,7 +51,7 @@
 | 项目 | 说明 / Notes |
 |---|---|
 | 产物 | **单个全架构 APK**（`Aura-face-VR-Player-v<版本>.apk`，含内置 ASR 模型）/ Single universal APK (ASR model bundled) |
-| 体积 | 约 **348MB**（其中内置 SenseVoice 模型占 229MB）/ ~348MB (229MB is the bundled ASR model) |
+| 体积 | 约 **186MB**（其中内置 Dolphin 模型占 99MB）/ ~186MB (99MB is the bundled ASR model) |
 | 包含 ABI | `arm64-v8a` + `armeabi-v7a` + `x86_64` + `x86` 全包含 / All ABIs in one package |
 | 安装 | 系统自动选取匹配 ABI 的原生库，无需挑选 / The OS picks the matching native libs |
 

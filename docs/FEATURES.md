@@ -68,10 +68,11 @@
   - All LUTs are self-generated via numpy scripts (no third-party copyright)
 
 ## 🗣️ 字幕与语音转写 / Subtitles & ASR
-- 离线语音识别：**SenseVoice-Small**（sherpa-onnx，CPU int8）
-  - 中/英/日/韩/粤 5 语言，自带标点，RTF 0.026
+- 离线语音识别：**Dolphin**（sherpa-onnx，CPU int8，**已内置进 APK，开箱即用**）
+  - **40 种东方语言 + 22 种中文方言**，自带语种识别（LID），无需指定语言
+  - 中文 WER 9.2%（Whisper large-v3 为 27.9%）；RTF 0.094（官方四个 Dolphin 变体中最快）
   - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载
-  - Offline ASR: SenseVoice-Small bundled in the APK — zh/en/ja/ko/yue with punctuation, no download needed
+  - Offline ASR: **Dolphin bundled in the APK** — 40 Eastern languages + 22 Chinese dialects with auto language detection, no download needed
 - 🌍 **多语言扩展识别（共 17 种语言）/ Multi-language ASR (17 languages)**
   - 内置 5 语之外，可在设置里**按需下载**官方离线模型：越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
   - Beyond the 5 bundled languages, more official offline models can be **downloaded on demand** in Settings: Vietnamese / Russian / French / German / Spanish / Belarusian / Croatian / Italian / Polish / Ukrainian / Thai
@@ -106,7 +107,7 @@
 
 | 语言 / Language | 模型 / Model | 体积 / Size | 下载源 / Source |
 |---|---|---|---|
-| 自动·中·英·日·韩·粤<br>Auto / zh / en / ja / ko / yue | SenseVoice-Small（**已内置 / bundled**） | 随 APK（229MB）<br>in APK (229MB) | 无需下载 / none |
+| 自动 · 中 · 日 · 韩 · 粤 · 英语 · 22 种中文方言 · 40 种东方语言<br>auto / zh / ja / ko / yue / en / 22 Chinese dialects / 40 Eastern languages | **Dolphin**（**已内置 / bundled**） | 随 APK（99MB）<br>in APK (99MB) | 无需下载 / none |
 | 越南语 / Vietnamese | `sherpa-onnx-zipformer-vi-int8` | ≈74MB | hf-mirror |
 | 俄·法·德·西·白俄·克·意·波·乌<br>ru / fr / de / es / be / hr / it / pl / uk | `NeMo FastConformer 20k int8`<br>（**一个模型覆盖 11 语 / one model, 11 languages**） | 整包 102MB → 解压 ≈132MB<br>pkg 102MB → ≈132MB extracted | GitHub releases |
 | 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
