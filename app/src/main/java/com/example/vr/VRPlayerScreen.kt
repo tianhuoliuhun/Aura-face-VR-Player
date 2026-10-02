@@ -4215,8 +4215,14 @@ fun VRPlayerScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.projection_auto_detect), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                            Text(stringResource(R.string.projection_auto_detect_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                            Text(stringResource(R.string.projection_auto_detect), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(stringResource(R.string.projection_auto_detect_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                         Switch(
                                             checked = isSmartProjectionEnabled,
@@ -4914,10 +4920,30 @@ fun VRPlayerScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text(title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                Text(
+                                                    title,
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    // v2.1.213：标题限 1 行 —— 某些语言的标题较长
+                                                    //（德/俄语系），不限行会把 Switch 挤出可视区
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                                 // ⚠️ 不用 desc?.let{} —— @Composable 调用嵌进普通 lambda 会丢作用域
                                                 if (desc != null) {
-                                                    Text(desc, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                                    Text(
+                                                        desc,
+                                                        color = Color.White.copy(alpha = 0.5f),
+                                                        fontSize = 9.sp,
+                                                        // v2.1.213：**描述必须限行**。
+                                                        // 原先不限行，描述一长（如时间标记球那句 33 字）
+                                                        // 就会换行成 4~5 行、把整行撑得极高，
+                                                        // 视觉上像「开关这块 UI 溢出/撑爆了」。
+                                                        // 2 行 + 省略号，溢出内容仍可读到开头。
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
                                             }
                                             Switch(
@@ -4929,7 +4955,13 @@ fun VRPlayerScreen(
                                                     uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
                                                     uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
                                                 ),
-                                                modifier = Modifier.scale(0.8f).testTag(tag)
+                                                modifier = Modifier
+                                                    // v2.1.213：**scale() 不改变布局占位**，
+                                                    // Switch 仍按标准宽度（约 52dp）占位、在窄屏上
+                                                    // 会把左侧文字挤到很窄。给固定宽度把空间让给文字。
+                                                    .width(46.dp)
+                                                    .scale(0.8f)
+                                                    .testTag(tag)
                                             )
                                         }
                                     }
@@ -4954,8 +4986,14 @@ fun VRPlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.floating_ball_enable), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                            Text(stringResource(R.string.floating_ball_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                            Text(stringResource(R.string.floating_ball_enable), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(stringResource(R.string.floating_ball_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                         Switch(
                                             checked = isFloatingBallEnabled,
@@ -5231,8 +5269,14 @@ fun VRPlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.memc_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                            Text(stringResource(R.string.memc_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                            Text(stringResource(R.string.memc_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(stringResource(R.string.memc_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                         Switch(
                                             checked = isMemcEnabled,
@@ -5292,7 +5336,10 @@ fun VRPlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.fsr_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(stringResource(R.string.fsr_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                             // 副标题 = 判定原因 +（启用时）**实际生效的目标尺寸**。
                                             // ⚠️ 实际尺寸按「档位高度 × 源宽高比」推出，非 16:9 片源
                                             //    会与档位的 16:9 参考值不同，必须显示真实值 ——
@@ -5302,7 +5349,10 @@ fun VRPlayerScreen(
                                             val reasonLine = if (fsrDecision.enabled) {
                                                 "$baseReason · ${fsrDecision.targetWidth}×${fsrDecision.targetHeight}"
                                             } else baseReason
-                                            Text(reasonLine, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+                                            Text(reasonLine, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                         Switch(
                                             checked = isFsrEnabled,
