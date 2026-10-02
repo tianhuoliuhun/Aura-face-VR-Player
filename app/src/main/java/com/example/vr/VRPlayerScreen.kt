@@ -140,6 +140,12 @@ fun VRPlayerScreen(
     // Smart auto-detection (2D video -> STANDARD, 2:1 panorama -> VR_360) only applies
     // while this is false, so a manual choice is never overridden.
     var projectionModeUserAdjusted by remember { mutableStateOf(false) }
+    // v2.1.211：**鱼眼视场角**（度）—— 仅 FISHEYE 模式生效，180 为基准档。
+    // 不同鱼眼镜头片源的视角不同（常见 180/190/200/220），选错会出现
+    // 「画面鼓成球」或「中心挤成一团」，所以做成可选。
+    var fisheyeFovDeg by remember {
+        mutableStateOf(prefs.getInt("fisheye_fov_deg", 180))
+    }
     // Master switch for the smart projection detection (settings panel)
     var isSmartProjectionEnabled by remember {
         mutableStateOf(prefs.getBoolean("smart_projection_enabled", true))
@@ -968,6 +974,7 @@ fun VRPlayerScreen(
     LaunchedEffect(
         isMemoryModeEnabled,
         projectionMode,
+        fisheyeFovDeg,
         stereoMode,
         beautyLevel,
         beautyTextureDetail,
@@ -1069,6 +1076,8 @@ fun VRPlayerScreen(
             putBoolean("is_memory_mode_enabled", isMemoryModeEnabled)
             if (isMemoryModeEnabled) {
                 putInt("projection_mode", projectionMode.id)
+                // v2.1.211：鱼眼视场角（与投影模式同组持久化）
+                putInt("fisheye_fov_deg", fisheyeFovDeg)
                 putInt("stereo_mode", stereoMode.id)
                 putFloat("beauty_level", beautyLevel)
                 putFloat("beauty_texture_detail", beautyTextureDetail)
@@ -1164,6 +1173,9 @@ fun VRPlayerScreen(
                 remove("fsr_rule_mode")
                 remove("fsr_target_resolution")
                 remove("projection_mode")
+                // ⚠️ 三处必须同步：读取(prefs.getInt) + 写回(putInt) + 这里的 remove。
+                //    漏掉本行会在「关闭记忆模式」后残留旧值（本项目头号坑）。
+                remove("fisheye_fov_deg")
                 remove("stereo_mode")
                 remove("beauty_level")
                 // v2.0.184：补齐此前遗漏的美颜 key（关闭记忆模式时应一并清除，
@@ -2766,6 +2778,8 @@ fun VRPlayerScreen(
                 view.isUiLocked = isUiLocked
                 view.isViewLocked = isViewLocked
                 view.renderer.projectionMode = projectionMode
+                // v2.1.211：鱼眼视场角（FISHEYE 模式读取，其它模式忽略）
+                view.renderer.fisheyeFov = fisheyeFovDeg.toFloat()
                 view.renderer.stereoMode = stereoMode
                 view.renderer.beautyLevel = beautyLevel
                 view.renderer.beautyTextureDetail = beautyTextureDetail
@@ -4305,52 +4319,54 @@ fun VRPlayerScreen(
                                     }
                                 }
 
-                                // v2.1.210：**投影模式选择器**（新增）。
-                                // 此前项目里根本没有这个入口 —— R.string.proj_* 只在枚举定义处被引用，
-                                // 投影模式全靠片源自动判定。新增 EAC 等模式后必须补上，
-                                // 否则新模式加了用户也选不到。
-                                // 6 个模式用 chunked(3) 排成两行，与语言 chips 的排版风格一致。
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(stringResource(R.string.projection_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    // ⚠️ 用 entries（EnumEntries 有 chunked）；values() 返回 Array 没有该扩展
-                                    ProjectionMode.entries.chunked(3).forEach { rowModes ->
+                                // v2.1.211：**鱼眼视场角** —— 仅在 FISHEYE 模式下显示
+                                // （其它模式读不到这个值，显示出来只会让人困惑）。
+                                // 不同鱼眼镜头片源的实际视角不同（常见 180/190/200/220），
+                                // 选错会出现「画面鼓成球」或「中心挤成一团」。
+                                if (projectionMode == ProjectionMode.FISHEYE) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(stringResource(R.string.fisheye_fov), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            rowModes.forEach { mode ->
-                                                val isSelected = projectionMode == mode
+                                            listOf(180, 190, 200, 220).forEach { fov ->
+                                                val isSel = fisheyeFovDeg == fov
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .height(32.dp)
                                                         .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
+                                                            if (isSel) AccentColor else Color.White.copy(alpha = 0.05f),
                                                             shape = RoundedCornerShape(8.dp)
                                                         )
                                                         .clickable {
-                                                            projectionMode = mode
+                                                            fisheyeFovDeg = fov
+                                                            projectionModeUserAdjusted = true
                                                             keepUiAlight()
                                                         },
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
-                                                        text = stringResource(mode.labelRes),
-                                                        color = if (isSelected) AccentOnColor else Color.White.copy(alpha = 0.8f),
-                                                        fontSize = 9.sp,
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        maxLines = 1,
-                                                        textAlign = TextAlign.Center
+                                                        text = "${fov}°",
+                                                        color = if (isSel) AccentOnColor else Color.White.copy(alpha = 0.8f),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                                                     )
                                                 }
-                                            }
-                                            repeat(3 - rowModes.size) {
-                                                Box(modifier = Modifier.weight(1f))
                                             }
                                         }
                                     }
                                 }
 
+                                // ⚠️ v2.1.210 曾在此处新增「投影模式」选择器 —— **已删除**。
+                                // 原因：项目在下方「视角格式」(`R.string.view_format`) 处**早就有**
+                                // 同一个 `ProjectionMode` 的选择器（带 projectionModeUserAdjusted 标记）。
+                                // 我当初 grep `R.string.proj_*` 没命中就误判为「没有入口」，
+                                // 但那里是用 `mode.labelRes` **动态取标签**，静态 grep 搜不到 ——
+                                // 教训：查「某枚举有没有 UI 入口」要用**枚举类型名**搜，不要搜资源 key。
+                                // 新增的 EAC 会自动出现在原有选择器里（它遍历 ProjectionMode.values()），
+                                // 无需额外 UI。
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(stringResource(R.string.stereo_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(

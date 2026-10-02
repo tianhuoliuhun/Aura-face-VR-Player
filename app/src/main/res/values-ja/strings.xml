@@ -691,4 +691,6 @@
     <string name="proj_eac">EAC キューブマップ</string>
 
     <string name="projection_format">投影モード</string>
+
+    <string name="fisheye_fov">魚眼視野角</string>
 </resources>

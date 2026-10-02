@@ -26,6 +26,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     // Volatile settings accessible from Compose UI
     @Volatile var projectionMode = ProjectionMode.STANDARD
+
+    /**
+     * v2.1.211：**鱼眼视场角**（度）——仅 [ProjectionMode.FISHEYE] 生效。
+     *
+     * 180 = 基准档（压缩指数 2.0）；数值越大，边缘压缩越强、观感越「广」。
+     * 不同鱼眼镜头片源的实际视角不同（常见 180/190/200/220），选错会
+     * 出现「画面鼓成球」或「中心挤成一团」，故做成可调。
+     */
+    @Volatile var fisheyeFov: Float = 180f
     @Volatile var stereoMode = StereoMode.MONO
     @Volatile var beautyLevel = 0.5f // 0.0f (off) to 1.0f (max smoothing)
     @Volatile var brightnessLevel = 0.0f // -0.5f to 0.5f
@@ -477,6 +486,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val hIsMirrored: Int,
         val hWarpMode: Int,
         val hCurvature: Int,
+        /** v2.1.211：鱼眼视场角句柄 */
+        val hFisheyeFov: Int,
         val hWhitening: Int,
         val hFaceSlimming: Int,
         val hBigEyes: Int,
@@ -1011,6 +1022,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform int uIsMirrored;
         uniform int uWarpMode;
         uniform float uCurvature;
+        // v2.1.211：鱼眼视场角（度）。仅 uProjectionMode==1 时被读取
+        uniform float uFisheyeFov;
         
         uniform float uBeautyStrength; 
         uniform float uBrightness;
@@ -1229,7 +1242,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     float theta = atan(d.y, d.x);
                     // 标准穹顶压缩：r 归一化后平方压缩，全域平滑
                     float rn = clamp(r / rMax, 0.0, 1.0);
-                    float rf = rn * rn * rMax;
+                    // v2.1.211：**FOV 可调** —— 以 180° 为基准（压缩指数 2.0），
+                    // FOV 越大则边缘压缩越强（视场越广、边缘越"卷")。
+                    // ⚠️ 注意本模式是「把平面画面压成穹顶观感」的**观感滤镜**，
+                    //    不是还原真实鱼眼片源 —— 所以这里调的是压缩强度，
+                    //    而非教科书里的「屏幕半径 → 球面角」映射。
+                    //    用错方向（把指数改小）会得到「边缘被拉平、画面鼓出」的反效果。
+                    float fovK = clamp(uFisheyeFov, 160.0, 240.0) / 180.0;
+                    float rf = pow(rn, 2.0 * fovK) * rMax;
                     // 中心区域保持线性（小 r 时不变形过多），边缘平滑压缩
                     float blend = smoothstep(0.0, 1.0, rn);
                     rf = mix(r * 0.5, rf, blend);
@@ -1593,6 +1613,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 hIsMirrored = GLES20.glGetUniformLocation(progId, "uIsMirrored"),
                 hWarpMode = GLES20.glGetUniformLocation(progId, "uWarpMode"),
                 hCurvature = GLES20.glGetUniformLocation(progId, "uCurvature"),
+                hFisheyeFov = GLES20.glGetUniformLocation(progId, "uFisheyeFov"),
                 hWhitening = GLES20.glGetUniformLocation(progId, "uWhitening"),
                 hFaceSlimming = GLES20.glGetUniformLocation(progId, "uFaceSlimming"),
                 hBigEyes = GLES20.glGetUniformLocation(progId, "uBigEyes"),
@@ -1945,6 +1966,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform1i(prog.hIsMirrored, if (isMirrored) 1 else 0)
         uniform1i(prog.hWarpMode, warpMode.id)
         uniform1f(prog.hCurvature, cylinderCurvature)
+        uniform1f(prog.hFisheyeFov, fisheyeFov)
 
         uniform1f(prog.hWhitening, beautyWhitening * bc)
         uniform1f(prog.hFaceSlimming, beautyFaceSlimming * bc)
@@ -2174,6 +2196,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform1i(prog.hIsMirrored, if (isMirrored) 1 else 0)
         uniform1i(prog.hWarpMode, warpMode.id)
         uniform1f(prog.hCurvature, cylinderCurvature)
+        uniform1f(prog.hFisheyeFov, fisheyeFov)
         uniform1f(prog.hWhitening, beautyWhitening * bc)
         uniform1f(prog.hFaceSlimming, beautyFaceSlimming * bc)
         uniform1f(prog.hBigEyes, beautyBigEyes * bc)

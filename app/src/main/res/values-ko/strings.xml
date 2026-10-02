@@ -691,4 +691,6 @@
     <string name="proj_eac">EAC 큐브맵</string>
 
     <string name="projection_format">투영 모드</string>
+
+    <string name="fisheye_fov">어안 FOV</string>
 </resources>

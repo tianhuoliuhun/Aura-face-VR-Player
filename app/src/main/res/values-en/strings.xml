@@ -724,4 +724,6 @@
     <string name="proj_eac">EAC cubemap</string>
 
     <string name="projection_format">Projection</string>
+
+    <string name="fisheye_fov">Fisheye FOV</string>
 </resources>

@@ -733,4 +733,6 @@
     <string name="proj_eac">EAC 立方體貼圖</string>
 
     <string name="projection_format">投影模式</string>
+
+    <string name="fisheye_fov">魚眼視場角</string>
 </resources>
