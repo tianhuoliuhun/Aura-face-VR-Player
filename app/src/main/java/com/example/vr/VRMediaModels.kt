@@ -10,7 +10,20 @@ enum class ProjectionMode(val displayName: String, @StringRes val labelRes: Int,
     FISHEYE("鱼眼广角", R.string.proj_fisheye, 1),
     VR_360("360°全景", R.string.proj_360, 2),
     VR_180("180°穹幕", R.string.proj_180, 3),
-    BOX("盒子模式", R.string.proj_box, 4)
+    BOX("盒子模式", R.string.proj_box, 4),
+
+    /**
+     * **EAC（Equi-Angular Cubemap，等角立方体贴图）**
+     *
+     * YouTube / Google 的 360° 片源格式：源码流是 3×2 排布的 6 个立方体面，
+     * 且每个面内做了 `tan(π/4·(2s−1))` 的**等角重映射**（相比普通立方体贴图 CMP，
+     * 球面上采样间距更均匀，面边界不再过采样）。
+     *
+     * 与 [VR_360] 的关系：**顶点几何完全相同**（都是球面），只是 UV 换成
+     * EAC atlas 映射 —— 见 [GeometryHelper.generateEacSphere]。
+     * 用 VR_360 播放 EAC 片源时，画面在 6 个面接缝处会明显错位/拉伸。
+     */
+    EAC("EAC 立方体贴图", R.string.proj_eac, 5)
 }
 
 enum class WarpMode(val displayName: String, @StringRes val labelRes: Int, val id: Int) {

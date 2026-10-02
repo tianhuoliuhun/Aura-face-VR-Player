@@ -442,6 +442,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private var sphere360Positions: FloatBuffer? = null
     private var sphere360TexCoords: FloatBuffer? = null
+    // v2.1.210：EAC（等角立方体贴图）——**位置与 sphere360 相同**，只有 UV 不同
+    private var eacPositions: FloatBuffer? = null
+    private var eacTexCoords: FloatBuffer? = null
+    private var eacVertexCount = 0
     private var sphere360VertexCount = 0
 
     private var sphere180Positions: FloatBuffer? = null
@@ -1201,7 +1205,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             
             // Mirror horizontally correctly within each eye segment center:
             // VR_360 (2) and VR_180 (3) spheres are inherently flipped on the inside.
-            if (uProjectionMode == 2 || uProjectionMode == 3) {
+            // v2.1.210：5 = EAC（同样是球体内侧，翻转方向与 360/180 一致，一并纳入）
+            if (uProjectionMode == 2 || uProjectionMode == 3 || uProjectionMode == 5) {
                 if (uIsMirrored == 1) {
                     // Naturally mirrored is already mirrored, so keep it as is
                 } else {
@@ -1684,6 +1689,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         sphere360Positions = sphere360.first
         sphere360TexCoords = sphere360.second
         sphere360VertexCount = sphere360Positions!!.capacity() / 3
+
+        // v2.1.210：EAC 网格 —— 同样的球面几何，UV 换成等角立方体 atlas 映射。
+        // 细分度取 64×64（高于 360 模式的 40×40）：EAC 的 atan 映射在面边界附近
+        // 变化最快，顶点太稀会把直线段插值成可见折线（接缝处出现细密锯齿）。
+        val eac = GeometryHelper.generateEacSphere(1.0f, 64, 64)
+        eacPositions = eac.first
+        eacTexCoords = eac.second
+        eacVertexCount = eacPositions!!.capacity() / 3
 
         val sphere180 = GeometryHelper.generateSphere(1.0f, 40, 40, true)
         sphere180Positions = sphere180.first
@@ -2270,7 +2283,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // Setup standard eye look matrix looking inside the 3D dome / box
         if (projectionMode == ProjectionMode.VR_360 || projectionMode == ProjectionMode.VR_180 ||
-            projectionMode == ProjectionMode.BOX
+            projectionMode == ProjectionMode.BOX || projectionMode == ProjectionMode.EAC
         ) {
             // Looking inside a virtual sphere / box, eye is exactly at center origin (0, 0, 0)
             Matrix.setLookAtM(viewMatrix, 0, 
@@ -2331,7 +2344,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // user can still swipe to adjust the viewpoint while looking around with
         // the gyroscope (offset is applied to the world first, then the head pose).
         val isPanorama = projectionMode == ProjectionMode.VR_360 || projectionMode == ProjectionMode.VR_180 ||
-            projectionMode == ProjectionMode.BOX
+            projectionMode == ProjectionMode.BOX || projectionMode == ProjectionMode.EAC
         val gyroActive = isPanorama && gyroEnabled
 
 
@@ -2439,6 +2452,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         posBuf = pos
                         texBuf = tex
                         totalVertices = boxVertexCount
+                        drawMethod = GLES20.GL_TRIANGLES
+                    }
+                }
+            }
+            // v2.1.210：EAC —— 与 VR_360 同一套球面几何，仅 UV 不同
+            ProjectionMode.EAC -> {
+                eacPositions?.let { pos ->
+                    eacTexCoords?.let { tex ->
+                        posBuf = pos
+                        texBuf = tex
+                        totalVertices = eacVertexCount
                         drawMethod = GLES20.GL_TRIANGLES
                     }
                 }

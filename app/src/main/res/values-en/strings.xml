@@ -720,4 +720,8 @@
 <!-- v2.1.208：时间标记球 -->
     <string name="marker_ball_enable">Time marker ball</string>
     <string name="marker_ball_desc">Tap = jump to marker · Double-tap = set marker · Drag to move · Shows delta vs current time</string>
+
+    <string name="proj_eac">EAC cubemap</string>
+
+    <string name="projection_format">Projection</string>
 </resources>

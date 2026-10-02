@@ -687,4 +687,8 @@
 <!-- v2.1.208：时间标记球 -->
     <string name="marker_ball_enable">タイムマーカー</string>
     <string name="marker_ball_desc">タップでマーカーへ · ダブルタップで設定 · ドラッグで移動 · 現在との差を表示</string>
+
+    <string name="proj_eac">EAC キューブマップ</string>
+
+    <string name="projection_format">投影モード</string>
 </resources>

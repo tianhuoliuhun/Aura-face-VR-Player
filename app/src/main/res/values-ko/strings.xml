@@ -687,4 +687,8 @@
 <!-- v2.1.208：时间标记球 -->
     <string name="marker_ball_enable">시간 마커</string>
     <string name="marker_ball_desc">탭하여 마커로 이동 · 더블탭으로 설정 · 드래그로 이동 · 현재 재생 시간과의 차이 표시</string>
+
+    <string name="proj_eac">EAC 큐브맵</string>
+
+    <string name="projection_format">투영 모드</string>
 </resources>

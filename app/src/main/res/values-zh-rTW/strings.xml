@@ -729,4 +729,8 @@
 <!-- v2.1.208：时间标记球 -->
     <string name="marker_ball_enable">時間標記球</string>
     <string name="marker_ball_desc">單擊跳回標記 · 雙擊設標記 · 拖動移位 · 顯示與當前播放時間的差值</string>
+
+    <string name="proj_eac">EAC 立方體貼圖</string>
+
+    <string name="projection_format">投影模式</string>
 </resources>

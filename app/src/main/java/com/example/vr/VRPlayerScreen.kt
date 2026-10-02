@@ -4305,6 +4305,52 @@ fun VRPlayerScreen(
                                     }
                                 }
 
+                                // v2.1.210：**投影模式选择器**（新增）。
+                                // 此前项目里根本没有这个入口 —— R.string.proj_* 只在枚举定义处被引用，
+                                // 投影模式全靠片源自动判定。新增 EAC 等模式后必须补上，
+                                // 否则新模式加了用户也选不到。
+                                // 6 个模式用 chunked(3) 排成两行，与语言 chips 的排版风格一致。
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(stringResource(R.string.projection_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                                    // ⚠️ 用 entries（EnumEntries 有 chunked）；values() 返回 Array 没有该扩展
+                                    ProjectionMode.entries.chunked(3).forEach { rowModes ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            rowModes.forEach { mode ->
+                                                val isSelected = projectionMode == mode
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(32.dp)
+                                                        .background(
+                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
+                                                            shape = RoundedCornerShape(8.dp)
+                                                        )
+                                                        .clickable {
+                                                            projectionMode = mode
+                                                            keepUiAlight()
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = stringResource(mode.labelRes),
+                                                        color = if (isSelected) AccentOnColor else Color.White.copy(alpha = 0.8f),
+                                                        fontSize = 9.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        maxLines = 1,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
+                                            }
+                                            repeat(3 - rowModes.size) {
+                                                Box(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(stringResource(R.string.stereo_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
