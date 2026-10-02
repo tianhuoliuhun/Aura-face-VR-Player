@@ -232,5 +232,4 @@ fun SeekFloatingBall(
     }
 }
 
-/** 双击判定窗口（单击需等这个窗口结束才执行，以便与双击区分） */
-const val DOUBLE_TAP_WINDOW_MS = 280L
+// 双击判定窗口 DOUBLE_TAP_WINDOW_MS 已移到 FloatingBallGesture.kt（与标记球共用同一套手势）

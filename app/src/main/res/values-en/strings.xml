@@ -716,4 +716,8 @@
     <string name="asr_model_multi_hint">Multiple models available</string>
     <string name="asr_model_builtin">Bundled</string>
     <string name="asr_model_current">In use</string>
+
+<!-- v2.1.208：时间标记球 -->
+    <string name="marker_ball_enable">Time marker ball</string>
+    <string name="marker_ball_desc">Tap = jump to marker · Double-tap = set marker · Drag to move · Shows delta vs current time</string>
 </resources>

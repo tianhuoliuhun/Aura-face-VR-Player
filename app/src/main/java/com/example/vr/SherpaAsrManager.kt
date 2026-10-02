@@ -171,16 +171,20 @@ object SherpaAsrManager {
      */
     val sherpaLanguages: List<SherpaLang> = buildList {
         // —— 内置 SenseVoice 覆盖的语言 ——
-        add(SherpaLang("auto", R.string.asr_lang_auto, modelId = "builtin", group = AsrExtModels.AsrLangGroup.COMMON))
-        add(SherpaLang("zh", R.string.asr_lang_zh, modelId = "builtin", group = AsrExtModels.AsrLangGroup.CHINESE))
-        add(SherpaLang("ja", R.string.asr_lang_ja, modelId = "builtin", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
-        add(SherpaLang("ko", R.string.asr_lang_ko, modelId = "builtin", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
-        add(SherpaLang("yue", R.string.asr_lang_yue, modelId = "builtin", group = AsrExtModels.AsrLangGroup.CHINESE))
+        // 「自动」= **语种识别**：改用 **Dolphin**（自带 LID，覆盖 40 语 + 22 方言）。
+        // 2026-10-02 用户要求「自动模型也改为这个」——
+        // SenseVoice 的 auto 实际上只能在 中/英/日/韩/粤 里猜，而 Dolphin 能真正自动判定语种，
+        // 语义上更贴合「自动」。
+        add(SherpaLang("auto", R.string.asr_lang_auto, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.COMMON))
+        add(SherpaLang("zh", R.string.asr_lang_zh, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.CHINESE))
+        add(SherpaLang("ja", R.string.asr_lang_ja, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("ko", R.string.asr_lang_ko, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("yue", R.string.asr_lang_yue, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.CHINESE))
         // —— 英语：3 个候选分开标（内置 / 轻量 / 全量），全部放「常用」组便于对比 ——
         // —— 英语：3 个候选分开标 ——
         //    「英语1（内置）」放常用组；「英语2/3」的模型是欧洲包（FC/V3），归入欧洲组，
         //    避免常用组里堆 3 个英语让首屏变乱（用户 2026-10-01 要求整理）。
-        add(SherpaLang("en", R.string.asr_lang_en, modelId = "builtin", suffix = "1", group = AsrExtModels.AsrLangGroup.COMMON))
+        add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.DOLPHIN_DIR, suffix = "1", group = AsrExtModels.AsrLangGroup.COMMON))
         add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.FASTCONF_DIR, suffix = "2", group = AsrExtModels.AsrLangGroup.EUROPE))
         add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.PARAKEET_V3_DIR, suffix = "3", group = AsrExtModels.AsrLangGroup.EUROPE))
         // —— 其余扩展语言：按候选数生成 chip（多候选加序号，单候选无后缀）——
@@ -205,12 +209,22 @@ object SherpaAsrManager {
             }
     }
 
-    /** 按语区收纳后的 chip 分组（供 UI 折叠渲染），已按语区 sortOrder 排序 */
-    fun groupedChips(): List<Pair<AsrExtModels.AsrLangGroup, List<SherpaLang>>> =
-        sherpaLanguages.groupBy { it.group }
-            .entries
+    /** 按语区收纳后的 chip 分组（供 UI 折叠渲染） */
+    fun groupedChips(): List<Pair<AsrExtModels.AsrLangGroup, List<SherpaLang>>> {
+        // ⚠️ 枚举不能起别名（`val G = AsrLangGroup` 会编译失败），一律写全限定名。
+        val out = ArrayList<Pair<AsrExtModels.AsrLangGroup, List<SherpaLang>>>()
+        // 「常用」组是**与其它语区重叠**的快捷入口：按**语言键**判定（而非 group 字段），
+        // 这样中文/日语/韩语（group 是 CHINESE / EAST_ASIA）也能出现在常用组里
+        // （用户 2026-10-02 要求），同时它们在原语区里仍然保留。
+        val common = sherpaLanguages.filter { AsrExtModels.isCommonKey(it.code) }
+        if (common.isNotEmpty()) out += AsrExtModels.AsrLangGroup.COMMON to common
+        // 其余语区按 group 字段 + sortOrder
+        sherpaLanguages.groupBy { it.group }.entries
+            .filter { it.key != AsrExtModels.AsrLangGroup.COMMON }
             .sortedBy { it.key.sortOrder }
-            .map { it.key to it.value }
+            .forEach { (g, list) -> if (list.isNotEmpty()) out += g to list }
+        return out
+    }
 
     /**
      * 按**模型**收纳：`(模型 id, 该模型覆盖的语言 chips)`。
@@ -645,8 +659,10 @@ object SherpaAsrManager {
         if (choice.isNotEmpty() && choice != "builtin") {
             cands.firstOrNull { it.dirName == choice }?.let { return it }
         }
-        // 用户选了内置 → 不走扩展（即使用户已下载了扩展模型）
-        if (choice == "builtin") return null
+        // ⚠️ v2.1.208：内置 SenseVoice 已移除，「builtin」这个历史选择值**不再特殊处理** ——
+        //    旧版本可能把它存进 prefs，这里让它继续往下走「自动选择」分支（等价于未选择），
+        //    否则会 return null 而走到已失效的 SenseVoice 路径上。
+        //    （用户历史存档无需迁移，行为自然收敛到 Dolphin。）
 
         // 自动：第一个已就绪的扩展模型
         return cands.firstOrNull { isExtModelReady(context, it) }
@@ -740,6 +756,31 @@ object SherpaAsrManager {
      * 整包几百 MB，但最终只保留 int8 组合；解压按 basename 匹配（忽略包内目录层级），
      * 完成后删除整包，避免长期占用。进度：下载占 85%，解压按已解出文件数占 15%。
      */
+    /**
+     * 探测远端文件实际大小：`Range: bytes=0-0` → 读 `Content-Range` 里的总长度。
+     *
+     * 用途：整包下载的**完成判定阈值**。手填的 [AsrExtArchive.packageMb] 与上游实际
+     * 包体积经常不一致（上游会重新打包/替换文件），硬编码阈值会误判「下载不完整」。
+     * 失败时返回 -1，由调用方回退到 packageMb 估算。
+     */
+    private fun probeContentLength(url: String): Long = try {
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.setRequestProperty("Range", "bytes=0-0")
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+        conn.instanceFollowRedirects = true
+        conn.connectTimeout = 20_000
+        conn.readTimeout = 20_000
+        conn.connect()
+        val cr = conn.getHeaderField("Content-Range")   // 形如 bytes 0-0/80671385
+        conn.inputStream.close()
+        conn.disconnect()
+        cr?.substringAfterLast('/')?.trim()?.toLongOrNull() ?: -1L
+    } catch (e: Exception) {
+        Log.w(TAG, "probeContentLength 失败：$url -> ${e.message}")
+        -1L
+    }
+
     private suspend fun downloadTarBz2AndExtract(
         context: Context,
         arc: AsrExtArchive,
@@ -751,14 +792,24 @@ object SherpaAsrManager {
             withContextMain {
                 downloadStatus = context.getString(R.string.asr_ext_archive_start, arc.packageMb)
             }
+            // ⚠️ 完成阈值**按 HTTP Content-Length 自适应**，而不是手填的 packageMb。
+            //    手填值与上游实际包体积不一致时会造成「明明下载完了却判不完整」——
+            //    实测：Dolphin 填 100 实际 76.9MiB、Parakeet v3 填 640 实际 464.6MiB，
+            //    两者都会恒定失败，表现就是「模型下载不了」。2026-10-02 修复。
+            val realBytes = probeContentLength(arc.url)
+            val expectMin = when {
+                realBytes > 0 -> realBytes * 97L / 100L
+                else -> (arc.packageMb.toLong() * 1024L * 1024L * 97L / 100L).coerceAtLeast(1L)
+            }
+            Log.i(TAG, "整包 ${m.dirName}：声明=${arc.packageMb}MB 实测=${realBytes}B 判定阈值=$expectMin")
             val downloaded = downloadFileWithResume(
                 url = arc.url,
                 dest = pkg,
                 progressBase = 0f,
                 progressSpan = 0.85f,
-                // 完成判定按整包 97% 体积：不足视为半包 → 继续 Range 续传，
+                // 97% 阈值：不足视为半包 → 继续 Range 续传，
                 // 避免"下到一半就当成完整包、到解压才失败"的浪费
-                expectMinBytes = (arc.packageMb.toLong() * 1024L * 1024L * 97L / 100L).coerceAtLeast(1L),
+                expectMinBytes = expectMin,
                 label = m.dirName
             )
             if (!downloaded) return false

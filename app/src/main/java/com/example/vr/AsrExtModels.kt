@@ -138,6 +138,25 @@ object AsrExtModels {
         dir = dir
     )
 
+    /**
+     * **ModelScope 文件直链**（`resolve/master/<文件名>`，支持 Range 续传）。
+     *
+     * 2026-10-02 引入：GitHub releases 只有整包 tar.bz2（要整包下载 + 流式解压，
+     * 且完成判定依赖包体积、上游一变就误判），而 ModelScope 上 csukuangfj 命名空间下有
+     * **已转好的 ONNX 单文件**，可直接按文件下载 —— 更快也更稳。
+     * ⚠️ 本注释里不要写 "csukuangfj/*"：块注释中的 "*/" 会**提前结束注释**，
+     *    导致其后代码结构崩塌（本次就是这么踩的）。
+     *
+     * ⚠️ 注意命名空间的坑：
+     *    `DataoceanAI/dolphin-base` 是**原始 PyTorch 权重**（base.pt 561MB），
+     *    sherpa-onnx **用不了**；必须取 `csukuangfj/sherpa-onnx-dolphin-*` 的 ONNX 转换版。
+     */
+    private fun fMs(repo: String, name: String, minBytes: Long) = AsrExtFile(
+        name = name,
+        url = "https://www.modelscope.cn/models/csukuangfj/$repo/resolve/master/$name",
+        minBytes = minBytes
+    )
+
     // =======================================================================
     // 越南语
     // =======================================================================
@@ -268,7 +287,9 @@ object AsrExtModels {
                 "joiner.int8.onnx" to 5_000_000L,
                 "tokens.txt" to 50_000L
             ),
-            packageMb = 640
+            // ⚠️ 实测整包 = 487,170,055 B ≈ **465MiB**（此前填 640 是按解压后体积算的，
+            //    完成判定因此要求 ≥621MiB → 恒定误判"下载不完整"）
+            packageMb = 465
         )
     )
 
@@ -341,6 +362,9 @@ object AsrExtModels {
     //
     // 【覆盖范围】不含欧洲语言（除 ru）—— 欧洲仍由 FastConformer / Parakeet v3 承接。
     const val DOLPHIN_DIR = "dolphin-base-ctc-multi-lang-int8"
+    /** ModelScope 上的 ONNX 转换版仓库（下载主源） */
+    private const val DOLPHIN_MS_REPO = "sherpa-onnx-dolphin-base-ctc-multi-lang-int8-2025-04-02"
+    /** GitHub 整包（兜底源，当前不用） */
     private const val DOLPHIN_URL =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" +
             "sherpa-onnx-dolphin-base-ctc-multi-lang-int8-2025-04-02.tar.bz2"
@@ -353,22 +377,42 @@ object AsrExtModels {
         encoder = "model.int8.onnx",
         tokens = "tokens.txt",
         sizeMb = 100,
-        files = emptyList(),
+        // ✅ 2026-10-02：改为 **ModelScope 按文件下载**（不再走 GitHub 整包）。
+        //   实测 model.int8.onnx = 103,729,802B、tokens.txt = 504,662B，Range 返回 206。
+        //   好处：省掉整包下载 + 流式解压，也不再受整包体积变化影响。
+        files = listOf(
+            fMs(DOLPHIN_MS_REPO, "model.int8.onnx", 90_000_000L),
+            fMs(DOLPHIN_MS_REPO, "tokens.txt", 400_000L)
+        ),
+        // 整包方案保留为兜底（ModelScope 不可达时可切回），当前不使用：
+        // ⚠️ files 非空时优先走按文件下载，archive 不会生效
         archive = AsrExtArchive(
             url = DOLPHIN_URL,
             wanted = mapOf(
                 "model.int8.onnx" to 90_000_000L,
                 "tokens.txt" to 300_000L
             ),
-            packageMb = 100
+            // ⚠️ 实测整包体积 = 80,671,385 B ≈ **77MiB**（2026-10-02，HTTP Content-Length）。
+            //    此前填 100 → 完成判定要求 ≥97MiB，而实际只有 76.9MiB → **恒定误判"下载不完整"**。
+            packageMb = 77
         )
     )
+    // ⚠️ packageMb 现在只用于「提示文案」与「Content-Length 探测失败时的兜底阈值」；
+    //    正常下载已改为按 HTTP Content-Length 自适应（见 SherpaAsrManager.downloadTarBz2AndExtract），
+    //    上游整包体积变化时不再需要改这个值。
 
     /**
      * Dolphin 覆盖的**语言**（已排除内置 SenseVoice 覆盖的 zh/ja/ko/ct，
      * 以及已有专用模型的 ru/th/vi，避免同语言三四个候选）。
      */
     private val DOLPHIN_LANGS: List<Pair<String, Int>> = listOf(
+        // 2026-10-02 新增：**中日韩** —— Dolphin 同样覆盖这三种语言，
+        // 因此它们与内置 SenseVoice 形成「同语言多候选」，用户可切换（中文1=内置 / 中文2=Dolphin）。
+        // ⚠️ 注：`zh` 与方言 `zh_cn`（普通话）语义重叠，但分属不同组、序号不同，
+        //    界面上分别显示为「中文 2」与「普通话」，可按需选用。
+        "zh" to R.string.asr_lang_zh,      // 中文
+        "ja" to R.string.asr_lang_ja,      // 日语
+        "ko" to R.string.asr_lang_ko,      // 韩语
         // 东南亚 / 南亚 / 中东 / 中亚 —— 这些在此前完全没有覆盖
         "id" to R.string.asr_lang_id,      // 印尼语
         "ms" to R.string.asr_lang_ms,      // 马来语
@@ -642,14 +686,25 @@ object AsrExtModels {
      * （原语区里仍然保留，不移动）。选取依据：中文用户最高频的影视语言。
      */
     private val COMMON_KEYS: Set<String> = setOf(
-        "zh", "en", "ja", "ko", "yue",        // 内置五语
+        "auto",                                // 自动（语种识别）
+        "zh", "en", "ja", "ko", "yue",        // 内置五语（用户 2026-10-02 要求常用含中日韩）
         "zh_cn", "zh_sichuan", "zh_minnan", "zh_shanghai", "zh_gd",  // 高频中文方言
-        "en_x",                                // 占位：英语多模型（见下方候选）
         "vi", "th", "ru", "ar", "hi", "fr", "de", "es", "pt", "id"
     )
 
+    /**
+     * 「常用」组的判定：**按语言键**（而非 group 字段）。
+     *
+     * 原因：中文/日语/韩语的 group 是 CHINESE / EAST_ASIA，但用户要求它们出现在常用组里。
+     * 用键集判定后，常用组成为**与其它语区重叠**的快捷入口——
+     * 同一语言既在常用里一键可达，也在原语区里保持完整。
+     */
+    fun isCommonKey(key: String): Boolean = key in COMMON_KEYS
+
     private fun defaultGroupOf(key: String): AsrLangGroup = when {
         key.startsWith("zh_") -> AsrLangGroup.CHINESE
+        // ⚠️ `zh` 不匹配上面的 `zh_` 前缀分支，若不单独列出就会落进 else → 被误判成 EUROPE
+        key == "zh" -> AsrLangGroup.CHINESE
         key == "yue" -> AsrLangGroup.CHINESE
         GROUP_OVERRIDE.containsKey(key) -> GROUP_OVERRIDE.getValue(key)
         else -> AsrLangGroup.EUROPE       // ru/fr/de/es/be/hr/it/pl/uk + Parakeet v3 的 16 种

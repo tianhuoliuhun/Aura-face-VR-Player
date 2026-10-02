@@ -683,4 +683,8 @@
     <string name="asr_model_multi_hint">사용 가능한 모델이 여러 개입니다</string>
     <string name="asr_model_builtin">내장</string>
     <string name="asr_model_current">사용 중</string>
+
+<!-- v2.1.208：时间标记球 -->
+    <string name="marker_ball_enable">시간 마커</string>
+    <string name="marker_ball_desc">탭하여 마커로 이동 · 더블탭으로 설정 · 드래그로 이동 · 현재 재생 시간과의 차이 표시</string>
 </resources>

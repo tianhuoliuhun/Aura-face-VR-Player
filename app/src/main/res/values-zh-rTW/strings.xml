@@ -725,4 +725,8 @@
     <string name="asr_model_multi_hint">該語言有多個可用模型</string>
     <string name="asr_model_builtin">內建</string>
     <string name="asr_model_current">目前使用</string>
+
+<!-- v2.1.208：时间标记球 -->
+    <string name="marker_ball_enable">時間標記球</string>
+    <string name="marker_ball_desc">單擊跳回標記 · 雙擊設標記 · 拖動移位 · 顯示與當前播放時間的差值</string>
 </resources>

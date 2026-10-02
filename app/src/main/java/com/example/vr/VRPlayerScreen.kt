@@ -449,6 +449,13 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("is_seek_backward_ball_enabled", false) else false
         )
     }
+    // v2.1.208：**时间标记球开关**（单击跳回标记 / 双击打标记 / 拖动移位）
+    // 与快进、后退两球同属「悬浮球」设置组，默认同样为**关**，保持一致的心智模型
+    var isMarkerBallEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_marker_ball_enabled", false) else false
+        )
+    }
     // 步长（秒），双击循环 5 → 10 → 15 → 30
     var seekForwardStep by remember {
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("seek_forward_step", 5) else 5)
@@ -1005,6 +1012,7 @@ fun VRPlayerScreen(
         isFloatingBallEnabled,
         isSeekForwardBallEnabled,
         isSeekBackwardBallEnabled,
+        isMarkerBallEnabled,
         seekForwardStep,
         seekBackwardStep,
         floatingBallSpeed,
@@ -1104,6 +1112,9 @@ fun VRPlayerScreen(
                 putBoolean("is_floating_ball_enabled", isFloatingBallEnabled)
                 putBoolean("is_seek_forward_ball_enabled", isSeekForwardBallEnabled)
                 putBoolean("is_seek_backward_ball_enabled", isSeekBackwardBallEnabled)
+                // ⚠️ 新增持久化项必须**同时**改三处：key 列表 + 这里的 put + else 分支的 remove。
+                //    漏了 key 会导致永不落盘（本项目头号坑）。
+                putBoolean("is_marker_ball_enabled", isMarkerBallEnabled)
                 putInt("seek_forward_step", seekForwardStep)
                 putInt("seek_backward_step", seekBackwardStep)
                 putFloat("floating_ball_speed", floatingBallSpeed)
@@ -4861,6 +4872,14 @@ fun VRPlayerScreen(
                                         onChange = { isSeekBackwardBallEnabled = it },
                                         tag = "seek_backward_ball_switch"
                                     )
+                                    // v2.1.208：时间标记球开关（与上面两个同组、同一样式组件）
+                                    BallSwitchRow(
+                                        title = stringResource(R.string.marker_ball_enable),
+                                        desc = stringResource(R.string.marker_ball_desc),
+                                        checked = isMarkerBallEnabled,
+                                        onChange = { isMarkerBallEnabled = it },
+                                        tag = "marker_ball_switch"
+                                    )
 
                                     if (isFloatingBallEnabled) {
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -5301,7 +5320,10 @@ fun VRPlayerScreen(
                                     //           语区可折叠，同语言多模型时支持选择模型。
                                     run {
                                         // —— 收纳状态（局部 remember，不持久化：折叠态没必要跨会话）——
-                                        var groupModeByModel by remember { mutableStateOf(false) }
+                                        // v2.1.208：默认**按模型分类**（用户要求简化切换流程）——
+                                        // 按模型视角下「同一语言有哪些模型可选、各多大体积」一目了然，
+                                        // 点语言即选模型，少一层「先选语言再选模型」的操作。
+                                        var groupModeByModel by remember { mutableStateOf(true) }
                                         // 折叠逻辑 v2.0.208：**默认只展开「常用语言」**，其余语区全部折叠（▶）——
                                         // 87 个 chip 全铺开要 22 行，首屏太长。用户点开某语区后，
                                         // 折叠状态在本面板会话内保持（不持久化：折叠只是临时浏览状态）。
@@ -6534,6 +6556,27 @@ BatchTranscribeSection(
         val fwdStepSwitched = stringResource(R.string.seek_step_switched, nextSeekStep(seekForwardStep))
         val bwdStepSwitched = stringResource(R.string.seek_step_switched, nextSeekStep(seekBackwardStep))
 
+        // 13b. v2.1.208：**时间标记球**（左侧边缘）
+        // 与右侧的快进/后退球共用同一套手势（FloatingBallGesture），但语义不同：
+        // 单击 = 跳回标记点，双击 = 把标记点设为当前播放位置，球面实时显示「当前−标记」差值。
+        // 横向取 initialXRatio = 0 → 贴左边缘，与右侧两个球天然错开，不抢位置也不误触。
+        // 差值实时性：currentPositionMs 是上游播放器循环写入的 state，写一次就重组一次
+        //（见 MarkerFloatingBall 的注释），无需额外定时器。
+        if (isMarkerBallEnabled) {
+            MarkerFloatingBall(
+                currentPositionMs = currentPositionMs,
+                maxX = seekMaxX,
+                maxY = seekMaxY,
+                onSeekTo = { ms -> playerInstance?.seekTo(ms) },
+                accentColor = AccentColor,
+                accentOnColor = AccentOnColor,
+                onFeedback = { seekHudText = it },
+                initialXRatio = 0f,
+                initialYRatio = 0.5f,
+                isLiquidGlass = isLiquidGlass
+            )
+        }
+
         if (isSeekForwardBallEnabled) {
             SeekFloatingBall(
                 forward = true,
@@ -6640,6 +6683,7 @@ BatchTranscribeSection(
                 )
             }
         }
+
     }
 }
 

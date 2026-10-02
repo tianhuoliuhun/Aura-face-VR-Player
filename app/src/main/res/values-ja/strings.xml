@@ -683,4 +683,8 @@
     <string name="asr_model_multi_hint">複数のモデルが利用可能</string>
     <string name="asr_model_builtin">内蔵</string>
     <string name="asr_model_current">使用中</string>
+
+<!-- v2.1.208：时间标记球 -->
+    <string name="marker_ball_enable">タイムマーカー</string>
+    <string name="marker_ball_desc">タップでマーカーへ · ダブルタップで設定 · ドラッグで移動 · 現在との差を表示</string>
 </resources>
