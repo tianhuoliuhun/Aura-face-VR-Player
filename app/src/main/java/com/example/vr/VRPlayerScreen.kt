@@ -5474,7 +5474,7 @@ fun VRPlayerScreen(
                                                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                                         Text(
                                                             text = "▸ " +
-                                                                (if (modelId == "builtin") "SenseVoice（内置）" else modelId) +
+                                                                (if (modelId == "builtin") "Dolphin" else modelId) +
                                                                 "  ·  ${langs.size}",
                                                             color = Color.White.copy(alpha = 0.7f),
                                                             fontSize = 9.sp,

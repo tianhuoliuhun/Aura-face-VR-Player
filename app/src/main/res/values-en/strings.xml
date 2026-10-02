@@ -197,9 +197,9 @@
 
     <!-- ===== batch ===== -->
     <string name="asr_engine_title">AI subtitle engine</string>
-    <string name="asr_engine_sensevoice_desc">SenseVoice-Small: zh/en/ja/ko/yue on CPU with punctuation, ~229MB model (downloaded on first use)</string>
+    <string name="asr_engine_sensevoice_desc">Dolphin: 40 Eastern languages + 22 Chinese dialects, bundled in the APK, automatic language detection</string>
     <string name="asr_language">Recognition language</string>
-    <string name="asr_sensevoice_tag">zh/en/ja/ko/yue - CPU - ~229MB download</string>
+    <string name="asr_sensevoice_tag">40 languages + 22 dialects - bundled - auto detection</string>
     <string name="asr_downloading">⬇ Downloading</string>
     <string name="asr_ready">✓ Ready</string>
     <string name="asr_not_downloaded">Not downloaded</string>
@@ -413,7 +413,7 @@
 
     <!-- ===== batch ===== -->
     <string name="asr_section_title">Realtime subtitles (engine &amp; model)</string>
-    <string name="asr_sensevoice_bundled">SenseVoice-Small - bundled (no download) - zh/en/ja/ko/yue - with punctuation</string>
+    <string name="asr_sensevoice_bundled">Dolphin - bundled (no download) - 40 languages + 22 dialects - auto detection</string>
     <string name="asr_model_ready_source">Ready - %1$s</string>
     <string name="asr_model_unavailable">Model unavailable (bundled copy missing, download as fallback)</string>
     <string name="asr_update_model">Update model</string>
@@ -569,9 +569,9 @@
     <string name="asr_source_assets">Bundled (assets)</string>
     <string name="asr_source_unavailable">Unavailable</string>
     <string name="asr_canceled">Canceled</string>
-    <string name="asr_preparing_download">Preparing to download SenseVoice model (~%1$dMB)...</string>
-    <string name="asr_model_download_failed">SenseVoice model download failed (retry)</string>
-    <string name="asr_model_ready">SenseVoice model ready</string>
+    <string name="asr_preparing_download">Preparing to download Dolphin model (~%1$dMB)...</string>
+    <string name="asr_model_download_failed">Dolphin model download failed (retry)</string>
+    <string name="asr_model_ready">Dolphin model ready</string>
     <string name="asr_vocab_download_failed">Vocabulary download failed (retry)</string>
     <string name="asr_model_unavailable_detail">Model unavailable: bundled asset missing and not downloaded (~%1$dMB)</string>
     <string name="asr_init_failed">Initialization failed: %1$s</string>

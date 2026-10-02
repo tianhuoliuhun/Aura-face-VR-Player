@@ -182,9 +182,9 @@
     <string name="fps_limit">フレームレート制限</string>
     <string name="no_limit">制限なし</string>
     <string name="asr_engine_title">AI 字幕エンジン</string>
-    <string name="asr_engine_sensevoice_desc">SenseVoice-Small：中英日韓粤の 5 言語、CPU 推論で句読点付き、モデル約 229MB（初回ダウンロード）</string>
+    <string name="asr_engine_sensevoice_desc">Dolphin：東洋 40 言語 + 中国語 22 方言、内蔵モデル（ダウンロード不要）、言語自動判別</string>
     <string name="asr_language">認識言語</string>
-    <string name="asr_sensevoice_tag">中英日韓粤・CPU 推論・約 229MB をダウンロード</string>
+    <string name="asr_sensevoice_tag">40 言語 + 22 方言・内蔵・言語自動判別</string>
     <string name="asr_downloading">⬇ ダウンロード中</string>
     <string name="asr_ready">✓ 準備完了</string>
     <string name="asr_not_downloaded">未ダウンロード</string>
@@ -382,7 +382,7 @@
     <string name="subtitle_delay">字幕の遅れ補正</string>
     <string name="subtitle_ipd">VR 両眼視差/瞳孔間距離の微調整</string>
     <string name="asr_section_title">リアルタイム字幕（エンジンとモデル）</string>
-    <string name="asr_sensevoice_bundled">SenseVoice-Small・内蔵モデル（ダウンロード不要）・中英日韓粤・句読点付き</string>
+    <string name="asr_sensevoice_bundled">Dolphin・内蔵モデル（ダウンロード不要）・40 言語 + 22 方言・言語自動判別</string>
     <string name="asr_model_ready_source">準備完了・%1$s</string>
     <string name="asr_model_unavailable">モデルを利用できません（内蔵分が不足。ダウンロードで代替可能）</string>
     <string name="asr_update_model">モデルを更新</string>
@@ -536,9 +536,9 @@
     <string name="asr_source_assets">内蔵版（assets）</string>
     <string name="asr_source_unavailable">利用不可</string>
     <string name="asr_canceled">キャンセル済み</string>
-    <string name="asr_preparing_download">SenseVoice モデル準備中（約 %1$dMB）...</string>
-    <string name="asr_model_download_failed">SenseVoice モデルダウンロード失敗（再試行可）</string>
-    <string name="asr_model_ready">SenseVoice モデル準備完了</string>
+    <string name="asr_preparing_download">Dolphin モデル準備中（約 %1$dMB）...</string>
+    <string name="asr_model_download_failed">Dolphin モデルダウンロード失敗（再試行可）</string>
+    <string name="asr_model_ready">Dolphin モデル準備完了</string>
     <string name="asr_vocab_download_failed">語彙ダウンロード失敗（再試行可）</string>
     <string name="asr_model_unavailable_detail">モデル利用不可：内蔵アセット欠落・未ダウンロード（約 %1$dMB）</string>
     <string name="asr_init_failed">初期化失敗：%1$s</string>

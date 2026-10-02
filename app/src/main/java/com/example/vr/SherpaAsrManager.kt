@@ -115,6 +115,30 @@ object SherpaAsrManager {
     private fun svcDir(context: Context): File =
         File(context.filesDir, "sherpa_models/$SVC_DIR_NAME")
 
+    // =======================================================================
+    // v2.1.208：**Dolphin 内置 assets**（模型随 APK 打包，替代原 SenseVoice 的内置地位）
+    // =======================================================================
+    //
+    // 【为什么能直接用 assets】sherpa-onnx 的 Kotlin API 提供
+    //   `OfflineRecognizer(assetManager, config)` 构造函数，
+    // 此时 config 里的 model/tokens 传**assets 内的相对路径**即可，
+    // 不需要先把文件复制到 filesDir（省掉一次 99MB 拷贝与额外存储占用）。
+    //
+    // 【与下载版的关系】优先级 = **内置 assets > filesDir 下载版**
+    //   （下载版保留为兜底：assets 打包遗漏/损坏时仍可工作，也便于不发版换模型）
+    private const val DOLPHIN_ASSET_DIR = "dolphin"
+    private const val DOLPHIN_ASSET_MODEL = "$DOLPHIN_ASSET_DIR/model.int8.onnx"
+    private const val DOLPHIN_ASSET_TOKENS = "$DOLPHIN_ASSET_DIR/tokens.txt"
+
+    /** Dolphin 内置 assets 是否可用（损坏/遗漏时返回 false → 回退下载版） */
+    fun dolphinAssetAvailable(context: Context): Boolean = try {
+        context.assets.open(DOLPHIN_ASSET_MODEL).close()
+        context.assets.open(DOLPHIN_ASSET_TOKENS).close()
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     /** 内置 assets 是否可用（打包遗漏或损坏时返回 false，交由下载版兜底） */
     private fun assetModelAvailable(context: Context): Boolean = try {
         context.assets.open(SVC_ASSET_MODEL).close()
@@ -557,6 +581,10 @@ object SherpaAsrManager {
 
     /** 扩展模型是否就绪（逐文件尺寸校验，防中断下载的残缺文件被误判） */
     fun isExtModelReady(context: Context, m: AsrExtModel): Boolean {
+        // v2.1.208：**Dolphin 已内置到 APK 的 assets** —— 只要 assets 完好即视为就绪，
+        // 不再要求用户先下载（下载版仍保留为兜底，但不参与就绪判定，
+        // 否则「明明能用却提示要下载」）。
+        if (m.modelType == "dolphin" && dolphinAssetAvailable(context)) return true
         val expect = expectedFiles(context, m)
         return expect.isNotEmpty() && expect.all { (file, min) ->
             file.exists() && file.length() >= min
@@ -579,7 +607,8 @@ object SherpaAsrManager {
      */
     fun modelInfoFor(context: Context, langKey: String): Triple<String, Int, Boolean> {
         val cands = AsrExtModels.candidatesByKey(langKey)
-        if (cands.isEmpty()) return Triple("SenseVoice-Small INT8", SVC_MODEL_MB, false)
+        // v2.1.208：内置模型已改为 Dolphin（SenseVoice 已移除），无扩展候选时显示 Dolphin
+        if (cands.isEmpty()) return Triple("Dolphin", 99, false)
         val pick = cands.firstOrNull { !isExtModelReady(context, it) } ?: cands.first()
         return Triple(pick.dirName, pick.sizeMb, true)
     }
@@ -636,7 +665,7 @@ object SherpaAsrManager {
     fun modelCandidatesFor(context: Context, langKey: String): List<AsrModelCandidate> {
         val out = mutableListOf<AsrModelCandidate>()
         if (langKey in BUILTIN_LANGS) {
-            out += AsrModelCandidate("builtin", "SenseVoice-Small INT8", 0, true)
+            out += AsrModelCandidate("builtin", "Dolphin", 0, true)
         }
         AsrExtModels.candidatesByKey(langKey).forEach { ext ->
             out += AsrModelCandidate(ext.dirName, ext.dirName, ext.sizeMb, false)
@@ -895,20 +924,39 @@ object SherpaAsrManager {
             "ext ASR (${m.key}): type=${m.modelType} single=${m.isSingleModel} " +
                 "model=$modelPath tokens=$tokensPath threads=$numThreads"
         )
+        // 内置 assets 优先：为 null 时走 filesDir 路径（下载版）
+        var assetMgr: android.content.res.AssetManager? = null
         return try {
             val modelConfig = when (m.modelType) {
                 // —— Dolphin（亚洲 40 语 + 中文 22 方言）：单一 model.int8.onnx
                 // ⚠️ 字段名是 `dolphin`（已用 javap 核对 AAR，不是猜测）；
                 //    modelType 用 sherpa 约定的 `dolphin`。
                 //    与 CTC 的唯一区别就是这两个名字，结构同为「单文件」。
-                "dolphin" -> OfflineModelConfig(
-                    dolphin = OfflineDolphinModelConfig(model = modelPath),
-                    modelType = "dolphin",
-                    tokens = tokensPath,
-                    numThreads = numThreads,
-                    debug = false,
-                    provider = "cpu",
-                )
+                //
+                // v2.1.208：**优先用内置 assets**（模型已随 APK 打包）——
+                //   此时路径换成 assets 内相对路径，并把 AssetManager 交给
+                //   OfflineRecognizer(assetManager, config)，无需先把 99MB 复制到 filesDir。
+                // assets 缺失/损坏时自动回退到下面的下载版路径。
+                "dolphin" -> if (dolphinAssetAvailable(context)) {
+                    assetMgr = context.assets
+                    OfflineModelConfig(
+                        dolphin = OfflineDolphinModelConfig(model = DOLPHIN_ASSET_MODEL),
+                        modelType = "dolphin",
+                        tokens = DOLPHIN_ASSET_TOKENS,
+                        numThreads = numThreads,
+                        debug = false,
+                        provider = "cpu",
+                    )
+                } else {
+                    OfflineModelConfig(
+                        dolphin = OfflineDolphinModelConfig(model = modelPath),
+                        modelType = "dolphin",
+                        tokens = tokensPath,
+                        numThreads = numThreads,
+                        debug = false,
+                        provider = "cpu",
+                    )
+                }
 
                 // —— CTC（IndicConformer 南亚语）：**单一 model.onnx**，无 encoder/decoder/joiner 三分。
                 // ⚠️ 必须填 `nemo` 字段（而不是 transducer）：填错字段时 sherpa 会因为
@@ -945,7 +993,8 @@ object SherpaAsrManager {
                 modelConfig = modelConfig,
                 decodingMethod = "greedy_search",
             )
-            OfflineRecognizer(null, config).also {
+            // assetMgr 非空 = 走内置 assets；为 null = 走 filesDir 下载版
+            OfflineRecognizer(assetMgr, config).also {
                 Log.i(TAG, "ext recognizer created: ${m.key}")
             }
         } catch (e: Throwable) {

@@ -196,9 +196,9 @@
 
     <!-- ===== batch ===== -->
     <string name="asr_engine_title">AI 字幕引擎</string>
-    <string name="asr_engine_sensevoice_desc">SenseVoice-Small：中英日韩粤 5 语言，CPU 推理自带标点，模型 ~229MB（首次需下载）</string>
+    <string name="asr_engine_sensevoice_desc">Dolphin：40 种东方语言 + 22 种中文方言，内置模型（无需下载），自带语种识别</string>
     <string name="asr_language">识别语言</string>
-    <string name="asr_sensevoice_tag">中英日韩粤 · CPU 推理 · ~229MB 下载</string>
+    <string name="asr_sensevoice_tag">40 语 + 22 方言 · 内置 · 自带语种识别</string>
     <string name="asr_downloading">⬇ 下载中</string>
     <string name="asr_ready">✓ 已就绪</string>
     <string name="asr_not_downloaded">未下载</string>
@@ -412,7 +412,7 @@
 
     <!-- ===== batch ===== -->
     <string name="asr_section_title">实时字幕（引擎与模型）</string>
-    <string name="asr_sensevoice_bundled">SenseVoice-Small · 内置模型（无需下载）· 中英日韩粤 · 自带标点</string>
+    <string name="asr_sensevoice_bundled">Dolphin · 内置模型（无需下载）· 40 语 + 22 方言 · 自带语种识别</string>
     <string name="asr_model_ready_source">已就绪 · %1$s</string>
     <string name="asr_model_unavailable">模型不可用（内置资源缺失，可下载兜底）</string>
     <string name="asr_update_model">更新模型</string>
@@ -568,9 +568,9 @@
     <string name="asr_source_assets">内置版（assets）</string>
     <string name="asr_source_unavailable">不可用</string>
     <string name="asr_canceled">已取消</string>
-    <string name="asr_preparing_download">准备下载 SenseVoice 模型（约 %1$dMB）...</string>
-    <string name="asr_model_download_failed">SenseVoice 模型下载失败（可重试）</string>
-    <string name="asr_model_ready">SenseVoice 模型就绪</string>
+    <string name="asr_preparing_download">准备下载 Dolphin 模型（约 %1$dMB）...</string>
+    <string name="asr_model_download_failed">Dolphin 模型下载失败（可重试）</string>
+    <string name="asr_model_ready">Dolphin 模型就绪</string>
     <string name="asr_vocab_download_failed">词表下载失败（可重试）</string>
     <string name="asr_model_unavailable_detail">模型不可用：内置资源缺失且未下载（约 %1$dMB）</string>
     <string name="asr_init_failed">初始化失败：%1$s</string>

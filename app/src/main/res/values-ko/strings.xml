@@ -182,9 +182,9 @@
     <string name="fps_limit">FPS 제한</string>
     <string name="no_limit">제한 없음</string>
     <string name="asr_engine_title">AI 자막 엔진</string>
-    <string name="asr_engine_sensevoice_desc">SenseVoice-Small: 중영일한월 5개 언어, CPU 추론, 구두점 포함, 모델 약 229MB (최초 다운로드)</string>
+    <string name="asr_engine_sensevoice_desc">Dolphin: 동양 40개 언어 + 중국어 22개 방언, 내장 모델(다운로드 불필요), 자동 언어 인식</string>
     <string name="asr_language">인식 언어</string>
-    <string name="asr_sensevoice_tag">중영일한월 · CPU 추론 · 약 229MB 다운로드</string>
+    <string name="asr_sensevoice_tag">40개 언어 + 22개 방언 · 내장 · 자동 언어 인식</string>
     <string name="asr_downloading">⬇ 다운로드 중</string>
     <string name="asr_ready">✓ 준비됨</string>
     <string name="asr_not_downloaded">다운로드 안 됨</string>
@@ -382,7 +382,7 @@
     <string name="subtitle_delay">자막 지연 보정</string>
     <string name="subtitle_ipd">VR 양안 시차/동공 거리 미세 조정</string>
     <string name="asr_section_title">실시간 자막 (엔진과 모델)</string>
-    <string name="asr_sensevoice_bundled">SenseVoice-Small · 내장 모델(다운로드 불필요) · 중영일한월 · 구두점 포함</string>
+    <string name="asr_sensevoice_bundled">Dolphin · 내장 모델(다운로드 불필요) · 40개 언어 + 22개 방언 · 자동 언어 인식</string>
     <string name="asr_model_ready_source">준비됨 · %1$s</string>
     <string name="asr_model_unavailable">모델을 사용할 수 없습니다 (내장본 누락, 다운로드로 대체 가능)</string>
     <string name="asr_update_model">모델 업데이트</string>
@@ -536,9 +536,9 @@
     <string name="asr_source_assets">내장 버전（assets）</string>
     <string name="asr_source_unavailable">사용 불가</string>
     <string name="asr_canceled">취소됨</string>
-    <string name="asr_preparing_download">SenseVoice 모델 다운로드 준비 중（약 %1$dMB）...</string>
-    <string name="asr_model_download_failed">SenseVoice 모델 다운로드 실패（재시도 가능）</string>
-    <string name="asr_model_ready">SenseVoice 모델 준비 완료</string>
+    <string name="asr_preparing_download">Dolphin 모델 다운로드 준비 중(약 %1$dMB)...</string>
+    <string name="asr_model_download_failed">Dolphin 모델 다운로드 실패(재시도 가능)</string>
+    <string name="asr_model_ready">Dolphin 모델 준비 완료</string>
     <string name="asr_vocab_download_failed">어휘 다운로드 실패（재시도 가능）</string>
     <string name="asr_model_unavailable_detail">모델 사용 불가: 내장 자산 누락 및 미다운로드（약 %1$dMB）</string>
     <string name="asr_init_failed">초기화 실패: %1$s</string>
