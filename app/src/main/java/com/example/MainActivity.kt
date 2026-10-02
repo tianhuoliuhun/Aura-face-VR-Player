@@ -50,6 +50,24 @@ class MainActivity : ComponentActivity(), LanguageManager.LanguageHost {
         }
     }
 
+    /**
+     * v2.1.210：**VR 手柄按键转发**（当前主要面向奇遇一体机的追光手柄）。
+     *
+     * 为什么放在 Activity 而不是 Compose 里：一体机手柄按键是**全局系统输入**，
+     * 走 `dispatchKeyEvent` 才能可靠拿到（Compose 的 `onKeyEvent` 需要焦点，
+     * 而播放界面里有大量可聚焦控件，焦点归属不稳定）。
+     *
+     * 流程：原生事件 → [VrGamepad] 归一化 → [VrGamepadBus] 投递给当前注册的界面。
+     * 未被映射的按键（返回 null）或无人消费时，一律交回 `super`，
+     * 避免吞掉系统级快捷键与音量键。
+     */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        com.example.vr.vrinput.VrGamepad.mapKeyEvent(event)?.let { action ->
+            if (com.example.vr.vrinput.VrGamepadBus.dispatch(action)) return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

@@ -60,6 +60,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import com.example.R
 import com.example.vr.huawei.HuaweiVrActivity
+import com.example.vr.vrinput.VrGamepadAction
+import com.example.vr.vrinput.VrGamepadBus
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import androidx.compose.material.icons.Icons
@@ -2615,6 +2617,58 @@ fun VRPlayerScreen(
     // 因为 currentGlSurfaceView 尚未被赋值），调用会静默失效。
     // 而 MutableState 是 remember 出来的同一实例，闭包读取永远拿到最新值。
     var recenterViewSignal by remember { mutableStateOf(0) }
+
+    // ===== v2.1.210：VR 手柄消费（奇遇一体机等）=====
+    // ⚠️ 用 SideEffect 而不是 DisposableEffect(Unit) 注册 handler：
+    //    DisposableEffect 只在 key 变化时重建，其闭包会**永久捕获**首次组合时的
+    //    isUiVisible / isSubtitleEnabled 等状态（本项目已在此栽过：
+    //    时间标记球的双击读到旧 currentPositionMs）。SideEffect 每次重组都跑，
+    //    handler 始终拿着**本次组合的最新闭包**。
+    // ⚠️ 清理放在独立的 DisposableEffect(Unit)：退出本界面必须置空，
+    //    否则按键会被已销毁的界面吃掉。
+    SideEffect {
+        VrGamepadBus.handler = { action ->
+            val p = playerInstance
+            when (action) {
+                VrGamepadAction.PLAY_PAUSE -> {
+                    if (p != null) {
+                        if (p.isPlaying) {
+                            p.pause(); isVideoPlaying = false
+                        } else {
+                            p.play(); isVideoPlaying = true
+                        }
+                    }
+                    true
+                }
+                // 陀螺仪/VR 方案：把画面重新摆到正前方
+                VrGamepadAction.RECENTER -> { recenterViewSignal++; true }
+                VrGamepadAction.TOGGLE_SUBTITLE -> { isSubtitleEnabled = !isSubtitleEnabled; true }
+                VrGamepadAction.TOGGLE_UI -> { isUiVisible = !isUiVisible; true }
+                // BACK：优先收起控制栏；已经收起时**不消费**，交回系统（触发返回）
+                VrGamepadAction.BACK -> {
+                    if (isUiVisible) { isUiVisible = false; true } else false
+                }
+                VrGamepadAction.SEEK_FORWARD -> {
+                    p?.let {
+                        val dur = if (it.duration > 0) it.duration else Long.MAX_VALUE
+                        it.seekTo((it.currentPosition + seekForwardStep * 1000L).coerceIn(0L, dur))
+                    }
+                    true
+                }
+                VrGamepadAction.SEEK_BACKWARD -> {
+                    p?.let {
+                        it.seekTo((it.currentPosition - seekBackwardStep * 1000L).coerceAtLeast(0L))
+                    }
+                    true
+                }
+                // 设置面板的开关状态变量较多，暂不接管（返回 false 交回系统）
+                VrGamepadAction.MENU -> false
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { VrGamepadBus.handler = null }
+    }
 
     LaunchedEffect(recenterViewSignal) {
         if (recenterViewSignal > 0) sensorManager?.recenter()
