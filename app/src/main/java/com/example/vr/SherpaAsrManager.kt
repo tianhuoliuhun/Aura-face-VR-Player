@@ -607,8 +607,15 @@ object SherpaAsrManager {
      */
     fun modelInfoFor(context: Context, langKey: String): Triple<String, Int, Boolean> {
         val cands = AsrExtModels.candidatesByKey(langKey)
-        // v2.1.208：内置模型已改为 Dolphin（SenseVoice 已移除），无扩展候选时显示 Dolphin
-        if (cands.isEmpty()) return Triple("Dolphin", 99, false)
+        // v2.1.208：内置模型已改为 Dolphin（SenseVoice 已移除），无扩展候选时显示 Dolphin。
+        // 体积给 0：Dolphin 是**随 APK 内置**的，不该让用户看到"需下载 99MB"。
+        if (cands.isEmpty()) return Triple("Dolphin", 0, false)
+        // ⚠️ Dolphin 已内置（assets 完好）→ 直接返回「内置、0MB、非扩展下载」三态，
+        //    否则会走到下面的 pick 分支、显示成需要下载的扩展模型（且体积 99MB），
+        //    与「开箱即用」的实际体验矛盾。
+        if (cands.any { it.modelType == "dolphin" && dolphinAssetAvailable(context) }) {
+            return Triple("Dolphin", 0, false)
+        }
         val pick = cands.firstOrNull { !isExtModelReady(context, it) } ?: cands.first()
         return Triple(pick.dirName, pick.sizeMb, true)
     }
@@ -704,6 +711,9 @@ object SherpaAsrManager {
             startModelDownload(context)
             return
         }
+        // ⚠️ v2.1.208：Dolphin 已内置到 assets —— 对该语言而言无需任何下载，
+        //    直接返回（否则 UI 的「下载模型」按钮会触发一次无意义的下载流程）。
+        if (cands.any { it.modelType == "dolphin" && dolphinAssetAvailable(context) }) return
         // 已有任一候选就绪 → 无需再下；否则下「第一个未就绪」的
         if (cands.any { isExtModelReady(context, it) }) return
         startExtModelDownload(context, cands.first())
