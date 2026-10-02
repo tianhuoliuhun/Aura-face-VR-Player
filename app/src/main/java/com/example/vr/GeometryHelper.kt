@@ -195,6 +195,90 @@ object GeometryHelper {
         )
     }
 
+    // ==========================================================================
+    // Dome Master（球幕 / 天文馆穹顶）—— v2.1.212
+    // --------------------------------------------------------------------------
+    // 用途：天文馆、球幕影院发行的**上半球**片源（画面是一个圆，圆外是黑的）。
+    //
+    // ## 为什么不复用 generateSphere(isHalfSphere = true)
+    // 那个 `isHalfSphere` 切的是**经度**一半（左半或右半球），服务于 VR_180；
+    // Dome 要的是**纬度**方向的上半球（天顶 → 赤道），两者正交、网格完全不同。
+    //
+    // ## UV 约定（Dome Master 主流是「上 Dome」）
+    //   u = 方位角 azimuth  0→1 对应 -180°→+180°（绕天顶一圈）
+    //   v = 天顶角          0→1 对应   90°(天顶)→ 0°(赤道)
+    //   ⚠️ 片源 v=0 在**顶部**（天顶），对应 lat=0；这个上下方向弄反会让画面
+    //      整个倒过来（天顶朝下），是最容易踩的坑。
+    //
+    // ## 圆形遮罩
+    // **不需要额外处理** —— Dome Master 片源本身就是「圆 + 四角黑」，
+    // 播放器只要正确映射上半球即可，圆外自然显示为黑。
+    //
+    // 参数：latBands 控制天顶→赤道的细分，lonBands 控制一周的细分。
+    // ==========================================================================
+    fun generateDomeSphere(
+        radius: Float,
+        latBands: Int = 32,
+        lonBands: Int = 64
+    ): Pair<FloatBuffer, FloatBuffer> {
+        val posList = FloatArrayList()
+        val texList = FloatArrayList()
+
+        // ⚠️ 三角剖分与 generateSphere 保持一致：每 quad 输出 6 个顶点
+        //    （P00,P10,P01 + P01,P10,P11），否则配 GL_TRIANGLES 会撕裂。
+        for (i in 0 until latBands) {
+            // lat: 0 = 天顶(北极) → π/2 = 赤道
+            val lat0 = (Math.PI / 2.0) * i.toDouble() / latBands
+            val lat1 = (Math.PI / 2.0) * (i + 1).toDouble() / latBands
+            val sinLat0 = sin(lat0).toFloat()
+            val cosLat0 = cos(lat0).toFloat()
+            val sinLat1 = sin(lat1).toFloat()
+            val cosLat1 = cos(lat1).toFloat()
+
+            for (j in 0 until lonBands) {
+                // lon: -π → +π（一周）
+                val lon0 = 2.0 * Math.PI * j.toDouble() / lonBands - Math.PI
+                val lon1 = 2.0 * Math.PI * (j + 1).toDouble() / lonBands - Math.PI
+                val sinLon0 = sin(lon0).toFloat()
+                val cosLon0 = cos(lon0).toFloat()
+                val sinLon1 = sin(lon1).toFloat()
+                val cosLon1 = cos(lon1).toFloat()
+
+                // 索引：0=P00(lat0,lon0) 1=P10(lat1,lon0) 2=P01(lat0,lon1) 3=P11(lat1,lon1)
+                val xs = floatArrayOf(
+                    sinLat0 * sinLon0, sinLat1 * sinLon0,
+                    sinLat0 * sinLon1, sinLat1 * sinLon1
+                )
+                val ys = floatArrayOf(cosLat0, cosLat1, cosLat0, cosLat1)
+                val zs = floatArrayOf(
+                    sinLat0 * cosLon0, sinLat1 * cosLon0,
+                    sinLat0 * cosLon1, sinLat1 * cosLon1
+                )
+                // v 归一化：0 在天顶（lat=0）→ 1 在赤道（lat=π/2）
+                val vs = floatArrayOf(
+                    i.toFloat() / latBands, (i + 1).toFloat() / latBands,
+                    i.toFloat() / latBands, (i + 1).toFloat() / latBands
+                )
+                val us = floatArrayOf(
+                    j.toFloat() / lonBands, j.toFloat() / lonBands,
+                    (j + 1).toFloat() / lonBands, (j + 1).toFloat() / lonBands
+                )
+                val order = intArrayOf(0, 1, 2, 2, 1, 3)
+                for (k in order) {
+                    posList.add(radius * xs[k])
+                    posList.add(radius * ys[k])
+                    posList.add(radius * zs[k])
+                    texList.add(us[k])
+                    texList.add(vs[k])
+                }
+            }
+        }
+        return Pair(
+            createFloatBuffer(posList.toArray()),
+            createFloatBuffer(texList.toArray())
+        )
+    }
+
     fun generateSphere(
         radius: Float,
         latBands: Int = 40,

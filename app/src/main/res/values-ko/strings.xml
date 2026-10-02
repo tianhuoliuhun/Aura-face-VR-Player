@@ -693,4 +693,6 @@
     <string name="projection_format">투영 모드</string>
 
     <string name="fisheye_fov">어안 FOV</string>
+
+    <string name="proj_dome">돔 (반구)</string>
 </resources>

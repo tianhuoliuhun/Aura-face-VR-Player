@@ -23,7 +23,18 @@ enum class ProjectionMode(val displayName: String, @StringRes val labelRes: Int,
      * EAC atlas 映射 —— 见 [GeometryHelper.generateEacSphere]。
      * 用 VR_360 播放 EAC 片源时，画面在 6 个面接缝处会明显错位/拉伸。
      */
-    EAC("EAC 立方体贴图", R.string.proj_eac, 5)
+    EAC("EAC 立方体贴图", R.string.proj_eac, 5),
+
+    /**
+     * **Dome Master（球幕 / 天文馆穹顶）** —— v2.1.212
+     *
+     * 上半球片源（天文馆、球幕影院发行）。画面本身是**一个圆 + 四角黑**，
+     * 播放器只需正确映射上半球，圆外自然显示为黑，无需额外做遮罩。
+     *
+     * 与 [VR_180] 的区别：[VR_180] 是**经度**方向的半球（等距柱状 180 度），
+     * 而 Dome 是**纬度**方向的上半球（天顶到赤道）—— 两者网格正交，不能复用。
+     */
+    DOME("球幕（半球）", R.string.proj_dome, 6)
 }
 
 enum class WarpMode(val displayName: String, @StringRes val labelRes: Int, val id: Int) {

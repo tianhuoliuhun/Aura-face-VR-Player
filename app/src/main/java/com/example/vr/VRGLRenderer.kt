@@ -455,6 +455,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var eacPositions: FloatBuffer? = null
     private var eacTexCoords: FloatBuffer? = null
     private var eacVertexCount = 0
+    // v2.1.212：Dome Master（球幕）—— 上半球网格
+    private var domePositions: FloatBuffer? = null
+    private var domeTexCoords: FloatBuffer? = null
+    private var domeVertexCount = 0
     private var sphere360VertexCount = 0
 
     private var sphere180Positions: FloatBuffer? = null
@@ -1219,7 +1223,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // Mirror horizontally correctly within each eye segment center:
             // VR_360 (2) and VR_180 (3) spheres are inherently flipped on the inside.
             // v2.1.210：5 = EAC（同样是球体内侧，翻转方向与 360/180 一致，一并纳入）
-            if (uProjectionMode == 2 || uProjectionMode == 3 || uProjectionMode == 5) {
+            if (uProjectionMode == 2 || uProjectionMode == 3 || uProjectionMode == 5 ||
+                uProjectionMode == 6) {
                 if (uIsMirrored == 1) {
                     // Naturally mirrored is already mirrored, so keep it as is
                 } else {
@@ -1718,6 +1723,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         eacPositions = eac.first
         eacTexCoords = eac.second
         eacVertexCount = eacPositions!!.capacity() / 3
+
+        // v2.1.212：Dome 网格（天顶 -> 赤道的上半球）
+        val dome = GeometryHelper.generateDomeSphere(1.0f, 32, 64)
+        domePositions = dome.first
+        domeTexCoords = dome.second
+        domeVertexCount = domePositions!!.capacity() / 3
 
         val sphere180 = GeometryHelper.generateSphere(1.0f, 40, 40, true)
         sphere180Positions = sphere180.first
@@ -2306,7 +2317,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // Setup standard eye look matrix looking inside the 3D dome / box
         if (projectionMode == ProjectionMode.VR_360 || projectionMode == ProjectionMode.VR_180 ||
-            projectionMode == ProjectionMode.BOX || projectionMode == ProjectionMode.EAC
+            projectionMode == ProjectionMode.BOX || projectionMode == ProjectionMode.EAC ||
+            projectionMode == ProjectionMode.DOME
         ) {
             // Looking inside a virtual sphere / box, eye is exactly at center origin (0, 0, 0)
             Matrix.setLookAtM(viewMatrix, 0, 
@@ -2367,7 +2379,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // user can still swipe to adjust the viewpoint while looking around with
         // the gyroscope (offset is applied to the world first, then the head pose).
         val isPanorama = projectionMode == ProjectionMode.VR_360 || projectionMode == ProjectionMode.VR_180 ||
-            projectionMode == ProjectionMode.BOX || projectionMode == ProjectionMode.EAC
+            projectionMode == ProjectionMode.BOX || projectionMode == ProjectionMode.EAC ||
+            projectionMode == ProjectionMode.DOME
         val gyroActive = isPanorama && gyroEnabled
 
 
@@ -2475,6 +2488,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         posBuf = pos
                         texBuf = tex
                         totalVertices = boxVertexCount
+                        drawMethod = GLES20.GL_TRIANGLES
+                    }
+                }
+            }
+            // v2.1.212：Dome —— 上半球网格
+            ProjectionMode.DOME -> {
+                domePositions?.let { pos ->
+                    domeTexCoords?.let { tex ->
+                        posBuf = pos
+                        texBuf = tex
+                        totalVertices = domeVertexCount
                         drawMethod = GLES20.GL_TRIANGLES
                     }
                 }

@@ -726,4 +726,6 @@
     <string name="projection_format">Projection</string>
 
     <string name="fisheye_fov">Fisheye FOV</string>
+
+    <string name="proj_dome">Dome (hemisphere)</string>
 </resources>

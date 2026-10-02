@@ -725,4 +725,6 @@
     <string name="projection_format">投影模式</string>
 
     <string name="fisheye_fov">鱼眼视场角</string>
+
+    <string name="proj_dome">球幕（半球）</string>
 </resources>
