@@ -777,11 +777,39 @@ object SherpaAsrManager {
         return cands.firstOrNull { isExtModelReady(context, it) }
     }
 
-    /** 按语言键下载对应模型（扩展语言 → 扩展模型；其余 → SenseVoice 兜底通道） */
+    /**
+     * 该语言**是否真的需要下载**模型。
+     *
+     * v2.1.232：新增。此前 UI 只要看到按钮就点得到，而 [startDownloadFor] 内部会静默
+     * 走到 SenseVoice 兜底通道 —— 于是用户反馈「选『自动』还是会下载 SenseVoice-Small」。
+     * 判据与 [startDownloadFor] 完全一致，供 UI 决定按钮要不要禁用。
+     */
+    fun isDownloadNeededFor(context: Context, langKey: String): Boolean {
+        val cands = AsrExtModels.candidatesByKey(langKey)
+        // 无扩展候选 → 走内置 Dolphin（随 APK），nothing to download
+        if (cands.isEmpty()) return false
+        // 候选里有内置 Dolphin 且 assets 完好 → 该语言开箱即用
+        if (cands.any { it.modelType == "dolphin" && dolphinAssetAvailable(context) }) return false
+        // 已有任一候选就绪 → 无需再下
+        return !cands.any { isExtModelReady(context, it) }
+    }
+
+    /**
+     * 按语言键下载对应模型（扩展语言 → 扩展模型；其余 → **无需下载**）。
+     *
+     * v2.1.232 修正：原先这里在「没有扩展候选」时调 [startModelDownload]，
+     * 而 [startModelDownload] 下载的是 **SenseVoice-Small** ——
+     * 但 SenseVoice 早在 v2.1.208 就被内置 Dolphin 取代、已不在识别链路上。
+     * 结果就是：选「自动」→ cands 为空 → 白白下载一个**根本用不上**的模型。
+     *
+     * 现在无候选时直接返回（`auto` / `zh` / `en` / `ja` / `ko` / `yue` 等内置语种
+     * 由随包的 Dolphin 覆盖）。SenseVoice 的下载通路 [startModelDownload] 本身保留，
+     * 需要替换/升级模型的场景仍可调用 —— **功能不删，只是不再被误触发**。
+     */
     fun startDownloadFor(context: Context, langKey: String) {
         val cands = AsrExtModels.candidatesByKey(langKey)
         if (cands.isEmpty()) {
-            startModelDownload(context)
+            Log.i(TAG, "startDownloadFor($langKey)：无扩展候选，由内置 Dolphin 覆盖，无需下载")
             return
         }
         // ⚠️ v2.1.208：Dolphin 已内置到 assets —— 对该语言而言无需任何下载，

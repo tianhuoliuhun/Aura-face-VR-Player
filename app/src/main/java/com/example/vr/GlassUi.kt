@@ -47,8 +47,19 @@ import com.kyant.backdrop.effects.vibrancy
  * | 观感 | 通透、边缘折射、立体 | **均匀糊开、柔和、平面** |
  */
 enum class GlassStyle {
-    /** iOS 11 磨砂玻璃：无折射 + 高模糊 + 低饱和，均匀柔和 */
+    /** iOS 11 磨砂玻璃：无折射 + 高模糊 + 低饱和，均匀柔和，带细颗粒噪点 */
     Frosted,
+
+    /**
+     * v2.1.232：**高斯模糊**（纯 Gaussian）。
+     *
+     * 与 [Frosted] 的区别 —— 磨砂是「模糊 + 噪点颗粒 + 淡白」（模拟粗糙表面漫射）；
+     * 高斯模糊则是**纯粹的均匀糊化 + 轻微提亮**，没有颗粒、不模拟材质，
+     * 观感更接近 iOS 的 `.systemUltraThinMaterial`：干净、通透、只有虚实之分。
+     *
+     * 半径也是两档里更大的（80dp），追求「背后的东西完全化作色块」。
+     */
+    Gaussian,
 
     /**
      * **Liquid Glass（iOS 13+ / iOS 26 取舍后的增强版）**
@@ -62,10 +73,12 @@ enum class GlassStyle {
 /** 主控栏 / 大面板：模糊半径（按风格分档） */
 val GlassPanelBlur: Dp = 22.dp
 private val GlassPanelBlurFrosted: Dp = 32.dp
+private val GlassPanelBlurGaussian: Dp = 80.dp
 
 /** 悬浮球 / 小控件：模糊半径（按风格分档） */
 val GlassSmallBlur: Dp = 11.dp
 private val GlassSmallBlurFrosted: Dp = 18.dp
+private val GlassSmallBlurGaussian: Dp = 40.dp
 
 /**
  * 玻璃面板（矩形/任意形状）。
@@ -87,10 +100,11 @@ fun Modifier.glassPanel(
     val blur = blurRadius ?: when (style) {
         GlassStyle.Liquid -> GlassPanelBlur
         // v2.1.221：40dp 过大。系统的 RenderEffect.createBlurEffect 在半径过大时
-        // 可能直接不绘制，表现为「模糊完全没生效」。降到 16dp（面板）/ 9dp（球体）实测可用。
+        // 可能直接不绘制，表现为「模糊完全没生效」。降到 32dp（面板）/ 18dp（球体）实测可用。
         GlassStyle.Frosted -> GlassPanelBlurFrosted
+        GlassStyle.Gaussian -> GlassPanelBlurGaussian
     }
-    // ⚠️ 只服务 Liquid 分支；磨砂的白底在它的分支里单独给（40%）。
+    // ⚠️ 只服务 Liquid 分支；磨砂的白底在它的分支里单独给。
     val overlay = tint ?: Color.White.copy(alpha = 0.05f)
 
     // ============ 磨砂：**纯毛玻璃** ============
@@ -102,6 +116,43 @@ fun Modifier.glassPanel(
     // 所以改用 backdrop 自己的 `blur()` effect（**只作用于 backdrop 层，UI 在其外不受影响**）。
     // 它的底层同样是系统的 `RenderEffect.createBlurEffect`（Android 12+），
     // 与 `Modifier.blur` 用的是同一条系统通路，只是作用域更精确。
+    // ============ v2.1.232：高斯模糊（Gaussian） ============
+    // 与 Frosted 同属「系统 RenderEffect 模糊家族」，差别在**要不要模拟材质**：
+    //   Frosted  = 模糊 + 噪点颗粒 + 淡白 —— 模拟粗糙表面漫射，手感「涩」
+    //   Gaussian = 只有模糊 + 轻微提亮 —— 不模拟材质，观感干净通透
+    if (style == GlassStyle.Gaussian) {
+        val gaussianSurface: DrawScope.() -> Unit = {
+            onDrawSurface()
+            // 极淡的提亮，让面板与背后的**同色**区域区分得出来 ——
+            // 背景是纯色时（详见下面 Frosted 分支里「backdrop 采不到 SurfaceView」的说明），
+            // 模糊本身是看不出来的，这点提亮 + 边框就是用户能感知到的全部。
+            drawRect(Color.White.copy(alpha = 0.10f))
+        }
+        if (!GlassCapability.supportsBlur) {
+            // 降级：给一个「看起来干净通透」的半透明底，不至于点了没反应
+            return this
+                .background(Color.White.copy(alpha = 0.12f), shape = shape())
+                .border(width = 1.dp, color = Color.White.copy(alpha = 0.28f), shape = shape())
+        }
+        return this
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = shape,
+                onDrawSurface = gaussianSurface,
+                effects = {
+                    // 只在 backdrop 上做**纯高斯模糊**：无 lens、无 vibrancy、无颗粒
+                    backdropBlur(blur.toPx())
+                    // 轻微提亮 + 去一点点饱和：让糊开后的画面显得「通透」而不是「发闷」
+                    colorControls(saturation = 0.95f, contrast = 1.0f, brightness = 1.08f)
+                },
+            )
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.28f),
+                shape = shape(),
+            )
+    }
+
     if (style == GlassStyle.Frosted) {
         // ============ v2.1.231：磨砂为什么"看起来没模糊" ============
         // 根因不是参数没调对，而是 **backdrop 里根本没有可被模糊的内容**：
@@ -222,7 +273,15 @@ fun Modifier.glassBall(
     backdrop = backdrop,
     shape = { CircleShape },
     style = style,
-    blurRadius = blurRadius,
+    // v2.1.232：球体必须用**控件专用**的小半径。
+    // 原先这里直接把 null 传给 glassPanel，于是小球拿到的是面板档（22/32dp）——
+    // 54dp 的球配 32dp 模糊，糊得完全没有形状，看起来就是一团色。
+    // GlassSmallBlur* 此前定义了却从未被用到，原因就在这行。
+    blurRadius = blurRadius ?: when (style) {
+        GlassStyle.Liquid -> GlassSmallBlur
+        GlassStyle.Frosted -> GlassSmallBlurFrosted
+        GlassStyle.Gaussian -> GlassSmallBlurGaussian
+    },
     onDrawSurface = onDrawSurface,
 )
 

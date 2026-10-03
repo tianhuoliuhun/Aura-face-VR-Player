@@ -755,5 +755,11 @@
 
     <!-- v2.1.217：玻璃风格 4 档 -->
     <string name="theme_frosted_glass">磨砂</string>
+<!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
+    <string name="theme_gaussian_blur">高斯模糊</string>
+    <string name="decoder_ijk">IJK 解碼器</string>
+    <string name="decoder_params_section">解碼器參數（保留）</string>
+    <string name="decoder_params_placeholder">該解碼核心尚未接入，此處為後續調整預留（緩衝區、探測尺寸、硬體解碼策略等）。</string>
+    <string name="asr_no_download_needed">已內建</string>
     <string name="theme_liquid_glass_26">iOS26 玻璃</string>
 </resources>

@@ -62,9 +62,28 @@ enum class StereoMode(val displayName: String, @StringRes val labelRes: Int, val
     TAB("3D 上下立体 (Top-Bottom)", R.string.stereo_tab_full, 2)
 }
 
+/**
+ * 解码器内核。
+ *
+ * ⚠️ v2.1.232 现状：**只有 EXO 真正接通**。IJK / MPV 是**预留位** ——
+ * 枚举与设置 UI 都已就位（「解码器参数（预留）」区块也留好了），
+ * 后续接入只需实现对应 Player 构造 + 把 IMPLEMENTED 加进来，不用再改 UI。
+ *
+ * 选择逻辑见 `VRPlayerScreen`（未实现的内核会被置灰，且读取存档时回落为 EXO）。
+ */
 enum class DecoderEngine(val displayName: String, @StringRes val labelRes: Int, val tag: String, val id: Int) {
     EXO("EXO 解码器", R.string.decoder_exo, "Google ExoPlayer 标准高清引擎", 0),
-    MPV("MPV 解码器", R.string.decoder_mpv, "MPV FFmpeg 万能解码内核", 1)
+    IJK("IJK 解码器", R.string.decoder_ijk, "Bilibili ijkplayer（基于 FFmpeg）", 2),
+    MPV("MPV 解码器", R.string.decoder_mpv, "MPV FFmpeg 万能解码内核", 1);
+
+    /**
+     * 该内核是否已经接通播放链路。
+     *
+     * 写在这里而不是散落在 UI 里：UI 的置灰判断、prefs 读取时的回落校正
+     * 都从这里取值 —— **新增内核时只需改这一处**。
+     */
+    val isImplemented: Boolean
+        get() = this == EXO
 }
 
 data class MediaItem(

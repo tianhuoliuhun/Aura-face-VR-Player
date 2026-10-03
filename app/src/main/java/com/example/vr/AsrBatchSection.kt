@@ -126,23 +126,39 @@ fun BatchTranscribeSection(
                         )
                     }
                     if (!isDownloading) {
-                        // 内置模型已就绪时这里作为「更新/替换模型」入口保留
+                        // v2.1.232：**先问「到底要不要下载」**，不再无条件给一个可点按钮。
+                        // 此前「自动」（以及任一内置语种）走到这里会触发 SenseVoice-Small 的
+                        // 下载流程 —— 但 SenseVoice 早在 v2.1.208 就被内置 Dolphin 取代了，
+                        // 下完也用不上（用户反馈的原话：「自动还是会下载 smallVocie」）。
+                        // 下载通路本身保留：确实需要下载的扩展语言按钮照常可用。
+                        val needDownload = SherpaAsrManager.isDownloadNeededFor(context, sherpaLangCode)
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(
-                                    if (modelReady) Color.White.copy(alpha = 0.12f)
-                                    else accentColor.copy(alpha = 0.85f)
+                                    when {
+                                        !needDownload -> Color.White.copy(alpha = 0.06f)
+                                        modelReady -> Color.White.copy(alpha = 0.12f)
+                                        else -> accentColor.copy(alpha = 0.85f)
+                                    }
                                 )
-                                .clickable {
+                                .clickable(enabled = needDownload) {
                                     onUserInteraction()
                                     SherpaAsrManager.startDownloadFor(context, sherpaLangCode)
                                 }
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                if (modelReady) stringResource(R.string.asr_update_model) else stringResource(R.string.asr_download_model),
-                                color = if (modelReady) Color.White.copy(alpha = 0.85f) else accentOnColor,
+                                when {
+                                    !needDownload -> stringResource(R.string.asr_no_download_needed)
+                                    modelReady -> stringResource(R.string.asr_update_model)
+                                    else -> stringResource(R.string.asr_download_model)
+                                },
+                                color = when {
+                                    !needDownload -> Color.White.copy(alpha = 0.35f)
+                                    modelReady -> Color.White.copy(alpha = 0.85f)
+                                    else -> accentOnColor
+                                },
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -177,98 +193,27 @@ fun BatchTranscribeSection(
                 }
             }
 
-            // ===== 识别语言（SenseVoice 内置语言 + 扩展语言）=====
-            // v2.0.208：分组收纳（与设置面板同一套逻辑）——
-            //   8 语区折叠（默认只展开「常用语言」）；重复语言分开标（英语1/2/3，点谁用谁）；
-            //   选中判定用「语言@模型」uid 精确匹配，杜绝同语言多 chip 同时高亮。
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
-
-                var collapsedGroups by remember {
-                    mutableStateOf(
-                        AsrExtModels.AsrLangGroup.values()
-                            .filter { it != AsrExtModels.AsrLangGroup.COMMON }
-                            .map { it.name }
-                            .toSet()
-                    )
-                }
-                // 当前生效模型统一解析一次（与设置面板的选中判定同一套逻辑）
-                val activeModelId = SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName ?: "builtin"
-
-                // ⚠️ groupedChips 在 SherpaAsrManager（不在 AsrExtModels）——本项目已在此栽过两次
-                SherpaAsrManager.groupedChips().forEach { (group, langs) ->
-                    val gCollapsed = group.name in collapsedGroups
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                            .clickable {
-                                collapsedGroups = if (gCollapsed) collapsedGroups - group.name
-                                else collapsedGroups + group.name
-                                onUserInteraction()
-                            }
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            stringResource(group.labelRes),
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            "${langs.size}  ${if (gCollapsed) "▶" else "▼"}",
-                            color = Color.White.copy(alpha = 0.5f),
-                            fontSize = 8.sp
-                        )
-                    }
-                    if (!gCollapsed) {
-                        langs.chunked(4).forEach { rowLangs ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                rowLangs.forEach { lang ->
-                                    val code = lang.code
-                                    val label = stringResource(lang.labelResId) +
-                                        (lang.suffix?.let { " $it" } ?: "")
-                                    // ⚠️ uid 精确匹配：语言@模型（同语言多 chip 不能同时高亮）
-                                    val sel = "$code@${lang.modelId ?: "builtin"}" == "$sherpaLangCode@$activeModelId"
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (sel) accentColor.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.08f))
-                                            .clickable {
-                                                onUserInteraction()
-                                                // ⚠️ 顺序不能反：先切语言、再选模型
-                                                onSherpaLangCodeChange(code)
-                                                lang.modelId?.let { mId ->
-                                                    SherpaAsrManager.setModelChoice(context, code, mId)
-                                                }
-                                            }
-                                            .padding(vertical = 4.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            label,
-                                            color = if (sel) accentOnColor else Color.White.copy(alpha = 0.8f),
-                                            fontSize = 8.sp,
-                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                                repeat(4 - rowLangs.size) {
-                                    Box(modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // 当前生效模型统一解析一次（chips 选中判定要用）
+            val activeModelId = SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName ?: "builtin"
+            // ===== 识别语言 =====
+            // v2.1.232：改用与设置面板**同一份** AsrLanguageChips。
+            // 此前这里是另一份独立副本，两个 bug 都源自它：
+            //   1) `lang.modelId?.let{}` 会跳过内置候选 → 内置语言选不中（v2.1.226 的同类问题）
+            //   2) 仍用旧的 7 语区分组，没跟上 v2.1.231 的四项分类
+            Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+            AsrLanguageChips(
+                context = context,
+                sherpaLangCode = sherpaLangCode,
+                activeModelId = activeModelId,
+                accentColor = accentColor,
+                accentOnColor = accentOnColor,
+                compact = true,
+                onPick = { code, modelId ->
+                    onSherpaLangCodeChange(code)
+                    SherpaAsrManager.setModelChoice(context, code, modelId)
+                },
+                onUserInteraction = onUserInteraction
+            )
             Text(
                 stringResource(R.string.asr_language_hint),
                 color = Color.White.copy(alpha = 0.4f),

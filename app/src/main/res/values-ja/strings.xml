@@ -713,5 +713,11 @@
 
     <!-- v2.1.217：玻璃风格 4 档 -->
     <string name="theme_frosted_glass">フ ロ ス ト</string>
+<!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
+    <string name="theme_gaussian_blur">ガウスぼかし</string>
+    <string name="decoder_ijk">IJK デコーダ</string>
+    <string name="decoder_params_section">デコーダ設定（予定）</string>
+    <string name="decoder_params_placeholder">このデコーダはまだ組み込まれていません。後で調整できる項目（バッファ、probe サイズ、ハードウェアデコード設定など）のための予約枠です。</string>
+    <string name="asr_no_download_needed">内蔵済み</string>
     <string name="theme_liquid_glass_26">iOS26 ガラス</string>
 </resources>

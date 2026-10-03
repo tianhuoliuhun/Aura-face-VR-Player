@@ -746,5 +746,11 @@
 
     <!-- v2.1.217：玻璃风格 4 档 -->
     <string name="theme_frosted_glass">Frosted</string>
+<!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
+    <string name="theme_gaussian_blur">Gaussian blur</string>
+    <string name="decoder_ijk">IJK decoder</string>
+    <string name="decoder_params_section">Decoder options (reserved)</string>
+    <string name="decoder_params_placeholder">This backend is not wired up yet; the slot is reserved for future tuning (buffers, probe size, hardware decoding policy, etc.).</string>
+    <string name="asr_no_download_needed">Built-in</string>
     <string name="theme_liquid_glass_26">iOS26 Glass</string>
 </resources>
