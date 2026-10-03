@@ -2,6 +2,7 @@ package com.example.vr
 
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
@@ -96,6 +97,20 @@ fun Modifier.glassPanel(
     // 它的底层同样是系统的 `RenderEffect.createBlurEffect`（Android 12+），
     // 与 `Modifier.blur` 用的是同一条系统通路，只是作用域更精确。
     if (style == GlassStyle.Frosted) {
+        // v2.1.229：**澎湃 OS / MIUI 降级**。
+        // HyperOS 对实时模糊有硬件分级：被屏蔽的机型上 RenderEffect 会失效或抛异常
+        // （社区实测报 "nativePtr is null"），表现就是「选了磨砂但什么都没发生」。
+        // 探测到不可用时退化为「半透明白底 + 轻描边」——
+        // 至少让用户看到这里有一层玻璃，而不是点完毫无反应。
+        if (!GlassCapability.supportsBlur) {
+            return this
+                .background(Color.White.copy(alpha = 0.18f), shape = shape())
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.22f),
+                    shape = shape(),
+                )
+        }
         return this
             .drawBackdrop(
                 backdrop = backdrop,
@@ -183,3 +198,59 @@ private fun Modifier.drawWithContentOverlay(color: Color): Modifier =
         drawContent()
         drawRect(color)
     }
+
+/**
+ * v2.1.229：**澎湃 OS（HyperOS）/ MIUI 的模糊能力探测与降级**。
+ *
+ * ## 为什么需要这个
+ * 实测与社区反馈（Haze 库 issue、小米官方说明）表明 HyperOS 对实时模糊有**硬件分级**：
+ *   - 仅部分芯片支持 real-time blur（骁龙 8+ Gen1 及以上 / 天玑 9200+ 及以上）
+ *   - 被分级屏蔽的机型上，`RenderEffect.createBlurEffect()` 会**抛 "nativePtr is null"**
+ *     或**静默失效** —— 表现就是「设置了模糊但完全看不到效果」
+ *   - 动态调整模糊半径时更容易触发（我们在切换玻璃风格时正是动态改半径）
+ *
+ * ## 探测方式
+ * 直接尝试创建一个最小半径的 RenderEffect 并立即释放：
+ * 成功 → 本机可用；抛异常 → 降级。
+ * 比读 Build.MODEL 白名单可靠（HyperOS 的分级随版本变化，硬编码名单会过期）。
+ *
+ * ## 降级策略
+ * 不支持模糊时，磨砂档退化为**半透明白 + 轻微描边**（而不是什么都不做），
+ * 至少让用户看到「这里有一层玻璃」，而不是「点了没反应」。
+ */
+object GlassCapability {
+
+    /**
+     * 本机是否支持 RenderEffect 高斯模糊。
+     *
+     * ⚠️ 用 `by lazy` 缓存：探测本身要创建一次 RenderEffect，
+     * 不该每帧或每次组合都做。
+     */
+    val supportsBlur: Boolean by lazy {
+        if (android.os.Build.VERSION.SDK_INT < 31) return@lazy false
+        try {
+            // 最小成本的探测：建一个 1px 半径的效果再丢了
+            val effect = android.graphics.RenderEffect.createBlurEffect(
+                1f, 1f, android.graphics.Shader.TileMode.CLAMP
+            )
+            // 触发一次 native 侧分配，确保不是"延迟到绘制时才失败"
+            effect.hashCode()
+            true
+        } catch (t: Throwable) {
+            // HyperOS 被分级屏蔽的机型会在这里抛 nativePtr is null
+            android.util.Log.w(
+                "GlassCapability",
+                "本机不支持 RenderEffect 模糊，玻璃效果将降级为半透明底：${t.message}"
+            )
+            false
+        }
+    }
+
+    /** 是否运行在小米系 ROM 上（HyperOS / MIUI）—— 仅用于诊断日志 */
+    val isXiaomiRom: Boolean by lazy {
+        val brand = android.os.Build.BRAND.lowercase()
+        val manufacturer = android.os.Build.MANUFACTURER.lowercase()
+        brand.contains("xiaomi") || brand.contains("redmi") ||
+            brand.contains("poco") || manufacturer.contains("xiaomi")
+    }
+}
