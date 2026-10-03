@@ -5,7 +5,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -82,30 +81,34 @@ fun Modifier.glassPanel(
         GlassStyle.Liquid -> GlassPanelBlur
         GlassStyle.Frosted -> GlassPanelBlurFrosted
     }
-    // 磨砂需要更"实"的半透明底，Liquid 只留极轻的一层
-    val overlay = tint ?: when (style) {
-        GlassStyle.Liquid -> Color.White.copy(alpha = 0.05f)
-        GlassStyle.Frosted -> Color.White.copy(alpha = 0.20f)
-    }
+    // ⚠️ 只服务 Liquid 分支；磨砂的白底在它的分支里单独给（40%）。
+    val overlay = tint ?: Color.White.copy(alpha = 0.05f)
 
-    // ============ 磨砂：**完全不同的管线** ============
-    // v2.1.219：用户要求「调用系统高斯模糊，去除高亮折射等玻璃特性」。
-    // 磨砂不是"弱化的 Liquid Glass"，而是**纯粹的毛玻璃**，所以：
-    //   ① backdrop **只负责采样背后的内容**，不施加任何 effects（无 lens / 无 vibrancy / 无 colorFilter）；
-    //   ② 模糊交给**系统高斯模糊** `Modifier.blur`（底层即 RenderEffect.createBlurEffect）；
-    //   ③ **不画任何边框** —— 玻璃高光/镜面折射是 Liquid Glass 的特征，磨砂不该有。
+    // ============ 磨砂：**纯毛玻璃** ============
+    // v2.1.220 用户反馈「UI 没有了只剩模糊」——根因是层级用错了：
+    // `Modifier.blur` 渲染在**离屏层**上，作用范围是它之后的**整棵子树**，
+    // 因此面板里的文字/图标（都是子 Composable）会被一起模糊掉。
+    //
+    // 正确做法：模糊必须作用在「采样到的背景」上，而不是「自己这棵树」——
+    // 所以改用 backdrop 自己的 `blur()` effect（**只作用于 backdrop 层，UI 在其外不受影响**）。
+    // 它的底层同样是系统的 `RenderEffect.createBlurEffect`（Android 12+），
+    // 与 `Modifier.blur` 用的是同一条系统通路，只是作用域更精确。
     if (style == GlassStyle.Frosted) {
         return this
             .drawBackdrop(
                 backdrop = backdrop,
                 shape = shape,
                 onDrawSurface = onDrawSurface,
-                effects = {},                 // 空 effects：只采样，不做玻璃特效
+                effects = {
+                    // 只做高斯模糊，**无 lens / vibrancy / colorControls** —— 纯毛玻璃
+                    backdropBlur(blur.toPx())
+                },
             )
-            // 系统高斯模糊。⚠️ Modifier.blur 依赖 Android 12+(API 31) 的 RenderEffect，
-            // 低版本会静默不生效（Compose 已做版本检查），因此这里不必再手动判断 SDK。
-            .blur(blur)
-            .drawWithContentOverlay(overlay)
+            // v2.1.220：白底由 20% 提到 **40%**（用户反馈「太透」）——
+            // 磨砂玻璃的灵魂是「把背景彻底糊掉」，透底就失去了磨砂的意义。
+            .drawWithContentOverlay(
+                tint ?: Color.White.copy(alpha = 0.40f)
+            )
     }
 
     // ============ Liquid Glass：折射 + 增饱和 + 边缘高光 ============
