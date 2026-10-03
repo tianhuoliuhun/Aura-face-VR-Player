@@ -512,7 +512,7 @@
     <string name="lang_es">西班牙語</string>
     <string name="lang_ru">俄語</string>
     <string name="asr_lang_auto">自動</string>
-    <string name="asr_lang_zh">中文</string>
+    <string name="asr_lang_zh">中文1</string>
     <string name="asr_lang_en">英文</string>
     <string name="asr_lang_ja">日文</string>
     <string name="asr_lang_ko">韓文</string>
@@ -687,8 +687,8 @@
     <string name="asr_lang_ps">普什圖語</string>
     <string name="asr_lang_kab">卡拜爾語</string>
     <string name="asr_lang_mn">蒙古語</string>
-    <string name="asr_sub_zh_cn">國語</string>
-    <string name="asr_sub_zh_tw">台灣國語</string>
+    <string name="asr_sub_zh_cn">中文2</string>
+    <string name="asr_sub_zh_tw">中國臺灣</string>
     <string name="asr_sub_zh_wu">吳語</string>
     <string name="asr_sub_zh_sichuan">四川話</string>
     <string name="asr_sub_zh_shanxi">山西話</string>

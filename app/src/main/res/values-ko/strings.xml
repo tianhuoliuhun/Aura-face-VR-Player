@@ -470,7 +470,7 @@
     <string name="lang_es">스페인어</string>
     <string name="lang_ru">러시아어</string>
     <string name="asr_lang_auto">자동</string>
-    <string name="asr_lang_zh">중국어</string>
+    <string name="asr_lang_zh">중국어 1</string>
     <string name="asr_lang_en">영어</string>
     <string name="asr_lang_ja">일본어</string>
     <string name="asr_lang_ko">한국어</string>
@@ -645,8 +645,8 @@
     <string name="asr_lang_ps">파슈토어</string>
     <string name="asr_lang_kab">카빌어</string>
     <string name="asr_lang_mn">몽골어</string>
-    <string name="asr_sub_zh_cn">보통화</string>
-    <string name="asr_sub_zh_tw">대만 중국어</string>
+    <string name="asr_sub_zh_cn">중국어 2</string>
+    <string name="asr_sub_zh_tw">중국 대만</string>
     <string name="asr_sub_zh_wu">우어</string>
     <string name="asr_sub_zh_sichuan">쓰촨어</string>
     <string name="asr_sub_zh_shanxi">산시어</string>

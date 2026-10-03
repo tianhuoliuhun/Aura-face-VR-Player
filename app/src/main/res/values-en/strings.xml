@@ -503,7 +503,7 @@
     <string name="lang_es">Spanish</string>
     <string name="lang_ru">Russian</string>
     <string name="asr_lang_auto">Auto</string>
-    <string name="asr_lang_zh">Chinese</string>
+    <string name="asr_lang_zh">Chinese 1</string>
     <string name="asr_lang_en">English</string>
     <string name="asr_lang_ja">Japanese</string>
     <string name="asr_lang_ko">Korean</string>
@@ -678,8 +678,8 @@
     <string name="asr_lang_ps">Pashto</string>
     <string name="asr_lang_kab">Kabyle</string>
     <string name="asr_lang_mn">Mongolian</string>
-    <string name="asr_sub_zh_cn">Mandarin</string>
-    <string name="asr_sub_zh_tw">Taiwanese Mandarin</string>
+    <string name="asr_sub_zh_cn">Chinese 2</string>
+    <string name="asr_sub_zh_tw">Taiwan, China</string>
     <string name="asr_sub_zh_wu">Wu Chinese</string>
     <string name="asr_sub_zh_sichuan">Sichuanese</string>
     <string name="asr_sub_zh_shanxi">Shanxi dialect</string>
