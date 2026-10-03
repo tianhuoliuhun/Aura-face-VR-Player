@@ -75,7 +75,11 @@ object SherpaAsrManager {
     private const val SVC_DIR_NAME = "sense-voice-cpu"
     private const val SVC_MODEL = "model.int8.onnx"
     private const val SVC_TOKENS = "tokens.txt"
-    private const val SVC_MODEL_MB = 229
+    // v2.1.223：原值 229 是 **SenseVoice-Small** 的体积，属 SenseVoice 时代的残留
+    //（该模型的 assets 已随 v2.1.214 移除）。此常量目前只用于「准备下载 / 不可用详情」
+    //两处兜底提示，把用户看到的体积数字改成当前真实内置模型（Dolphin 99MB），
+    // 避免继续显示一个早已不存在的 229MB。
+    private const val SVC_MODEL_MB = 99
     private const val SVC_MODEL_URL =
         "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx"
     private const val SVC_TOKENS_URL =
@@ -636,7 +640,9 @@ object SherpaAsrManager {
     )
 
     /** SenseVoice 内置覆盖的语言（这些语言的候选列表最前面会带一条内置） */
-    private val BUILTIN_LANGS = setOf("zh", "en", "ja", "ko", "yue")
+    // v2.1.223：补上 "auto"。此前漏了它 → 「自动」语言走不到内置分支，
+    // 在「选择模型」里被当成需要下载的扩展模型（显示 ~100MB），但它其实是内置的。
+    private val BUILTIN_LANGS = setOf("auto", "zh", "en", "ja", "ko", "yue")
 
     private fun choicePrefs(context: Context) =
         context.getSharedPreferences("vr_player_prefs", Context.MODE_PRIVATE)
@@ -671,10 +677,22 @@ object SherpaAsrManager {
      */
     fun modelCandidatesFor(context: Context, langKey: String): List<AsrModelCandidate> {
         val out = mutableListOf<AsrModelCandidate>()
+        // v2.1.223：Dolphin 随 APK 内置（体积 0、随包可用），因此作为「内置项」列出。
+        // ⚠️ 原来这里硬编码 `true`（意为"需下载"），是 SenseVoice 时代的残留 ——
+        //    内置化之后必须改为 assets 的实际可用性，否则 UI 会显示"需下载"却其实已内置。
         if (langKey in BUILTIN_LANGS) {
-            out += AsrModelCandidate("builtin", "Dolphin", 0, true)
+            out += AsrModelCandidate(
+                id = "builtin",
+                label = "Dolphin",
+                sizeMb = 0,
+                builtin = dolphinAssetAvailable(context)
+            )
         }
+        // ⚠️ 已内置（assets 完好）时不再把 Dolphin 作为「扩展下载项」重复列出 ——
+        //    否则同一语言会出现两条 Dolphin（一条 0MB 内置、一条 100MB 需下载），自相矛盾。
+        val dolphinBundled = dolphinAssetAvailable(context)
         AsrExtModels.candidatesByKey(langKey).forEach { ext ->
+            if (ext.modelType == "dolphin" && dolphinBundled) return@forEach
             out += AsrModelCandidate(ext.dirName, ext.dirName, ext.sizeMb, false)
         }
         return out
