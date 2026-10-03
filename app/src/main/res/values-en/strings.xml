@@ -738,4 +738,8 @@
     <string name="lut_jp_fair_skin">Japanese Fair</string>
     <string name="lut_cold_pale_skin">Cold Pale</string>
     <string name="lut_natural_makeup">Natural Makeup</string>
+
+    <!-- v2.1.217：玻璃风格 4 档 -->
+    <string name="theme_frosted_glass">Frosted</string>
+    <string name="theme_liquid_glass_26">iOS26 Glass</string>
 </resources>

@@ -705,4 +705,8 @@
     <string name="lut_jp_fair_skin">日系白皙</string>
     <string name="lut_cold_pale_skin">クールホワイト</string>
     <string name="lut_natural_makeup">ナチュラルメイク</string>
+
+    <!-- v2.1.217：玻璃风格 4 档 -->
+    <string name="theme_frosted_glass">フ ロ ス ト</string>
+    <string name="theme_liquid_glass_26">iOS26 ガラス</string>
 </resources>

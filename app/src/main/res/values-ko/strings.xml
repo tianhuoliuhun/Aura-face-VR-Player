@@ -705,4 +705,8 @@
     <string name="lut_jp_fair_skin">일본식 맑은 피부</string>
     <string name="lut_cold_pale_skin">쿨 팰 스킨</string>
     <string name="lut_natural_makeup">내추럴 메이크업</string>
+
+    <!-- v2.1.217：玻璃风格 4 档 -->
+    <string name="theme_frosted_glass">프로스티드</string>
+    <string name="theme_liquid_glass_26">iOS26 글래스</string>
 </resources>

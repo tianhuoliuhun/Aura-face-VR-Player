@@ -2726,7 +2726,13 @@ fun VRPlayerScreen(
             .testTag("player_root_container")
     ) {
         // Liquid glass backdrop：捕获视频层 + 主题底色，供玻璃面板绘制（Backdrop 库，Android 12+）
-        val isLiquidGlass = glassMode == 1 && Build.VERSION.SDK_INT >= 31
+        val isLiquidGlass = glassMode > 0 && Build.VERSION.SDK_INT >= 31
+        // v2.1.217：玻璃风格 —— 0=纯色(无 backdrop) / 1=Liquid(iOS13+) / 2=磨砂(iOS11) / 3=iOS26
+        val glassStyle: GlassStyle = when (glassMode) {
+            2 -> GlassStyle.Frosted
+            3 -> GlassStyle.Liquid26
+            else -> GlassStyle.Liquid
+        }
         val liquidBackdrop = rememberLayerBackdrop {
             drawRect(ThemeBgColor)
             drawContent()
@@ -3292,16 +3298,11 @@ fun VRPlayerScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
                             .then(
-                                if (isLiquidGlass) Modifier.drawBackdrop(
+                                if (isLiquidGlass) Modifier.glassPanel(
                                     backdrop = liquidBackdrop,
                                     shape = { RoundedCornerShape(24.dp) },
-                                    effects = {
-                                        vibrancy()
-                                        blur(20f.dp.toPx())
-                                        if (Build.VERSION.SDK_INT >= 33) {
-                                            lens(14f.dp.toPx(), 24f.dp.toPx())
-                                        }
-                                    },
+                                    style = glassStyle,
+                                    blurRadius = 20.dp,
                                     onDrawSurface = { drawRect(ThemePanelBgColor.copy(alpha = 0.55f)) }
                                 ) else Modifier
                             )
@@ -4120,7 +4121,13 @@ fun VRPlayerScreen(
                                         fontSize = 12.sp
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        listOf(0 to stringResource(R.string.theme_solid), 1 to stringResource(R.string.theme_liquid_glass)).forEach { (m, label) ->
+                                        listOf(
+                                            0 to stringResource(R.string.theme_solid),
+                                            1 to stringResource(R.string.theme_liquid_glass),
+                                            // v2.1.217：新增磨砂（iOS 11）与 iOS26 Liquid Glass 两档
+                                            2 to stringResource(R.string.theme_frosted_glass),
+                                            3 to stringResource(R.string.theme_liquid_glass_26),
+                                        ).forEach { (m, label) ->
                                             val sel = glassMode == m
                                             Box(
                                                 modifier = Modifier
@@ -6569,16 +6576,10 @@ BatchTranscribeSection(
                     )
                     .then(
                         // v88：玻璃主题（glassMode=1 且 Android 12+）下悬浮球使用液态玻璃材质
-                        if (isLiquidGlass) Modifier.drawBackdrop(
+                        if (isLiquidGlass) Modifier.glassBall(
                             backdrop = liquidBackdrop,
-                            shape = { CircleShape },
-                            effects = {
-                                vibrancy()
-                                blur(12f.dp.toPx())
-                                if (Build.VERSION.SDK_INT >= 33) {
-                                    lens(8f.dp.toPx(), 16f.dp.toPx())
-                                }
-                            },
+                            style = glassStyle,
+                            blurRadius = 12.dp,
                             onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
                         ) else Modifier
                     )
@@ -6766,16 +6767,10 @@ BatchTranscribeSection(
                 },
                 onFeedback = { seekHudText = it },
                 isLiquidGlass = isLiquidGlass,
-                glassModifier = if (isLiquidGlass) Modifier.drawBackdrop(
+                glassModifier = if (isLiquidGlass) Modifier.glassBall(
                     backdrop = liquidBackdrop,
-                    shape = { CircleShape },
-                    effects = {
-                        vibrancy()
-                        blur(12f.dp.toPx())
-                        if (Build.VERSION.SDK_INT >= 33) {
-                            lens(8f.dp.toPx(), 16f.dp.toPx())
-                        }
-                    },
+                    style = glassStyle,
+                    blurRadius = 12.dp,
                     onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
                 ) else Modifier
             )
@@ -6803,16 +6798,10 @@ BatchTranscribeSection(
                 },
                 onFeedback = { seekHudText = it },
                 isLiquidGlass = isLiquidGlass,
-                glassModifier = if (isLiquidGlass) Modifier.drawBackdrop(
+                glassModifier = if (isLiquidGlass) Modifier.glassBall(
                     backdrop = liquidBackdrop,
-                    shape = { CircleShape },
-                    effects = {
-                        vibrancy()
-                        blur(12f.dp.toPx())
-                        if (Build.VERSION.SDK_INT >= 33) {
-                            lens(8f.dp.toPx(), 16f.dp.toPx())
-                        }
-                    },
+                    style = glassStyle,
+                    blurRadius = 12.dp,
                     onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
                 ) else Modifier
             )

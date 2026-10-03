@@ -1,0 +1,197 @@
+package com.example.vr
+
+import android.os.Build
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+
+/**
+ * v2.1.217：**玻璃效果的统一实现**，支持两种风格。
+ *
+ * ## 为什么要抽这个工厂
+ * 此前 7 处 `drawBackdrop` 各写一遍 `effects { vibrancy(); blur(...) }`，问题有三：
+ * 1. **参数散落**：主控栏 blur 20dp、悬浮球 12dp，想统一调一次得改 7 个地方；
+ * 2. **欠配**：只用了 `vibrancy() + blur()`，而库还提供 `lens()`（透镜/折射）、
+ *    `colorControls()`（饱和/对比/亮度）等 —— 没用上这些，玻璃就只是「模糊的半透明板」；
+ * 3. **改不统一**：调参时极易漏改某几处。
+ *
+ * ## 两种风格的差别（不是换个名字，是参数与效果都相反）
+ * | | [Liquid]（iOS 13+ Liquid Glass）| [Frosted]（iOS 11 磨砂）|
+ * |---|---|---|
+ * | 透镜折射 `lens` | ✅ 有（边缘把内容"掰弯"）| ❌ **无**（iOS 11 没有这效果）|
+ * | 饱和度 | 1.35（通透）| **0.88（略去色，磨砂发灰）** |
+ * | 模糊半径 | 22dp | **30dp（更强）** |
+ * | vibrancy | ✅ | ❌ 关闭 |
+ * | 底色 | 极轻白 5% | **半透明白 12%**（更实、有实体感）|
+ * | 观感 | 通透、边缘折射、立体 | **均匀糊开、柔和、平面** |
+ */
+enum class GlassStyle {
+    /** iOS 11 磨砂玻璃：无折射 + 高模糊 + 低饱和，均匀柔和 */
+    Frosted,
+
+    /** iOS 13+ Liquid Glass：透镜折射 + 高饱和，通透立体 */
+    Liquid,
+
+    /**
+     * iOS 26 Liquid Glass（2025 起的系统设计语言）。
+     *
+     * 相对 [Liquid] 的差别：**折射更强、边缘更亮更镜面、模糊略小（更透光）**。
+     * iOS 26 那一代玻璃的核心观感是「边缘像厚玻璃一样聚光」，
+     * 所以把 `lens` 的折射量与边缘高光都往上推，模糊反而略降以突出通透感。
+     */
+    Liquid26,
+}
+
+/** 主控栏 / 大面板：模糊半径（按风格分档） */
+val GlassPanelBlur: Dp = 22.dp
+private val GlassPanelBlurFrosted: Dp = 30.dp
+private val GlassPanelBlurLiquid26: Dp = 18.dp
+
+/** 悬浮球 / 小控件：模糊半径（按风格分档） */
+val GlassSmallBlur: Dp = 11.dp
+private val GlassSmallBlurFrosted: Dp = 15.dp
+private val GlassSmallBlurLiquid26: Dp = 9.dp
+
+/**
+ * 玻璃面板（矩形/任意形状）。
+ *
+ * @param style 玻璃风格。[GlassStyle.Liquid] 通透立体；[GlassStyle.Frosted] 柔和磨砂。
+ * @param blurRadius 模糊半径；传 null 则用该风格的推荐值。
+ *        ⚠️ 半径越大 GPU 开销越高（backdrop 采样 + RenderEffect）；
+ *        帧率吃紧时应优先降这个值，而不是去掉 lens。
+ */
+fun Modifier.glassPanel(
+    backdrop: Backdrop,
+    shape: () -> Shape,
+    style: GlassStyle = GlassStyle.Liquid,
+    blurRadius: Dp? = null,
+    tint: Color? = null,
+    /** 在 backdrop 之上、border 之下再画一层（原本各调用点用它铺面板底色）。 */
+    onDrawSurface: DrawScope.() -> Unit = {}
+): Modifier {
+    val blur = blurRadius ?: when (style) {
+        GlassStyle.Liquid -> GlassPanelBlur
+        GlassStyle.Frosted -> GlassPanelBlurFrosted
+        GlassStyle.Liquid26 -> GlassPanelBlurLiquid26
+    }
+    // 磨砂需要更"实"的半透明底，Liquid 只留极轻的一层
+    val overlay = tint ?: when (style) {
+        GlassStyle.Liquid -> Color.White.copy(alpha = 0.05f)
+        GlassStyle.Frosted -> Color.White.copy(alpha = 0.12f)
+        // iOS 26：边缘聚光强，中心仍保持通透 → 底色最轻
+        GlassStyle.Liquid26 -> Color.White.copy(alpha = 0.03f)
+    }
+    return this
+        .drawBackdrop(
+            backdrop = backdrop,
+            shape = shape,
+            onDrawSurface = onDrawSurface,
+            effects = {
+                if (style == GlassStyle.Liquid || style == GlassStyle.Liquid26) {
+                    // ① 透镜折射：玻璃边缘把背后的内容「掰弯」——Liquid Glass 的标志
+                    // ⚠️ 必须保留 SDK>=33 的版本保护：lens() 依赖 Android 13(API 33) 才有的
+                    //    RenderEffect SDF 能力，低版本直接调会崩。项目原本就有这个保护，
+                    //    抽到工厂时**不能丢**。
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        if (style == GlassStyle.Liquid26) {
+                            // iOS 26：折射量与聚光都更强（更「厚玻璃」）
+                            lens(refractionHeight = 18f, refractionAmount = 0.55f)
+                        } else {
+                            lens(refractionHeight = 10f, refractionAmount = 0.32f)
+                        }
+                    }
+                    // ② 提高饱和 + 微调对比/亮度：模糊后颜色不发灰
+                    vibrancy()
+                    colorControls(
+                        saturation = if (style == GlassStyle.Liquid26) 1.45f else 1.35f,
+                        contrast = if (style == GlassStyle.Liquid26) 1.06f else 1.04f,
+                        brightness = if (style == GlassStyle.Liquid26) 1.05f else 1.03f,
+                    )
+                } else {
+                    // 磨砂：**不折射、不过饱和**，甚至轻微降饱和 ——
+                    // iOS 11 的 UIBlurEffect 就是这种"均匀糊开、略微发灰"的观感
+                    colorControls(saturation = 0.88f, contrast = 1.02f, brightness = 1.05f)
+                }
+                // ③ 模糊半径（性能主要看这一项）
+                blur(blur.toPx())
+            },
+        )
+        .border(
+            border = BorderStroke(
+                width = 1.dp,
+                // 玻璃高光边：上/左偏亮、下/右偏暗，模拟环境光从上方来
+                brush = Brush.linearGradient(
+                    colors = when (style) {
+                        GlassStyle.Liquid -> listOf(
+                            Color.White.copy(alpha = 0.42f),
+                            Color.White.copy(alpha = 0.14f),
+                            Color.White.copy(alpha = 0.05f),
+                        )
+                        // 磨砂的边更"糊"——高光更弱更均匀
+                        GlassStyle.Frosted -> listOf(
+                            Color.White.copy(alpha = 0.26f),
+                            Color.White.copy(alpha = 0.12f),
+                            Color.White.copy(alpha = 0.07f),
+                        )
+                        // iOS 26：边缘像厚玻璃聚光 → 高光最强、衰减更陡
+                        GlassStyle.Liquid26 -> listOf(
+                            Color.White.copy(alpha = 0.62f),
+                            Color.White.copy(alpha = 0.18f),
+                            Color.White.copy(alpha = 0.04f),
+                        )
+                    },
+                    start = androidx.compose.ui.geometry.Offset.Zero,
+                    end = androidx.compose.ui.geometry.Offset.Infinite,
+                ),
+            ),
+            shape = shape(),
+        )
+        .drawWithContentOverlay(overlay)
+}
+
+/**
+ * 玻璃球体（悬浮球等圆形控件）。
+ *
+ * @param blurRadius 球体专用模糊半径；传 null 用该风格的推荐值。
+ * @param onDrawSurface 与 [glassPanel] 同一参数（球体原本用它画圆形底色）。
+ */
+fun Modifier.glassBall(
+    backdrop: Backdrop,
+    style: GlassStyle = GlassStyle.Liquid,
+    blurRadius: Dp? = null,
+    onDrawSurface: DrawScope.() -> Unit = {}
+): Modifier = glassPanel(
+    backdrop = backdrop,
+    shape = { CircleShape },
+    style = style,
+    blurRadius = blurRadius,
+    onDrawSurface = onDrawSurface,
+)
+
+
+/**
+ * 在内容之上叠一层半透明色（模拟玻璃表面反射 / 磨砂的实体感）。
+ *
+ * 放在 `drawBackdrop` **之后**：backdrop 负责采样+模糊+折射，
+ * 本函数只在其上盖一层薄色，两者互不干扰。
+ */
+private fun Modifier.drawWithContentOverlay(color: Color): Modifier =
+    if (color.alpha <= 0.001f) this
+    else this.drawWithContent {
+        drawContent()
+        drawRect(color)
+    }
