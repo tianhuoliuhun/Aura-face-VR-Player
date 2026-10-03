@@ -83,7 +83,14 @@ object LutUtils {
         BuiltinLut("39_Sodium", R.string.lut_sodium),
         BuiltinLut("40_Argent", R.string.lut_argent),
         BuiltinLut("41_Canopy", R.string.lut_canopy),
-        BuiltinLut("42_Dusk_Tide", R.string.lut_dusk_tide)
+        BuiltinLut("42_Dusk_Tide", R.string.lut_dusk_tide),
+        // v2.1.215：**美白 LUT**（自研生成，非第三方授权素材）——
+        // 现有 36 款全是胶片/风格化（Portra / Kodak / Ektachrome…），
+        // 没有真正的「美白」档，而这 3 款是**专门按美白诉求**算出来的：
+        // 肤色带加权提亮 + 去黄 + 高光保护，与磨皮/美白滑条叠加不打架。
+        BuiltinLut("43_Porcelain_Cool_White", R.string.lut_porcelain_cool_white),
+        BuiltinLut("44_Natural_Warm_White", R.string.lut_natural_warm_white),
+        BuiltinLut("45_Studio_Bright_White", R.string.lut_studio_bright_white)
     )
 
     /** 风格化滤镜分组（青橙 / 赛博朋克 / 黑白…），不针对人像肤色优化 */

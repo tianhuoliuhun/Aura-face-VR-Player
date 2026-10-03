@@ -695,4 +695,9 @@
     <string name="fisheye_fov">어안 FOV</string>
 
     <string name="proj_dome">돔 (반구)</string>
+
+    <!-- v2.1.215：美白 LUT（自研生成） -->
+    <string name="lut_porcelain_cool_white">도자기 화이트</string>
+    <string name="lut_natural_warm_white">자연 웜 화이트</string>
+    <string name="lut_studio_bright_white">스튜디오 화이트</string>
 </resources>

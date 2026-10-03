@@ -728,4 +728,9 @@
     <string name="fisheye_fov">Fisheye FOV</string>
 
     <string name="proj_dome">Dome (hemisphere)</string>
+
+    <!-- v2.1.215：美白 LUT（自研生成） -->
+    <string name="lut_porcelain_cool_white">Porcelain Cool</string>
+    <string name="lut_natural_warm_white">Natural Warm White</string>
+    <string name="lut_studio_bright_white">Studio Bright</string>
 </resources>

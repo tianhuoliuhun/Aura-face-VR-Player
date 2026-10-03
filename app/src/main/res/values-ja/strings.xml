@@ -695,4 +695,9 @@
     <string name="fisheye_fov">魚眼視野角</string>
 
     <string name="proj_dome">ドーム（半球）</string>
+
+    <!-- v2.1.215：美白 LUT（自研生成） -->
+    <string name="lut_porcelain_cool_white">陶器ホワイト</string>
+    <string name="lut_natural_warm_white">自然な暖白</string>
+    <string name="lut_studio_bright_white">スタジオホワイト</string>
 </resources>
