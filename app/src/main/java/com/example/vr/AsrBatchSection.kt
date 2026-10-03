@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.sp
  *
  * v120 拆分自 VRPlayerScreen.kt；v127 起只保留 SenseVoice-Small（CPU）一条路线，
  * 因此删掉了原先的三引擎选择器与 Vosk 语言/模型档位 UI，只留：
- * - 模型状态与下载（约 229MB，含下载进度、取消）
+ * - 模型状态与下载（内置 Dolphin 无需下载；其它模型按需下载，含进度与取消）
  * - 识别语言选择（自动/中/英/日/韩，直接透传给 SenseVoice）
  *
  * 整片转写（生成 _asr.srt）已停用，改由 RealtimeSubtitleEngine 边播边生成，

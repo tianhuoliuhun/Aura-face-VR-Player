@@ -5648,7 +5648,9 @@ fun VRPlayerScreen(
                                                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                                         Text(
                                                             text = "▸ " +
-                                                                (if (modelId == "builtin") "Dolphin" else modelId) +
+                                                                // v2.1.224：显示友好名而不是原始 modelId
+                                                                //（原样会显示成 dolphin-base-ctc-multi-lang-int8 这种极长的目录名）
+                                                                com.example.vr.AsrExtModels.friendlyModelName(modelId) +
                                                                 "  ·  ${langs.size}",
                                                             color = Color.White.copy(alpha = 0.7f),
                                                             fontSize = 9.sp,

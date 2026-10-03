@@ -701,6 +701,23 @@ object AsrExtModels {
      */
     fun isCommonKey(key: String): Boolean = key in COMMON_KEYS
 
+    /**
+     * v2.1.224：把内部 modelId / dirName 换成**用户可读的友好名**。
+     *
+     * 这些 id 是仓库目录名（如 `dolphin-base-ctc-multi-lang-int8`），
+     * 直接显示在「按模型分类」的组标题里会非常长且难懂。
+     */
+    fun friendlyModelName(modelId: String): String = when {
+        modelId == "builtin" -> "Dolphin（内置）"
+        modelId.startsWith("dolphin") -> "Dolphin"
+        modelId.startsWith("parakeet") -> "Parakeet v3"
+        modelId.contains("fast-conformer") -> "FastConformer"
+        modelId.contains("thai") -> "Zipformer 泰语"
+        modelId.contains("zipformer-vi") -> "Zipformer 越南语"
+        modelId.contains("indicconformer") -> "IndicConformer"
+        else -> modelId.removePrefix("sherpa-onnx-")
+    }
+
     private fun defaultGroupOf(key: String): AsrLangGroup = when {
         key.startsWith("zh_") -> AsrLangGroup.CHINESE
         // ⚠️ `zh` 不匹配上面的 `zh_` 前缀分支，若不单独列出就会落进 else → 被误判成 EUROPE
