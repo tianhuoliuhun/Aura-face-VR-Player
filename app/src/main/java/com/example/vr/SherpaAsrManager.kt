@@ -648,8 +648,16 @@ object SherpaAsrManager {
         context.getSharedPreferences("vr_player_prefs", Context.MODE_PRIVATE)
 
     /** 用户为某语言选中的模型 id；空串 = 未选择（自动取第一个已就绪的） */
+    /**
+     * 当前该语言选中的模型 id。
+     *
+     * v2.1.226：默认值由 `""` 改为 **`"builtin"`**。
+     * 原因：chips 的选中判断是 `"$code@${lang.modelId ?: "builtin"}"`，
+     * 内置候选拼出来是 `en@builtin`；而这里原先返回 `""` 时，
+     * 与 activeModelId 拼出的 `en@` 对不上 → **内置候选永远显示为未选中**。
+     */
     fun modelChoiceFor(context: Context, langKey: String): String =
-        choicePrefs(context).getString("asr_model_choice_$langKey", "") ?: ""
+        choicePrefs(context).getString("asr_model_choice_$langKey", "builtin") ?: "builtin"
 
     /**
      * 模型选择版本号：**任何一次 [setModelChoice] 都会自增**。

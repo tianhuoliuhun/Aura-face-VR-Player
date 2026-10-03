@@ -5615,11 +5615,16 @@ fun VRPlayerScreen(
                                                                                 keepUiAlight()
                                                                                 // ⚠️ 顺序不能反：先切语言、再选模型。
                                                                                 //    另外同 code 换模型时 changeAsrLanguage 会
-                                                                                //    直接 return，全靠下面的 version++ 触发重建。
+                                                                                //    直接 return，全靠下面的 setModelChoice 触发重建。
                                                                                 changeAsrLanguage(code)
-                                                                                lang.modelId?.let { mId ->
-                                                                                    SherpaAsrManager.setModelChoice(context, code, mId)
-                                                                                }
+                                                                                // v2.1.226：**内置候选（modelId == null）也要显式写入 "builtin"**。
+                                                                                // 原写法是 `lang.modelId?.let { ... }` —— 内置候选 modelId 为 null，
+                                                                                // 整段被跳过：此时若当前语言已是同一个 code（如从 FastConformer 的
+                                                                                // 英文切回内置英文），changeAsrLanguage 会因同 code 直接 return、
+                                                                                // 这里又什么都不做 → **点击完全无反应**，表现就是「英语选不中」。
+                                                                                SherpaAsrManager.setModelChoice(
+                                                                                    context, code, lang.modelId ?: "builtin"
+                                                                                )
                                                                             }
                                                                             .padding(vertical = 5.dp),
                                                                         contentAlignment = Alignment.Center
@@ -5675,9 +5680,12 @@ fun VRPlayerScreen(
                                                                             .clickable {
                                                                                 keepUiAlight()
                                                                                 changeAsrLanguage(code)
-                                                                                lang.modelId?.let { mId ->
-                                                                                    SherpaAsrManager.setModelChoice(context, code, mId)
-                                                                                }
+                                                                                // v2.1.226：同「按语言」视角的修复 ——
+                                                                                // 内置候选（modelId == null）也必须显式写 "builtin"，
+                                                                                // 否则从扩展模型切回内置时点击无反应（表现为「选不中」）。
+                                                                                SherpaAsrManager.setModelChoice(
+                                                                                    context, code, lang.modelId ?: "builtin"
+                                                                                )
                                                                             }
                                                                             .padding(vertical = 4.dp),
                                                                         contentAlignment = Alignment.Center
