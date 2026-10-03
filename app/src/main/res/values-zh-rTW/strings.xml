@@ -742,4 +742,9 @@
     <string name="lut_porcelain_cool_white">瓷白冷調</string>
     <string name="lut_natural_warm_white">自然暖白</string>
     <string name="lut_studio_bright_white">棚拍亮白</string>
+
+    <!-- v2.1.216：追加美白 LUT -->
+    <string name="lut_jp_fair_skin">日系白皙</string>
+    <string name="lut_cold_pale_skin">冷白皮</string>
+    <string name="lut_natural_makeup">自然裸妝</string>
 </resources>

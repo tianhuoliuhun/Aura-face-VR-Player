@@ -90,7 +90,11 @@ object LutUtils {
         // 肤色带加权提亮 + 去黄 + 高光保护，与磨皮/美白滑条叠加不打架。
         BuiltinLut("43_Porcelain_Cool_White", R.string.lut_porcelain_cool_white),
         BuiltinLut("44_Natural_Warm_White", R.string.lut_natural_warm_white),
-        BuiltinLut("45_Studio_Bright_White", R.string.lut_studio_bright_white)
+        BuiltinLut("45_Studio_Bright_White", R.string.lut_studio_bright_white),
+        // v2.1.216：按用户要求追加的 3 款美白
+        BuiltinLut("46_JP_Fair_Skin", R.string.lut_jp_fair_skin),
+        BuiltinLut("47_Cold_Pale_Skin", R.string.lut_cold_pale_skin),
+        BuiltinLut("48_Natural_Makeup", R.string.lut_natural_makeup)
     )
 
     /** 风格化滤镜分组（青橙 / 赛博朋克 / 黑白…），不针对人像肤色优化 */

@@ -733,4 +733,9 @@
     <string name="lut_porcelain_cool_white">Porcelain Cool</string>
     <string name="lut_natural_warm_white">Natural Warm White</string>
     <string name="lut_studio_bright_white">Studio Bright</string>
+
+    <!-- v2.1.216：追加美白 LUT -->
+    <string name="lut_jp_fair_skin">Japanese Fair</string>
+    <string name="lut_cold_pale_skin">Cold Pale</string>
+    <string name="lut_natural_makeup">Natural Makeup</string>
 </resources>
