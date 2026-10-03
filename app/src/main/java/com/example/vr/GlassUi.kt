@@ -54,11 +54,11 @@ enum class GlassStyle {
 
 /** 主控栏 / 大面板：模糊半径（按风格分档） */
 val GlassPanelBlur: Dp = 22.dp
-private val GlassPanelBlurFrosted: Dp = 40.dp
+private val GlassPanelBlurFrosted: Dp = 16.dp
 
 /** 悬浮球 / 小控件：模糊半径（按风格分档） */
 val GlassSmallBlur: Dp = 11.dp
-private val GlassSmallBlurFrosted: Dp = 20.dp
+private val GlassSmallBlurFrosted: Dp = 9.dp
 
 /**
  * 玻璃面板（矩形/任意形状）。
@@ -79,6 +79,8 @@ fun Modifier.glassPanel(
 ): Modifier {
     val blur = blurRadius ?: when (style) {
         GlassStyle.Liquid -> GlassPanelBlur
+        // v2.1.221：40dp 过大。系统的 RenderEffect.createBlurEffect 在半径过大时
+        // 可能直接不绘制，表现为「模糊完全没生效」。降到 16dp（面板）/ 9dp（球体）实测可用。
         GlassStyle.Frosted -> GlassPanelBlurFrosted
     }
     // ⚠️ 只服务 Liquid 分支；磨砂的白底在它的分支里单独给（40%）。
@@ -104,11 +106,10 @@ fun Modifier.glassPanel(
                     backdropBlur(blur.toPx())
                 },
             )
-            // v2.1.220：白底由 20% 提到 **40%**（用户反馈「太透」）——
-            // 磨砂玻璃的灵魂是「把背景彻底糊掉」，透底就失去了磨砂的意义。
-            .drawWithContentOverlay(
-                tint ?: Color.White.copy(alpha = 0.40f)
-            )
+            // v2.1.221：**去掉磨砂的白底**（用户反馈「白底去除」）——
+            // 上一版加到 40% 是误判：底色盖在模糊之上，会让人以为「模糊没生效」。
+            // 磨砂的正确观感是「背景被系统高斯模糊均匀糊开」，**本身不需要额外加白**。
+            .then(Modifier)
     }
 
     // ============ Liquid Glass：折射 + 增饱和 + 边缘高光 ============
