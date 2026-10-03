@@ -2727,12 +2727,9 @@ fun VRPlayerScreen(
     ) {
         // Liquid glass backdrop：捕获视频层 + 主题底色，供玻璃面板绘制（Backdrop 库，Android 12+）
         val isLiquidGlass = glassMode > 0 && Build.VERSION.SDK_INT >= 31
-        // v2.1.217：玻璃风格 —— 0=纯色(无 backdrop) / 1=Liquid(iOS13+) / 2=磨砂(iOS11) / 3=iOS26
-        val glassStyle: GlassStyle = when (glassMode) {
-            2 -> GlassStyle.Frosted
-            3 -> GlassStyle.Liquid26
-            else -> GlassStyle.Liquid
-        }
+        // v2.1.218：玻璃风格 —— 0=纯色(无 backdrop) / 1=Liquid(iOS26 增强) / 2=磨砂(iOS11)
+        // （原先的 1=Liquid13 / 3=Liquid26 已合并为一档，用户反馈两档观感接近）
+        val glassStyle: GlassStyle = if (glassMode == 2) GlassStyle.Frosted else GlassStyle.Liquid
         val liquidBackdrop = rememberLayerBackdrop {
             drawRect(ThemeBgColor)
             drawContent()
@@ -3302,7 +3299,10 @@ fun VRPlayerScreen(
                                     backdrop = liquidBackdrop,
                                     shape = { RoundedCornerShape(24.dp) },
                                     style = glassStyle,
-                                    blurRadius = 20.dp,
+                                    // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
+                                    // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
+                                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
+                                    blurRadius = null,
                                     onDrawSurface = { drawRect(ThemePanelBgColor.copy(alpha = 0.55f)) }
                                 ) else Modifier
                             )
@@ -4124,9 +4124,10 @@ fun VRPlayerScreen(
                                         listOf(
                                             0 to stringResource(R.string.theme_solid),
                                             1 to stringResource(R.string.theme_liquid_glass),
-                                            // v2.1.217：新增磨砂（iOS 11）与 iOS26 Liquid Glass 两档
+                                            // v2.1.218：v2.1.217 的 4 档并回 3 档 ——
+                                            // Liquid 与 Liquid26 观感接近、选择意义不大，
+                                            // 已合并为一档并采用 iOS 26 的增强参数
                                             2 to stringResource(R.string.theme_frosted_glass),
-                                            3 to stringResource(R.string.theme_liquid_glass_26),
                                         ).forEach { (m, label) ->
                                             val sel = glassMode == m
                                             Box(
@@ -6579,7 +6580,10 @@ BatchTranscribeSection(
                         if (isLiquidGlass) Modifier.glassBall(
                             backdrop = liquidBackdrop,
                             style = glassStyle,
-                            blurRadius = 12.dp,
+                            // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
+                            // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
+                            // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
+                            blurRadius = null,
                             onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
                         ) else Modifier
                     )
@@ -6770,7 +6774,10 @@ BatchTranscribeSection(
                 glassModifier = if (isLiquidGlass) Modifier.glassBall(
                     backdrop = liquidBackdrop,
                     style = glassStyle,
-                    blurRadius = 12.dp,
+                    // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
+                    // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
+                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
+                    blurRadius = null,
                     onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
                 ) else Modifier
             )
@@ -6801,7 +6808,10 @@ BatchTranscribeSection(
                 glassModifier = if (isLiquidGlass) Modifier.glassBall(
                     backdrop = liquidBackdrop,
                     style = glassStyle,
-                    blurRadius = 12.dp,
+                    // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
+                    // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
+                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
+                    blurRadius = null,
                     onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
                 ) else Modifier
             )
