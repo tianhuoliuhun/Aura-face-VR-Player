@@ -54,11 +54,11 @@ enum class GlassStyle {
 
 /** 主控栏 / 大面板：模糊半径（按风格分档） */
 val GlassPanelBlur: Dp = 22.dp
-private val GlassPanelBlurFrosted: Dp = 16.dp
+private val GlassPanelBlurFrosted: Dp = 32.dp
 
 /** 悬浮球 / 小控件：模糊半径（按风格分档） */
 val GlassSmallBlur: Dp = 11.dp
-private val GlassSmallBlurFrosted: Dp = 9.dp
+private val GlassSmallBlurFrosted: Dp = 18.dp
 
 /**
  * 玻璃面板（矩形/任意形状）。
