@@ -4,6 +4,27 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <!-- ========================================================================
+         v2.1.228：**强制剔除依赖库夹带进来的权限**（tools:node="remove"）
+
+         ⚠️ 教训：只改本文件是不够的 —— 最终 APK 的权限是「主清单 + 所有依赖库清单」
+         合并的结果。此前我只 grep 了本文件、看到 6 条就以为干净了，
+         实际用 `aapt2 dump permissions` 查 APK 发现有 **13 条**。
+         下面这 5 条都是**没有任何依赖库会真正用到、本应用也完全不使用**的，
+         其中广告相关的几条会让商店把它标成「含广告」并把 AD_ID 暴露给系统。
+
+         核对方法（务必用这个而不是 grep 源码）：
+             aapt2 dump permissions app/build/outputs/apk/release/*.apk
+         ======================================================================== -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" tools:node="remove" />
+    <uses-permission android:name="com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE" tools:node="remove" />
+    <!-- ⚠️ OPENXR_SYSTEM 是系统级签名权限（普通应用拿不到），
+         我从主清单删过一次，但它又被某个依赖库合并了回来 ——
+         所以这次用 remove 强制剔除，而不是再删一遍源码。 -->
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" tools:node="remove" />
     <!-- v2.1.222：移除 READ_MEDIA_IMAGES
          全项目代码未读取图片库（演示图片走 assets/renderable，全程不需要该权限），
          属于不必要的权限 —— 应用商店会把它列成「读取你的相册」，去掉可减少隐私面。 -->
