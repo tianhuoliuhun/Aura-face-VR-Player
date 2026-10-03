@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -14,7 +15,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.blur as backdropBlur
 import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
@@ -85,35 +86,45 @@ fun Modifier.glassPanel(
     val overlay = tint ?: when (style) {
         GlassStyle.Liquid -> Color.White.copy(alpha = 0.05f)
         GlassStyle.Frosted -> Color.White.copy(alpha = 0.20f)
-        // Liquid 已采用 iOS 26 参数：底色保持很轻，中心通透
     }
+
+    // ============ 磨砂：**完全不同的管线** ============
+    // v2.1.219：用户要求「调用系统高斯模糊，去除高亮折射等玻璃特性」。
+    // 磨砂不是"弱化的 Liquid Glass"，而是**纯粹的毛玻璃**，所以：
+    //   ① backdrop **只负责采样背后的内容**，不施加任何 effects（无 lens / 无 vibrancy / 无 colorFilter）；
+    //   ② 模糊交给**系统高斯模糊** `Modifier.blur`（底层即 RenderEffect.createBlurEffect）；
+    //   ③ **不画任何边框** —— 玻璃高光/镜面折射是 Liquid Glass 的特征，磨砂不该有。
+    if (style == GlassStyle.Frosted) {
+        return this
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = shape,
+                onDrawSurface = onDrawSurface,
+                effects = {},                 // 空 effects：只采样，不做玻璃特效
+            )
+            // 系统高斯模糊。⚠️ Modifier.blur 依赖 Android 12+(API 31) 的 RenderEffect，
+            // 低版本会静默不生效（Compose 已做版本检查），因此这里不必再手动判断 SDK。
+            .blur(blur)
+            .drawWithContentOverlay(overlay)
+    }
+
+    // ============ Liquid Glass：折射 + 增饱和 + 边缘高光 ============
     return this
         .drawBackdrop(
             backdrop = backdrop,
             shape = shape,
             onDrawSurface = onDrawSurface,
             effects = {
-                if (style == GlassStyle.Liquid) {
-                    // ① 透镜折射：玻璃边缘把背后的内容「掰弯」——Liquid Glass 的标志
-                    // ⚠️ 必须保留 SDK>=33 的版本保护：lens() 依赖 Android 13(API 33) 才有的
-                    //    RenderEffect SDF 能力，低版本直接调会崩。项目原本就有这个保护，
-                    //    抽到工厂时**不能丢**。
-                    if (Build.VERSION.SDK_INT >= 33) {
-                        // v2.1.218：采用 iOS 26 参数（折射更强、边缘更「厚玻璃聚光」）
-                        lens(refractionHeight = 18f, refractionAmount = 0.55f)
-                    }
-                    // ② 提高饱和 + 微调对比/亮度：模糊后颜色不发灰
-                    vibrancy()
-                    colorControls(saturation = 1.45f, contrast = 1.06f, brightness = 1.05f)
-                } else {
-                    // 磨砂：**不折射、不过饱和**，甚至轻微降饱和 ——
-                    // iOS 11 的 UIBlurEffect 就是这种"均匀糊开、略微发灰"的观感
-                    // v2.1.218：磨砂加强 —— 饱和压到 0.72（更接近「洗掉颜色」）+
-                    // 亮度提到 1.10，配合更大的模糊与更实的白底，让「磨砂」明显区别于液态玻璃
-                    colorControls(saturation = 0.72f, contrast = 1.0f, brightness = 1.10f)
+                // ⚠️ 必须保留 SDK>=33 的版本保护：lens() 依赖 Android 13(API 33) 才有的
+                //    RenderEffect SDF 能力，低版本直接调会崩。项目原本就有这个保护，
+                //    抽到工厂时**不能丢**。
+                if (Build.VERSION.SDK_INT >= 33) {
+                    // v2.1.218：采用 iOS 26 参数（折射更强、边缘更「厚玻璃聚光」）
+                    lens(refractionHeight = 18f, refractionAmount = 0.55f)
                 }
-                // ③ 模糊半径（性能主要看这一项）
-                blur(blur.toPx())
+                vibrancy()
+                colorControls(saturation = 1.45f, contrast = 1.06f, brightness = 1.05f)
+                backdropBlur(blur.toPx())
             },
         )
         .border(
@@ -121,20 +132,12 @@ fun Modifier.glassPanel(
                 width = 1.dp,
                 // 玻璃高光边：上/左偏亮、下/右偏暗，模拟环境光从上方来
                 brush = Brush.linearGradient(
-                    colors = when (style) {
-                        GlassStyle.Liquid -> listOf(
-                            // v2.1.218：采用 iOS 26 强度 —— 边缘镜面聚光
-                            Color.White.copy(alpha = 0.62f),
-                            Color.White.copy(alpha = 0.14f),
-                            Color.White.copy(alpha = 0.05f),
-                        )
-                        // 磨砂的边更"糊"——高光更弱更均匀
-                        GlassStyle.Frosted -> listOf(
-                            Color.White.copy(alpha = 0.30f),
-                            Color.White.copy(alpha = 0.14f),
-                            Color.White.copy(alpha = 0.08f),
-                        )
-                    },
+                    colors = listOf(
+                        // v2.1.218：采用 iOS 26 强度 —— 边缘镜面聚光
+                        Color.White.copy(alpha = 0.62f),
+                        Color.White.copy(alpha = 0.14f),
+                        Color.White.copy(alpha = 0.05f),
+                    ),
                     start = androidx.compose.ui.geometry.Offset.Zero,
                     end = androidx.compose.ui.geometry.Offset.Infinite,
                 ),
