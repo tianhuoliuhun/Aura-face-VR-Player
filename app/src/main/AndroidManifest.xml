@@ -4,7 +4,9 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- v2.1.222：移除 READ_MEDIA_IMAGES
+         全项目代码未读取图片库（演示图片走 assets/renderable，全程不需要该权限），
+         属于不必要的权限 —— 应用商店会把它列成「读取你的相册」，去掉可减少隐私面。 -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
     <!-- ========================================================================
@@ -46,7 +48,10 @@
             因找不到 loader 而失败 —— 比「不出现 VR 库」更糟。等 loader 就绪后再开启。
          ==================================================================== -->
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
-    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <!-- v2.1.222：移除 OPENXR_SYSTEM
+         它是**系统级签名权限**（normal 应用无法获得、申请了也无效），
+         属于 OpenXR 规范里给「系统级 XR 运行时」用的。普通第三方应用只需要
+         OPENXR（runtime permission）即可，故移除这条无副作用、还能让权限清单更干净。 -->
     <!-- OpenXR 标准：标记为支持 VR 头显（required=false 保证普通 Android 设备不受影响） -->
     <uses-feature
         android:name="android.hardware.vr.headtracking"
@@ -55,6 +60,17 @@
     <uses-feature android:name="oculus.software.handtracking" android:required="false" />
 
     <!-- API 30+ 包可见性：不声明则查不到华为 VR 运行时 -->
+    <!--
+        v2.1.222 说明：应用商店会把 <queries> 渲染成「获取应用列表」权限提示。
+        这里**必须保留** —— 它不是「扫描用户装了什么应用」，而是**声明本应用
+        运行时需要与哪几个特定系统服务通信**（且下面每一条都精确到包名/Action）：
+          com.huawei.vrhandle / com.huawei.hvrsdkserverapp  —— 华为 VR Glass 手柄与运行时
+          com.huawei.android.vr.PROMPT                  —— 华为 VR 接入提示
+          org.khronos.openxr.OpenXRRuntimeService         —— 标准 OpenXR 运行时发现
+        Android 11+ 若删掉这些，手柄发现与 OpenXR 运行时发现会**直接失效**
+        （targetSdk>=30 时系统不再返回这些包信息），VR 设备上将搜不到手柄。
+        这是**「显式列举」而非「全量查询」**，不涉及用户隐私数据。
+    -->
     <queries>
         <package android:name="com.huawei.vrhandle" />
         <package android:name="com.huawei.hvrsdkserverapp" />

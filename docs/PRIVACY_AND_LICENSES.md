@@ -21,6 +21,41 @@
 
 ---
 
+## 📱 权限说明 / Permissions
+
+本应用**只申请播放本地视频所必需的权限**，不收集、不上传任何用户数据。
+The app requests **only the permissions required to play local video**; it collects and uploads no user data.
+
+| 权限 / Permission | 用途 / Purpose |
+|---|---|
+| `INTERNET` | 在线翻译、模型下载。仅此一项涉及网络。 / Online translation and model download only. |
+| `READ_MEDIA_VIDEO`（Android 13+）/ `READ_EXTERNAL_STORAGE`（≤Android 12） | 选择要播放的本地视频文件。 / Selecting local video files to play. |
+| `org.khronos.openxr.permission.OPENXR` | 在 VR 头显上运行。 / Running on VR headsets. |
+| `com.huawei.android.permission.VR`、`com.huawei.vrhandle.permission.DEVICE_MANAGER` | 华为 VR Glass 手柄发现与交互。 / Huawei VR Glass controller discovery. |
+
+### 关于「获取应用列表」提示 / About the app-list permission prompt
+
+应用商店会把 Android 的 `<queries>` 包可见性声明显示为「获取应用列表」，
+但本应用**并未扫描用户装了什么应用** —— 它是**精确列举**了几个必需的系统服务：
+
+- `com.huawei.vrhandle` / `com.huawei.hvrsdkserverapp` —— 华为 VR Glass 手柄与运行时
+- `com.huawei.android.vr.PROMPT` —— 华为 VR 接入提示
+- `org.khronos.openxr.OpenXRRuntimeService` —— 标准 OpenXR 运行时发现
+
+Android 11+ 若删掉这些声明，VR 设备上将**搜不到手柄、找不到 OpenXR 运行时**，因此必须保留。
+它们是「显式列举」而非「全量查询」，不涉及任何用户隐私数据。
+
+Stores render Android `<queries>` as an app-list permission prompt, but this app does **not** scan
+installed apps — it explicitly names a few required system services. Without them, controllers and the
+OpenXR runtime could not be discovered on VR devices. No privacy data is involved.
+
+### 已移除的权限 / Removed permissions
+
+- `READ_MEDIA_IMAGES` —— 代码从不读取图片库（演示图片走 assets/renderable），无需此权限。
+- `OPENXR_SYSTEM` —— 系统级签名权限，普通应用无法获得、申请了也无效。
+- 短信 / 彩信 / 通讯录 / 通话记录 / 锁屏显示 —— **从未声明**。
+
+---
 ## 📦 依赖与开源许可 / Dependencies & Licenses
 
 本项目基于 Google AI Studio 生成的项目骨架，核心功能均为自研实现。
