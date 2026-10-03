@@ -967,6 +967,12 @@ fun VRPlayerScreen(
     var ballOffsetY by remember { mutableFloatStateOf(0f) }
     var isBallPositionInitialized by remember { mutableStateOf(false) }
 
+    // v2.1.231：关闭「设置记忆」时清掉悬浮球位置存档（与项目「关闭即 remove」的约定一致）。
+    // 位置是组件自己在拖动抬手时直接 commit 的，不走下面那个大写回 effect，所以这里单独清。
+    LaunchedEffect(isMemoryModeEnabled) {
+        if (!isMemoryModeEnabled) FloatingBallPositions.clearAll(prefs)
+    }
+
     // Dynamic Reactive Settings Memory Auto-Persistence Task
     // v2.0.172：补齐此前缺失的 key —— 快进/后退悬浮球开关与步长、美颜总开关/引擎/GPUPixel
     // 参数、磨皮质感、ASR 线程数、字幕去标点。这些状态此前**不在 key 列表里**，只改它们
@@ -5497,14 +5503,17 @@ fun VRPlayerScreen(
                                         // v2.1.208：默认**按模型分类**（用户要求简化切换流程）——
                                         // 按模型视角下「同一语言有哪些模型可选、各多大体积」一目了然，
                                         // 点语言即选模型，少一层「先选语言再选模型」的操作。
-                                        var groupModeByModel by remember { mutableStateOf(true) }
-                                        // 折叠逻辑 v2.0.208：**默认只展开「常用语言」**，其余语区全部折叠（▶）——
-                                        // 87 个 chip 全铺开要 22 行，首屏太长。用户点开某语区后，
-                                        // 折叠状态在本面板会话内保持（不持久化：折叠只是临时浏览状态）。
+                                        // v2.1.231：默认视角改为**四项分类**（常用 / 中日韩英 / 内置 / 下载）。
+                                        // 此前默认「按模型」，用户反馈找语言太绕 ——
+                                        // 「常用 → 中日韩英 → 要不要下载」这条顺序更符合直觉。
+                                        // 「按模型」作为对比视角保留（同一语言有哪些模型、各多大体积）。
+                                        var groupModeByModel by remember { mutableStateOf(false) }
+                                        // 折叠：默认只展开「常用语言」，其余三项折叠（▶）——
+                                        // 87 个 chip 全铺开要 22 行，首屏太长；折叠态只是临时浏览状态，不持久化。
                                         var collapsedGroups by remember {
                                             mutableStateOf(
-                                                AsrExtModels.AsrLangGroup.values()
-                                                    .filter { it != AsrExtModels.AsrLangGroup.COMMON }
+                                                SherpaAsrManager.AsrLangCategory.values()
+                                                    .filter { it != SherpaAsrManager.AsrLangCategory.COMMON }
                                                     .map { it.name }
                                                     .toSet()
                                             )
@@ -5555,91 +5564,105 @@ fun VRPlayerScreen(
                                             val activeModelId =
                                                 SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName
                                                     ?: "builtin"
-                                            // ⚠️ 诊断（用户报「英语1/2/3 同时高亮」）：每次重组打印一次，
-                                            //    核对 activeModelId 与 choice 的取值。确认修复后可删。
-                                            Log.i(
-                                                "VRPlayerScreen",
-                                                "语言面板: code=$sherpaLangCode activeModelId=$activeModelId " +
-                                                    "choice=${SherpaAsrManager.modelChoiceFor(context, sherpaLangCode)}"
-                                            )
                                             if (!groupModeByModel) {
-                                                // ================= 按语区分组（可折叠） =================
-                                                // v2.0.208：**重复语言分开标** —— 同语言多模型时每个候选一条 chip
-                                                //（英语1/英语2/英语3），点击 = 切语言 + 选模型一步完成。
-                                                SherpaAsrManager.groupedChips().forEach { (group, langs) ->
-                                                    val gCollapsed = group.name in collapsedGroups
+                                                // ================= 四项分类（可折叠） =================
+                                                // v2.1.231：用户要求按「常用语言 / 中日韩英 / 内置模型语言 /
+                                                // 下载模型语言」分类。四类互斥（见 SherpaAsrManager.categoryOf），
+                                                // 每个 chip 只出现一次。
+                                                SherpaAsrManager.groupedByCategory().forEach { (cat, langs) ->
+                                                    val cCollapsed = cat.name in collapsedGroups
                                                     // 分组标题行（点击折叠/展开；展示数量）
                                                     Row(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .clip(RoundedCornerShape(6.dp))
                                                             .background(Color.White.copy(alpha = 0.05f))
-                                                            .clickable { toggleGroup(group.name); keepUiAlight() }
+                                                            .clickable { toggleGroup(cat.name); keepUiAlight() }
                                                             .padding(horizontal = 8.dp, vertical = 4.dp),
                                                         horizontalArrangement = Arrangement.SpaceBetween,
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text(
-                                                            text = stringResource(group.labelRes),
+                                                            text = stringResource(cat.labelRes),
                                                             color = Color.White.copy(alpha = 0.85f),
                                                             fontSize = 10.sp,
                                                             fontWeight = FontWeight.SemiBold
                                                         )
                                                         Text(
-                                                            text = "${langs.size}  ${if (gCollapsed) "▶" else "▼"}",
+                                                            text = "${langs.size}  ${if (cCollapsed) "\u25b6" else "\u25bc"}",
                                                             color = Color.White.copy(alpha = 0.5f),
                                                             fontSize = 9.sp
                                                         )
                                                     }
-                                                    if (!gCollapsed) {
-                                                        langs.chunked(4).forEach { rowLangs ->
-                                                            Row(
-                                                                modifier = Modifier.fillMaxWidth(),
-                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                            ) {
-                                                                rowLangs.forEach { lang ->
-                                                                    val code = lang.code
-                                                                    val label = stringResource(lang.labelResId) +
-                                                                        (lang.suffix?.let { " $it" } ?: "")
-                                                                    // ⚠️ 选中判定 = **uid 精确匹配**（语言@模型）：
-                                                                    //    同语言的多个 chip 的 uid 互不相同
-                                                                    //    （en@builtin / en@nemo-fast… / en@parakeet…），
-                                                                    //    从结构上杜绝「多个一起亮」。
-                                                                    val sel = "$code@${lang.modelId ?: "builtin"}" == "$sherpaLangCode@$activeModelId"
-                                                                    Box(
-                                                                        modifier = Modifier
-                                                                            .weight(1f)
-                                                                            .clip(RoundedCornerShape(6.dp))
-                                                                            .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                                            .clickable {
-                                                                                keepUiAlight()
-                                                                                // ⚠️ 顺序不能反：先切语言、再选模型。
-                                                                                //    另外同 code 换模型时 changeAsrLanguage 会
-                                                                                //    直接 return，全靠下面的 setModelChoice 触发重建。
-                                                                                changeAsrLanguage(code)
-                                                                                // v2.1.226：**内置候选（modelId == null）也要显式写入 "builtin"**。
-                                                                                // 原写法是 `lang.modelId?.let { ... }` —— 内置候选 modelId 为 null，
-                                                                                // 整段被跳过：此时若当前语言已是同一个 code（如从 FastConformer 的
-                                                                                // 英文切回内置英文），changeAsrLanguage 会因同 code 直接 return、
-                                                                                // 这里又什么都不做 → **点击完全无反应**，表现就是「英语选不中」。
-                                                                                SherpaAsrManager.setModelChoice(
-                                                                                    context, code, lang.modelId ?: "builtin"
-                                                                                )
-                                                                            }
-                                                                            .padding(vertical = 5.dp),
-                                                                        contentAlignment = Alignment.Center
-                                                                    ) {
-                                                                        Text(
-                                                                            text = label,
-                                                                            color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
-                                                                            fontSize = 9.sp,
-                                                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                                                                            textAlign = TextAlign.Center
-                                                                        )
+                                                    if (!cCollapsed) {
+                                                        // v2.1.231：组内再按**语区**分段小标题。
+                                                        // 「下载模型语言」这类可能有 40+ 个 chip，
+                                                        // 不分段就是一长串，找不到目标语言。
+                                                        // 只有一个语区时不显示小标题（避免多余噪音）。
+                                                        val subGroups = langs
+                                                            .groupBy { it.group }
+                                                            .entries
+                                                            .sortedBy { it.key.sortOrder }
+                                                        val showSubTitle = subGroups.size > 1
+                                                        subGroups.forEach { (sub, subLangs) ->
+                                                            if (showSubTitle) {
+                                                                Text(
+                                                                    text = stringResource(sub.labelRes),
+                                                                    color = Color.White.copy(alpha = 0.4f),
+                                                                    fontSize = 8.sp,
+                                                                    fontWeight = FontWeight.SemiBold,
+                                                                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                                                                )
+                                                            }
+                                                            subLangs.chunked(4).forEach { rowLangs ->
+                                                                Row(
+                                                                    modifier = Modifier.fillMaxWidth(),
+                                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                                ) {
+                                                                    rowLangs.forEach { lang ->
+                                                                        val code = lang.code
+                                                                        val label = stringResource(lang.labelResId) +
+                                                                            (lang.suffix?.let { " $it" } ?: "")
+                                                                        // ⚠️ 选中判定 = **uid 精确匹配**（语言@模型）：
+                                                                        //    同语言的多个 chip 的 uid 互不相同
+                                                                        //    （en@builtin / en@nemo-fast… / en@parakeet…），
+                                                                        //    从结构上杜绝「多个一起亮」。
+                                                                        val sel = "$code@${lang.modelId ?: "builtin"}" == "$sherpaLangCode@$activeModelId"
+                                                                        Box(
+                                                                            modifier = Modifier
+                                                                                .weight(1f)
+                                                                                .clip(RoundedCornerShape(6.dp))
+                                                                                .background(if (sel) AccentColor else Color.White.copy(alpha = 0.08f))
+                                                                                .clickable {
+                                                                                    keepUiAlight()
+                                                                                    // ⚠️ 顺序不能反：先切语言、再选模型。
+                                                                                    //    另外同 code 换模型时 changeAsrLanguage 会
+                                                                                    //    直接 return，全靠下面的 setModelChoice 触发重建。
+                                                                                    changeAsrLanguage(code)
+                                                                                    // v2.1.226：**内置候选（modelId == null）也要显式写入 "builtin"**。
+                                                                                    // 原写法是 `lang.modelId?.let { ... }` —— 内置候选 modelId 为 null，
+                                                                                    // 整段被跳过：此时若当前语言已是同一个 code（如从 FastConformer 的
+                                                                                    // 英文切回内置英文），changeAsrLanguage 会因同 code 直接 return、
+                                                                                    // 这里又什么都不做 → **点击完全无反应**，表现就是「英语选不中」。
+                                                                                    SherpaAsrManager.setModelChoice(
+                                                                                        context, code, lang.modelId ?: "builtin"
+                                                                                    )
+                                                                                }
+                                                                                .padding(vertical = 5.dp),
+                                                                            contentAlignment = Alignment.Center
+                                                                        ) {
+                                                                            Text(
+                                                                                text = label,
+                                                                                color = if (sel) AccentOnColor else Color.White.copy(alpha = 0.85f),
+                                                                                fontSize = 9.sp,
+                                                                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                                                                                textAlign = TextAlign.Center
+                                                                            )
+                                                                        }
                                                                     }
-                                                                }
-                                                                repeat(4 - rowLangs.size) {
-                                                                    Spacer(modifier = Modifier.weight(1f))
+                                                                    repeat(4 - rowLangs.size) {
+                                                                        Spacer(modifier = Modifier.weight(1f))
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -6533,8 +6556,17 @@ BatchTranscribeSection(
 
             LaunchedEffect(constraints.maxWidth, constraints.maxHeight) {
                 if (!isBallPositionInitialized && maxXPx > 0f && maxYPx > 0f) {
-                    ballOffsetX = maxXPx - with(density) { 20.dp.toPx() }
-                    ballOffsetY = maxYPx / 2f
+                    // v2.1.231：优先恢复到上次拖动到的位置（存档是 0~1 比例 × 当次范围），
+                    // 没有存档才回落到「贴右侧边缘、纵向居中」的默认值
+                    val sx = if (isMemoryModeEnabled) FloatingBallPositions.loadX(prefs, FloatingBallPositions.SPEED) else Float.NaN
+                    val sy = if (isMemoryModeEnabled) FloatingBallPositions.loadY(prefs, FloatingBallPositions.SPEED) else Float.NaN
+                    if (!sx.isNaN() && !sy.isNaN()) {
+                        ballOffsetX = (sx * maxXPx).coerceIn(0f, maxXPx)
+                        ballOffsetY = (sy * maxYPx).coerceIn(0f, maxYPx)
+                    } else {
+                        ballOffsetX = maxXPx - with(density) { 20.dp.toPx() }
+                        ballOffsetY = maxYPx / 2f
+                    }
                     isBallPositionInitialized = true
                 }
             }
@@ -6654,6 +6686,15 @@ BatchTranscribeSection(
                                 }
                             } else {
                                 lastTapUpTime = 0L
+                                // v2.1.231：拖动结束 → 把落点按「占可移动范围的比例」存盘
+                                if (isMemoryModeEnabled && maxXPx > 0f && maxYPx > 0f) {
+                                    FloatingBallPositions.save(
+                                        prefs,
+                                        FloatingBallPositions.SPEED,
+                                        ballOffsetX / maxXPx,
+                                        ballOffsetY / maxYPx
+                                    )
+                                }
                             }
                         }
                     }
@@ -6754,7 +6795,17 @@ BatchTranscribeSection(
                 onFeedback = { seekHudText = it },
                 initialXRatio = 0f,
                 initialYRatio = 0.5f,
-                isLiquidGlass = isLiquidGlass
+                isLiquidGlass = isLiquidGlass,
+                // v2.1.231：与快进/后退球一致的玻璃材质（此前漏传，玻璃主题下标记球没有 backdrop）
+                glassModifier = if (isLiquidGlass) Modifier.glassBall(
+                    backdrop = liquidBackdrop,
+                    style = glassStyle,
+                    blurRadius = null,
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
+                ) else Modifier,
+                // v2.1.231：记忆上次拖动到的位置
+                prefs = prefs,
+                rememberPosition = isMemoryModeEnabled
             )
         }
 
@@ -6786,10 +6837,14 @@ BatchTranscribeSection(
                     style = glassStyle,
                     // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
                     // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
-                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
+                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 32）。
                     blurRadius = null,
                     onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
-                ) else Modifier
+                ) else Modifier,
+                // v2.1.231：记忆上次拖动到的位置
+                prefs = prefs,
+                ballId = FloatingBallPositions.SEEK_FWD,
+                rememberPosition = isMemoryModeEnabled
             )
         }
 
@@ -6820,10 +6875,14 @@ BatchTranscribeSection(
                     style = glassStyle,
                     // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
                     // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
-                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
+                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 32）。
                     blurRadius = null,
                     onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
-                ) else Modifier
+                ) else Modifier,
+                // v2.1.231：记忆上次拖动到的位置
+                prefs = prefs,
+                ballId = FloatingBallPositions.SEEK_BWD,
+                rememberPosition = isMemoryModeEnabled
             )
         }
 

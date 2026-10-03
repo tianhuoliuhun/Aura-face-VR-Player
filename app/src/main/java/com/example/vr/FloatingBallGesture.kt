@@ -50,6 +50,7 @@ const val DOUBLE_TAP_WINDOW_MS = 280L
  * @param offsetY 读取当前 Y 偏移
  * @param onOffset 写回新偏移（已钳制）
  * @param onPressed 按下状态变化（用于换高亮底色/阴影）
+ * @param onDragEnd v2.1.231：拖动结束（抬手且确实拖动过）时回调 —— 调用方在此持久化位置
  */
 @Composable
 fun Modifier.floatingBallGesture(
@@ -61,6 +62,7 @@ fun Modifier.floatingBallGesture(
     onSingleTap: () -> Unit,
     onDoubleTap: () -> Unit,
     onPressed: (Boolean) -> Unit = {},
+    onDragEnd: () -> Unit = {},
     /** 手势协程的 key：把会影响手势判定的参数放进来，变化时重建手势 */
     gestureKey: Any? = Unit
 ): Modifier {
@@ -85,6 +87,7 @@ fun Modifier.floatingBallGesture(
     val latestMaxX by rememberUpdatedState(maxX)
     val latestMaxY by rememberUpdatedState(maxY)
     val latestOnPressed by rememberUpdatedState(onPressed)
+    val latestOnDragEnd by rememberUpdatedState(onDragEnd)
     // 上次抬手时间（ms）：0 表示「当前没有待判定的单击」
     var lastTapMs by remember { mutableLongStateOf(0L) }
 
@@ -115,6 +118,9 @@ fun Modifier.floatingBallGesture(
                 }
             }
             latestOnPressed(false)
+
+            // v2.1.231：确实拖动过 → 通知调用方提交位置（拖动结束不判定点击）
+            if (dragging) latestOnDragEnd()
 
             // 拖动结束不判定点击
             if (!dragging) {

@@ -2,6 +2,7 @@ package com.example.vr
 
 import android.content.Context
 import android.util.Log
+import androidx.annotation.StringRes
 import com.example.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -252,6 +253,52 @@ object SherpaAsrManager {
             .sortedBy { it.key.sortOrder }
             .forEach { (g, list) -> if (list.isNotEmpty()) out += g to list }
         return out
+    }
+
+    /**
+     * v2.1.231：语言选择的**四项分类**（用户 2026-10-03 要求）。
+     *
+     * | 分类 | 判定 | 解决什么问题 |
+     * |---|---|---|
+     * | [COMMON] | [AsrExtModels.isCommonKey] | 高频语言一键可达 |
+     * | [CJK_EN] | 中 / 粤 / 日 / 韩 / 英（含中文方言） | 按语种集合找 |
+     * | [BUILTIN] | chip 的模型是内置 Dolphin | **不用下载就能用** |
+     * | [DOWNLOAD] | 其余（需额外下载扩展模型） | 明确知道要付出下载成本 |
+     *
+     * ⚠️ 四类是**互斥**的（[categoryOf] 按上表顺序取第一个命中），每个 chip 恰好出现在一处 ——
+     *    87 个 chip 若在各分类里重复铺开，面板会滚很久，从上往下找反而更慢。
+     */
+    enum class AsrLangCategory(@StringRes val labelRes: Int, val sortOrder: Int) {
+        COMMON(R.string.asr_cat_common, 0),
+        CJK_EN(R.string.asr_cat_cjk_en, 1),
+        BUILTIN(R.string.asr_cat_builtin, 2),
+        DOWNLOAD(R.string.asr_cat_download, 3),
+    }
+
+    /** 「中日韩英」语种集合：`zh` / `yue` / `ja` / `ko` / `en` + 全部 `zh_*` 方言 */
+    private fun isCjkEnKey(code: String): Boolean =
+        code == "zh" || code == "yue" || code == "ja" || code == "ko" || code == "en" ||
+            code.startsWith("zh_")
+
+    /**
+     * 单个 chip 归属哪个分类（互斥，按 [AsrLangCategory] 表的顺序取第一个命中）。
+     *
+     * 「内置」的判据是 **模型是不是内置 Dolphin**（而不是该语言是否在五语列表里）——
+     * Dolphin 本身是多语种模型、随 APK 发布，凡由它背书的 chip 都不需要下载。
+     */
+    fun categoryOf(chip: SherpaLang): AsrLangCategory = when {
+        AsrExtModels.isCommonKey(chip.code) -> AsrLangCategory.COMMON
+        isCjkEnKey(chip.code) -> AsrLangCategory.CJK_EN
+        chip.modelId == AsrExtModels.DOLPHIN_DIR -> AsrLangCategory.BUILTIN
+        else -> AsrLangCategory.DOWNLOAD
+    }
+
+    /** 按四项分类收纳后的 chip 分组（已按 [AsrLangCategory.sortOrder] 排序） */
+    fun groupedByCategory(): List<Pair<AsrLangCategory, List<SherpaLang>>> {
+        val byCat = sherpaLanguages.groupBy { categoryOf(it) }
+        return AsrLangCategory.values()
+            .sortedBy { it.sortOrder }
+            .mapNotNull { cat -> byCat[cat]?.let { cat to it } }
     }
 
     /**

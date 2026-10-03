@@ -99,10 +99,14 @@ object UiThemes {
 
     fun loadThemeId(prefs: SharedPreferences): Int = prefs.getInt("ui_theme_id", 0)
 
+    /** 玻璃档位：0 = 纯色，1 = 液态玻璃（iOS 26 风），2 = 磨砂玻璃（系统高斯模糊） */
     fun loadGlassMode(prefs: SharedPreferences): Int {
-        // Glass modes: 0 = solid, 1 = liquid glass. Legacy value 2 (transparent)
-        // is no longer offered; fall back to solid.
+        // ⚠️ v2.1.231 修正：这里原本写着「legacy value 2（旧的透明档）已不再提供，回落为纯色」。
+        // 但 v2.1.218 之后 **2 已经被重新启用为「磨砂玻璃」**，于是出现：
+        //   用户在设置里点「磨砂」→ putInt("ui_glass_mode", 2) → 重启后这里把它读成 0
+        //   → 界面变回纯色。表现就是用户反馈的「选择的主题样式没有被记忆」。
+        // 现在 2 是合法档位，只把越界值（<0 或 >2）回落为 0。
         val mode = prefs.getInt("ui_glass_mode", 0)
-        return if (mode == 2) 0 else mode
+        return if (mode in 0..2) mode else 0
     }
 }

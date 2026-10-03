@@ -1,5 +1,6 @@
 package com.example.vr
 
+import android.content.SharedPreferences
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -85,6 +86,9 @@ fun nextBallSpeed(current: Float): Float {
  *
  * @param forward true = 快进球，false = 后退球（只影响图标与语义，交互一致）
  * @param glassModifier 玻璃主题下的 `Modifier.drawBackdrop(...)`（父级构建后传入，保持与加速球一致）
+ * @param prefs v2.1.231：位置存档用的 SharedPreferences（null = 不记忆位置）
+ * @param ballId v2.1.231：本球在存档里的唯一 id（[FloatingBallPositions.SEEK_FWD] / [SEEK_BWD]）
+ * @param rememberPosition v2.1.231：是否记忆位置（= 用户开启了「设置记忆」）
  */
 @Composable
 fun SeekFloatingBall(
@@ -101,8 +105,13 @@ fun SeekFloatingBall(
     initialYRatio: Float = 0.5f,
     /** 玻璃主题（glassMode=1 且 Android 12+）—— 底色需换成半透明白，与加速球保持视觉一致 */
     isLiquidGlass: Boolean = false,
-    glassModifier: Modifier = Modifier
+    glassModifier: Modifier = Modifier,
+    prefs: SharedPreferences? = null,
+    ballId: String = "",
+    rememberPosition: Boolean = false
 ) {
+    // v2.1.231：只有「给了 prefs + 给了 id + 开了记忆」三者齐备才读写存档
+    val persistPosition = rememberPosition && prefs != null && ballId.isNotEmpty()
     val scope = rememberCoroutineScope()
     val viewConfig = LocalViewConfiguration.current
     val longPressMs = viewConfig.longPressTimeoutMillis
@@ -116,11 +125,20 @@ fun SeekFloatingBall(
     var pressed by remember { mutableStateOf(false) }
     var lastTapAt by remember { mutableLongStateOf(0L) }
 
-    // 首次布局：贴右侧边缘，纵向按 initialYRatio 错开（快进 / 后退 / 加速三个球互不重叠）
+    // 首次布局：优先恢复到上次拖动到的位置（存的是 0~1 比例，乘当次的 maxX/maxY），
+    // 没有存档才回落到「贴右侧边缘 + initialYRatio 错开」的默认值。
+    // 存比例而非像素：横竖屏/分屏切换时容器尺寸变了，像素值会跑出屏幕。
     LaunchedEffect(maxX, maxY) {
         if (!positionInitialized && maxX > 0f && maxY > 0f) {
-            offsetX = maxX - with(density) { 20.dp.toPx() }
-            offsetY = (maxY * initialYRatio).coerceIn(0f, maxY)
+            val sx = if (persistPosition) FloatingBallPositions.loadX(prefs!!, ballId) else Float.NaN
+            val sy = if (persistPosition) FloatingBallPositions.loadY(prefs!!, ballId) else Float.NaN
+            if (!sx.isNaN() && !sy.isNaN()) {
+                offsetX = (sx * maxX).coerceIn(0f, maxX)
+                offsetY = (sy * maxY).coerceIn(0f, maxY)
+            } else {
+                offsetX = maxX - with(density) { 20.dp.toPx() }
+                offsetY = (maxY * initialYRatio).coerceIn(0f, maxY)
+            }
             positionInitialized = true
         }
     }
@@ -189,6 +207,11 @@ fun SeekFloatingBall(
                         }
                     }
                     pressed = false
+
+                    // v2.1.231：拖动结束 → 把落点按「占可移动范围的比例」存盘，下次启动恢复
+                    if (dragging && persistPosition && maxX > 0f && maxY > 0f) {
+                        FloatingBallPositions.save(prefs!!, ballId, offsetX / maxX, offsetY / maxY)
+                    }
 
                     // 抬手：未进入拖动才判定单击 / 双击（长按拖动不会触发单击）
                     if (!dragging) {

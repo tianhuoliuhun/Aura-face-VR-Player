@@ -1,5 +1,6 @@
 package com.example.vr
 
+import android.content.SharedPreferences
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -87,9 +88,15 @@ fun MarkerFloatingBall(
     initialXRatio: Float = 0f,
     initialYRatio: Float = 0.5f,
     isLiquidGlass: Boolean = false,
-    glassModifier: Modifier = Modifier
+    glassModifier: Modifier = Modifier,
+    /** v2.1.231：位置存档用的 SharedPreferences（null = 不记忆位置） */
+    prefs: SharedPreferences? = null,
+    /** v2.1.231：是否记忆位置（= 用户开启了「设置记忆」） */
+    rememberPosition: Boolean = false
 ) {
     val density = LocalDensity.current
+    // v2.1.231：prefs 与开关齐备才读写存档
+    val persistPosition = rememberPosition && prefs != null
 
     // —— 标记点：组件内部持有，跨重组保留 ——
     var markerMs by remember { mutableLongStateOf(0L) }
@@ -99,11 +106,19 @@ fun MarkerFloatingBall(
     var positionInitialized by remember { mutableStateOf(false) }
     var pressed by remember { mutableStateOf(false) }
 
-    // 首次布局：贴左边缘（与右侧的快进/后退球错开），纵向按 initialYRatio
+    // 首次布局：优先恢复到上次拖动到的位置（存档是 0~1 比例 × 当次 maxX/maxY），
+    // 没有存档才回落到「贴左边缘 + initialYRatio」的默认值。
     LaunchedEffect(maxX, maxY) {
         if (!positionInitialized && maxX > 0f && maxY > 0f) {
-            offsetX = (maxX * initialXRatio).coerceIn(0f, maxX)
-            offsetY = (maxY * initialYRatio).coerceIn(0f, maxY)
+            val sx = if (persistPosition) FloatingBallPositions.loadX(prefs!!, FloatingBallPositions.MARKER) else Float.NaN
+            val sy = if (persistPosition) FloatingBallPositions.loadY(prefs!!, FloatingBallPositions.MARKER) else Float.NaN
+            if (!sx.isNaN() && !sy.isNaN()) {
+                offsetX = (sx * maxX).coerceIn(0f, maxX)
+                offsetY = (sy * maxY).coerceIn(0f, maxY)
+            } else {
+                offsetX = (maxX * initialXRatio).coerceIn(0f, maxX)
+                offsetY = (maxY * initialYRatio).coerceIn(0f, maxY)
+            }
             positionInitialized = true
         }
     }
@@ -155,6 +170,17 @@ fun MarkerFloatingBall(
                 offsetY = { offsetY },
                 onOffset = { x, y -> offsetX = x; offsetY = y },
                 onPressed = { pressed = it },
+                // v2.1.231：拖动结束 → 按「占可移动范围的比例」存盘，下次启动恢复
+                onDragEnd = {
+                    if (persistPosition && maxX > 0f && maxY > 0f) {
+                        FloatingBallPositions.save(
+                            prefs!!,
+                            FloatingBallPositions.MARKER,
+                            offsetX / maxX,
+                            offsetY / maxY
+                        )
+                    }
+                },
                 onSingleTap = {
                     // 单击：跳回标记点
                     onSeekTo(markerMs)
