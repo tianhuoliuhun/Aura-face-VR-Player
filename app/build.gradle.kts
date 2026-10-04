@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 233
-    versionName = "2.1.233"
+    versionCode = 234
+    versionName = "2.1.234"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -80,9 +80,49 @@ android {
     //    「CXX1104: NDK from ndk.dir had version ... which disagrees with android.ndkVersion」。
     //    这里显式指定本机实际版本；若你的环境不同，改这个字符串即可。
     ndkVersion = "30.0.16248370"
+    // ==========================================================================
+  // v2.1.234：ABI 从「仅 arm64-v8a」扩到 **arm64-v8a + armeabi-v7a**
+  // --------------------------------------------------------------------------
+  // ⚠️ 为什么**不能**加 x86 / x86_64（这两个 ABI 是物理上做不到，不是没做）：
+  //
+  //   1. **libmars-face-kit.so（旷视 Megvii 闭源预编译二进制）只有两个 ABI**：
+  //      third_party/gpupixel/third_party/mars-face-kit/libs/android/
+  //        ├── arm64-v8a/libmars-face-kit.so
+  //        └── armeabi-v7a/libmars-face-kit.so
+  //      没有源码 → 无法自行编译 x86 版本。
+  //      而 app/src/main/cpp/CMakeLists.txt 里有一条**硬校验**：
+  //        if(NOT EXISTS "<mars-face-kit>/libs/android/${ANDROID_ABI}/libmars-face-kit.so")
+  //            message(FATAL_ERROR ...)
+  //      → 一旦把 x86 加进 abiFilters，**CMake 直接报错终止构建**（不是警告）。
+  //
+  //   2. **libmediapipe_tasks_vision_jni.so**（Maven: tasks-vision:0.10.14）
+  //      只有 arm64-v8a / armeabi-v7a / x86 —— **没有 x86_64**，
+  //      该库是 Google 发布的闭源 AAR，同样无法自行编译。
+  //
+  //   3. 华为 SDK 的 libxr_loader.so 也只有 arm64-v8a / armeabi-v7a
+  //      （D:/HuaweiVrSdk/sdkDemo/openXRsdk/jni/），CMake 对每个 ABI 都会硬校验。
+  //
+  //   结论：**arm64-v8a + armeabi-v7a 是唯一能做到「每个 ABI 的 native 库都完整」
+  //   的组合**。硬塞 x86/x86_64 的后果不是"多支持两个架构"，而是
+  //   「构建直接失败」，或者绕过校验后「装上能开、一点美颜就 UnsatisfiedLinkError 崩」。
+  //
+  //   ⚠️ 另外提醒：**不要**为了让模拟器用 x86 原生库而加 x86_64 ——
+  //      一旦 APK 里存在 x86_64 目录，x86_64 设备会优先选它（原生 ABI 优先于转译），
+  //      于是从"能用 arm64 转译正常跑"退化成"缺 gpupixel/mars/mediapipe 直接崩"。
+  //
+  //   abiFilters 的两个 ABI 各来源覆盖（已逐个核对）：
+  //     libauravr.so        —— 自建 CMake（按 abiFilters 自动出两份）
+  //     libgpupixel.so      —— 源码集成 third_party/gpupixel（同上）
+  //     libmars-face-kit.so —— 预编译，两个 ABI 都有
+  //     libijkplayer.so     —— libs/ijkplayer-k0.8.9-release.aar，四个 ABI 齐
+  //     libsherpa-onnx-*.so / libonnxruntime.so —— sherpa aar，四个 ABI 齐
+  //     libmediapipe_*.so   —— tasks-vision aar，含这两个 ABI
+  //     libopenxr_loader*.so—— openxr_loader aar + 华为 SDK，两个 ABI 齐
+  //     libxr_loader.so     —— 华为 SDK，两个 ABI 齐
+  // ==========================================================================
     defaultConfig {
       ndk {
-        abiFilters += listOf("arm64-v8a")
+        abiFilters += listOf("arm64-v8a", "armeabi-v7a")
       }
     }
     externalNativeBuild {
@@ -317,33 +357,62 @@ dependencies {
   implementation(files("libs/sherpa-onnx-1.13.6.aar"))
 
   // ==========================================================================
-  // v2.1.233：ijkplayer（Bilibili，FFmpeg 内核）解码器接入
+  // v2.1.234：ijkplayer —— 换用**新源码构建**的 AAR（debugly/ijkplayer k0.8.9）
   // --------------------------------------------------------------------------
-  // 坐标说明：
-  //   ijkplayer-java   —— Java 层（tv.danmaku.ijk.media.player.*），纯 Java 无 .so
-  //   ijkplayer-<abi>  —— 各 ABI 的 FFmpeg/ijk native 库（.so）
+  // 为什么不再用 `tv.danmaku.ijk.media:*:0.8.8`：
+  //   0.8.8 是 2016 年官方发布的最后一个版本，用 **NDK r10e** 编译 ——
+  //   在 Android 15 上已有明确的兼容问题，且它当年只发到 **jcenter**（2021 关停），
+  //   MavenCentral / Google Maven 上从来没有这个包，必须挂第三方镜像才能取到。
   //
-  // ⚠️⚠️ 四个 ABI 都声明，但**当前只有 arm64-v8a 会进包** ——
-  //    defaultConfig.ndk.abiFilters 已锁死为 ["arm64-v8a"]（见上面的 defaultConfig），
-  //    AGP 会过滤掉其余 ABI 的 .so。实测 release APK 里只出现
-  //      lib/arm64-v8a/libijk{ffmpeg,player,sdl}.so（合计 4.24 MB 未压缩）。
-  //    这里仍然把四个都写上，是为了**将来放开 abiFilters（或恢复 ABI 分包）时
-  //    不用再回来补依赖**；代价只是首次构建多下载约 17MB 的 aar（不进包）。
+  // 现在改用 debugly/ijkplayer 的 **k0.8.9**（从上游源码重新构建）：
+  //   · NDK r27c 编译 → 可在 Android 15 正常运行
+  //   · FFmpeg / OpenSSL(1.1.1w) / soundtouch / yuv 全部升级并静态链接
+  //   · **四个 ABI 齐全**：arm64-v8a / armeabi-v7a / x86 / x86_64
+  //   · 合并成**单个 libijkplayer.so**（不再是 ijkffmpeg+ijkplayer+ijksdl 三个）
+  //   · 用 cmake 重新组织工程，取代原 ndk-build
+  //   · **Java API 100% 向后兼容**：包名仍是 `tv.danmaku.ijk.media.player`，
+  //     loadLibrariesOnce / native_profileBegin / setSpeed / setOption(int,String,long)
+  //     / setSurface / setDataSource / prepareAsync 与各 OPT_CATEGORY_* 常量全部一致
+  //     → IjkPlayerBackend.kt 一行都不用改
+  //     （已用 javap 逐项核对，并确认 loadLibrariesOnce 内部加载的是 "ijkplayer" 单库）
   //
-  //    反过来说：**如果哪天放开了 abiFilters，必须确认这四个 ABI 都留着** ——
-  //    缺哪个 ABI 的库，装到该架构设备上就会在 `IjkMediaPlayer.loadLibrariesOnce`
-  //    处抛 UnsatisfiedLinkError（native 层崩，Java 栈看不到原因）。
+  // 来源：https://github.com/debugly/ijkplayer/releases
+  //       → k0.8.9-beta-260526101841/ijkplayer-cmake-release.aar（13.13 MB）
   //
-  // ⚠️ 0.8.8 是官方最后一个**发布**的版本（2016 年），此后 bilibili 只维护源码
-  //    不再发版。注意它当年发的是 **jcenter / bintray**（2021 年关停），
-  //    **MavenCentral 与 Google Maven 上从来没有这个包** —— 所以 settings.gradle.kts
-  //    里加了阿里云 public 镜像（聚合缓存了 jcenter 归档）来取它，详见那里的注释。
+  // ⚠️ 换成 AAR 文件依赖后，**settings.gradle.kts 里那两个 ijk 专用镜像可以删掉**
+  //    （它们只为取 0.8.8 而加，且用 content{includeGroup} 限定了 group）。
   // ==========================================================================
-  implementation("tv.danmaku.ijk.media:ijkplayer-java:0.8.8")
-  implementation("tv.danmaku.ijk.media:ijkplayer-arm64:0.8.8")
-  implementation("tv.danmaku.ijk.media:ijkplayer-armv7a:0.8.8")
-  implementation("tv.danmaku.ijk.media:ijkplayer-x86:0.8.8")
-  implementation("tv.danmaku.ijk.media:ijkplayer-x86_64:0.8.8")
+  implementation(files("libs/ijkplayer-k0.8.9-release.aar"))
+
+  // ==========================================================================
+  // v2.1.234：MPV（libmpv）解码内核
+  // --------------------------------------------------------------------------
+  // `io.github.marlboro-advance:mpv-android`（MavenCentral，MIT）—— **libmpv 的纯 JNI
+  // 绑定，不带自己的 View**。本项目需要的是"把解码结果吐到我给的 Surface"（视频帧要
+  // 交给 VRGLSurfaceView 做投影与美颜），而不是现成的播放器控件，所以这个包正合适。
+  //
+  // ⚠️ 为什么不用同样常见的 `dev.jdtech.mpv:libmpv`：它 **minSdk = 26**，
+  //    而本项目 minSdk = 24 → 清单合并直接失败：
+  //      uses-sdk:minSdkVersion 24 cannot be smaller than version 26 declared
+  //      in library [dev.jdtech.mpv:libmpv:1.0.0]
+  //    提高 minSdk 会砍掉全部 Android 7.x 设备（破坏性变更），故换用本库
+  //    —— 它 minSdk = 24，与本项目一致，清单不用动。
+  //
+  // 已核对（javap + 二进制字符串）：
+  //   · `is.xyz.mpv.MPVLib` 提供 create/init/attachSurface/detachSurface/command(vararg)/
+  //     setOptionString/getProperty* /observeProperty/addObserver —— 够实现 VrPlayerBackend
+  //   · libmpv.so 内含 `mediacodec_embed`（Android 专有 vo，画面直出 Surface）
+  //     与 `mediacodec` 硬解 → 可以像 Exo/ijk 一样只交出 Surface
+  //   · 含 `video-params` / `audio-params` / `file-format` 等属性 → 「视频信息」面板的数据源
+  //   · 四个 ABI 齐全（arm64-v8a / armeabi-v7a / x86 / x86_64）
+  //
+  // ⚠️ 它是**全局单例**（Kotlin object）：同一时刻只能有一个 mpv 播放器。
+  //    本项目同时只播一个片，够用；但要清楚这个限制（见 MpvPlayerBackend.kt 注释）。
+  //
+  // ⚠️ 体积：AAR 65.4 MB；实际进包的是 abiFilters 允许的两个 ABI
+  //    （libmpv.so：arm64 ≈ 13.9 MB + armv7a ≈ 12 MB，另带 libass 等依赖）。
+  // ==========================================================================
+  implementation("io.github.marlboro-advance:mpv-android:1.0.0")
 
   // ===== Khronos 标准 OpenXR loader（Android AAR）=====
   // 用途：给 PICO / Meta Quest 提供 OpenXR loader。它们与华为同为 Android OpenXR，

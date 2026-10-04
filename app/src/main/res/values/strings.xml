@@ -748,6 +748,24 @@
     <string name="theme_frosted_glass">磨砂</string>
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
     <string name="theme_gaussian_blur">高斯模糊</string>
+<!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
+    <string name="toast_mpv_fallback">MPV 解码失败，已切回 EXO 解码器</string>
+    <string name="mpv_param_hwdec">MediaCodec 硬解</string>
+    <string name="mpv_param_hwdec_hint">关闭后画面直出通路（mediacodec_embed）没有帧输出，会黑屏；仅在排查问题时关闭</string>
+    <string name="mpv_param_framedrop">丢帧保流畅</string>
+    <string name="mpv_param_cache">网络缓冲</string>
+    <string name="video_info_section">视频信息</string>
+    <string name="video_info_no_source">无播放源</string>
+    <string name="video_info_empty">暂无信息（未开始播放或尚未加载完成）</string>
+    <string name="video_info_resolution">分辨率</string>
+    <string name="video_info_vcodec">视频编码</string>
+    <string name="video_info_fps">帧率</string>
+    <string name="video_info_bitrate">码率</string>
+    <string name="video_info_container">容器</string>
+    <string name="video_info_duration">时长</string>
+    <string name="video_info_acodec">音频编码</string>
+    <string name="video_info_audio_detail">声道 / 采样率</string>
+    <string name="video_info_decoding">解码方式</string>
     <string name="decoder_ijk">IJK 解码器</string>
     <string name="toast_ijk_fallback">IJK 解码失败，已切回 EXO 解码器</string>
     <string name="ijk_param_mediacodec">MediaCodec 硬解</string>

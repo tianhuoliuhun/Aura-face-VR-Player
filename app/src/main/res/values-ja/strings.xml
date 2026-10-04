@@ -716,6 +716,24 @@
     <string name="theme_frosted_glass">フ ロ ス ト</string>
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
     <string name="theme_gaussian_blur">ガウスぼかし</string>
+<!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
+    <string name="toast_mpv_fallback">MPV の再生に失敗したため EXO に戻しました</string>
+    <string name="mpv_param_hwdec">MediaCodec ハードウェア</string>
+    <string name="mpv_param_hwdec_hint">オフにすると mediacodec_embed にフレームが供給されず画面が真っ黒になります。問題の切り分け時のみオフにしてください。</string>
+    <string name="mpv_param_framedrop">フレームドロップ</string>
+    <string name="mpv_param_cache">ネットワークキャッシュ</string>
+    <string name="video_info_section">映像情報</string>
+    <string name="video_info_no_source">再生ソースなし</string>
+    <string name="video_info_empty">情報なし（未再生、または読み込み中）</string>
+    <string name="video_info_resolution">解像度</string>
+    <string name="video_info_vcodec">映像コーデック</string>
+    <string name="video_info_fps">フレームレート</string>
+    <string name="video_info_bitrate">ビットレート</string>
+    <string name="video_info_container">コンテナ</string>
+    <string name="video_info_duration">再生時間</string>
+    <string name="video_info_acodec">オーディオコーデック</string>
+    <string name="video_info_audio_detail">チャンネル / サンプルレート</string>
+    <string name="video_info_decoding">デコード方式</string>
     <string name="decoder_ijk">IJK デコーダ</string>
     <string name="toast_ijk_fallback">IJK のデコードに失敗しました。EXO に切り替えます</string>
     <string name="ijk_param_mediacodec">MediaCodec ハードウェアデコード</string>

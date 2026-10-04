@@ -716,6 +716,24 @@
     <string name="theme_frosted_glass">프로스티드</string>
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
     <string name="theme_gaussian_blur">가우시안 블러</string>
+<!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
+    <string name="toast_mpv_fallback">MPV 재생 실패, EXO로 전환했습니다</string>
+    <string name="mpv_param_hwdec">MediaCodec 하드웨어</string>
+    <string name="mpv_param_hwdec_hint">끄면 mediacodec_embed로 전달되는 프레임이 없어 화면이 검게 나옵니다. 문제 확인 시에만 끄세요.</string>
+    <string name="mpv_param_framedrop">프레임 드롭</string>
+    <string name="mpv_param_cache">네트워크 캐시</string>
+    <string name="video_info_section">비디오 정보</string>
+    <string name="video_info_no_source">재생 소스 없음</string>
+    <string name="video_info_empty">정보 없음(재생 전이거나 로딩 중)</string>
+    <string name="video_info_resolution">해상도</string>
+    <string name="video_info_vcodec">비디오 코덱</string>
+    <string name="video_info_fps">프레임 레이트</string>
+    <string name="video_info_bitrate">비트레이트</string>
+    <string name="video_info_container">컨테이너</string>
+    <string name="video_info_duration">길이</string>
+    <string name="video_info_acodec">오디오 코덱</string>
+    <string name="video_info_audio_detail">채널 / 샘플레이트</string>
+    <string name="video_info_decoding">디코딩 방식</string>
     <string name="decoder_ijk">IJK 디코더</string>
     <string name="toast_ijk_fallback">IJK 디코딩 실패, EXO로 전환했습니다</string>
     <string name="ijk_param_mediacodec">MediaCodec 하드웨어 디코딩</string>

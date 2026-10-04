@@ -21,31 +21,18 @@ dependencyResolutionManagement {
     mavenCentral()
 
     // ========================================================================
-    // v2.1.233：ijkplayer 的归档源
+    // v2.1.234：**原来这里的两个 ijkplayer 镜像已删除**
     // ------------------------------------------------------------------------
-    // 背景：ijkplayer 官方当年只发到 **jcenter**（bintray），而 jcenter 已于
-    // 2021 年关停。MavenCentral 与 Google Maven 上**从来没有**这个包，直接加
-    // `tv.danmaku.ijk.media:*` 坐标会报 Could not find。
+    // v2.1.233 曾加过阿里云 public 与华为云镜像，用途只有一个：取
+    // `tv.danmaku.ijk.media:*:0.8.8` —— 它当年只发到 jcenter（2021 关停），
+    // MavenCentral / Google Maven 上从来没有这个坐标。
     //
-    // 阿里云 public 仓库是 MavenCentral + jcenter 的聚合镜像，**完整缓存了
-    // jcenter 关停前的归档**，因此能取到 0.8.8 的全部 5 个构件
-    // （ijkplayer-java / arm64 / armv7a / x86 / x86_64，均为 .aar）。
-    // 华为云镜像同样缓存了（repo.huaweicloud.com/repository/maven/），作为备用。
-    //
-    // ⚠️ 为什么放在**最后**并且限定 content：
-    //    Gradle 按声明顺序查找，google/mavenCentral 优先 —— 这样镜像只用于补漏，
-    //    不会把既有依赖解析到镜像上的不同副本（避免版本漂移与构建不确定性）。
-    //    `content { includeGroup(...) }` 进一步把它限制成"只认 ijk 这一个 group"，
-    //    其他依赖连查都不会查，也不拖慢构建。
+    // 现在 ijk 改用 **本地 AAR 文件依赖**（见 app/build.gradle.kts：
+    // `implementation(files("libs/ijkplayer-k0.8.9-release.aar"))`，
+    // 来源 debugly/ijkplayer k0.8.9 从上游源码以 NDK r27c 重新构建），
+    // 不再需要任何第三方 Maven 源 → 一并移除，保持依赖解析路径干净
+    // （少一个镜像就少一处"依赖被解析到镜像副本上的不同版本"的隐患）。
     // ========================================================================
-    maven {
-      url = uri("https://maven.aliyun.com/repository/public/")
-      content { includeGroup("tv.danmaku.ijk.media") }
-    }
-    maven {
-      url = uri("https://repo.huaweicloud.com/repository/maven/")
-      content { includeGroup("tv.danmaku.ijk.media") }
-    }
   }
 }
 

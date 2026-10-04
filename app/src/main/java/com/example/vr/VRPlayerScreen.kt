@@ -594,6 +594,13 @@ fun VRPlayerScreen(
     var ijkOptions by remember {
         mutableStateOf(if (isMemoryModeEnabled) IjkOptions.load(prefs) else IjkOptions())
     }
+    // v2.1.234：MPV 内核参数。
+    // ⚠️ 新增持久化状态必须**同时改四处**（本项目头号坑）：
+    //    ① state 定义（本行）② 写回 LaunchedEffect 的 key 列表 ③ put* 写回块
+    //    ④ else 分支的 remove(...)。漏任意一处 = 永不落盘 / 关不掉记忆。
+    var mpvOptions by remember {
+        mutableStateOf(if (isMemoryModeEnabled) MpvOptions.load(prefs) else MpvOptions())
+    }
 
     // Subtitle System States
     var isSubtitleEnabled by remember {
@@ -1054,6 +1061,8 @@ fun VRPlayerScreen(
         decoderEngine,
         // v2.1.233：IJK 参数 ⚠️ 必须进 key 列表，否则改了不落盘（同上注释）
         ijkOptions,
+        // v2.1.234：MPV 参数（同上）
+        mpvOptions,
         isSubtitleEnabled,
         isStripSubtitlePunctuation,
         subtitleFont,
@@ -1166,6 +1175,10 @@ fun VRPlayerScreen(
                 putLong("ijk_max_buffer", ijkOptions.maxBufferBytes)
                 putLong("ijk_probe_size", ijkOptions.probeSizeBytes)
                 putLong("ijk_skip_loop_filter", ijkOptions.skipLoopFilter)
+                // v2.1.234：MPV 内核参数
+                putBoolean("mpv_hwdec", mpvOptions.hwdec)
+                putBoolean("mpv_framedrop", mpvOptions.frameDrop)
+                putInt("mpv_cache_mb", mpvOptions.cacheMb)
                 putBoolean("is_subtitle_enabled", isSubtitleEnabled)
                 putBoolean("subtitle_strip_punct", isStripSubtitlePunctuation)
                 putInt("subtitle_font_id", subtitleFont.id)
@@ -1259,6 +1272,10 @@ fun VRPlayerScreen(
                 remove("ijk_max_buffer")
                 remove("ijk_probe_size")
                 remove("ijk_skip_loop_filter")
+                // v2.1.234：MPV 参数 key（同上，必须与 put 成对）
+                remove("mpv_hwdec")
+                remove("mpv_framedrop")
+                remove("mpv_cache_mb")
                 remove("is_subtitle_enabled")
                 remove("subtitle_strip_punct")
                 remove("subtitle_font_id")
@@ -1576,6 +1593,11 @@ fun VRPlayerScreen(
     // 门面刻意复刻了 ExoPlayer 的方法名与签名（play/pause/seekTo/currentPosition/
     // duration/isPlaying/setPlaybackSpeed/release），因此下面 20 多处调用点无需改动。
     var playerInstance by remember { mutableStateOf<VrPlayerBackend?>(null) }
+    // v2.1.234：当前正在播放的 URI。
+    // 用途：给「视频信息」面板猜容器格式（Exo 没有直接给出封装的 API，只能按扩展名推）。
+    // 不能直接用 `decodedUri` —— 那是 setupVideoPlayer 里的**局部变量**，
+    // 设置面板所在的 Compose 作用域看不到它。
+    var currentVideoUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
     // Synchronize player speed with basePlaybackSpeed and floating ball long-press boost
     LaunchedEffect(basePlaybackSpeed, floatingBallSpeed, isFloatingBallPressed, playerInstance) {
@@ -2093,6 +2115,8 @@ fun VRPlayerScreen(
             isVideoPlaying = false
 
             val decodedUri = Uri.parse(videoUriStr)
+            // v2.1.234：记录下来供「视频信息」面板显示（见 currentVideoUri 的声明处）
+            currentVideoUri = decodedUri
 
             // v119 修复(#7)：按当前媒体 URI 读取上次播放位置（不再跨媒体共享同一个变量）
             var resumeMs = PlaybackPositions.load(prefs, videoUriStr)
@@ -2315,6 +2339,79 @@ fun VRPlayerScreen(
                     "VRPlayerScreen",
                     "IJK 不可用（协议不支持或 native 库缺失: " + IjkPlayerFactory.lastError + "），回退 EXO"
                 )
+            }
+        }
+
+        // ======================================================================
+        // v2.1.234：MPV 内核（libmpv / FFmpeg）
+        // ----------------------------------------------------------------------
+        // 与 IJK 分支同样的"绝不黑屏"策略，两类失败静默回退 Exo：
+        //   ① libmpv native 库不可用（ABI 不匹配 / 分包丢 .so）
+        //   ② create 抛异常（数据源打不开）
+        // ③ prepare 后暴露的错误（解码失败、END_FILE 非正常结束）
+        //    → 走 onError 回调，Toast 并把内核切回 EXO（不在这里递归调用 setupVideoPlayer）
+        // ======================================================================
+        if (decoderEngine == DecoderEngine.MPV) {
+            if (MpvPlayerFactory.isAvailable(context)) {
+                val backend = MpvPlayerFactory.create(
+                    context = context,
+                    uri = decodedUri,
+                    surface = nativeSurface,
+                    options = mpvOptions,
+                    callbacks = object : MpvPlayerFactory.Callbacks {
+                        override fun onVideoSizeChanged(width: Int, height: Int) {
+                            // 与 Exo / IJK 共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
+                            applyVideoSize(width, height)
+                        }
+
+                        override fun onPrepared(backend: VrPlayerBackend) {
+                            // 倍速要在 play 之前设好 —— 与 Exo / IJK 同一时机
+                            backend.setPlaybackSpeed(
+                                if (isFloatingBallPressed) floatingBallSpeed else basePlaybackSpeed
+                            )
+                            if (!resumeApplied) {
+                                resumeApplied = true
+                                val dur = backend.duration
+                                if (PlaybackPositions.shouldResume(resumeMs, dur)) {
+                                    backend.seekTo(resumeMs)
+                                    Log.i("VRPlayerScreen", "MPV 恢复上次播放位置 " + resumeMs + "ms / 总长 " + dur + "ms")
+                                }
+                            }
+                            backend.play()
+                            isVideoPlaying = true
+                        }
+
+                        override fun onCompletion() {
+                            PlaybackPositions.clear(prefs, videoUriStr)
+                            resumeMs = 0L
+                        }
+
+                        override fun onError(reason: String) {
+                            Log.e("VRPlayerScreen", "MPV 播放错误: $reason -> 回退 EXO")
+                            // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
+                            //    改 decoderEngine 会触发重建 effect；同时写回 prefs，
+                            //    下次打开不再踩同一个坑（与 IJK 的回退一致）。
+                            decoderEngine = DecoderEngine.EXO
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.toast_mpv_fallback),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+
+                        override fun onFirstFrame() {
+                            isVideoPlaying = true
+                        }
+                    }
+                )
+                if (backend != null) {
+                    playerInstance = backend
+                    Log.i("VRPlayerScreen", "已使用 MPV 内核播放")
+                    return
+                }
+                Log.w("VRPlayerScreen", "MPV 创建失败，回退 EXO")
+            } else {
+                Log.w("VRPlayerScreen", "libmpv 不可用（native 库缺失），回退 EXO")
             }
         }
 
@@ -5412,7 +5509,7 @@ fun VRPlayerScreen(
                                             )
                                         } else if (decoderEngine == DecoderEngine.IJK) {
                                             // v2.1.233：IJK 已接通 → 挂上真实调参项。
-                                            // 改任何一项都会更新 ijkOptions state，而它是 Effect B 的 key，
+                                            // 改任何一项都会更新 ijkOptions state，而它是重建 effect 的 key，
                                             // 因此改完自动重建播放器并从原位置续播，无需「应用」按钮。
                                             IjkOptionsPanel(
                                                 options = ijkOptions,
@@ -5420,6 +5517,15 @@ fun VRPlayerScreen(
                                                 accentColor = AccentColor,
                                                 accentOnColor = AccentOnColor,
                                                 defaultBufferLabel = stringResource(R.string.ijk_buffer_default)
+                                            )
+                                        } else if (decoderEngine == DecoderEngine.MPV) {
+                                            // v2.1.234：MPV 参数（同样的机制：改完自动重建 + 续播）
+                                            MpvOptionsPanel(
+                                                options = mpvOptions,
+                                                onOptionsChange = { mpvOptions = it },
+                                                accentColor = AccentColor,
+                                                accentOnColor = AccentOnColor,
+                                                defaultLabel = stringResource(R.string.ijk_buffer_default)
                                             )
                                         } else {
                                             // EXO 目前可调项已在下面「软件/硬件解码」等开关里，
@@ -5441,6 +5547,17 @@ fun VRPlayerScreen(
                                             }
                                         }
                                     }
+
+                                    // v2.1.234：**视频信息** ——
+                                    // 显示当前片源的容器/编码/分辨率/帧率/码率/音轨/实际解码方式。
+                                    // 三个内核（Exo / IJK / MPV）各自能给的字段不同，统一由
+                                    // VideoInfoPanel 内部走 currentVideoInfo() 分发，这里不需要判断内核。
+                                    VideoInfoPanel(
+                                        player = playerInstance,
+                                        uri = currentVideoUri,
+                                        isSoftwareDecoding = isSoftwareDecoding,
+                                        accentColor = AccentColor
+                                    )
 
                                     // 软硬解码切换
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

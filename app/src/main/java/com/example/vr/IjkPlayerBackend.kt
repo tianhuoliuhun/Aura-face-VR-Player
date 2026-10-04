@@ -287,4 +287,27 @@ class IjkBackend(private val mp: IjkMediaPlayer) : VrPlayerBackend {
         } catch (e: Throwable) {
             null
         }
+
+    // ===================== v2.1.234：视频信息 =====================
+
+    /**
+     * 读当前视频信息（「视频信息」面板的数据源）。
+     *
+     * ijk 能给的比 mpv 少：没有帧率，也没有直接的"容器格式"字段。
+     * 但有 [MediaInfo] —— 里面的 `mVideoDecoder` / `mAudioDecoder` 是**实际用到的
+     * 解码器名**（形如 `h264` / `aac`），`mVideoDecoderImpl` 是解码实现
+     * （`MediaCodec` = 硬解 / `FFmpeg` = 软解），这三项对排查"这个片源到底走了软解还是硬解"
+     * 最有用处，所以优先取它们。
+     *
+     * ⚠️ 全部在 [safe] 里读：ijk 在 prepare 完成前调这些会抛 IllegalStateException。
+     */
+    fun videoInfo(): VideoInfo = VideoInfo(
+        engine = DecoderEngine.IJK,
+        videoCodec = safe { mp.mediaInfo?.mVideoDecoder },
+        width = safe { mp.videoWidth } ?: 0,
+        height = safe { mp.videoHeight } ?: 0,
+        durationMs = safe { mp.duration } ?: 0L,
+        audioCodec = safe { mp.mediaInfo?.mAudioDecoder },
+        decoding = safe { mp.mediaInfo?.mVideoDecoderImpl }
+    )
 }

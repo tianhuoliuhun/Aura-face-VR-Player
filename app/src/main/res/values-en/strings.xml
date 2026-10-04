@@ -749,6 +749,24 @@
     <string name="theme_frosted_glass">Frosted</string>
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
     <string name="theme_gaussian_blur">Gaussian blur</string>
+<!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
+    <string name="toast_mpv_fallback">MPV playback failed, switched back to EXO</string>
+    <string name="mpv_param_hwdec">MediaCodec (HW)</string>
+    <string name="mpv_param_hwdec_hint">Turning this off leaves mediacodec_embed with no decoded frames — the screen will go black. Only disable it for troubleshooting.</string>
+    <string name="mpv_param_framedrop">Frame drop</string>
+    <string name="mpv_param_cache">Network cache</string>
+    <string name="video_info_section">Video info</string>
+    <string name="video_info_no_source">No source</string>
+    <string name="video_info_empty">No data yet (not playing or still loading)</string>
+    <string name="video_info_resolution">Resolution</string>
+    <string name="video_info_vcodec">Video codec</string>
+    <string name="video_info_fps">Frame rate</string>
+    <string name="video_info_bitrate">Bitrate</string>
+    <string name="video_info_container">Container</string>
+    <string name="video_info_duration">Duration</string>
+    <string name="video_info_acodec">Audio codec</string>
+    <string name="video_info_audio_detail">Channels / sample rate</string>
+    <string name="video_info_decoding">Decoding</string>
     <string name="decoder_ijk">IJK decoder</string>
     <string name="toast_ijk_fallback">IJK decoding failed, switched back to EXO</string>
     <string name="ijk_param_mediacodec">MediaCodec HW decode</string>
