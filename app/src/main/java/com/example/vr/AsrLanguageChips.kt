@@ -151,9 +151,14 @@ fun AsrLanguageChips(
                     )
                 }
                 if (!cCollapsed) {
+                    // v2.1.233：**同一语言只留一条**（用户反馈「选择里有重复项」）。
+                    // 同一语言有多个模型候选时（如英语 = 内置 / FastConformer / Parakeet v3），
+                    // 「按分类」视角只显示**首选**那条，避免「英语1 / 英语2 / 英语3」并排的重复观感；
+                    // 想换模型请切到「按模型」视角（那里保留全部候选，本来就是对比用的）。
+                    val deduped = dedupeKeepPreferred(langs)
                     // 组内超过一个语区时加**语区小标题**分段 ——
                     // 「下载模型语言」可能有 40+ 个 chip，不分段就是一长串找不到目标。
-                    val subGroups = langs.groupBy { it.group }.entries.sortedBy { it.key.sortOrder }
+                    val subGroups = deduped.groupBy { it.group }.entries.sortedBy { it.key.sortOrder }
                     val showSubTitle = subGroups.size > 1
                     subGroups.forEach { (sub, subLangs) ->
                         if (showSubTitle) {
@@ -210,6 +215,29 @@ fun AsrLanguageChips(
                 }
             }
         }
+    }
+}
+
+/**
+ * 同一语言只保留**首选**的一条 chip，「按分类」视角专用。
+ *
+ * 优先级（数字越小越优先）：
+ *   0 = 内置（`builtin` / 内置 Dolphin）—— 开箱即用，不用下模型
+ *   1 = 内置 Dolphin（显式登记的那种）
+ *   2 = 其它扩展模型
+ *
+ * 同时把「只剩一条」的语言上的序号后缀去掉（原本是给「英语1/2/3」区分用的，
+ * 只剩一条时还挂着「1」反而像是残缺）。
+ */
+private fun dedupeKeepPreferred(langs: List<SherpaAsrManager.SherpaLang>): List<SherpaAsrManager.SherpaLang> {
+    fun rank(l: SherpaAsrManager.SherpaLang): Int = when {
+        l.modelId == null || l.modelId == "builtin" -> 0
+        l.modelId == AsrExtModels.DOLPHIN_DIR -> 1
+        else -> 2
+    }
+    return langs.groupBy { it.code }.values.mapNotNull { same ->
+        val picked = same.minByOrNull { rank(it) } ?: return@mapNotNull null
+        if (same.size == 1) picked else picked.copy(suffix = null)
     }
 }
 

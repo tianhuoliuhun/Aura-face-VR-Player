@@ -144,6 +144,21 @@ object SherpaAsrManager {
         false
     }
 
+    // ===== v2.1.233：Dolphin 下载版路径（内置 assets 缺失时的兜底） =====
+    // 与 createExtRecognizer 里 dolphin 分支的路径算法保持一致：
+    // 模型落在 `ext-<dirName>/`，tokens 也在同一目录（Dolphin 没有共享 tokens）。
+    private fun dolphinDownloadModelPath(context: Context): String =
+        extSubDir(context, AsrExtModels.DOLPHIN_DIR).resolve("model.int8.onnx").absolutePath
+
+    private fun dolphinDownloadTokensPath(context: Context): String =
+        extSubDir(context, AsrExtModels.DOLPHIN_DIR).resolve("tokens.txt").absolutePath
+
+    private fun downloadedDolphinReady(context: Context): Boolean {
+        val m = File(dolphinDownloadModelPath(context))
+        val t = File(dolphinDownloadTokensPath(context))
+        return m.isFile && m.length() > 1_000_000L && t.isFile && t.length() > 1000L
+    }
+
     /** 内置 assets 是否可用（打包遗漏或损坏时返回 false，交由下载版兜底） */
     private fun assetModelAvailable(context: Context): Boolean = try {
         context.assets.open(SVC_ASSET_MODEL).close()
@@ -236,7 +251,18 @@ object SherpaAsrManager {
                     )
                 }
             }
-    }
+            // ===================================================================
+            // v2.1.233：**去重** —— 用户反馈「AI 字幕的选择有重复项」
+            //
+            // 真重复（uid 完全相同）来自两处登记撞车：
+            //   上面手动 add 了 zh / ja / ko（modelId = DOLPHIN_DIR），
+            //   而 DOLPHIN_LANGS 里**也**含 zh / ja / ko，于是下面的循环又生成一遍 ——
+            //   同语言同模型 = 两条一模一样的 chip（选中判定用 uid，两条会**同时高亮**）。
+            //
+            // 按 uid（`语言@模型`）去重，保留第一条（= 手动登记的那条，无序号后缀，
+            // 显示为「中文」而不是「中文 2」，更符合预期）。
+            // ===================================================================
+        }.distinctBy { "${it.code}@${it.modelId}" }
 
     /** 按语区收纳后的 chip 分组（供 UI 折叠渲染） */
     fun groupedChips(): List<Pair<AsrExtModels.AsrLangGroup, List<SherpaLang>>> {
@@ -532,49 +558,67 @@ object SherpaAsrManager {
         language: String = "auto",
         threads: Int = 0
     ): OfflineRecognizer? {
-        // v2.0.145：扩展语言（越南语等）走各自独立的离线模型，与内置 SenseVoice 完全隔离，互不影响。
-        // v2.0.208：**尊重用户在「选择模型」里的选择** ——
-        //   解析结果为 null 时走内置 SenseVoice（用户选了内置、或该语言没有扩展候选）。
+        // =======================================================================
+        // v2.1.233：「自动」必须**真的自动**
+        //
+        // 「自动」= 语种识别（LID）。能真正做 LID 的只有 **Dolphin** ——
+        // 它是自带语种判定的多语种模型。用 javap 核对过 AAR：
+        //   `OfflineDolphinModelConfig` **只有一个 `model` 字段，没有 language**，
+        //   也就是说 Dolphin 在 sherpa-onnx 里**没有语种参数**，默认行为就是自动判定。
+        //
+        // 而 SenseVoice 的 `language="auto"` 只能在 中/英/日/韩/粤 **五种语言里猜** ——
+        // 这既不符合「自动」的语义，且 SenseVoice 本身已在 v2.1.208 退役
+        // （assets 可能已不存在）。此前选「自动」就落在这条废弃路径上，
+        // 表现为「识别器创建失败」或「只能在五语里瞎猜」。
+        // =======================================================================
+        if (language == "auto") {
+            return createDolphinRecognizer(context, threads)
+        }
+
+        // v2.0.145：扩展语言（越南语等）走各自独立的离线模型，与内置模型完全隔离。
+        // v2.0.208：**尊重用户在「选择模型」里的选择**
         resolveExtModel(context, language)?.let { ext ->
             return createExtRecognizer(context, ext, threads)
         }
+
+        // v2.1.233：没有扩展候选 → 该语言由内置 Dolphin 覆盖（如 zh / ja / ko / yue）。
+        // ⚠️ 原先这里落到 **已退役的 SenseVoice** 通路：assets 一旦不存在就直接
+        //    返回 null（识别器创建失败）。现在统一由 Dolphin 兜底。
+        return createDolphinRecognizer(context, threads)
+    }
+
+    /**
+     * 用**内置 Dolphin** 建识别器（不指定语种 = 自动识别；也是无扩展模型时的兜底通路）。
+     *
+     * Dolphin 在 sherpa-onnx 里没有语种参数（见 [createRecognizer] 里的 javap 结论），
+     * 因此这个函数同时承担两件事：
+     *   - 处理 `language == "auto"`（真正的 LID）
+     *   - 作为内置语种（zh / ja / ko / yue …）的兜底实现
+     */
+    fun createDolphinRecognizer(
+        context: Context,
+        threads: Int = 0
+    ): OfflineRecognizer? {
         lastInitError = null
-        if (!isModelReady(context)) {
-            Log.w(TAG, "SenseVoice model not ready（内置缺失且无下载版）")
-            lastInitError = context.getString(R.string.asr_model_unavailable_detail, SVC_MODEL_MB)
+        if (!dolphinAssetAvailable(context) && !downloadedDolphinReady(context)) {
+            Log.w(TAG, "Dolphin not available（内置 assets 缺失且无下载版）")
+            lastInitError = context.getString(R.string.asr_dolphin_unavailable)
             return null
         }
         val auto = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
         val numThreads = if (threads in MIN_THREADS..MAX_THREADS) threads else auto
-        val useDownloaded = downloadedModelReady(context)
-
-        val assetManager: android.content.res.AssetManager?
-        val modelPath: String
-        val tokensPath: String
-        if (useDownloaded) {
-            val dir = svcDir(context)
-            assetManager = null
-            modelPath = dir.resolve(SVC_MODEL).absolutePath
-            tokensPath = dir.resolve(SVC_TOKENS).absolutePath
-        } else {
-            assetManager = context.assets
-            modelPath = SVC_ASSET_MODEL
-            tokensPath = SVC_ASSET_TOKENS
-        }
-        Log.i(
-            TAG,
-            "SenseVoice: source=${if (useDownloaded) "download" else "assets"} " +
-                "model=$modelPath lang=$language threads=$numThreads（自动值=$auto）"
-        )
+        // 内置 assets 优先；assets 缺失时回退到 filesDir 的下载版
+        val useAsset = dolphinAssetAvailable(context)
+        val assetManager: android.content.res.AssetManager? = if (useAsset) context.assets else null
+        val modelPath = if (useAsset) DOLPHIN_ASSET_MODEL else dolphinDownloadModelPath(context)
+        val tokensPath = if (useAsset) DOLPHIN_ASSET_TOKENS else dolphinDownloadTokensPath(context)
+        Log.i(TAG, "Dolphin: source=${if (useAsset) "assets" else "download"} threads=$numThreads")
         return try {
             val config = OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                 modelConfig = OfflineModelConfig(
-                    senseVoice = OfflineSenseVoiceModelConfig(
-                        model = modelPath,
-                        language = language,                // "auto" / "zh" / "en" / "ja" / "ko" / "yue"
-                        useInverseTextNormalization = true, // 数字/日期正规化，字幕更可读
-                    ),
+                    dolphin = OfflineDolphinModelConfig(model = modelPath),
+                    modelType = "dolphin",
                     tokens = tokensPath,
                     numThreads = numThreads,
                     debug = false,
@@ -583,11 +627,11 @@ object SherpaAsrManager {
                 decodingMethod = "greedy_search",
             )
             OfflineRecognizer(assetManager, config).also {
-                Log.i(TAG, "SenseVoice recognizer created (lang=$language, threads=$numThreads)")
+                Log.i(TAG, "Dolphin recognizer created（自动语种识别）")
             }
         } catch (e: Throwable) {
             // 用 Throwable：native 初始化失败可能抛 UnsatisfiedLinkError 等 Error 子类
-            Log.e(TAG, "SenseVoice init failed: ${e.message}", e)
+            Log.e(TAG, "Dolphin init failed: ${e.message}", e)
             lastInitError = context.getString(R.string.asr_init_failed, e.message ?: e.javaClass.simpleName)
             null
         }
@@ -642,11 +686,22 @@ object SherpaAsrManager {
         }
     }
 
-    /** 指定语言键的模型是否就绪（SenseVoice 语言 → 内置模型；扩展语言 → **任一候选**就绪即算就绪） */
+    /**
+     * 指定语言键的模型是否就绪。
+     *
+     * v2.1.233：无扩展候选时（如 `auto` / `zh` / `ja` / `ko` / `yue`）判定的是
+     * **内置 Dolphin** 的可用性，而不是原先那条**已退役的 SenseVoice** 通路 ——
+     * 否则选「自动」时这里永远返回 false，UI 显示「模型不可用」，
+     * 可实际上 Dolphin 一直随包可用。
+     */
     fun isModelReadyFor(context: Context, langKey: String): Boolean {
         val cands = AsrExtModels.candidatesByKey(langKey)
-        return if (cands.isNotEmpty()) cands.any { isExtModelReady(context, it) }
-        else isModelReady(context)
+        if (cands.isNotEmpty()) {
+            // 候选里有内置 Dolphin 且 assets 完好 → 开箱即用，无需下载
+            if (cands.any { it.modelType == "dolphin" && dolphinAssetAvailable(context) }) return true
+            return cands.any { isExtModelReady(context, it) }
+        }
+        return dolphinAssetAvailable(context) || downloadedDolphinReady(context)
     }
 
     /**

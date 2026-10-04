@@ -385,6 +385,7 @@
     <string name="asr_sensevoice_bundled">Dolphin・内蔵モデル（ダウンロード不要）・40 言語 + 22 方言・言語自動判別</string>
     <string name="asr_model_ready_source">準備完了・%1$s</string>
     <string name="asr_model_unavailable">モデルを利用できません（内蔵分が不足。ダウンロードで代替可能）</string>
+    <string name="asr_dolphin_unavailable">Dolphin モデルを利用できません（内蔵分が不足、未ダウンロード）</string>
     <string name="asr_update_model">モデルを更新</string>
     <string name="asr_download_model">モデルをダウンロード</string>
     <string name="asr_language_hint">「自動」は音声から言語を判定します。中国語と日本語が混ざる場合は明示指定の方が正確です</string>
@@ -716,6 +717,13 @@
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
     <string name="theme_gaussian_blur">ガウスぼかし</string>
     <string name="decoder_ijk">IJK デコーダ</string>
+    <string name="toast_ijk_fallback">IJK のデコードに失敗しました。EXO に切り替えます</string>
+    <string name="ijk_param_mediacodec">MediaCodec ハードウェアデコード</string>
+    <string name="ijk_param_framedrop">フレームドロップで滑らかさ優先</string>
+    <string name="ijk_param_accurate_seek">正確なシーク</string>
+    <string name="ijk_param_buffer">バッファ上限</string>
+    <string name="ijk_buffer_default">デフォルト</string>
+    <string name="ijk_param_hw_hint">オフ時は FFmpeg ソフトデコード（端末が対応しない形式でお試しください）</string>
     <string name="decoder_params_section">デコーダ設定（予定）</string>
     <string name="decoder_params_placeholder">このデコーダはまだ組み込まれていません。後で調整できる項目（バッファ、probe サイズ、ハードウェアデコード設定など）のための予約枠です。</string>
     <string name="asr_no_download_needed">内蔵済み</string>

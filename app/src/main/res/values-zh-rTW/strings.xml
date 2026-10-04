@@ -425,6 +425,7 @@
     <string name="asr_sensevoice_bundled">Dolphin · 內置模型（無需下載）· 40 語 + 22 方言 · 自帶語種識別</string>
     <string name="asr_model_ready_source">已就緒 · %1$s</string>
     <string name="asr_model_unavailable">模型不可用（內置資源缺失，可下載兜底）</string>
+    <string name="asr_dolphin_unavailable">Dolphin 模型不可用（內置資源缺失且未下載）</string>
     <string name="asr_update_model">更新模型</string>
     <string name="asr_download_model">下載模型</string>
     <string name="asr_language_hint">「自動」按語音內容判別語種；中日混說時指定語種更準</string>
@@ -758,6 +759,13 @@
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
     <string name="theme_gaussian_blur">高斯模糊</string>
     <string name="decoder_ijk">IJK 解碼器</string>
+    <string name="toast_ijk_fallback">IJK 解碼失敗，已切回 EXO 解碼器</string>
+    <string name="ijk_param_mediacodec">MediaCodec 硬解</string>
+    <string name="ijk_param_framedrop">丟幀保流暢</string>
+    <string name="ijk_param_accurate_seek">精確跳轉</string>
+    <string name="ijk_param_buffer">緩衝上限</string>
+    <string name="ijk_buffer_default">預設</string>
+    <string name="ijk_param_hw_hint">關閉則用 FFmpeg 軟解（裝置不認的格式可嘗試）</string>
     <string name="decoder_params_section">解碼器參數（保留）</string>
     <string name="decoder_params_placeholder">該解碼核心尚未接入，此處為後續調整預留（緩衝區、探測尺寸、硬體解碼策略等）。</string>
     <string name="asr_no_download_needed">已內建</string>

@@ -416,6 +416,7 @@
     <string name="asr_sensevoice_bundled">Dolphin - bundled (no download) - 40 languages + 22 dialects - auto detection</string>
     <string name="asr_model_ready_source">Ready - %1$s</string>
     <string name="asr_model_unavailable">Model unavailable (bundled copy missing, download as fallback)</string>
+    <string name="asr_dolphin_unavailable">Dolphin model unavailable (bundled copy missing and not downloaded)</string>
     <string name="asr_update_model">Update model</string>
     <string name="asr_download_model">Download model</string>
     <string name="asr_language_hint">Auto detects language from speech; set it manually for mixed Chinese/Japanese</string>
@@ -749,6 +750,13 @@
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
     <string name="theme_gaussian_blur">Gaussian blur</string>
     <string name="decoder_ijk">IJK decoder</string>
+    <string name="toast_ijk_fallback">IJK decoding failed, switched back to EXO</string>
+    <string name="ijk_param_mediacodec">MediaCodec HW decode</string>
+    <string name="ijk_param_framedrop">Drop frames for smoothness</string>
+    <string name="ijk_param_accurate_seek">Accurate seek</string>
+    <string name="ijk_param_buffer">Max buffer</string>
+    <string name="ijk_buffer_default">Default</string>
+    <string name="ijk_param_hw_hint">Off = FFmpeg software decode (try it for formats the device rejects)</string>
     <string name="decoder_params_section">Decoder options (reserved)</string>
     <string name="decoder_params_placeholder">This backend is not wired up yet; the slot is reserved for future tuning (buffers, probe size, hardware decoding policy, etc.).</string>
     <string name="asr_no_download_needed">Built-in</string>

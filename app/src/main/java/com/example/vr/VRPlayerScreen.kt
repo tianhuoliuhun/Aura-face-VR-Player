@@ -588,6 +588,13 @@ fun VRPlayerScreen(
         )
     }
 
+    // v2.1.233：IJK 内核的可调参数（对应设置面板「解码器参数 · IJK」那几项）。
+    // 只有选中 IJK 时才会被读取；切回 EXO 时这些值不参与播放，但仍保留在 prefs 里，
+    // 用户下次切回 IJK 时不用重设。
+    var ijkOptions by remember {
+        mutableStateOf(if (isMemoryModeEnabled) IjkOptions.load(prefs) else IjkOptions())
+    }
+
     // Subtitle System States
     var isSubtitleEnabled by remember {
         mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("is_subtitle_enabled", true) else true)
@@ -1045,6 +1052,8 @@ fun VRPlayerScreen(
         fsrCustomTarget,
         isSoftwareDecoding,
         decoderEngine,
+        // v2.1.233：IJK 参数 ⚠️ 必须进 key 列表，否则改了不落盘（同上注释）
+        ijkOptions,
         isSubtitleEnabled,
         isStripSubtitlePunctuation,
         subtitleFont,
@@ -1149,6 +1158,14 @@ fun VRPlayerScreen(
                 putString("fsr_target_resolution", fsrCustomTarget.id)
                 putBoolean("is_software_decoding", isSoftwareDecoding)
                 putInt("decoder_engine_id", decoderEngine.id)
+                // v2.1.233：IJK 内核参数（与 decoderEngine 一起落盘）
+                putBoolean("ijk_mediacodec", ijkOptions.mediaCodec)
+                putBoolean("ijk_framedrop", ijkOptions.frameDrop)
+                putBoolean("ijk_accurate_seek", ijkOptions.accurateSeek)
+                putBoolean("ijk_soundtouch", ijkOptions.soundTouch)
+                putLong("ijk_max_buffer", ijkOptions.maxBufferBytes)
+                putLong("ijk_probe_size", ijkOptions.probeSizeBytes)
+                putLong("ijk_skip_loop_filter", ijkOptions.skipLoopFilter)
                 putBoolean("is_subtitle_enabled", isSubtitleEnabled)
                 putBoolean("subtitle_strip_punct", isStripSubtitlePunctuation)
                 putInt("subtitle_font_id", subtitleFont.id)
@@ -1233,6 +1250,15 @@ fun VRPlayerScreen(
                 remove("max_fps")
                 remove("is_software_decoding")
                 remove("decoder_engine_id")
+                // v2.1.233：IJK 参数 key —— 必须与上面的 put 成对，否则关闭记忆模式后
+                // 旧值残留，下次开启被「恢复」成过期设置（本项目头号坑）。
+                remove("ijk_mediacodec")
+                remove("ijk_framedrop")
+                remove("ijk_accurate_seek")
+                remove("ijk_soundtouch")
+                remove("ijk_max_buffer")
+                remove("ijk_probe_size")
+                remove("ijk_skip_loop_filter")
                 remove("is_subtitle_enabled")
                 remove("subtitle_strip_punct")
                 remove("subtitle_font_id")
@@ -1546,7 +1572,10 @@ fun VRPlayerScreen(
     }
 
     // Handle modern ExoPlayer lifecycle and Surface Texture streaming in Compose
-    var playerInstance by remember { mutableStateOf<ExoPlayer?>(null) }
+    // v2.1.233：类型由 ExoPlayer 改为统一门面 VrPlayerBackend（接入 ijk 后两种内核共用）。
+    // 门面刻意复刻了 ExoPlayer 的方法名与签名（play/pause/seekTo/currentPosition/
+    // duration/isPlaying/setPlaybackSpeed/release），因此下面 20 多处调用点无需改动。
+    var playerInstance by remember { mutableStateOf<VrPlayerBackend?>(null) }
 
     // Synchronize player speed with basePlaybackSpeed and floating ball long-press boost
     LaunchedEffect(basePlaybackSpeed, floatingBallSpeed, isFloatingBallPressed, playerInstance) {
@@ -1760,7 +1789,9 @@ fun VRPlayerScreen(
 
     // Dynamic track selection parameters update when maxResolution limit is changed
     LaunchedEffect(maxResolution) {
-        playerInstance?.let { player ->
+        // v2.1.233：轨道选择是 ExoPlayer 专有能力 → 走门面的 exo 逃生舱口；
+        // ijk 下为 null，此处自然跳过（不会崩，只是不生效）。
+        playerInstance?.exo?.let { player ->
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                 .setMaxVideoSize(maxResolution.width, maxResolution.height)
                 .build()
@@ -1930,7 +1961,8 @@ fun VRPlayerScreen(
 
     // 音轨/字幕轨选择（8/2 功能）
     fun selectMediaTrack(groupType: Int, trackIndex: Int) {
-        playerInstance?.let { p ->
+        // v2.1.233：轨道切换仅 Exo 支持（ijk 无等效 API）→ 用 exo 逃生舱口
+        playerInstance?.exo?.let { p ->
             try {
                 val groups = p.currentTracks?.groups ?: return@let
                 val group = groups.firstOrNull { it.type == groupType } ?: return@let
@@ -1971,7 +2003,8 @@ fun VRPlayerScreen(
             sb.append(context.getString(R.string.info_title, title))
         }
         var gotAny = false
-        playerInstance?.let { p ->
+        // v2.1.233：轨道信息仅 Exo 提供（ijk 无 Tracks API）→ 用 exo 逃生舱口
+        playerInstance?.exo?.let { p ->
             try {
                 val dur = p.duration
                 if (dur > 0) {
@@ -2077,6 +2110,213 @@ fun VRPlayerScreen(
 
             surfaceTexture.setDefaultBufferSize(videoWidth, videoHeight)
             val nativeSurface = Surface(surfaceTexture)
+        // ===================================================================
+        // v2.1.233：视频尺寸处理 —— **Exo 与 ijk 共用同一份**
+        // 原先这段逻辑整个写在 Exo 的 onVideoSizeChanged 里；接入 ijk 后如果
+        // 照抄一份，就会变成「同一个功能两份实现」—— 本项目反复出事的根源。
+        // 抽成局部函数后，两个内核都只调它，行为天然一致。
+        // ===================================================================
+            fun applyVideoSize(width: Int, height: Int) {
+                if (width <= 0 || height <= 0) return
+            try {
+                surfaceTexture.setDefaultBufferSize(
+                    effectiveOutputSize(width, height).first,
+                    effectiveOutputSize(width, height).second
+                )
+                currentGlSurfaceView?.renderer?.let { r ->
+                    r.videoWidth = width
+                    r.videoHeight = height
+                }
+                // v2.0.206：同步进 state 供 FSR 默认规则判定与 UI 显示。
+                // ⚠️ 只写 renderer 是不会触发重组的 —— 那样 FSR 的判定结果
+                //    会永远停在初始的 0x0（「等待视频信息」），开关看起来失灵。
+                videoSourceWidth = width
+                videoSourceHeight = height
+                // v2.1.233：这条日志原本写死 "ExoPlayer onVideoSizeChanged"，但抽成共用函数后
+            // **ijk 也会走到这里** —— 实测日志里出现「ExoPlayer onVideoSizeChanged」而实际
+            // 跑的是 ijk，会直接把排查带偏。改成带上当前内核名。
+            Log.d(
+                "VRPlayerScreen",
+                "视频尺寸回调[" + decoderEngine.displayName + "]: 更新 SurfaceTexture 缓冲为 " + width + "x" + height
+            )
+            
+                // Smart projection detection: only while the user has not
+                // manually chosen a mode AND the feature switch is on. (8/1 功能)
+                // 强制视频类型判断（优先于自动检测）：用户手动指定视频类型
+                if (forceVideoType != 0) {
+                    val targetMode: ProjectionMode
+                    val targetStereo: StereoMode
+                    when (forceVideoType) {
+                        1 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
+                        2 -> { targetMode = ProjectionMode.VR_360; targetStereo = StereoMode.MONO }
+                        3 -> { targetMode = ProjectionMode.VR_180; targetStereo = StereoMode.MONO }
+                        4 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.SBS }
+                        5 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.TAB }
+                        else -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
+                    }
+                    if (projectionMode != targetMode || stereoMode != targetStereo) {
+                        projectionMode = targetMode
+                        stereoMode = targetStereo
+                        currentGlSurfaceView?.renderer?.warpDualCenter =
+                            forceVideoType == 2 && (targetMode == ProjectionMode.VR_360)
+                        projectionModeUserAdjusted = true // 强制锁定，防止自动检测覆盖
+                        Toast.makeText(
+                            context,
+                            "已强制切换为 ${context.getString(targetMode.labelRes)}${if (targetStereo != StereoMode.MONO) " + ${context.getString(targetStereo.labelRes)}" else ""}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } else if (isSmartProjectionEnabled && !projectionModeUserAdjusted) {
+                    val aspect = width.toFloat() / height.toFloat()
+                    when {
+                        aspect in 1.80f..2.20f -> {
+                            // Equirectangular panorama (2:1): 切 VR_360 全景 + 单目（平面 2D 立体模式）
+                            // + 双中心变形（左右半区各以 25%/75% 为变形中心）
+                            if (projectionMode != ProjectionMode.VR_360 || stereoMode != StereoMode.MONO) {
+                                projectionMode = ProjectionMode.VR_360
+                                stereoMode = StereoMode.MONO
+                                currentGlSurfaceView?.renderer?.warpDualCenter = true
+                                Toast.makeText(context, context.getString(R.string.toast_detected_360), Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        else -> {
+                            // Ordinary flat video: don't let the 180° dome distort it
+                            if (projectionMode != ProjectionMode.STANDARD) {
+                                projectionMode = ProjectionMode.STANDARD
+                                stereoMode = StereoMode.MONO
+                                currentGlSurfaceView?.renderer?.warpDualCenter = false
+                                Toast.makeText(context, context.getString(R.string.toast_detected_2d), Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+
+                // Independent stereo reset: a leftover SBS/TAB mode on a plain
+                // 2D video renders only half the frame stretched full-screen.
+                // 3D framing only makes sense on 3D sources, so we always fall
+                // back to mono for ordinary aspect videos in planar projection.
+                val vidAspect = width.toFloat() / height.toFloat()
+                val isPlanar = projectionMode == ProjectionMode.STANDARD ||
+                    projectionMode == ProjectionMode.FISHEYE
+                if (isSmartProjectionEnabled && isPlanar &&
+                    vidAspect !in 1.80f..2.20f && stereoMode != StereoMode.MONO
+                ) {
+                    stereoMode = StereoMode.MONO
+                    Toast.makeText(context, context.getString(R.string.toast_2d_mono), Toast.LENGTH_SHORT).show()
+                }
+            
+                // Detect ultra high resolution (like 8K or exceeds user set resolution limit)
+                if (width > maxResolution.width || height > maxResolution.height) {
+                    resolutionTipText = context.getString(R.string.toast_res_exceeds, width, height)
+                    showResolutionTip = true
+                } else if (width >= 7680 || height >= 4320) {
+                    resolutionTipText = context.getString(R.string.toast_8k_hint, width, height)
+                    showResolutionTip = true
+                } else {
+                    showResolutionTip = false
+                }
+
+                // 8K 硬解：视频超出硬件解码标称上限时，重封装并改写 SPS level
+                // （实验性，默认关闭，levelPatchEnabled / spoofResolutionEnabled）
+                if ((levelPatchEnabled || spoofResolutionEnabled) &&
+                    !isTranscoding && !isRemuxing && (width >= 7680 || height >= 4320)
+                ) {
+                    val cap = DecoderCapabilities.getBestHardwareDecoderMax()
+                    if (cap != null && (width > cap.width || height > cap.height)) {
+                        resolutionTipText = context.getString(R.string.toast_8k_patching, width, height)
+                        showResolutionTip = true
+                        startLevelPatchFix()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("VRPlayerScreen", "Error setting SurfaceTexture buffer size to ${width}x${height}", e)
+            }
+        }
+
+
+        // ======================================================================
+        // v2.1.233：IJK（FFmpeg 内核）分支
+        //
+        // 放在 Exo 的 renderersFactory 之前：选中 IJK 时**根本不创建 ExoPlayer**，
+        // 省掉一整套 MediaCodec 资源的无谓开销。
+        //
+        // 四类「接不住」的情况全部**回退 Exo**，绝不黑屏：
+        //   ① native 库没加载上（ABI 不匹配 / 分包丢 .so）
+        //   ② 片源协议 ijk 吃不下（smb:// 等不在 FFmpeg 协议集里）
+        //   ③ create 内部抛异常（数据源打不开）
+        //   ④ prepare 之后才暴露的错误（编码不支持等）→ 走 onError 回调
+        // ①②③ 在这里静默回退（只 Log，不打扰用户）；
+        // ④ 会 Toast 并把内核切回 EXO（用户知情，且下次不再踩同一个坑）。
+        // ======================================================================
+        if (decoderEngine == DecoderEngine.IJK) {
+            val ijkUri = decodedUri
+            val ijkUsable = IjkPlayerFactory.supports(ijkUri) && IjkPlayerFactory.ensureLibraries()
+            if (ijkUsable) {
+                val backend = IjkPlayerFactory.create(
+                    context = context,
+                    uri = ijkUri,
+                    surface = nativeSurface,
+                    options = ijkOptions,
+                    callbacks = object : IjkPlayerFactory.Callbacks {
+                        override fun onVideoSizeChanged(width: Int, height: Int) {
+                            // 与 Exo 侧共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
+                            applyVideoSize(width, height)
+                        }
+
+                        override fun onPrepared(backend: VrPlayerBackend) {
+                            // 倍速要在 start 之前设好 —— 与 Exo 侧「prepare 后、播放前」同一时机
+                            backend.setPlaybackSpeed(
+                                if (isFloatingBallPressed) floatingBallSpeed else basePlaybackSpeed
+                            )
+                            // 位置恢复：同 Exo 侧，duration 到这一步才真正就绪
+                            if (!resumeApplied) {
+                                resumeApplied = true
+                                val dur = backend.duration
+                                if (PlaybackPositions.shouldResume(resumeMs, dur)) {
+                                    backend.seekTo(resumeMs)
+                                    Log.i("VRPlayerScreen", "IJK 恢复上次播放位置 " + resumeMs + "ms / 总长 " + dur + "ms")
+                                }
+                            }
+                            backend.play()
+                            isVideoPlaying = true
+                        }
+
+                        override fun onCompletion() {
+                            PlaybackPositions.clear(prefs, videoUriStr)
+                            resumeMs = 0L
+                        }
+
+                        override fun onError(what: Int, extra: Int) {
+                            Log.e("VRPlayerScreen", "IJK 播放错误 what=" + what + " extra=" + extra + " -> 回退 EXO")
+                            // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
+                            //    改 decoderEngine 会触发 Effect B 重建播放器；同时把 EXO
+                            //    写进 prefs，下次打开不再踩同一个坑。
+                            decoderEngine = DecoderEngine.EXO
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.toast_ijk_fallback),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+
+                        override fun onFirstFrame() {
+                            isVideoPlaying = true
+                        }
+                    }
+                )
+                if (backend != null) {
+                    playerInstance = backend
+                    Log.i("VRPlayerScreen", "已使用 IJK 内核播放")
+                    return
+                }
+                Log.w("VRPlayerScreen", "IJK 创建失败，回退 EXO")
+            } else {
+                Log.w(
+                    "VRPlayerScreen",
+                    "IJK 不可用（协议不支持或 native 库缺失: " + IjkPlayerFactory.lastError + "），回退 EXO"
+                )
+            }
+        }
 
             val renderersFactory = object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
                 override fun buildAudioSink(
@@ -2152,117 +2392,7 @@ fun VRPlayerScreen(
                 
                 addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                        val width = videoSize.width
-                        val height = videoSize.height
-                        if (width > 0 && height > 0) {
-                            try {
-                                surfaceTexture.setDefaultBufferSize(
-                                    effectiveOutputSize(width, height).first,
-                                    effectiveOutputSize(width, height).second
-                                )
-                                currentGlSurfaceView?.renderer?.let { r ->
-                                    r.videoWidth = width
-                                    r.videoHeight = height
-                                }
-                                // v2.0.206：同步进 state 供 FSR 默认规则判定与 UI 显示。
-                                // ⚠️ 只写 renderer 是不会触发重组的 —— 那样 FSR 的判定结果
-                                //    会永远停在初始的 0x0（「等待视频信息」），开关看起来失灵。
-                                videoSourceWidth = width
-                                videoSourceHeight = height
-                                Log.d("VRPlayerScreen", "ExoPlayer onVideoSizeChanged: updated surface texture buffer to ${width}x${height}")
-                                
-                                // Smart projection detection: only while the user has not
-                                // manually chosen a mode AND the feature switch is on. (8/1 功能)
-                                // 强制视频类型判断（优先于自动检测）：用户手动指定视频类型
-                                if (forceVideoType != 0) {
-                                    val targetMode: ProjectionMode
-                                    val targetStereo: StereoMode
-                                    when (forceVideoType) {
-                                        1 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
-                                        2 -> { targetMode = ProjectionMode.VR_360; targetStereo = StereoMode.MONO }
-                                        3 -> { targetMode = ProjectionMode.VR_180; targetStereo = StereoMode.MONO }
-                                        4 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.SBS }
-                                        5 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.TAB }
-                                        else -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
-                                    }
-                                    if (projectionMode != targetMode || stereoMode != targetStereo) {
-                                        projectionMode = targetMode
-                                        stereoMode = targetStereo
-                                        currentGlSurfaceView?.renderer?.warpDualCenter =
-                                            forceVideoType == 2 && (targetMode == ProjectionMode.VR_360)
-                                        projectionModeUserAdjusted = true // 强制锁定，防止自动检测覆盖
-                                        Toast.makeText(
-                                            context,
-                                            "已强制切换为 ${context.getString(targetMode.labelRes)}${if (targetStereo != StereoMode.MONO) " + ${context.getString(targetStereo.labelRes)}" else ""}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                } else if (isSmartProjectionEnabled && !projectionModeUserAdjusted) {
-                                    val aspect = width.toFloat() / height.toFloat()
-                                    when {
-                                        aspect in 1.80f..2.20f -> {
-                                            // Equirectangular panorama (2:1): 切 VR_360 全景 + 单目（平面 2D 立体模式）
-                                            // + 双中心变形（左右半区各以 25%/75% 为变形中心）
-                                            if (projectionMode != ProjectionMode.VR_360 || stereoMode != StereoMode.MONO) {
-                                                projectionMode = ProjectionMode.VR_360
-                                                stereoMode = StereoMode.MONO
-                                                currentGlSurfaceView?.renderer?.warpDualCenter = true
-                                                Toast.makeText(context, context.getString(R.string.toast_detected_360), Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                        else -> {
-                                            // Ordinary flat video: don't let the 180° dome distort it
-                                            if (projectionMode != ProjectionMode.STANDARD) {
-                                                projectionMode = ProjectionMode.STANDARD
-                                                stereoMode = StereoMode.MONO
-                                                currentGlSurfaceView?.renderer?.warpDualCenter = false
-                                                Toast.makeText(context, context.getString(R.string.toast_detected_2d), Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Independent stereo reset: a leftover SBS/TAB mode on a plain
-                                // 2D video renders only half the frame stretched full-screen.
-                                // 3D framing only makes sense on 3D sources, so we always fall
-                                // back to mono for ordinary aspect videos in planar projection.
-                                val vidAspect = width.toFloat() / height.toFloat()
-                                val isPlanar = projectionMode == ProjectionMode.STANDARD ||
-                                    projectionMode == ProjectionMode.FISHEYE
-                                if (isSmartProjectionEnabled && isPlanar &&
-                                    vidAspect !in 1.80f..2.20f && stereoMode != StereoMode.MONO
-                                ) {
-                                    stereoMode = StereoMode.MONO
-                                    Toast.makeText(context, context.getString(R.string.toast_2d_mono), Toast.LENGTH_SHORT).show()
-                                }
-                                
-                                // Detect ultra high resolution (like 8K or exceeds user set resolution limit)
-                                if (width > maxResolution.width || height > maxResolution.height) {
-                                    resolutionTipText = context.getString(R.string.toast_res_exceeds, width, height)
-                                    showResolutionTip = true
-                                } else if (width >= 7680 || height >= 4320) {
-                                    resolutionTipText = context.getString(R.string.toast_8k_hint, width, height)
-                                    showResolutionTip = true
-                                } else {
-                                    showResolutionTip = false
-                                }
-
-                                // 8K 硬解：视频超出硬件解码标称上限时，重封装并改写 SPS level
-                                // （实验性，默认关闭，levelPatchEnabled / spoofResolutionEnabled）
-                                if ((levelPatchEnabled || spoofResolutionEnabled) &&
-                                    !isTranscoding && !isRemuxing && (width >= 7680 || height >= 4320)
-                                ) {
-                                    val cap = DecoderCapabilities.getBestHardwareDecoderMax()
-                                    if (cap != null && (width > cap.width || height > cap.height)) {
-                                        resolutionTipText = context.getString(R.string.toast_8k_patching, width, height)
-                                        showResolutionTip = true
-                                        startLevelPatchFix()
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Log.e("VRPlayerScreen", "Error setting SurfaceTexture buffer size to ${width}x${height}", e)
-                            }
-                        }
+                        applyVideoSize(videoSize.width, videoSize.height)
                     }
 
                     override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
@@ -2321,7 +2451,8 @@ fun VRPlayerScreen(
                 playWhenReady = true
                 isVideoPlaying = true
             }
-            playerInstance = exo
+            // v2.1.233：包一层门面，使 playerInstance 与 IJK 分支同类型
+            playerInstance = ExoBackend(exo)
         } catch (e: Exception) {
             Log.e("VRPlayerScreen", "Error preparing video content", e)
         }
@@ -2436,7 +2567,9 @@ fun VRPlayerScreen(
     // Effect B：解码设置 / 容器修复变更时触发 —— 只重建播放器，**不再改动视角设置**，
     // 并接着原播放位置继续，避免切换解码方式后从头播放。
     var decoderRebindSeen by remember { mutableStateOf(false) }
-    LaunchedEffect(isSoftwareDecoding, decoderEngine, photoReloadTrigger) {
+    // v2.1.233：ijkOptions 也作为 key —— 改 IJK 的任一参数都会重建播放器并续播，
+    // 省掉一个「应用/重启播放」按钮（否则用户改完看不到效果，会以为参数没接上）。
+    LaunchedEffect(isSoftwareDecoding, decoderEngine, ijkOptions, photoReloadTrigger) {
         if (!decoderRebindSeen) {
             // 首次组合时上面的 Effect A 已经完成绑定，这里跳过，避免重复创建播放器
             decoderRebindSeen = true
@@ -2742,8 +2875,35 @@ fun VRPlayerScreen(
             3 -> GlassStyle.Gaussian
             else -> GlassStyle.Liquid
         }
+        // v2.1.233：背景采样只在「玻璃/模糊」档位开着时才做（纯色档不需要，白白费电）
+        LaunchedEffect(isLiquidGlass) {
+            VideoBackdrop.enabled = isLiquidGlass
+            if (!isLiquidGlass) VideoBackdrop.release()
+        }
+        DisposableEffect(Unit) {
+            onDispose { VideoBackdrop.release() }
+        }
         val liquidBackdrop = rememberLayerBackdrop {
             drawRect(ThemeBgColor)
+            // v2.1.233：**把视频画面画进 backdrop** ——
+            // 视频画在 SurfaceView 上，Compose 采样不到它（独立窗口、打洞），
+            // 于是此前 backdrop 里只有上面那层纯色，而「模糊纯色」= 什么都没发生，
+            // 这就是磨砂/高斯模糊一直「看不出效果」的根因。
+            // 现在由 VRGLRenderer 每 3 帧降采样一帧送过来，糊的就是真画面。
+            VideoBackdrop.current()?.let { bmp ->
+                runCatching {
+                    drawImage(
+                        image = bmp.asImageBitmap(),
+                        srcOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                        srcSize = androidx.compose.ui.unit.IntSize(bmp.width, bmp.height),
+                        dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                        dstSize = androidx.compose.ui.unit.IntSize(
+                            size.width.roundToInt(),
+                            size.height.roundToInt()
+                        )
+                    )
+                }
+            }
             drawContent()
         }
 
@@ -3196,7 +3356,7 @@ fun VRPlayerScreen(
                                                                 val newSurface = Surface(st)
                                                                 // ⚠️ setVideoSurface 内部会做一次 flush + 重配解码器输出，
                                                                 //    不会丢播放位置，也不会重启解码器。
-                                                                playerInstance?.setVideoSurface(newSurface)
+                                                                playerInstance?.setSurface(newSurface)
                                                                 Log.i(
                                                                     "HuaweiVR",
                                                                     "视频源已切到华为 VR（${w}x$h, uri=$uriStr）"
@@ -5250,6 +5410,17 @@ fun VRPlayerScreen(
                                                 fontSize = 8.sp,
                                                 lineHeight = 11.sp
                                             )
+                                        } else if (decoderEngine == DecoderEngine.IJK) {
+                                            // v2.1.233：IJK 已接通 → 挂上真实调参项。
+                                            // 改任何一项都会更新 ijkOptions state，而它是 Effect B 的 key，
+                                            // 因此改完自动重建播放器并从原位置续播，无需「应用」按钮。
+                                            IjkOptionsPanel(
+                                                options = ijkOptions,
+                                                onOptionsChange = { ijkOptions = it },
+                                                accentColor = AccentColor,
+                                                accentOnColor = AccentOnColor,
+                                                defaultBufferLabel = stringResource(R.string.ijk_buffer_default)
+                                            )
                                         } else {
                                             // EXO 目前可调项已在下面「软件/硬件解码」等开关里，
                                             // 这里保留给将来与内核绑定的参数。
@@ -6170,7 +6341,8 @@ BatchTranscribeSection(
 
         // Audio / subtitle track selection dialog (8/2 功能)
         if (trackDialogOpen) {
-            val groups = playerInstance?.currentTracks?.groups ?: emptyList()
+            // v2.1.233：轨道列表仅 Exo 有；ijk 下得到空列表 → 对话框显示「无轨道」
+            val groups = playerInstance?.exo?.currentTracks?.groups ?: emptyList()
             val audioGroup = groups.firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO }
             val textGroup = groups.firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_TEXT }
             AlertDialog(

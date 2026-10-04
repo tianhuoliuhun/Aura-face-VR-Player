@@ -2095,6 +2095,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             runHalfSmoothingPasses()
             blendHalfPassToScreen()
         }
+
+        // v2.1.233：本帧已经画完、尚未 swap —— 此刻把画面降采样一份给 Compose 的
+        // backdrop，让玻璃/模糊效果有真实内容可糊（详见 VideoBackdrop 的注释）。
+        captureBackdropIfNeeded()
     }
 
     // ======================= 华为 VR（OpenXR）单眼绘制 =======================
@@ -3057,6 +3061,161 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val src = if (gpLastResultTex != 0) gpLastResultTex else gpFboTexId
         blitToScreen(src)
         return true
+    }
+
+    // =======================================================================
+    // v2.1.233：backdrop 背景采样
+    //
+    // 目的：把当前画面降采样成一张极小的图交给 Compose，让玻璃/模糊效果**真的有内容可糊**。
+    // 背景（详见 VideoBackdrop 的注释）：SurfaceView 是打洞的独立窗口，Compose 的
+    // layer backdrop 采不到它 —— backdrop 里只有一层纯色，模糊纯色等于没模糊。
+    //
+    // ⚠️ 必须在「本帧绘制完成、eglSwapBuffers 之前」读取，否则拿到的是已被换走的缓冲。
+    // ⚠️ 尺寸刻意极小（96×N）：glReadPixels 是同步调用，全分辨率回读会卡死帧率
+    //    （本项目 v2.0.182 就踩过 8MB 回读的坑），而这里只有约 5 千像素。
+    // =======================================================================
+    private var bdFboId = 0
+    private var bdTexId = 0
+    private var bdW = 0
+    private var bdH = 0
+    private var bdBuffer: java.nio.IntBuffer? = null
+    private var bdPixels: IntArray? = null
+    private var bdRow: IntArray? = null
+    private var bdFrame = 0
+    /** 一旦失败就永久停用，避免每帧都抛异常刷日志 */
+    private var bdDisabled = false
+
+    private fun releaseBackdropTarget() {
+        if (bdFboId != 0) {
+            GLES20.glDeleteFramebuffers(1, intArrayOf(bdFboId), 0)
+            bdFboId = 0
+        }
+        if (bdTexId != 0) {
+            GLES20.glDeleteTextures(1, intArrayOf(bdTexId), 0)
+            bdTexId = 0
+        }
+        bdW = 0
+        bdH = 0
+        bdBuffer = null
+        bdPixels = null
+        bdRow = null
+    }
+
+    private fun ensureBackdropTarget(w: Int, h: Int) {
+        if (bdFboId != 0 && bdW == w && bdH == h) return
+        releaseBackdropTarget()
+        val tex = IntArray(1)
+        val fbo = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glGenFramebuffers(1, fbo, 0)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
+        GLES20.glFramebufferTexture2D(
+            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+            GLES20.GL_TEXTURE_2D, tex[0], 0
+        )
+        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            Log.w(TAG, "backdrop FBO incomplete: 0x${Integer.toHexString(status)}")
+            releaseBackdropTarget()
+            return
+        }
+        bdTexId = tex[0]
+        bdFboId = fbo[0]
+        bdW = w
+        bdH = h
+        bdBuffer = java.nio.IntBuffer.allocate(w * h)
+        bdPixels = IntArray(w * h)
+        bdRow = IntArray(w)
+    }
+
+    /** 在本帧绘制完成后调用（见 [onDrawFrame] 末尾） */
+    private fun captureBackdropIfNeeded() {
+        if (!VideoBackdrop.enabled || bdDisabled) return
+        val dw = displayWidth
+        val dh = displayHeight
+        if (dw <= 0 || dh <= 0) return
+
+        // 每 3 帧采样一次：糊掉的背景不需要 60fps 的新鲜度，省掉绝大部分开销
+        bdFrame++
+        if (bdFrame % 3 != 0) return
+
+        val tw = VideoBackdrop.TARGET_W
+        val th = (tw * dh / dw).coerceIn(1, 256)
+        try {
+            ensureBackdropTarget(tw, th)
+            if (bdFboId == 0) {
+                bdDisabled = true
+                return
+            }
+            // ⚠️ glReadPixels 只裁剪不缩放 —— 必须先用 glBlitFramebuffer 缩到小 FBO
+            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
+            GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, bdFboId)
+            GLES30.glBlitFramebuffer(
+                0, 0, dw, dh,
+                0, 0, tw, th,
+                GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_LINEAR
+            )
+            val err1 = GLES20.glGetError()
+            if (err1 != GLES20.GL_NO_ERROR) {
+                Log.w(TAG, "backdrop blit failed err=$err1，已停用背景采样")
+                bdDisabled = true
+                return
+            }
+            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, bdFboId)
+            val buf = bdBuffer!!
+            buf.position(0)
+            GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+            val err2 = GLES20.glGetError()
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            if (err2 != GLES20.GL_NO_ERROR) {
+                Log.w(TAG, "backdrop readPixels failed err=$err2，已停用背景采样")
+                bdDisabled = true
+                return
+            }
+            // GL 的行序是自下而上，Bitmap 是自上而下 —— 必须翻转，否则背景是倒的
+            buf.position(0)
+            val px = bdPixels!!
+            buf.get(px)
+            val row = bdRow!!
+            var y = 0
+            while (y < th / 2) {
+                val a = y * tw
+                val b = (th - 1 - y) * tw
+                System.arraycopy(px, a, row, 0, tw)
+                System.arraycopy(px, b, px, a, tw)
+                System.arraycopy(row, 0, px, b, tw)
+                y++
+            }
+            VideoBackdrop.commit(px, tw, th)
+            // v2.1.233：低频统计日志（约每 120 次采样一行 = 每 360 帧一次）。
+            // 用途：确认「给玻璃/模糊效果喂画面」这条链路真的在跑 —— 高斯模糊
+            // 「看不出效果」的根因就是这条链路没内容可糊（backdrop 只有一层纯色）。
+            // 保留它是为了让下次排查能一眼分辨「没采样」与「采样了但糊得不对」。
+            if (bdFrame % 360 == 0) {
+                Log.d(TAG, "backdrop 采样正常: " + tw + "x" + th + " <- 屏幕 " + dw + "x" + dh + " (version=" + VideoBackdrop.version + ")")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "backdrop capture 异常，已停用：${t.message}")
+            bdDisabled = true
+        } finally {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        }
+    }
+
+    /** 采样开关变化时重建资源（尺寸变化由 ensureBackdropTarget 自行处理） */
+    private fun resetBackdropCapture() {
+        bdDisabled = false
+        bdFrame = 0
     }
 
     private fun snapshotGpResult() {

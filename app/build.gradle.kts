@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 232
-    versionName = "2.1.232"
+    versionCode = 233
+    versionName = "2.1.233"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -177,8 +177,12 @@ android {
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
 
-  // v111：ABI 分包（当前注释掉 = 构建全架构 universal 包，约 391MB）
-  // 若要出 arm64 专用包，取消注释下面几行：
+  // v111：ABI 分包（当前注释掉）
+  // ⚠️ v2.1.233 更正：原先这里写着「当前注释掉 = 构建全架构 universal 包，约 391MB」——
+  //    但 defaultConfig.ndk.abiFilters 已经锁死 arm64-v8a，**不可能**再产出 universal 包。
+  //    所以这个 splits 块现在**即使取消注释也没有额外效果**（包含集被 abiFilters 先一步裁掉）。
+  //    真要出多 ABI 包，得先放开上面的 abiFilters，再启用这里。
+  //    保留这段是为了记住历史上的分包做法，不是"打开就能用"的开关。
   // splits {
   //   abi {
   //     isEnable = true
@@ -311,6 +315,35 @@ dependencies {
 
   // v110：sherpa-onnx 离线 ASR（Qwen3-ASR 等，29 语言 + 20 种中文方言）
   implementation(files("libs/sherpa-onnx-1.13.6.aar"))
+
+  // ==========================================================================
+  // v2.1.233：ijkplayer（Bilibili，FFmpeg 内核）解码器接入
+  // --------------------------------------------------------------------------
+  // 坐标说明：
+  //   ijkplayer-java   —— Java 层（tv.danmaku.ijk.media.player.*），纯 Java 无 .so
+  //   ijkplayer-<abi>  —— 各 ABI 的 FFmpeg/ijk native 库（.so）
+  //
+  // ⚠️⚠️ 四个 ABI 都声明，但**当前只有 arm64-v8a 会进包** ——
+  //    defaultConfig.ndk.abiFilters 已锁死为 ["arm64-v8a"]（见上面的 defaultConfig），
+  //    AGP 会过滤掉其余 ABI 的 .so。实测 release APK 里只出现
+  //      lib/arm64-v8a/libijk{ffmpeg,player,sdl}.so（合计 4.24 MB 未压缩）。
+  //    这里仍然把四个都写上，是为了**将来放开 abiFilters（或恢复 ABI 分包）时
+  //    不用再回来补依赖**；代价只是首次构建多下载约 17MB 的 aar（不进包）。
+  //
+  //    反过来说：**如果哪天放开了 abiFilters，必须确认这四个 ABI 都留着** ——
+  //    缺哪个 ABI 的库，装到该架构设备上就会在 `IjkMediaPlayer.loadLibrariesOnce`
+  //    处抛 UnsatisfiedLinkError（native 层崩，Java 栈看不到原因）。
+  //
+  // ⚠️ 0.8.8 是官方最后一个**发布**的版本（2016 年），此后 bilibili 只维护源码
+  //    不再发版。注意它当年发的是 **jcenter / bintray**（2021 年关停），
+  //    **MavenCentral 与 Google Maven 上从来没有这个包** —— 所以 settings.gradle.kts
+  //    里加了阿里云 public 镜像（聚合缓存了 jcenter 归档）来取它，详见那里的注释。
+  // ==========================================================================
+  implementation("tv.danmaku.ijk.media:ijkplayer-java:0.8.8")
+  implementation("tv.danmaku.ijk.media:ijkplayer-arm64:0.8.8")
+  implementation("tv.danmaku.ijk.media:ijkplayer-armv7a:0.8.8")
+  implementation("tv.danmaku.ijk.media:ijkplayer-x86:0.8.8")
+  implementation("tv.danmaku.ijk.media:ijkplayer-x86_64:0.8.8")
 
   // ===== Khronos 标准 OpenXR loader（Android AAR）=====
   // 用途：给 PICO / Meta Quest 提供 OpenXR loader。它们与华为同为 Android OpenXR，

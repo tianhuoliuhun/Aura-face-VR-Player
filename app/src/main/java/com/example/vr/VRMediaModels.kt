@@ -65,9 +65,9 @@ enum class StereoMode(val displayName: String, @StringRes val labelRes: Int, val
 /**
  * 解码器内核。
  *
- * ⚠️ v2.1.232 现状：**只有 EXO 真正接通**。IJK / MPV 是**预留位** ——
- * 枚举与设置 UI 都已就位（「解码器参数（预留）」区块也留好了），
- * 后续接入只需实现对应 Player 构造 + 把 IMPLEMENTED 加进来，不用再改 UI。
+ * ⚠️ v2.1.233 现状：**EXO 与 IJK 已接通**，MPV 仍是**预留位**。
+ * 枚举与设置 UI 都已就位（「解码器参数」区块按内核分别挂参数），
+ * 后续接 MPV 只需实现对应 Player 构造 + 把这里的判断再加一项，不用再改 UI。
  *
  * 选择逻辑见 `VRPlayerScreen`（未实现的内核会被置灰，且读取存档时回落为 EXO）。
  */
@@ -81,9 +81,14 @@ enum class DecoderEngine(val displayName: String, @StringRes val labelRes: Int, 
      *
      * 写在这里而不是散落在 UI 里：UI 的置灰判断、prefs 读取时的回落校正
      * 都从这里取值 —— **新增内核时只需改这一处**。
+     *
+     * v2.1.233：IJK 已接入（见 `IjkPlayerBackend.kt` + `VrPlayerBackend.kt`）。
+     * 注意"已接通"只意味着**代码链路齐备**；ijk 的 native 库是否装上、以及
+     * 当前片源的协议 ijk 吃不吃得下，都在 `VRPlayerScreen.setupVideoPlayer`
+     * 里做**运行时判定**，判定不过会自动回退 EXO（绝不黑屏）。
      */
     val isImplemented: Boolean
-        get() = this == EXO
+        get() = this == EXO || this == IJK
 }
 
 data class MediaItem(
