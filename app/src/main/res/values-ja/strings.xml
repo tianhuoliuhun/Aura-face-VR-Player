@@ -328,10 +328,10 @@
     <string name="info_bitrate">ビットレート：%1$d kbps\n</string>
     <string name="info_hw">ハードウェア</string>
     <string name="label_resolution">解像度</string>
-    <string name="info_resolution2">解像度：%1$dx%2$d\n</string>
-    <string name="info_rotation">回転：%1$d°\n</string>
+    <string name="info_resolution2">解像度：%1$sx%2$s\n</string>
+    <string name="info_rotation">回転：%1$s°\n</string>
     <string name="label_fps">フレームレート</string>
-    <string name="info_fps2">フレームレート：%1$d fps\n</string>
+    <string name="info_fps2">フレームレート：%1$s fps\n</string>
     <string name="label_bitrate">ビットレート</string>
     <string name="info_bitrate2">ビットレート：%1$d kbps\n</string>
     <string name="label_codec">コーデック</string>
@@ -487,7 +487,7 @@
     <string name="asr_lang_it">イタリア語</string>
     <string name="asr_lang_pl">ポーランド語</string>
     <string name="asr_lang_uk">ウクライナ語</string>
-    <string name="asr_ext_archive_start">この言語はモデルパッケージ（約 %1）が必要です。解凍後は必要なファイルのみ保持します…</string>
+    <string name="asr_ext_archive_start">この言語はモデルパッケージ（約 %1$d）が必要です。解凍後は必要なファイルのみ保持します…</string>
     <string name="asr_ext_archive_extracting">モデルファイルを展開中…</string>
     <string name="asr_ext_model_unready">この言語のモデルは未ダウンロードです（約 %1$dMB）。上から先にダウンロードしてください。</string>
     <string name="asr_ext_model_tag">sherpa-onnx オフラインモデル・Dolphin は内蔵、その他は必要時ダウンロード</string>

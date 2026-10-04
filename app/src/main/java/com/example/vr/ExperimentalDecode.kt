@@ -134,7 +134,18 @@ object ExperimentalDecode {
             val mime = configuration.format.sampleMimeType
             if (mime != null && mime.startsWith("video/")) {
                 try {
-                    val mf = MediaFormat(configuration.mediaFormat)
+                    // ⚠️⚠️ `MediaFormat(MediaFormat)` 这个**拷贝构造器是 API 29+**，
+                    //       而本项目 minSdk = 24 —— 在 Android 7/8/9 上直接调用会抛
+                    //       NoSuchMethodError（Error 不是 Exception，下面只 catch Throwable 才接得住）
+                    //       → 一开这个实验开关就崩。
+                    //       只在 >= Q 时拷贝（拷贝的目的是"不就地改动传入的 format 对象"）；
+                    //       低版本退回**只读借用**原对象 —— 下面全程只用
+                    //       containsKey / getInteger 读取，不会修改它，所以借用是安全的。
+                    val mf = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        MediaFormat(configuration.mediaFormat)
+                    } else {
+                        configuration.mediaFormat
+                    }
                     val w = if (mf.containsKey(MediaFormat.KEY_WIDTH)) mf.getInteger(MediaFormat.KEY_WIDTH) else 1920
                     val h = if (mf.containsKey(MediaFormat.KEY_HEIGHT)) mf.getInteger(MediaFormat.KEY_HEIGHT) else 1080
                     // v124：按分辨率分级设置输入缓冲。

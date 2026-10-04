@@ -156,7 +156,17 @@ object MpvLibLoader {
      * ⚠️ 任何一步失败都返回 false（不抛）—— 调用方据此回退 EXO。
      *    失败时会把已部分加载的状态保持原样（**不做卸载**：dlopen 的库无法安全卸载，
      *    强行 dlclose 会让其他仍在使用的库崩）。
+     *
+     * ⚠️ 这里用的是 `System.load(绝对路径)` 而不是 `System.loadLibrary(名字)` ——
+     *    因为库是**运行时下载**到 `filesDir` 的，不在 APK 的 `nativeLibraryDir` 里，
+     *    `loadLibrary` 根本找不到它。lint 会报 `UnsafeDynamicallyLoadedCode`
+     *    （"从任意路径加载代码有风险"），但那正是本功能的实现方式本身 ——
+     *    所以这里显式抑制，并把风险边界写清楚：
+     *      · 来源是本仓库固定 tag `mpv-libs` 的 Release（HTTPS）；
+     *      · 解压时**只接受 LOAD_ORDER 白名单里的文件名**（防 zip 路径穿越）；
+     *      · 解压后校验文件数与大小，再逐个加载。
      */
+    @android.annotation.SuppressLint("UnsafeDynamicallyLoadedCode")
     fun ensureLoaded(context: Context): Boolean {
         if (loaded) return true
         synchronized(this) {

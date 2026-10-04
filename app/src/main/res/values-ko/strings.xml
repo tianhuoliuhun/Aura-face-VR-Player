@@ -328,10 +328,10 @@
     <string name="info_bitrate">비트레이트: %1$d kbps\n</string>
     <string name="info_hw">하드웨어</string>
     <string name="label_resolution">해상도</string>
-    <string name="info_resolution2">해상도: %1$dx%2$d\n</string>
-    <string name="info_rotation">회전: %1$d°\n</string>
+    <string name="info_resolution2">해상도: %1$sx%2$s\n</string>
+    <string name="info_rotation">회전: %1$s°\n</string>
     <string name="label_fps">프레임 레이트</string>
-    <string name="info_fps2">프레임 레이트: %1$d fps\n</string>
+    <string name="info_fps2">프레임 레이트: %1$s fps\n</string>
     <string name="label_bitrate">비트레이트</string>
     <string name="info_bitrate2">비트레이트: %1$d kbps\n</string>
     <string name="label_codec">코덱</string>
@@ -487,7 +487,7 @@
     <string name="asr_lang_it">이탈리아어</string>
     <string name="asr_lang_pl">폴란드어</string>
     <string name="asr_lang_uk">우크라이나어</string>
-    <string name="asr_ext_archive_start">이 언어는 모델 패키지(약 %1)가 필요합니다. 압축 해제 후 필요한 파일만 유지됩니다...</string>
+    <string name="asr_ext_archive_start">이 언어는 모델 패키지(약 %1$d)가 필요합니다. 압축 해제 후 필요한 파일만 유지됩니다...</string>
     <string name="asr_ext_archive_extracting">모델 파일 압축 해제 중…</string>
     <string name="asr_ext_model_unready">이 언어 모델이 아직 다운로드되지 않았습니다（약 %1$dMB）. 위에서 먼저 다운로드하세요.</string>
     <string name="asr_ext_model_tag">sherpa-onnx 오프라인 모델 · Dolphin 내장, 나머지는 필요 시 다운로드</string>

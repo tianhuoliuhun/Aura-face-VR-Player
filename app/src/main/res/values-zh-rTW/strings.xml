@@ -364,10 +364,10 @@
     <string name="info_bitrate">碼率：%1$d kbps\n</string>
     <string name="info_hw">硬件</string>
     <string name="label_resolution">分辨率</string>
-    <string name="info_resolution2">分辨率：%1$d × %2$d\n</string>
-    <string name="info_rotation">旋轉：%1$d°\n</string>
+    <string name="info_resolution2">分辨率：%1$s × %2$s\n</string>
+    <string name="info_rotation">旋轉：%1$s°\n</string>
     <string name="label_fps">幀率</string>
-    <string name="info_fps2">幀率：%1$d fps\n</string>
+    <string name="info_fps2">幀率：%1$s fps\n</string>
     <string name="label_bitrate">碼率</string>
     <string name="info_bitrate2">碼率：%1$d kbps\n</string>
     <string name="label_codec">編碼</string>
@@ -529,7 +529,7 @@
     <string name="asr_lang_it">意大利語</string>
     <string name="asr_lang_pl">波蘭語</string>
     <string name="asr_lang_uk">烏克蘭語</string>
-    <string name="asr_ext_archive_start">該語言需下載模型包（約 %1），完成後自動只保留所需檔案…</string>
+    <string name="asr_ext_archive_start">該語言需下載模型包（約 %1$d），完成後自動只保留所需檔案…</string>
     <string name="asr_ext_archive_extracting">正在解壓並提取模型檔案…</string>
     <string name="asr_ext_model_unready">該語言的模型尚未下載（約 %1$dMB），請先在上方點擊下載</string>
     <string name="asr_ext_model_tag">sherpa-onnx 離線模型 · Dolphin 已內置，其餘按需下載</string>

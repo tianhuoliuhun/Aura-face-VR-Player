@@ -133,7 +133,14 @@
     <string name="huawei_vr_enable">Huawei VR Glass (VR Engine)</string>
     <string name="huawei_vr_enable_desc">Output through the Huawei VR runtime; connect the glasses and enter from the VR entry</string>
     <string name="huawei_vr_render_scale">Huawei VR render resolution</string>
-    <string name="huawei_vr_render_scale_desc">Ratio against the glasses\' recommended resolution (1552×1552 per eye). Pick 100% for best quality, lower it step by step if the device overheats or drops frames</string>
+    <!-- formatted="false"：文案里的 `100%` 纯属展示 —— 代码侧是
+         `stringResource(R.string.huawei_vr_render_scale_desc)`（**不带参数**），
+         Android 不会对它做 String.format。但 lint 会把 "100% for" 里的 `% f`
+         当成格式符，报 StringFormatInvalid(error) + StringFormatCount warning
+         （英文 1 个格式符 vs 其他语言 0 个）。
+         显式声明"本串不参与格式化"：既消除误报，也让语义对自己的意图更明确。
+         ⚠️ 注意**不能**靠把 `%` 写成 `%%` 来绕过 —— 无参调用时 `%%` 会**原样显示**成两个百分号。 -->
+    <string name="huawei_vr_render_scale_desc" formatted="false">Ratio against the glasses\' recommended resolution (1552×1552 per eye). Pick 100% for best quality, lower it step by step if the device overheats or drops frames</string>
     <string name="huawei_vr_enter">Enter Huawei VR</string>
     <string name="huawei_vr_enter_desc">Tap after plugging in the VR Glass; with the glasses connected it skips the VR launcher and starts playback directly</string>
     <string name="huawei_vr_runtime_missing">Huawei VR runtime not found, falling back to built-in split-screen VR</string>
@@ -355,10 +362,10 @@
     <string name="info_bitrate">Bitrate: %1$d kbps\n</string>
     <string name="info_hw">Hardware</string>
     <string name="label_resolution">Resolution</string>
-    <string name="info_resolution2">Resolution: %1$dx%2$d\n</string>
-    <string name="info_rotation">Rotation: %1$d°\n</string>
+    <string name="info_resolution2">Resolution: %1$sx%2$s\n</string>
+    <string name="info_rotation">Rotation: %1$s°\n</string>
     <string name="label_fps">Frame rate</string>
-    <string name="info_fps2">Frame rate: %1$d fps\n</string>
+    <string name="info_fps2">Frame rate: %1$s fps\n</string>
     <string name="label_bitrate">Bitrate</string>
     <string name="info_bitrate2">Bitrate: %1$d kbps\n</string>
     <string name="label_codec">Codec</string>
@@ -520,7 +527,7 @@
     <string name="asr_lang_it">Italian</string>
     <string name="asr_lang_pl">Polish</string>
     <string name="asr_lang_uk">Ukrainian</string>
-    <string name="asr_ext_archive_start">This language needs a model package (~%1); only required files are kept after extraction...</string>
+    <string name="asr_ext_archive_start">This language needs a model package (~%1$d); only required files are kept after extraction...</string>
     <string name="asr_ext_archive_extracting">Extracting model files…</string>
     <string name="asr_ext_model_unready">Model for this language is not downloaded (~%1$dMB). Download it above first.</string>
     <string name="asr_ext_model_tag">sherpa-onnx offline model - Dolphin is bundled, others download on demand</string>

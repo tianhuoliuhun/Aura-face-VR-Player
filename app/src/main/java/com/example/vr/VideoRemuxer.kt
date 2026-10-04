@@ -145,7 +145,20 @@ object VideoRemuxer {
                     bufferInfo.offset = 0
                     bufferInfo.size = size
                     bufferInfo.presentationTimeUs = extractor.sampleTime
-                    bufferInfo.flags = extractor.sampleFlags
+                    // ⚠️ 这里**不能**直接 `bufferInfo.flags = extractor.sampleFlags`。
+                    //    `MediaExtractor.SAMPLE_FLAG_*` 与 `MediaCodec.BUFFER_FLAG_*` 是
+                    //    **两套不同的位定义**，只是「同步帧/keyframe」恰好都等于 1 ——
+                    //    直接透传会造成两处错误映射：
+                    //      SAMPLE_FLAG_ENCRYPTED(2)     → 被当成 BUFFER_FLAG_CODEC_CONFIG(2)
+                    //      SAMPLE_FLAG_PARTIAL_FRAME(4) → 被当成 BUFFER_FLAG_END_OF_STREAM(4)
+                    //    后者会让 muxer **提前认为流已结束**，前者会把加密样本交给解码器当配置帧。
+                    //    只映射真正对得上的 SYNC 位，其余一律 0（不猜）。
+                    bufferInfo.flags =
+                        if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                            android.media.MediaCodec.BUFFER_FLAG_KEY_FRAME
+                        } else {
+                            0
+                        }
                     muxer.writeSampleData(muxerIdx, buffer, bufferInfo)
                     if (!extractor.advance()) break
                 }
