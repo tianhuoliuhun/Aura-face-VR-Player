@@ -58,19 +58,14 @@ object MpvPlayerFactory {
     private const val TAG = "MpvPlayer"
 
     /**
-     * 库是否可用（native 库缺失 / ABI 不匹配时应回退 Exo，而不是黑屏）。
+     * 库是否可用。
      *
-     * ⚠️ `create` 返回 void，失败是**抛异常**（`UnsatisfiedLinkError` 在 `System.loadLibrary`
-     * 时抛，是 `Error` 不是 `Exception`）→ 必须 `catch (Throwable)`。
+     * ⚠️ v2.1.235 起 MPV 的 so **不再打进 APK**（见 `MpvLibLoader`），
+     * 所以这里不能再去试 `MPVLib.create` —— 那样只会抛 UnsatisfiedLinkError。
+     * 必须先走 `MpvLibLoader.isReady()`：它负责"已安装 且 已按依赖顺序加载成功"。
+     * 未安装时返回 false，调用方（VRPlayerScreen）会提示下载并回退 Exo。
      */
-    fun isAvailable(context: Context): Boolean = try {
-        MPVLib.create(context)
-        MPVLib.destroy()
-        true
-    } catch (t: Throwable) {
-        Log.w(TAG, "libmpv 不可用: ${t.message}")
-        false
-    }
+    fun isAvailable(context: Context): Boolean = MpvLibLoader.isReady(context)
 
     /**
      * mpv 自带 FFmpeg，协议集最全 —— 除 `content://` 外**不做预筛**，

@@ -752,6 +752,19 @@
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV playback failed, switched back to EXO</string>
     <string name="mpv_param_hwdec">MediaCodec (HW)</string>
+<!-- v2.1.235：MPV 解码库后下载 -->
+    <string name="mpv_lib_section">MPV libraries</string>
+    <string name="mpv_lib_not_installed">Not installed. The MPV libraries are not bundled (saves ~32MB) — a one-time ~16MB download is needed.</string>
+    <string name="mpv_lib_download">Download</string>
+    <string name="mpv_lib_installing">Installing…</string>
+    <string name="mpv_lib_downloading">Downloading</string>
+    <string name="mpv_lib_extracting">Extracting</string>
+    <string name="mpv_lib_verifying">Verifying</string>
+    <string name="mpv_lib_installed">Installed</string>
+    <string name="mpv_lib_ready_hint">Ready — pick the MPV decoder above to use it</string>
+    <string name="mpv_lib_delete">Delete</string>
+    <string name="mpv_lib_failed">Install failed</string>
+    <string name="toast_mpv_need_download">MPV libraries are not installed. Download them in Settings → Decoder.</string>
     <string name="mpv_param_hwdec_hint">Turning this off leaves mediacodec_embed with no decoded frames — the screen will go black. Only disable it for troubleshooting.</string>
     <string name="mpv_param_framedrop">Frame drop</string>
     <string name="mpv_param_cache">Network cache</string>

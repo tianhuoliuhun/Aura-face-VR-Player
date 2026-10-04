@@ -2411,7 +2411,14 @@ fun VRPlayerScreen(
                 }
                 Log.w("VRPlayerScreen", "MPV 创建失败，回退 EXO")
             } else {
-                Log.w("VRPlayerScreen", "libmpv 不可用（native 库缺失），回退 EXO")
+                Log.w("VRPlayerScreen", "libmpv 不可用（解码库未安装或加载失败），回退 EXO")
+                // v2.1.235：MPV 的 native 库改为后下载 —— 未安装时要明确告诉用户
+                // 去哪里装（否则表现为"选了 MPV 却还是 Exo，没有任何提示"，很像 bug）
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.toast_mpv_need_download),
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
 
@@ -5519,6 +5526,13 @@ fun VRPlayerScreen(
                                                 defaultBufferLabel = stringResource(R.string.ijk_buffer_default)
                                             )
                                         } else if (decoderEngine == DecoderEngine.MPV) {
+                                            // v2.1.235：MPV 的 native 库不进 APK，
+                                            // 所以先给一个"解码库"区块（未装时是下载入口）
+                                            MpvLibPanel(
+                                                context = context,
+                                                accentColor = AccentColor,
+                                                accentOnColor = AccentOnColor
+                                            )
                                             // v2.1.234：MPV 参数（同样的机制：改完自动重建 + 续播）
                                             MpvOptionsPanel(
                                                 options = mpvOptions,

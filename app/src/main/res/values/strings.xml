@@ -751,6 +751,19 @@
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV 解码失败，已切回 EXO 解码器</string>
     <string name="mpv_param_hwdec">MediaCodec 硬解</string>
+<!-- v2.1.235：MPV 解码库后下载 -->
+    <string name="mpv_lib_section">MPV 解码库</string>
+    <string name="mpv_lib_not_installed">未安装。MPV 解码库不进安装包（省约 32MB），首次使用需下载（约 16MB）</string>
+    <string name="mpv_lib_download">下载并安装</string>
+    <string name="mpv_lib_installing">安装中…</string>
+    <string name="mpv_lib_downloading">正在下载</string>
+    <string name="mpv_lib_extracting">正在解压</string>
+    <string name="mpv_lib_verifying">正在校验</string>
+    <string name="mpv_lib_installed">已安装</string>
+    <string name="mpv_lib_ready_hint">解码库已就绪，可在上面选择「MPV 解码器」使用</string>
+    <string name="mpv_lib_delete">删除</string>
+    <string name="mpv_lib_failed">安装失败</string>
+    <string name="toast_mpv_need_download">MPV 解码库未安装，请到「设置 → 解码内核」中下载后使用</string>
     <string name="mpv_param_hwdec_hint">关闭后画面直出通路（mediacodec_embed）没有帧输出，会黑屏；仅在排查问题时关闭</string>
     <string name="mpv_param_framedrop">丢帧保流畅</string>
     <string name="mpv_param_cache">网络缓冲</string>

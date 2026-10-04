@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 234
-    versionName = "2.1.234"
+    versionCode = 235
+    versionName = "2.1.235"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -28,6 +28,45 @@ android {
   packaging {
     jniLibs {
       useLegacyPackaging = true
+
+      // ======================================================================
+      // v2.1.235：**MPV 的 native 库不再打进 APK**，改为"后下载模式"
+      // ----------------------------------------------------------------------
+      // 原因：MPV 只是三个解码内核里的一个，很多用户根本不会用，但它要占
+      //   arm64 展开 36.5MB / v7a 31.8MB —— 让所有人的安装包都为它变大不划算。
+      // 现在 APK 里只保留 MPV 的 **Java 层**（AAR 的 classes.jar，几十 KB），
+      // native 库在用户第一次选 MPV 内核时下载（见 MpvLibLoader.kt）：
+      //   源 = 本仓库固定 tag `mpv-libs` 的 Release 附件
+      //        mpv-libs-arm64-v8a.zip / mpv-libs-armeabi-v7a.zip（各约 16MB）
+      //
+      // ⚠️ 排除清单必须与 MpvLibLoader.LOAD_ORDER **完全一致** ——
+      //    漏排一个：它进了 APK，但下载包里也有同名文件，两边版本可能不同步；
+      //    多排一个：下载包里没有、APK 里也没有 → 运行时 dlopen 找不到依赖。
+      //    两处的对应关系是"打包脚本 pack_mpv_libs.py → 下载包 → LOAD_ORDER"。
+      //
+      // ⚠️ libc++_shared.so 也在排除之列：这是刻意的。已核对过当前 APK 的
+      //    native 库清单里**本来就没有**它（其他库都静态链接了 libc++），
+      //    所以由 MPV 的下载包独占提供，不会与 APK 内的库打架。
+      //    如果将来某个依赖开始动态链接 libc++，需要重新评估这一条。
+      //
+      // ⚠️ 如果哪天要改回"内置 MPV"：把这段 excludes 删掉即可，
+      //    MpvLibLoader 会因为 isInstalled() 为假而走下载流程 —— 但既然 APK 里
+      //    已经有 so，`MpvLibLoader.ensureLoaded()` 需要改成优先用 System.loadLibrary。
+      //    更简单的回退方式是把 MPV 的 so 重新放回 jniLibs 并让
+      //    MpvPlayerFactory.isAvailable() 恢复成"试 MPVLib.create"。
+      // ======================================================================
+      excludes += listOf(
+        "**/libmpv.so",
+        "**/libavcodec.so",
+        "**/libavformat.so",
+        "**/libavutil.so",
+        "**/libavfilter.so",
+        "**/libavdevice.so",
+        "**/libswscale.so",
+        "**/libswresample.so",
+        "**/libplayer.so",
+        "**/libc++_shared.so",
+      )
     }
   }
 

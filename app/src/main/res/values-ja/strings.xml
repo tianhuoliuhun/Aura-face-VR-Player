@@ -719,6 +719,19 @@
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV の再生に失敗したため EXO に戻しました</string>
     <string name="mpv_param_hwdec">MediaCodec ハードウェア</string>
+<!-- v2.1.235：MPV 解码库后下载 -->
+    <string name="mpv_lib_section">MPV ライブラリ</string>
+    <string name="mpv_lib_not_installed">未インストール。MPV ライブラリは同梱していません（約 32MB 削減）。初回のみ約 16MB のダウンロードが必要です。</string>
+    <string name="mpv_lib_download">ダウンロード</string>
+    <string name="mpv_lib_installing">インストール中…</string>
+    <string name="mpv_lib_downloading">ダウンロード中</string>
+    <string name="mpv_lib_extracting">展開中</string>
+    <string name="mpv_lib_verifying">検証中</string>
+    <string name="mpv_lib_installed">インストール済み</string>
+    <string name="mpv_lib_ready_hint">準備完了。上の「MPV デコーダ」を選ぶと使えます</string>
+    <string name="mpv_lib_delete">削除</string>
+    <string name="mpv_lib_failed">インストール失敗</string>
+    <string name="toast_mpv_need_download">MPV ライブラリが未インストールです。「設定 → デコーダ」からダウンロードしてください。</string>
     <string name="mpv_param_hwdec_hint">オフにすると mediacodec_embed にフレームが供給されず画面が真っ黒になります。問題の切り分け時のみオフにしてください。</string>
     <string name="mpv_param_framedrop">フレームドロップ</string>
     <string name="mpv_param_cache">ネットワークキャッシュ</string>
