@@ -6,6 +6,7 @@ import androidx.annotation.StringRes
 import com.example.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.k2fsa.sherpa.onnx.FeatureConfig
@@ -770,7 +771,7 @@ object SherpaAsrManager {
      * 放在 Manager 而非 UI 局部状态，是因为语言 chip 有**两处渲染**
      * （设置面板 + 字幕快捷面板），两处触发都要能联动重建。
      */
-    var modelChoiceVersion: Int by mutableStateOf(0)
+    var modelChoiceVersion: Int by mutableIntStateOf(0)
         private set
 
     fun setModelChoice(context: Context, langKey: String, modelId: String) {

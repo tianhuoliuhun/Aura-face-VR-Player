@@ -897,19 +897,29 @@ fun VRPlayerScreen(
      * 并把字幕源切换到本地（关闭实时生成——内容相同，省电省 CPU）。
      */
     fun loadSavedSubtitleFile(f: File) {
-        try {
-            val cues = SubtitleParser.parseSrtOrVtt(f.readText())
-            if (cues.isEmpty()) return
-            loadedSubtitleCues = cues
-            loadedSubtitleFileName = f.name
-            isSubtitleEnabled = true
-            isRealtimeSubtitleEnabled = false
-            if (isMemoryModeEnabled) {
-                prefs.edit().putBoolean("realtime_subtitle_enabled", false).apply()
+        // ⚠️ 读文件 + 解析字幕**必须**放 IO 线程：字幕文件从几十 KB 到几 MB 不等，
+        //    而这个函数是从 `.clickable { }` 里直接调的（也就是**主线程**）——
+        //    主线程做这件事会在用户点下去之后冻住 UI 一段时间（文件越大越明显）。
+        //    ⚠️ 同一功能的另一处「设置面板 → 已下载字幕加载」早就用了
+        //       `scope.launch(Dispatchers.IO)`，只有这里漏了 —— 典型的「同功能两处实现、
+        //       改一处漏一处」。两处现在都走 IO 线程。
+        scope.launch(Dispatchers.IO) {
+            try {
+                val cues = SubtitleParser.parseSrtOrVtt(f.readText())
+                withContext(Dispatchers.Main) {
+                    if (cues.isEmpty()) return@withContext
+                    loadedSubtitleCues = cues
+                    loadedSubtitleFileName = f.name
+                    isSubtitleEnabled = true
+                    isRealtimeSubtitleEnabled = false
+                    if (isMemoryModeEnabled) {
+                        prefs.edit().putBoolean("realtime_subtitle_enabled", false).apply()
+                    }
+                    Toast.makeText(context, context.getString(R.string.toast_subtitle_autoloaded, f.name, cues.size), Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.w("VRPlayerScreen", "load saved subtitle failed: ${e.message}")
             }
-            Toast.makeText(context, context.getString(R.string.toast_subtitle_autoloaded, f.name, cues.size), Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.w("VRPlayerScreen", "load saved subtitle failed: ${e.message}")
         }
     }
 
@@ -1668,7 +1678,7 @@ fun VRPlayerScreen(
     var resolutionTipText by remember { mutableStateOf("") }
 
     var isTranscoding by remember { mutableStateOf(false) }
-    var transcodingProgress by remember { mutableStateOf(0) }
+    var transcodingProgress by remember { mutableIntStateOf(0) }
     var transcodingStatusText by remember { mutableStateOf("") }
     // Seek-failure auto-fix state: some mp4 containers reset position to 0 on seek. (8/1 功能)
     var isRemuxing by remember { mutableStateOf(false) }
@@ -2874,7 +2884,7 @@ fun VRPlayerScreen(
     // 只在首次组合时执行一次，其内部闭包会永久捕获那一刻的 sensorManager（此时还是 null，
     // 因为 currentGlSurfaceView 尚未被赋值），调用会静默失效。
     // 而 MutableState 是 remember 出来的同一实例，闭包读取永远拿到最新值。
-    var recenterViewSignal by remember { mutableStateOf(0) }
+    var recenterViewSignal by remember { mutableIntStateOf(0) }
 
     // ===== v2.1.210：VR 手柄消费（奇遇一体机等）=====
     // ⚠️ 用 SideEffect 而不是 DisposableEffect(Unit) 注册 handler：

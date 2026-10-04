@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -108,7 +109,7 @@ fun SubtitleOverlay(
     // Caption panel position is controlled exclusively by the settings sliders
     // (offsetX/offsetY). The only runtime gesture kept is pinch-zoom. State is
     // hoisted above block() so both VR eyes share the same zoom.
-    var panelZoom by remember { mutableStateOf(1f) }
+    var panelZoom by remember { mutableFloatStateOf(1f) }
     fun transformPanelModifier(): Modifier = Modifier.pointerInput(Unit) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
