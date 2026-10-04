@@ -186,6 +186,24 @@
                 <data android:mimeType="video/*" />
             </intent-filter>
 
+            <!-- v2.1.237：流媒体协议（与上面的 filter 分开写，**刻意不带 mimeType**）
+                 ⚠️ 为什么必须另开一个 filter：intent-filter 内多个 <data> 是**与**关系，
+                    上面那个带 `video/*`，而 HLS 的 .m3u8 是 application/x-mpegURL、
+                    RTSP/RTMP 根本没有 mimeType → 全都匹配不上上面那条，
+                    链接点"打开方式"时不会出现本应用。
+                 不带 mimeType 的 scheme-only filter 才能接收这些。
+                 ⚠️ 这里**只加 rtsp/rtmp**，没把 http/https 也放进无 mimeType 的 filter ——
+                    否则本应用会出现在**所有网页链接**的打开方式里，属于骚扰用户。
+                    （因此浏览器里的 .m3u8 链接仍要靠"分享"或应用内输入地址；
+                      如果需要一个"输入网络地址"的入口，那是另一个 UI 需求。） -->
+            <intent-filter tools:ignore="AppLinkUrlError">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="rtsp" />
+                <data android:scheme="rtmp" />
+            </intent-filter>
+
             <!-- Support sharing video files/links into our application from shared streams -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

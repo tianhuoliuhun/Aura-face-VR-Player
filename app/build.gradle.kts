@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 236
-    versionName = "2.1.236"
+    versionCode = 237
+    versionName = "2.1.237"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -380,6 +380,29 @@ dependencies {
   // （CacheDataSource / SimpleCache / LeastRecentlyUsedCacheEvictor 本身在 media3-datasource，
   //  已由 media3-exoplayer 传递引入，无需再显式声明）
   implementation("androidx.media3:media3-database:1.4.1")
+
+  // ==========================================================================
+  // v2.1.237：ExoPlayer **流媒体协议扩展**（第一批）
+  // --------------------------------------------------------------------------
+  // 用户要求"支持 exo 扩展库"。这些是 **纯 Java** 模块，加依赖即可生效 ——
+  // `DefaultMediaSourceFactory` 会**自动检测 classpath 上可用的模块**并按 URI
+  // scheme 选择对应的 MediaSource（hls:// / .m3u8 → HLS，.mpd → DASH，
+  // rtsp:// → RTSP，.ism → SmoothStreaming），**项目代码一行都不用改**。
+  // （Media3 各模块的 AAR 自带 consumer proguard 规则，反射查找的类不会被 R8 裁掉。）
+  //
+  // ⚠️ 解码器扩展（decoder-ffmpeg / av1 / vp9）**不在这里** —— 它们含 native 库，
+  //    不在 Google Maven 上，见下方 "解码扩展" 段落。
+  //
+  // ⚠️ rtmp 与其他几个不同：它提供的是 **DataSource**（不是 MediaSource），
+  //    要真正播 rtmp:// 需要在 DataSource.Factory 里显式挂 RtmpDataSource.Factory。
+  //    这里先引入（体积很小），实际启用见 `VRPlayerScreen` 的 DataSource 链。
+  // ==========================================================================
+  implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+  implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
+  implementation("androidx.media3:media3-exoplayer-rtsp:1.4.1")
+  implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.4.1")
+  implementation("androidx.media3:media3-datasource-rtmp:1.4.1")
+  implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
   // Real Vosk offline speech recognition (Kaldi based, on-device ASR)
   // v117：纯 Java MPEG 音频软件解码兜底（JLayer，LGPL-2.1）
   // 背景：MPEG-1 Audio Layer II（Android 里的 MIME 是 audio/mpeg-L2）在 Android 上属可选格式，

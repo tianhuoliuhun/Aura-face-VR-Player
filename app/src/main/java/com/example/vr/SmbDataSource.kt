@@ -11,6 +11,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.datasource.rtmp.RtmpDataSource
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 
@@ -122,16 +123,26 @@ class SchemeRoutingDataSource(private val context: Context) : BaseDataSource(/* 
 
     override fun open(dataSpec: DataSpec): Long {
         close()
-        val isSmb = dataSpec.uri.scheme?.equals("smb", ignoreCase = true) == true
-        val source: DataSource = if (isSmb) {
-            SmbDataSource()
-        } else {
-            // v2.0.142：http(s)（MT 回环代理等）包 CacheDataSource——代理不支持 Range
-            // 时也能按需拉取字节、正常 seek（边下边播），moov 在尾部的 MP4 也能先读 moov。
-            CacheDataSource(
-                getHttpCache(context),
-                DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).createDataSource()
-            )
+        val scheme = dataSpec.uri.scheme?.lowercase()
+        val source: DataSource = when (scheme) {
+            // v2.1.237：**RTMP 走专用 DataSource**（`media3-datasource-rtmp`，纯 Java 实现，
+            // 无 native 库 —— 已核实 AAR 内没有任何 .so）。
+            // ⚠️ 它**不能**包 CacheDataSource：RTMP 是**流式**协议，不支持按字节区间的
+            //    随机请求（无 Range / 不可 seek），缓存层会尝试按区间拉取并失败。
+            // ⚠️ 也因此 rtmp:// 天然不能拖动进度条 —— 这是协议本身的限制，不是 bug。
+            "rtmp" -> RtmpDataSource()
+
+            // smb:// → jcifs
+            "smb" -> SmbDataSource()
+
+            else -> {
+                // v2.0.142：http(s)（MT 回环代理等）包 CacheDataSource——代理不支持 Range
+                // 时也能按需拉取字节、正常 seek（边下边播），moov 在尾部的 MP4 也能先读 moov。
+                CacheDataSource(
+                    getHttpCache(context),
+                    DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).createDataSource()
+                )
+            }
         }
         delegate = source
         return source.open(dataSpec)
