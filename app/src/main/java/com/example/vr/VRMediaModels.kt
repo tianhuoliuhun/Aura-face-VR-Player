@@ -84,10 +84,37 @@ enum class DecoderEngine(val displayName: String, @StringRes val labelRes: Int, 
      * 注意"已接通"只意味着**代码链路齐备**；native 库是否装上、片源协议与编码
      * 该内核吃不吃得下，都在 `VRPlayerScreen.setupVideoPlayer` 里做**运行时判定**，
      * 判定不过会自动回退 EXO（绝不黑屏）。
+     *
+     * v2.1.236：MPV 由 [MPV_ENABLED] 总开关控制 —— 关掉后它会从选择列表里消失，
+     * 且存档里遗留的 MPV 选择会在读取时**自动回落 EXO**（见 `VRPlayerScreen` 的
+     * prefs 读取处：那里的 `find { it.id == id && it.isImplemented }` 正是靠本属性过滤）。
+     * **注意本属性同时承担"UI 是否展示"的职责**，所以停用一个内核不用改 UI 代码。
      */
     val isImplemented: Boolean
-        get() = true
+        get() = this != MPV || MPV_ENABLED
 }
+
+/**
+ * **MPV 内核总开关** —— v2.1.236。
+ *
+ * 用户反馈"暂时不需要 MPV 了"，于是从界面上停用。这里刻意**用开关而不是把代码
+ * 注释掉**，原因有三：
+ *  1. 注释掉大段代码极易引发语法错（本项目的 Kotlin 块注释**可嵌套**，注释里出现
+ *     斜杠紧跟星号就会吃掉后面整个文件），且 IDE 无法对注释代码做引用检查；
+ *  2. 关闭后此处的分支都**不可达**，运行时效果与"注释掉"完全一致 —— UI 里没有 MPV、
+ *     存档回落到 EXO、下载面板也永远不会显示；
+ *  3. 将来要恢复只需把这里改回 `true`，**一处生效**（`isImplemented` 已经承担了
+ *     "UI 是否展示 / 是否允许选中"的全部判断）。
+ *
+ * 关掉后**仍然保留**（不删、不失效）的东西：
+ *  - `MpvPlayerBackend.kt` / `MpvLibLoader.kt` / `MpvLibPanel.kt` / `MpvOptionsPanel.kt`
+ *    全部代码与 `packaging.jniLibs.excludes` 里的排除项；
+ *  - 已下载到 `filesDir/mpv-libs/` 的库文件（不会自动删；将来恢复就不用重新下）。
+ *    ⚠️ 已下载过 MPV 库的用户现在**在界面上看不到删除入口**了（那段 UI 在 MPV 分支内，
+ *       不可达）。那部分空间（约 36MB）只能靠"清除应用数据"释放 —— 可接受，
+ *       因为恢复开关后入口就回来了。
+ */
+const val MPV_ENABLED = false
 
 data class MediaItem(
     val id: String,

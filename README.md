@@ -146,7 +146,7 @@ The README keeps only the **overview and getting started**; everything else is s
 - [ ] 修复陀螺仪漂移（方向问题已在 v125 修正，剩余为长时间 yaw 漂移）/ Fix gyro drift (direction fixed in v125; residual slow yaw drift)
 - [ ] 字幕时间轴对齐优化 / Subtitle timing alignment (VAD/endpoint calibration)
 - [ ] 人脸关键点 x86_64 支持 / x86_64 face-landmark support (emulator beauty)
-- [ ] **MPV 解码器真实接入**（v2.0.141 仅为占位）/ Wire the MPV decoder for real (v2.0.141 is a placeholder only)
+- [ ] **MPV 解码器**：已于 v2.1.234 真实接入（native 库走可选下载，APK 不带），但 **v2.1.236 起在界面上暂时停用**（开关 `MPV_ENABLED = false`，恢复只需改回 `true`）/ MPV decoder: implemented in v2.1.234 (native libs downloaded on demand), UI **disabled since v2.1.236** via the `MPV_ENABLED` switch
 - [ ] 更多投影模式（CAVE / 半球）/ More projection modes (CAVE / hemisphere)
 - [ ] 字幕样式模板 / Subtitle style templates
 - [ ] 播放列表与历史记录同步 / Playlist & history sync

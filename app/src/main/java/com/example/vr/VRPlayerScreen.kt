@@ -5453,7 +5453,13 @@ fun VRPlayerScreen(
                                         ) {
                                         // v2.1.232：IJK 加入「预留位」。是否置灰**由枚举自己说了算**
                                         //（DecoderEngine.isImplemented）—— 将来接好了只需改那一处，UI 不用动。
-                                        DecoderEngine.values().forEach { engine ->
+                                        // v2.1.236：改成 filter 只展示**已启用**的内核 ——
+                                        // 停用的（如 MPV，见 MPV_ENABLED）会**直接不出现**，
+                                        // 而不是显示成置灰的「开发中」（那会让人以为功能坏了）。
+                                        // ⚠️ 过滤依据仍是 isImplemented，所以启用/停用内核
+                                        //    依然不需要动这里。
+                                        DecoderEngine.values().filter { it.isImplemented }.forEach { engine ->
+                                            // 过滤后恒为 false，保留是为了兼容下面依赖它的样式分支
                                             val isPlaceholder = !engine.isImplemented
                                             val isSelected = !isPlaceholder && decoderEngine == engine
                                                 Box(
