@@ -783,6 +783,7 @@
     <string name="mpv_lib_builtin_hint">The decoder library is bundled with the app — ready to use, no download needed</string>
     <string name="toast_mpv_need_download">MPV libraries are not installed. Download them in Settings → Decoder.</string>
     <string name="mpv_param_hwdec_hint">Turning this off leaves mediacodec_embed with no decoded frames — the screen will go black. Only disable it for troubleshooting.</string>
+    <string name="mpv_vo_mode_hint">Legacy formats such as WMV/RM usually lack hardware decoders, so MPV automatically uses compatibility rendering for them (handles both hardware and software decoding); other formats use zero-copy output</string>
     <string name="mpv_param_framedrop">Frame drop</string>
     <string name="mpv_param_cache">Network cache</string>
     <string name="video_info_section">Video info</string>

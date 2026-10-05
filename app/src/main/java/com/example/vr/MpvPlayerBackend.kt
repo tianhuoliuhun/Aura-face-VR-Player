@@ -108,9 +108,22 @@ object MpvPlayerFactory {
             MPVLib.setOptionString("pause", "yes")
             // 视频输出：Android 专有 vo，把解码结果直接投到 Surface。
             // ⚠️ 不能用 vo=gpu —— 那会让 mpv 另建一个 GL 上下文，与我们的 SurfaceTexture 打架。
-            MPVLib.setOptionString("vo", "mediacodec_embed")
+            //    （v2.1.244 更正：见 MpvVoMode 注释 —— vo=gpu 用的是 Surface 的 buffer queue，
+            //     与 SurfaceTexture 并不冲突，故保留为「软解兜底」模式。）
+            MPVLib.setOptionString("vo", options.voMode.voName)
+            if (options.voMode == MpvVoMode.GPU) {
+                // Android 上的 GL context；现代 mpv 由它把帧渲进 Surface 的 buffer queue
+                MPVLib.setOptionString("gpu-context", "android")
+            }
             // 硬解（见第 2 条）
-            MPVLib.setOptionString("hwdec", if (options.hwdec) "mediacodec" else "no")
+            // ⚠️ EMBED 模式必须硬解（它只吃硬件帧）；GPU 模式让 mpv 自己选，
+            //    无硬解器时能顺利退回软解 —— 这正是兜底能生效的关键。
+            val hwdecValue = when {
+                options.voMode == MpvVoMode.EMBED -> if (options.hwdec) "mediacodec" else "no"
+                options.hwdec -> "auto-safe"
+                else -> "no"
+            }
+            MPVLib.setOptionString("hwdec", hwdecValue)
             MPVLib.setOptionString("ao", "audiotrack")
             // 变速不变调（mpv 默认就是 yes，显式写出以防默认值变化）
             MPVLib.setOptionString("audio-pitch-correction", "yes")
@@ -155,13 +168,24 @@ object MpvPlayerFactory {
                         }
                         MPVLib.MpvEvent.MPV_EVENT_VIDEO_RECONFIG -> backend.onVideoParamsChanged()
                         MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
-                            // ⚠️ 播完与出错都会发 END_FILE，必须靠 eof-reached 区分，
-                            //    否则「解码失败」会被当成「正常播完」→ 不触发回退，用户看到黑屏
-                            if (backend.isNormalEof()) {
+                            // ⚠️ v2.1.245：**必须用事件自带的 reason，不能用 eof-reached 属性**。
+                            //    v2.1.244 曾用 `getPropertyBoolean("eof-reached")` 判定，实测在
+                            //    END_FILE 回调时刻该属性恒为 false（mpv 在发事件前后会重置播放状态）
+                            //    → 正常播完被误判成「非正常结束」→ 触发回退 EXO（用户报「能播但自动回退」）。
+                            //    END_FILE 的 MPVNode 里带权威字段（mpv 源码 player/client.c
+                            //    mpv_event_to_node）：reason ∈ {eof,stop,quit,error,redirect}。
+                            val reason = backend.endFileReason(data)
+                            if (reason == "eof") {
                                 mainHandler.post { callbacks.onCompletion() }
-                            } else if (backend.fileLoadedOnce) {
-                                mainHandler.post { callbacks.onError("mpv END_FILE 非正常结束") }
+                            } else if (reason == "error") {
+                                val detail = runCatching { data.get("file_error")?.asString() }.getOrNull()
+                                if (backend.fileLoadedOnce) {
+                                    mainHandler.post {
+                                        callbacks.onError("mpv 解码错误" + (detail?.let { ": $it" } ?: ""))
+                                    }
+                                }
                             }
+                            // stop / quit / redirect：主动切源或退出，既不是播完也不是错误 → 静默
                         }
                         MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
                             mainHandler.post { callbacks.onFirstFrame() }
@@ -185,6 +209,11 @@ object MpvPlayerFactory {
             }
             // ⚠️ command 是 vararg，不是数组参数
             MPVLib.command("loadfile", target)
+
+            // ===== 6. 「迟迟不 onPrepared」看门狗 =====
+            // ⚠️ 必须在 loadfile 之后启动：打不开的文件不会发 FILE_LOADED，
+            //    没有兜底就会一直黑屏无提示（见 MpvBackend.startWatchdog 注释）。
+            backend.startWatchdog()
 
             Log.i(TAG, "mpv 已创建: scheme=${uri.scheme} options=$options")
             backend
@@ -215,7 +244,11 @@ data class MpvOptions(
     /** 解码跟不上时丢帧保流畅。默认关（VR 里丢帧有空间跳动感）。 */
     val frameDrop: Boolean = false,
     /** 网络流缓冲上限（MB）。0 = 用 mpv 默认。 */
-    val cacheMb: Int = 0
+    val cacheMb: Int = 0,
+    /**
+     * 视频输出模式。**不持久化**，由二段兜底在内存里切换（见 [MpvVoMode]）。
+     */
+    val voMode: MpvVoMode = MpvVoMode.EMBED
 ) {
     companion object {
         /** 缓冲档位（MB）。0 表示交回 mpv 默认。 */
@@ -227,8 +260,47 @@ data class MpvOptions(
                 hwdec = prefs.getBoolean("mpv_hwdec", true),
                 frameDrop = prefs.getBoolean("mpv_framedrop", false),
                 cacheMb = prefs.getInt("mpv_cache_mb", 0)
+                // voMode 故意不从 prefs 读：它只用于「本片二段兜底」，不该跨片记住
             )
         }
+    }
+}
+
+/**
+ * mpv 的视频输出（vo）模式 —— v2.1.244 引入，用于 **WMV/RM 等老编码的二段兜底**。
+ *
+ * ## 为什么需要它（v2.1.243 踩到的真实故障）
+ * 原实现固定用 `vo=mediacodec_embed`。查 mpv 源码 `video/out/vo_mediacodec_embed.c`：
+ * ```c
+ * static int query_format(struct vo *vo, int format) {
+ *     return format == IMGFMT_MEDIACODEC;   // ← 只接受硬件帧格式
+ * }
+ * ```
+ * 它**天生不支持软解**。而 WMV1/WMV2、RealVideo 这类老编码在现代 Android 上
+ * 通常**没有硬件解码器** → mpv 退回软解、输出 `yuv420p` → vo 拒收：
+ * ```
+ * [autoconvert:error] Failed to create HW uploader for format yuv420p
+ * [autoconvert:error] can't find video conversion for yuv420p
+ * → MPV_EVENT_END_FILE（非正常结束）
+ * ```
+ * 这是 vo 的**架构性限制**，调 hwdec 参数绕不过去（`mediacodec-copy` 同样要
+ * 硬件帧格式），只能换 vo。
+ *
+ * ## 两个模式
+ * - [EMBED]：`mediacodec_embed`。**零拷贝**（解码器直接投 Surface），真机首选。
+ *   但只吃硬解帧 → 无硬解器的编码会失败。
+ * - [GPU]：`vo=gpu` + `gpu-context=android`。**软解硬解都能出画**，兼容性最好。
+ *   代价是硬解路径多一次 GPU 拷贝（性能略低），且它自建 GL 上下文，
+ *   渲染到我们给的 Surface 的 buffer queue（不是 SurfaceTexture，故不冲突）。
+ *
+ * ⚠️ 默认仍是 [EMBED]（真机最优），只在 EMBED 失败时由应用层自动切 [GPU] 重试一次。
+ */
+enum class MpvVoMode(val id: Int, val voName: String) {
+    EMBED(0, "mediacodec_embed"),
+    GPU(1, "gpu");
+
+    companion object {
+        fun fromId(id: Int): MpvVoMode = entries.firstOrNull { it.id == id } ?: EMBED
     }
 }
 
@@ -252,6 +324,16 @@ class MpvBackend(
     private val mainHandler: Handler
 ) : VrPlayerBackend {
 
+    private companion object {
+        const val TAG = "MpvPlayer"
+
+        /**
+         * 看门狗超时（毫秒）。取 15s —— 远超正常加载（本地/局域网 1~2s，大文件或
+         * 慢速 SMB 也远小于此），又短到用户不会以为「卡死」。
+         */
+        const val WATCHDOG_MS = 15_000L
+    }
+
     override val engine: DecoderEngine = DecoderEngine.MPV
     override val exo: androidx.media3.exoplayer.ExoPlayer? = null
 
@@ -263,6 +345,17 @@ class MpvBackend(
     /** 是否收到过 FILE_LOADED —— 用于区分「根本没加载成功」与「加载后出错」。 */
     @Volatile internal var fileLoadedOnce = false
         private set
+
+    /**
+     * 「迟迟不 onPrepared」看门狗（v2.1.245）。
+     *
+     * ⚠️ 为什么必须有它：MPV 打不开文件时（损坏片源、极端不支持的容器）**根本不发
+     * `MPV_EVENT_FILE_LOADED`** → `fileLoadedOnce` 恒为 false → END_FILE 的 error 分支
+     * 被 `if (fileLoadedOnce)` 挡住 → 既不上报 onError、也永远等不到 onPrepared
+     * → 用户看到的是**一直黑屏、没有任何提示**（比报错更糟：无从判断）。
+     * 因此加一个「N 秒内没加载成功就当作失败」的兜底上报。
+     */
+    private var watchdog: Runnable? = null
 
     private var lastW = 0
     private var lastH = 0
@@ -301,6 +394,7 @@ class MpvBackend(
     override fun release() {
         if (released) return
         released = true
+        cancelWatchdog()
         // ⚠️ 顺序：先 detachSurface 再 destroy。反过来的话 mpv 销毁 vo 时仍持有
         //    Surface，某些设备上会 native 崩（"Surface has been released"）。
         safe { MPVLib.detachSurface() }
@@ -311,8 +405,32 @@ class MpvBackend(
 
     // ===================== 事件辅助（由 MpvPlayerFactory 调用）=====================
 
+    /**
+     * 启动「迟迟不 onPrepared」看门狗（在 `loadfile` 之后调用）。
+     *
+     * ⚠️ 只在**从未加载成功**时上报：若 `fileLoadedOnce` 已为 true，说明播放早已开始，
+     * 此后的沉默（暂停/播完）是正常状态，绝不能误报错误（与 END_FILE 的教训同型）。
+     */
+    internal fun startWatchdog() {
+        cancelWatchdog()
+        val r = Runnable {
+            watchdog = null
+            if (released || fileLoadedOnce) return@Runnable
+            Log.e(TAG, "看门狗：${WATCHDOG_MS}ms 内未收到 FILE_LOADED，判定为无法打开 → 上报错误")
+            callbacks.onError("mpv 无法打开该文件（${WATCHDOG_MS / 1000} 秒内未就绪）")
+        }
+        watchdog = r
+        mainHandler.postDelayed(r, WATCHDOG_MS)
+    }
+
+    internal fun cancelWatchdog() {
+        watchdog?.let { mainHandler.removeCallbacks(it) }
+        watchdog = null
+    }
+
     internal fun onFileLoaded() {
         fileLoadedOnce = true
+        cancelWatchdog()   // 已就绪，撤掉兜底上报
         // 文件加载完才有真实的 video-params，主动上报一次分辨率
         onVideoParamsChanged()
     }
@@ -332,13 +450,24 @@ class MpvBackend(
     }
 
     /**
-     * 区分「正常播完」与「出错/被中断」。
+     * 解析 `MPV_EVENT_END_FILE` 自带的结束原因。
      *
-     * ⚠️ 必须用 `eof-reached`：END_FILE 两种情况都会发。播完时该属性为 true，
-     * 出错/切源时为 false。**不能**用 playlist 位置判断 —— 单文件播放时它恒为 0。
+     * ⚠️ **不要改用 `eof-reached` 属性** —— 实测在 END_FILE 回调时刻恒为 false
+     * （v2.1.244 的误回退就是这么来的）。事件的 `MPVNode` 里有权威的 `reason` 字段：
+     *
+     * | 值 | 含义 |
+     * |---|---|
+     * | `eof` | 正常播完 |
+     * | `error` | 解码/打开失败（另有 `file_error` 说明原因） |
+     * | `stop` | 被外部停止（stop 命令、切源） |
+     * | `quit` | 播放器退出 |
+     * | `redirect` | 播放列表重定向 |
+     *
+     * 来源：mpv `player/client.c` → `mpv_event_to_node()`。
+     * 读不到时返回 null，调用方按「忽略」处理（避免误报错误吓用户）。
      */
-    internal fun isNormalEof(): Boolean =
-        safe { MPVLib.getPropertyBoolean("eof-reached") } ?: false
+    internal fun endFileReason(data: MPVNode): String? =
+        safe { data.get("reason")?.asString() }
 
     // ===================== 视频信息 =====================
 

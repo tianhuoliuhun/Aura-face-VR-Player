@@ -601,6 +601,13 @@ fun VRPlayerScreen(
     var mpvOptions by remember {
         mutableStateOf(if (isMemoryModeEnabled) MpvOptions.load(prefs) else MpvOptions())
     }
+    // v2.1.244：MPV 视频输出模式 —— 由**容器预判**决定（见 setupVideoPlayer 的「预判式选 vo」）。
+    // ⚠️ **故意不持久化**：它只反映「本片要不要走兼容渲染」，不该跨片记住
+    //    （否则播过一次 WMV 后，下次播 MP4 也走 GPU 拷贝，白掉性能）。
+    // ⚠️ **也不要放进重建 effect 的 key 列表**：vo 在创建播放器前就已定好，
+    //    若把它当 key，改它会触发「重建 MPV」→ 撞上全局单例的 `!mpctx->initialized`
+    //    断言 → native 崩溃（第一版方案实测踩过）。
+    var mpvVoMode by remember { mutableStateOf(MpvVoMode.EMBED) }
 
     // Subtitle System States
     var isSubtitleEnabled by remember {
@@ -2388,6 +2395,30 @@ fun VRPlayerScreen(
         // ======================================================================
         val containerExt = MediaFormats.extensionOf(decodedUri)
         var effectiveEngine = decoderEngine
+        // ======================================================================
+        // v2.1.244：**预判式选 vo** —— MPV 的视频输出模式
+        // ----------------------------------------------------------------------
+        // 背景：EMBED（mediacodec_embed）只吃硬件帧格式（mpv 源码 query_format 只认
+        //   IMGFMT_MEDIACODEC），而 WMV/ASF/RM/RMVB 这类老容器**几乎必然没有硬解器**
+        //   → mpv 退回软解输出 yuv420p → vo 拒收 → END_FILE 失败。
+        // 做法：**在创建播放器之前**就按容器选好 vo，而不是等失败后重建。
+        //
+        // ⚠️⚠️ 为什么不能「失败后重建」（第一版方案，实测直接崩）
+        //   MPV 是**全局单例**（`is.xyz.mpv.MPVLib` 是 Kotlin object，所有调用打到同一份
+        //   native context）。失败后重建会再次调 `MPVLib.create()` + `init()`，
+        //   mpv 断言 `../player/main.c:347: assertion "!mpctx->initialized" failed`
+        //   → **SIGABRT 直接崩在 libmpv.so**（实测 tombstone 已确认）。
+        //   因此本方案**只改一次、不重建**。
+        // ======================================================================
+        // 判据：需 MPV 的容器 → 直接给 GPU 模式（软硬解都能出画）。
+        //   代价：硬解路径多一次 GPU 拷贝；但这些容器本来就走软解，没有损失。
+        if (MediaFormats.shouldRouteToMpv(containerExt)) {
+            if (mpvVoMode != MpvVoMode.GPU) mpvVoMode = MpvVoMode.GPU
+            Log.i("VRPlayerScreen", "容器 .$containerExt 可能无硬解器，MPV 采用 vo=gpu（软硬解均可出画）")
+        } else if (mpvVoMode != MpvVoMode.EMBED) {
+            // 其它格式（含用户手动选 MPV 播 mp4 等）用 EMBED —— 零拷贝，真机最优
+            mpvVoMode = MpvVoMode.EMBED
+        }
         // ⚠️ v2.1.243：先判 MPV，再判 IJK。顺序不能反 ——
         //    wmv/rm 这类格式**两边都可能被 shouldXxx 命中**（requiresMpv 与
         //    shouldAutoRouteToIjk 的集合都是 IJK_ONLY 的子集），但只有 MPV 能真正解，
@@ -2564,7 +2595,8 @@ fun VRPlayerScreen(
                     context = context,
                     uri = decodedUri,
                     surface = nativeSurface,
-                    options = mpvOptions,
+                    // v2.1.244：把兜底选定的 voMode 合并进 options（EMBED / GPU）
+                    options = mpvOptions.copy(voMode = mpvVoMode),
                     callbacks = object : MpvPlayerFactory.Callbacks {
                         override fun onVideoSizeChanged(width: Int, height: Int) {
                             // 与 Exo / IJK 共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
@@ -2594,6 +2626,11 @@ fun VRPlayerScreen(
                         }
 
                         override fun onError(reason: String) {
+                            // v2.1.244：**这里不能重建播放器**（第一版方案，实测直接崩）。
+                            //   MPV 是全局单例，重建会再次调 MPVLib.create()+init()，而旧
+                            //   context 尚未销毁 → mpv 断言 `!mpctx->initialized` 失败 →
+                            //   SIGABRT 崩在 libmpv.so。vo 模式改为**创建前预判**
+                            //   （见 setupVideoPlayer 里的「预判式选 vo」），失败即回退。
                             Log.e("VRPlayerScreen", "MPV 播放错误: $reason -> 回退 EXO")
                             // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
                             //    改 decoderEngine 会触发重建 effect；同时写回 prefs，
@@ -2956,6 +2993,8 @@ fun VRPlayerScreen(
     var decoderRebindSeen by remember { mutableStateOf(false) }
     // v2.1.233：ijkOptions 也作为 key —— 改 IJK 的任一参数都会重建播放器并续播，
     // 省掉一个「应用/重启播放」按钮（否则用户改完看不到效果，会以为参数没接上）。
+    // ⚠️ v2.1.244：**mpvVoMode 刻意不放进来** —— MPV 是全局单例，重建会撞
+    //    `!mpctx->initialized` 断言并 native 崩溃（实测）。vo 改为创建前预判。
     LaunchedEffect(isSoftwareDecoding, decoderEngine, ijkOptions, photoReloadTrigger) {
         if (!decoderRebindSeen) {
             // 首次组合时上面的 Effect A 已经完成绑定，这里跳过，避免重复创建播放器

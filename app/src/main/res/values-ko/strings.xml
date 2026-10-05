@@ -743,6 +743,7 @@
     <string name="mpv_lib_builtin_hint">디코더 라이브러리가 앱에 내장되어 있어 다운로드 없이 바로 사용할 수 있습니다</string>
     <string name="toast_mpv_need_download">MPV 라이브러리가 설치되지 않았습니다. 설정 → 디코더에서 다운로드하세요.</string>
     <string name="mpv_param_hwdec_hint">끄면 mediacodec_embed로 전달되는 프레임이 없어 화면이 검게 나옵니다. 문제 확인 시에만 끄세요.</string>
+    <string name="mpv_vo_mode_hint">WMV/RM 등 구형 형식은 보통 하드웨어 디코더가 없어 MPV가 자동으로 호환 렌더링을 사용합니다(하드웨어/소프트웨어 모두 지원). 그 외 형식은 제로 카피 출력입니다</string>
     <string name="mpv_param_framedrop">프레임 드롭</string>
     <string name="mpv_param_cache">네트워크 캐시</string>
     <string name="video_info_section">비디오 정보</string>

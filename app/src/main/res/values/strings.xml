@@ -775,6 +775,7 @@
     <string name="mpv_lib_builtin_hint">解码库已随安装包内置，可直接使用，无需下载</string>
     <string name="toast_mpv_need_download">MPV 解码库未安装，请到「设置 → 解码内核」中下载后使用</string>
     <string name="mpv_param_hwdec_hint">关闭后画面直出通路（mediacodec_embed）没有帧输出，会黑屏；仅在排查问题时关闭</string>
+    <string name="mpv_vo_mode_hint">WMV/RM 等老格式通常无硬解，打开时 MPV 会自动采用兼容渲染（软硬解都能出画）；其它格式走零拷贝直出</string>
     <string name="mpv_param_framedrop">丢帧保流畅</string>
     <string name="mpv_param_cache">网络缓冲</string>
     <string name="video_info_section">视频信息</string>

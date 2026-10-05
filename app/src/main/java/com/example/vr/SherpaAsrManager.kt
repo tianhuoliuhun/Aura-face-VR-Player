@@ -65,15 +65,21 @@ object SherpaAsrManager {
     private const val DOWNLOAD_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-    // ===== SenseVoice 配置（v2.0.127：内置 assets + 可选下载兜底）=====
+    // ===== SenseVoice 配置（v2.0.127 引入内置 assets；v2.1.214 起 assets 已移除）=====
     //
     // 模型：sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 的 model.int8.onnx
     // （239MB）+ tokens.txt。234M 参数，中英日韩粤，RTF 0.026，自带标点。
-    private const val SVC_ASSET_DIR = "sense-voice"
-    private const val SVC_ASSET_MODEL = "$SVC_ASSET_DIR/model.int8.onnx"
-    private const val SVC_ASSET_TOKENS = "$SVC_ASSET_DIR/tokens.txt"
+    //
+    // ⚠️ v2.1.244 清理：原先这里的 `SVC_ASSET_DIR/MODEL/TOKENS` 三个常量与
+    // `assetModelAvailable()` 探测函数**已整套删除**。理由：
+    //  - SenseVoice 的 assets 自 **v2.1.214** 起就不再打进 APK（内置地位由 Dolphin 接管）；
+    //  - 但探测逻辑残留了下来，导致**每次初始化都必然打出一条**
+    //    `W SherpaAsr: 内置模型不可用：sense-voice/model.int8.onnx` ——
+    //    这条警告 100% 触发、且不代表任何故障，实测已让用户与排查者误判为「ASR 坏了」。
+    //  - 死代码 + 永久噪音警告 = 纯负资产，故删除而不是注释掉。
+    //  SenseVoice 的**下载通路仍完整保留**（见下方 SVC_*_URL），用于「不发版换模型」的兜底。
 
-    // 下载版（filesDir）：内置缺失时兜底，或用于不发版替换模型
+    // 下载版（filesDir）：用于不发版替换模型
     private const val SVC_DIR_NAME = "sense-voice-cpu"
     private const val SVC_MODEL = "model.int8.onnx"
     private const val SVC_TOKENS = "tokens.txt"
@@ -160,15 +166,10 @@ object SherpaAsrManager {
         return m.isFile && m.length() > 1_000_000L && t.isFile && t.length() > 1000L
     }
 
-    /** 内置 assets 是否可用（打包遗漏或损坏时返回 false，交由下载版兜底） */
-    private fun assetModelAvailable(context: Context): Boolean = try {
-        context.assets.open(SVC_ASSET_MODEL).close()
-        context.assets.open(SVC_ASSET_TOKENS).close()
-        true
-    } catch (e: Exception) {
-        Log.w(TAG, "内置模型不可用：${e.message}")
-        false
-    }
+    // v2.1.244：原 `assetModelAvailable()`（探测 SenseVoice 内置 assets）已删除。
+    // 它自 v2.1.214（assets 移除）起就成了死代码，且每次调用都必然打出
+    // 「内置模型不可用：sense-voice/model.int8.onnx」的 W 级警告（纯噪音）。
+    // 详见文件上方 SVC 配置区的说明。
 
     /** 下载版是否就绪（带最小尺寸校验，避免中断下载留下的残缺文件被误判） */
     private fun downloadedModelReady(context: Context): Boolean {
@@ -181,11 +182,17 @@ object SherpaAsrManager {
 
     /**
      * 当前生效的模型来源。
-     * **下载版优先**：便于不发版替换模型（把新文件放进去即生效）。
+     *
+     * ⚠️ v2.1.244 更正：原先第一个分支是 SenseVoice 的「内置 assets」——
+     * 但 SenseVoice 的内置 assets **自 v2.1.214 起已移除**（内置地位由 Dolphin 接管），
+     * 该分支永远不会命中，属死代码；且它的存在会让「模型来源」显示成已不存在的
+     * 「内置版（assets）/SenseVoice」。改为按 **Dolphin（当前唯一内置模型）** 判定。
+     *
+     * 优先级：内置 assets（Dolphin）→ 下载版（filesDir）→ 不可用。
      */
     fun activeModelSource(context: Context): String = when {
-        downloadedModelReady(context) -> context.getString(R.string.asr_source_downloaded)
-        assetModelAvailable(context) -> context.getString(R.string.asr_source_assets)
+        dolphinAssetAvailable(context) -> context.getString(R.string.asr_source_assets)
+        downloadedDolphinReady(context) -> context.getString(R.string.asr_source_downloaded)
         else -> context.getString(R.string.asr_source_unavailable)
     }
 
@@ -343,9 +350,16 @@ object SherpaAsrManager {
         return byId.map { (id, chips) -> id to chips }
     }
 
-    /** 模型是否就绪：下载版或内置版任一可用即可 */
+    /**
+     * 模型是否就绪。
+     *
+     * ⚠️ v2.1.244 更正：原先 = `downloadedModelReady(老 SenseVoice 目录) ||
+     * assetModelAvailable(SenseVoice assets)`。但 SenseVoice 的内置 assets 自 v2.1.214
+     * 已移除、且内置地位由 Dolphin 接管 → 这两个判据都已失效（前者查的是废弃目录，
+     * 后者恒 false）。改为按 **Dolphin** 判定，与 `activeModelSource` 保持一致。
+     */
     fun isModelReady(context: Context): Boolean =
-        downloadedModelReady(context) || assetModelAvailable(context)
+        dolphinAssetAvailable(context) || downloadedDolphinReady(context)
 
     // ===== 下载管理 =====
 
@@ -366,7 +380,12 @@ object SherpaAsrManager {
 
     /** 下载 SenseVoice 模型（单文件 ×2，带进度与断点续传） */
     private suspend fun downloadSenseVoiceCpu(context: Context): File? = withContext(Dispatchers.IO) {
-        if (isModelReady(context)) {
+        // ⚠️ v2.1.244：这里**必须**用 `downloadedModelReady`（查 SenseVoice 自己的目录），
+        //    不能用 `isModelReady` —— 后者已改为按 Dolphin 判定，而 Dolphin 的内置资产
+        //    恒存在 → 该判断会恒为 true 并直接 return，**下载就永远不执行了**；
+        //    反之若 Dolphin 资产缺失，则每次点下载都会重新下载一遍 239MB。
+        //    「缓存是否已存在」只能由它自己的目录说话。
+        if (downloadedModelReady(context)) {
             Log.i(TAG, "SenseVoice cached: ${svcDir(context)}")
             return@withContext svcDir(context)
         }

@@ -47,6 +47,13 @@ internal fun MpvOptionsPanel(
                 lineHeight = 9.sp
             )
         }
+        // v2.1.244：说明 vo 的二段兜底（EMBED 只吃硬解帧 → 无硬解器的老编码会自动切 GPU）
+        Text(
+            text = stringResource(R.string.mpv_vo_mode_hint),
+            color = Color.White.copy(alpha = 0.35f),
+            fontSize = 7.sp,
+            lineHeight = 9.sp
+        )
         DecoderToggle(
             label = stringResource(R.string.mpv_param_framedrop),
             checked = options.frameDrop,

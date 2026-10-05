@@ -743,6 +743,7 @@
     <string name="mpv_lib_builtin_hint">デコーダーライブラリはアプリに同梱済みです。ダウンロード不要でそのまま使えます</string>
     <string name="toast_mpv_need_download">MPV ライブラリが未インストールです。「設定 → デコーダ」からダウンロードしてください。</string>
     <string name="mpv_param_hwdec_hint">オフにすると mediacodec_embed にフレームが供給されず画面が真っ黒になります。問題の切り分け時のみオフにしてください。</string>
+    <string name="mpv_vo_mode_hint">WMV/RM などの旧形式は通常ハードウェアデコーダがないため、MPV は自動的に互換レンダリングを使用します（ハード・ソフト両対応）。それ以外の形式はゼロコピー出力です</string>
     <string name="mpv_param_framedrop">フレームドロップ</string>
     <string name="mpv_param_cache">ネットワークキャッシュ</string>
     <string name="video_info_section">映像情報</string>
