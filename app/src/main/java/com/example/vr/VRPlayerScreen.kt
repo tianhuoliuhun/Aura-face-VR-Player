@@ -2432,6 +2432,82 @@ fun VRPlayerScreen(
             }
         }
 
+        // ======================================================================
+        // v2.1.240：**系统解码**（Android Framework 的 MediaPlayer）
+        // ----------------------------------------------------------------------
+        // 与 Exo/IJK/MPV 的本质区别：那三个都是"应用自带一套解码栈"，
+        // 而系统解码走的是**厂商 ROM 自己的解码管线** —— 国产 ROM 常在其中集成
+        // 私有增强解码器（自研格式、更激进的功耗控制）。所以它是一条**独立兜底路径**：
+        // 同一片源在 Exo/IJK 下异常时，值得切过来试一次。
+        //
+        // 三层回退全部指向 EXO（与 IJK 同一套机制，绝不黑屏）：
+        //   ① 协议不支持（smb://）→ supports() 返回 false，根本不进这里；
+        //   ② create() 返回 null（MediaPlayer 建不起来/设数据源抛异常）→ 回退；
+        //   ③ prepare 或播放中出错 → onError 回调 → 切回 EXO + Toast 提示。
+        // ======================================================================
+        if (decoderEngine == DecoderEngine.SYSTEM) {
+            if (SystemPlayerFactory.supports(decodedUri)) {
+                val backend = SystemPlayerFactory.create(
+                    context = context,
+                    uri = decodedUri,
+                    surface = nativeSurface,
+                    callbacks = object : SystemPlayerFactory.Callbacks {
+                        override fun onVideoSizeChanged(width: Int, height: Int) {
+                            // 与 Exo / IJK / MPV 共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
+                            applyVideoSize(width, height)
+                        }
+
+                        override fun onPrepared(backend: VrPlayerBackend) {
+                            // 倍速要在 play 之前设好 —— 与其余内核同一时机
+                            // （SystemBackend 内部会把 prepared 之前设过的倍速补应用一次）
+                            backend.setPlaybackSpeed(
+                                if (isFloatingBallPressed) floatingBallSpeed else basePlaybackSpeed
+                            )
+                            if (!resumeApplied) {
+                                resumeApplied = true
+                                val dur = backend.duration
+                                if (PlaybackPositions.shouldResume(resumeMs, dur)) {
+                                    backend.seekTo(resumeMs)
+                                    Log.i("VRPlayerScreen", "系统解码 恢复上次播放位置 " + resumeMs + "ms / 总长 " + dur + "ms")
+                                }
+                            }
+                            backend.play()
+                            isVideoPlaying = true
+                        }
+
+                        override fun onCompletion() {
+                            PlaybackPositions.clear(prefs, videoUriStr)
+                            resumeMs = 0L
+                        }
+
+                        override fun onError(what: Int, extra: Int) {
+                            Log.e("VRPlayerScreen", "系统解码播放错误 what=" + what + " extra=" + extra + " -> 回退 EXO")
+                            // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
+                            //    改 decoderEngine 触发重建；同时写回 prefs，下次不再踩同一个坑。
+                            decoderEngine = DecoderEngine.EXO
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.toast_system_fallback),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+
+                        override fun onFirstFrame() {
+                            isVideoPlaying = true
+                        }
+                    }
+                )
+                if (backend != null) {
+                    playerInstance = backend
+                    Log.i("VRPlayerScreen", "已使用系统解码播放")
+                    return
+                }
+                Log.w("VRPlayerScreen", "系统解码创建失败，回退 EXO")
+            } else {
+                Log.w("VRPlayerScreen", "系统解码不支持该协议（scheme=${decodedUri.scheme}），回退 EXO")
+            }
+        }
+
             val renderersFactory = object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
                 override fun buildAudioSink(
                     context: Context,

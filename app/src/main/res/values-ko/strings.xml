@@ -447,6 +447,9 @@
     <string name="stereo_tab_full">3D 상하 입체</string>
     <string name="decoder_exo">EXO 디코더</string>
     <string name="decoder_mpv">MPV 디코더</string>
+<!-- v2.1.240：系统解码（MediaPlayer） -->
+    <string name="decoder_system">시스템 디코더</string>
+    <string name="toast_system_fallback">시스템 디코더를 사용할 수 없어 EXO로 전환했습니다</string>
     <string name="decoder_coming_soon">개발 중</string>
     <string name="auto_opt">자동</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->

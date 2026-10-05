@@ -479,6 +479,9 @@
     <string name="stereo_tab_full">3D 上下立体 (Top-Bottom)</string>
     <string name="decoder_exo">EXO 解码器</string>
     <string name="decoder_mpv">MPV 解码器</string>
+<!-- v2.1.240：系统解码（MediaPlayer） -->
+    <string name="decoder_system">系统解码器</string>
+    <string name="toast_system_fallback">系统解码不可用，已切回 EXO 解码器</string>
     <string name="decoder_coming_soon">开发中</string>
     <string name="auto_opt">自动</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->

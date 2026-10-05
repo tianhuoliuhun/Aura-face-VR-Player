@@ -191,5 +191,10 @@ fun currentVideoInfo(
     null -> null
     is MpvBackend -> player.videoInfo()
     is IjkBackend -> player.videoInfo()
+    // ⚠️ 新增内核时必须在这里补一个分支 —— 否则会静默落到 else，
+    //    而 SystemBackend/IjkBackend/MpvBackend 的 `exo` 都是 null，
+    //    `player.exo?.let { … }` 直接返回 null → 面板显示「暂无信息」，
+    //    看起来像"读不到元数据"，实际是分发漏了。
+    is SystemBackend -> player.videoInfo()
     else -> player.exo?.let { exoVideoInfo(it, uri, isSoftwareDecoding) }
 }

@@ -72,7 +72,22 @@ enum class StereoMode(val displayName: String, @StringRes val labelRes: Int, val
 enum class DecoderEngine(val displayName: String, @StringRes val labelRes: Int, val tag: String, val id: Int) {
     EXO("EXO 解码器", R.string.decoder_exo, "Google ExoPlayer 标准高清引擎", 0),
     IJK("IJK 解码器", R.string.decoder_ijk, "Bilibili ijkplayer（基于 FFmpeg）", 2),
-    MPV("MPV 解码器", R.string.decoder_mpv, "MPV FFmpeg 万能解码内核", 1);
+    MPV("MPV 解码器", R.string.decoder_mpv, "MPV FFmpeg 万能解码内核", 1),
+
+    /**
+     * 系统解码 —— 走 **Android Framework 自带的 `MediaPlayer`**，而不是第三方内核。
+     *
+     * ## 它的价值在哪
+     * Exo/IJK/MPV 都是「自带一套解码栈」。而系统 MediaPlayer 用的是**厂商 ROM 自己的
+     * 解码管线** —— 国产 ROM（华为/小米/OPPO…）常在其中集成**私有增强解码器**
+     * （自研格式支持、更好的功耗控制、某些 DRM/超分能力）。同一台设备上，
+     * 系统解码能放的面源类型与硬解路径，未必和 Exo 走 MediaCodec 时一致。
+     * 所以它是一条**独立的兜底路径**：当某个片源在 Exo/IJK 下都不正常时，值得一试。
+     *
+     * ⚠️ 但它的 API 很老（`MediaPlayer` 从 API 1 就在），**各 ROM 行为差异较大** ——
+     * 所以它是**可选**项、并且失败时必定回退 EXO（见 `SystemPlayerBackend`）。
+     */
+    SYSTEM("系统解码器", R.string.decoder_system, "调用系统原生解码能力（MediaPlayer）", 3);
 
     /**
      * 该内核是否已经接通播放链路。
@@ -89,6 +104,9 @@ enum class DecoderEngine(val displayName: String, @StringRes val labelRes: Int, 
      * 且存档里遗留的 MPV 选择会在读取时**自动回落 EXO**（见 `VRPlayerScreen` 的
      * prefs 读取处：那里的 `find { it.id == id && it.isImplemented }` 正是靠本属性过滤）。
      * **注意本属性同时承担"UI 是否展示"的职责**，所以停用一个内核不用改 UI 代码。
+     *
+     * v2.1.240：SYSTEM（系统解码）无需 native 库、也不依赖任何可选组件，
+     * 所以**恒为可用** —— 它只在运行时（MediaPlayer 创建/prepare 失败）才回退 EXO。
      */
     val isImplemented: Boolean
         get() = this != MPV || MPV_ENABLED
