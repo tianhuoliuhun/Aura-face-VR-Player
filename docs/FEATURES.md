@@ -22,11 +22,17 @@
   - Touch: drag to look around, pinch to zoom, UI auto-hides after 2s idle
 - 曲面沉浸：圆柱面曲率可调，双中心变形（Warp Dual Center）优化
   - Immersive: adjustable cylinder curvature, dual-center warp distortion
-- **容器与时装兼容（v2.1.241）**：WMV / ASF、ISO 镜像等「非常规」片源
-  - 支持 WMV / ASF（内含 WMV3 / VC-1 视频 + WMA 音频）、ISO 光盘数据镜像、
-    VOB、M2TS、RMVB、FLV、DivX 等扩展名
-  - **内核自动路由**：打开上述片源时，即使当前选的是 EXO / 系统解码，也会**本次自动改用 IJK
-    （FFmpeg）内核**播放，并弹出提示 —— 用户设置不会被改写（下次播普通 MP4 仍走原内核）
+- **容器与格式兼容（v2.1.241 起，v2.1.242 全量补齐）**：WMV / ASF、ISO 镜像等「非常规」片源
+  - **全量白名单**（按实测各内核真实能力分类，单一入口 `MediaFormats.kt`）：
+    - 双内核通用：`mp4 / m4v / mov / 3gp / 3g2 / f4v / mkv / webm / flv / ts / m2ts / mts /
+      mpg / mpeg / m1v / m2v / vob / dat / ogv / wtv`
+    - **仅 EXO 可开**（IJK 的 FFmpeg 是裁剪版，无 avi/ogg 解复用器，送到 IJK 必然失败）：
+      `avi / divx / ogv / ogg`
+    - **必须走 IJK（FFmpeg）内核**（EXO 无对应解析器）：`wmv / asf / wmvhd`、
+      `rm / rmvb / ra / ram / rmhd`、`iso`
+  - **内核自动路由**：打开上述「必须走 IJK」的片源时，即使当前选的是 EXO / 系统解码，
+    也会**本次自动改用 IJK（FFmpeg）内核**播放，并弹出提示 —— 用户设置不会被改写
+    （下次播普通 MP4 仍走原内核）。反向保护：`avi/ogv/ogg` 等多内核可开的格式**永不**被路由到 IJK
   - **选择器补全**：点顶部「+」会先问「相册」还是「任意文件」。相册入口按 `video/*` 过滤，
     **列不出 WMV / ISO**，此时请选「任意文件」
   - **ISO 能力边界**：只支持**未加密的数据镜像**（UDF / ISO9660）。DVD-Video（`VIDEO_TS`）
@@ -34,12 +40,15 @@
     （而不是黑屏或播到花絮），请先用工具提取其中的 VOB / M2TS
   - **SMB 上的 WMV 无解**：WMV 需要 FFmpeg 内核，而 FFmpeg 内核不支持 `smb://` 协议，
     因此 SMB 共享里的 WMV 会提前提示「请先下载到本地」
-  - **Format compatibility (v2.1.241)**: WMV/ASF, ISO disc images, VOB, M2TS, RMVB, FLV, DivX.
-    These containers need the FFmpeg (IJK) kernel and are **auto-routed** to it for that playback —
-    the user's decoder setting is never rewritten. The "+" button now asks whether to pick from the
-    **gallery** (filtered to `video/*`, so WMV/ISO will not show) or **any file**. ISO support covers
-    **unencrypted data images** (UDF / ISO9660) only; DVD-Video and Blu-ray structures are detected
-    from the image header and rejected with a clear message instead of going black.
+  - **Format compatibility (v2.1.241; full list v2.1.242)**: every container the app can open is
+    declared once in `MediaFormats.kt`, split by **measured** kernel capability — dual-engine
+    common formats, **EXO-only** containers (`avi/divx/ogv/ogg`; the trimmed FFmpeg inside IJK has
+    no AVI/Ogg demuxer), and **IJK-only** containers (`wmv/asf`, `rm/rmvb`, `iso`) which are
+    **auto-routed** to the FFmpeg kernel for that playback without rewriting the user's decoder
+    setting. The "+" button asks whether to pick from the **gallery** (filtered to `video/*`, so
+    WMV/ISO will not show) or **any file**. ISO support covers **unencrypted data images**
+    (UDF / ISO9660) only; DVD-Video and Blu-ray structures are detected from the image header and
+    rejected with a clear message instead of going black.
 
 ## ⚡ 画质增强 / Video Enhancement（v2.0.206 起）
 - **MEMC 运动补偿插帧**：在相邻两帧之间生成中间帧，让运动更顺滑

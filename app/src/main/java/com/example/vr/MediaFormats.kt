@@ -11,15 +11,66 @@ import android.net.Uri
  * 这与本项目头号事故源「同一功能两份 UI」是同一类问题 ——
  * 所以这里把判定收成**一份**，所有入口都调它。
  *
- * ## 分类依据（实测，非猜测）
- * 用 `llvm-readelf` / 二进制字符串扫描 `app/libs/ijkplayer-k0.8.9-release.aar` 里
- * `jni/arm64-v8a/libijkplayer.so`，确认 IJK（FFmpeg）**确实注册**了：
- *   - 解码器：`wmv3` / `wmv2` / `wmv1` / `vc1` / `wmav1` / `wmav2` / `wmapro` / `mpeg2video`
- *   - 解复用：`ff_asf_demuxer`（含 `ff_asf_header` / `ff_asf_stream_header` 等符号）
- *   - 镜像：`udf` / `UDF`（FFmpeg 的 UDF/ISO9660 读取器）
- * 而 ExoPlayer(Media3) 的 `DefaultExtractorsFactory` **不含 ASF 解析器**，
- * `android.media.MediaPlayer` 同样不认 ASF 与 ISO 镜像 → 这两个容器
- * 只能交给 IJK。
+ * ## 分类依据（v2.1.242 全量实测重写，非猜测）
+ *
+ * 两条实测证据链，缺一不可：
+ *
+ * **(1) IJK(FFmpeg) 真实能力** —— 扫描 `app/libs/ijkplayer-k0.8.9-release.aar`
+ * 里 `jni/arm64-v8a/libijkplayer.so`。它用的是**白名单式裁剪**的 FFmpeg：
+ * config 横幅里有 `--disable-demuxers --enable-demuxer=...`，只放行了极少几个。
+ * 实测注册的 demuxer 共 23 个（`ff_xxx_demuxer` 符号）：
+ * ```
+ * aac asf concat data flac flv hevc hls ijklas ijklivehook ivr live_flv
+ * matroska mov mp3 mpegps mpegts mpegtsraw mpegvideo rdt rm rtsp webm_dash_manifest
+ * ```
+ * 实测注册的 decoder 共 28 个：
+ * ```
+ * aac aac_latm flac flv h263 h263p h264 hevc mpeg4 mp3* pcm_*
+ * vp6 vp6a vp6f vp8 vp9
+ * ```
+ * ⚠️ **踩过的坑**：`.so` 里能搜到 `wmv3` / `vc1` / `mpeg2video` / `wmav2` 字符串，
+ * 一度被误认为「IJK 有这些解码器」。实测上下文全是 `xan_wc4.rv30.wmv3.indeo2...`
+ * 这种**连续短名列表** = FFmpeg 的 `codec_tag` / `AVCodecDescriptor` **名字表**，
+ * **不是 `ff_xxx_decoder` 注册符号**。真正的注册列表里**没有** wmv3/vc1/mpeg2video。
+ * → 结论：WMV/VC-1/MPEG-2 靠 **IJK 自己的 MediaCodec 通道硬解**
+ * （so 里有完整的 `ffpipeline_android_media` / `MediaCodec_*` 符号，
+ * 而 FFmpeg 自带 hwaccel 被 `--disable-hwaccel` 关了，走的是 IJK 自研 MediaCodec 链路）。
+ * 这也解释了 `video/mpeg2` 会出现在 so 的 MIME 表里。
+ *
+ * ⚠️ **关键发现**：IJK 里 **没有 `ff_avi_demuxer` / `ff_riff_demuxer`**（0 命中），
+ * 搜到的 82 次 `avi` 全是 FFmpeg 的 `avio_*` I/O 函数名，与 AVI 容器无关。
+ * → **AVI 不能交给 IJK**，必须靠 EXO。
+ *
+ * **(2) EXO(Media3 1.4.1) 真实能力** —— 从 `media3-extractor-1.4.1` 的 classes.jar
+ * 枚举 `DefaultExtractorsFactory` 注册的 extractor：
+ * ```
+ * Avi Ac3 Ac4 Adts Amr Avif Bmp Flac Flv FragmentedMp4 Heif Jpeg
+ * Matroska(MKV/WebM) Mp3 Mp4 Ogg Png Ps(mpg/vob) SingleSample
+ * Subtitle Ts Wav Webp
+ * ```
+ * ⚠️ **没有 ASF/WMV 解析器、没有 RealMedia(RM/RMVB)、没有 ISO** →
+ * 这三类只能交给 IJK。
+ *
+ * ## 由此得出的分组（务必保持与上表一致）
+ * | 容器 | IJK | EXO | 归入 |
+ * |---|---|---|---|
+ * | mp4/m4v/mov/3gp/3g2 | ✅ mov | ✅ Mp4 | COMMON |
+ * | mkv/webm | ✅ matroska | ✅ Matroska | COMMON |
+ * | avi/divx | ❌ 无 demuxer | ✅ Avi | COMMON（**必须靠 EXO**，见 EXO_ONLY） |
+ * | flv/f4v | ✅ flv | ✅ Flv | COMMON |
+ * | ts/m2ts/mts | ✅ mpegts | ✅ Ts | COMMON |
+ * | mpg/mpeg/vob/dat | ✅ mpegps | ✅ Ps | COMMON |
+ * | ogv | ❌ 无 ogg | ✅ Ogg | COMMON（**必须靠 EXO**） |
+ * | **wmv/asf** | ✅ asf | ❌ | IJK_ONLY |
+ * | **rm/rmvb/ra** | ✅ rm | ❌ | IJK_ONLY |
+ * | **iso** | ⚠️ 仅数据镜像 | ❌ | IJK_ONLY + 特殊处理 |
+ * | mp3/flac/m4a/ogg/mka/wma… | 部分 | 部分 | AUDIO_ONLY |
+ *
+ * ## ⚠️ 三个集合的语义不同，允许重叠，勿"去重"掉
+ * - [COMMON] / [IJK_ONLY] / [AUDIO_ONLY] 管的是「**放不放行**」（能不能点开）。
+ * - [EXO_ONLY] 管的是「**能不能给 IJK**」（内核路由安全）。
+ * - 所以 `ogg` 可以既在 AUDIO_ONLY（放行）又在 EXO_ONLY（禁路由到 IJK）——
+ *   这不是冗余，是两件不同的事。曾经有人因为看到重叠而删掉一个，直接导致回归。
  */
 
 /** 媒体类型判定的唯一入口。 */
@@ -27,25 +78,97 @@ object MediaFormats {
 
     // ===================== 容器扩展名白名单 =====================
 
-    /** Exo / 系统解码 / IJK 都能直接吃的常见容器。 */
+    /**
+     * **EXO 或 IJK 至少一方能直接吃**的常见容器（全量补齐版）。
+     *
+     * 分组依据见文件头的能力对照表。这里刻意按「同一底层格式的所有常见扩展名」
+     * 收全，避免用户拿到 `m1v` / `m4v` / `mts` 这类少见写法时被白名单挡在门外。
+     *
+     * ⚠️ 集合里同时包含两类：
+     *   - EXO + IJK 双通（mp4/mkv/flv/ts/mpg…）
+     *   - **仅 EXO 通**（`avi` `divx` `ogv` `ogg` —— IJK 无对应 demuxer，
+     *     若被路由到 IJK 会直接失败，见 [requiresIjk] 与 [isExoOnly]）
+     */
     val COMMON = setOf(
-        "mp4", "m4v", "mkv", "webm", "avi", "mov", "flv", "ts", "m2ts", "mts",
-        "3gp", "mpg", "mpeg", "rmvb", "rm", "ogv", "divx", "f4v", "wtv"
+        // —— MPEG-4 家族（IJK: ff_mov_demuxer / EXO: Mp4Extractor）——
+        "mp4", "m4v", "mov", "3gp", "3g2", "3gpp", "3gpp2", "ismv", "f4v",
+        // —— Matroska 家族（IJK: ff_matroska_demuxer / EXO: MatroskaExtractor）——
+        "mkv", "webm",
+        // —— AVI / RIFF（⚠️ 仅 EXO 有 AviExtractor，IJK 无 avi demuxer）——
+        "avi", "divx",
+        // —— FLV（IJK: ff_flv_demuxer / EXO: FlvExtractor）——
+        "flv",
+        // —— MPEG-TS（IJK: ff_mpegts_demuxer / EXO: TsExtractor）——
+        "ts", "m2ts", "mts", "m2t", "tsv", "tsa", "tp", "trp",
+        // —— MPEG-PS / Program Stream（IJK: ff_mpegps_demuxer / EXO: PsExtractor）——
+        "mpg", "mpeg", "mpe", "m1v", "m2v", "mpv", "vob", "dat", "ps",
+        // —— Ogg 视频（⚠️ 仅 EXO 有 OggExtractor，IJK 无 ogg demuxer）——
+        "ogv",
+        // —— Windows Media Center 录制（EXO 走 TsExtractor / PsExtractor 探测）——
+        "wtv", "dvr-ms"
     )
 
     /**
-     * **必须走 IJK（FFmpeg）内核**的容器。
+     * **纯音频容器** —— 本项目播放器同样能播（`isSupportedMediaExtension` 放行）。
      *
-     * - `wmv` / `asf`：ASF 容器，内含 WMV3/VC-1 视频 + WMA 音频。
-     *   EXO 不解析 ASF 容器；系统解码同样不认。IJK 实测带全套解码器与 `ff_asf_demuxer`。
+     * 之所以从 [COMMON] 单列：`COMMON` 的语义是「视频容器」，
+     * 而 `.mp3` / `.flac` / `.mka` / `.ogg` 这类塞进去会让概念含糊；
+     * 需要严格「只要视频」的地方可以只看 [COMMON]。
+     *
+     * ⚠️ `ogg` / `oga` / `spx` 与 [EXO_ONLY] 有交集，这是**有意为之**：
+     *   它们既是音频（本集合），也绝不能路由到 IJK（EXO_ONLY）。
+     *   两个集合语义不同（一个管「放不放行」、一个管「能不能给 IJK」），
+     *   所以允许重叠 —— 切勿因为看到重叠就去掉其中一个。
+     */
+    val AUDIO_ONLY = setOf(
+        // Ogg 音频家族（EXO: OggExtractor；IJK 无 ogg demuxer）
+        "ogg", "oga", "ogx", "ogm", "spx",
+        // Matroska 音频（EXO: MatroskaExtractor / IJK: ff_matroska_demuxer）
+        "mka",
+        // MP4 家族音频（EXO: Mp4Extractor / IJK: ff_mov_demuxer）
+        "m4a", "m4b",
+        // 裸流 / 其他（EXO 有 Adts/Mp3/Flac/Wav/Amr/Ac3/Ac4 对应 extractor）
+        "aac", "mp3", "flac", "wav", "amr", "awb", "ac3", "eac3", "opus",
+        // WMA 是 ASF 容器内的音频，IJK 的 ff_asf_demuxer 能解
+        "wma"
+    )
+
+    /**
+     * **必须走 IJK（FFmpeg）内核**的容器 —— EXO 与系统解码都接不住。
+     *
+     * 判定依据（实测）：
+     * - `wmv` / `asf`：ASF 容器。EXO 的 `DefaultExtractorsFactory` **没有 ASF 解析器**；
+     *   系统 `MediaPlayer` 同样不认。IJK 有 `ff_asf_demuxer`，视频走 MediaCodec 硬解
+     *   （so 内无 `ff_wmv3_decoder` 软件解码器，全靠硬解通道）、音频 WMA 走 MediaCodec。
+     * - `rm` / `rmvb` / `ra`：RealMedia。EXO **没有 RealMedia 解析器**；
+     *   IJK 有 `ff_rm_demuxer`（`ff_sipr_*` / `rv10~rv40` 名字表也在）。
+     *   ⚠️ v2.1.241 原先把 `rm/rmvb` 错放在 COMMON，实测 EXO 打不开 → v2.1.242 修正。
      * - `iso`：光盘镜像。**注意能力边界** —— FFmpeg 只能读**未加密的 UDF / ISO9660
      *   *数据*镜像**；DVD-Video 的 `.VOB` + `VIDEO_TS.IFO` 有 CSS 加密与
      *   导航（IFO）结构、蓝光有 BDMV 结构与 AACS，这些**都不在本项目能力范围内**，
      *   会走 [NEEDS_SPECIAL_HANDLING] 给出明确提示，而不是黑屏。
-     * - `vob` / `m2ts`（原盘 TS 流）：FFmpeg 可解，EXO 也能解部分，
-     *   但为稳妥一并归入 IJK 优先。
      */
-    val IJK_ONLY = setOf("wmv", "asf", "iso", "vob")
+    val IJK_ONLY = setOf(
+        "wmv", "asf", "wmvhd",           // ASF 家族（.wmvhd 是老高清 WMV 的写法）
+        "rm", "rmvb", "ra", "ram", "rmhd", // RealMedia 家族
+        "iso"                            // 光盘镜像
+    )
+
+    /**
+     * **只有 EXO 能开、绝不能路由到 IJK** 的容器。
+     *
+     * 这是 v2.1.242 新增的「反向白名单」。IJK 的 FFmpeg 是裁剪版，
+     * **没有 riff/avi demuxer、没有 ogg demuxer**（实测 0 命中），
+     * 所以 `avi` / `divx` / `ogv` / `ogg` 一旦被送到 IJK 必然失败。
+     *
+     * 用途：内核自动路由时**跳过**这些，即使用户手动设了 IJK 也保持原核。
+     * 早先用「凡是常见格式就切 IJK」的一刀切会把这些格式**从能播改成不能播**，
+     * 这是必须避免的回归。
+     */
+    val EXO_ONLY = setOf(
+        "avi", "divx",
+        "ogv", "ogg", "oga", "ogx", "ogm", "spx"
+    )
 
     /**
      * **本项目无法保证播放**、应当明确告知用户而不是静默失败的容器。
@@ -82,12 +205,40 @@ object MediaFormats {
 
     // ===================== 能力判定 =====================
 
-    /** 是否是本应用放行的视频容器（含仅 IJK 支持的那几种）。 */
+    /**
+     * 是否是本应用**放行的媒体容器**（视频 + 纯音频 + 仅 IJK 支持的那几种）。
+     *
+     * 用途：SMB / FTP 列表的「这一项能不能点开」、选择器返回结果的兜底判定。
+     * 名字保留 `isSupportedVideoExtension` 是历史原因（v2.1.241 引入时只考虑视频），
+     * 语义已扩展为「媒体容器」；需要**严格只要视频**时请用 [isSupportedVideoOnly]。
+     */
     fun isSupportedVideoExtension(ext: String): Boolean =
+        ext in COMMON || ext in IJK_ONLY || ext in AUDIO_ONLY
+
+    /** 只判「视频容器」（不含纯音频）。 */
+    fun isSupportedVideoOnly(ext: String): Boolean =
         ext in COMMON || ext in IJK_ONLY
 
     /** 该容器是否**必须**交给 IJK，EXO / 系统解码接不住。 */
     fun requiresIjk(ext: String): Boolean = ext in IJK_ONLY
+
+    /**
+     * 该容器是否**只能**由 EXO 打开（IJK 的裁剪版 FFmpeg 没有对应 demuxer）。
+     *
+     * 见 [EXO_ONLY] 的说明。内核自动路由必须用它做**排除**，
+     * 否则会把本来能播的 avi/ogv 路由到 IJK 变成不能播。
+     */
+    fun isExoOnly(ext: String): Boolean = ext in EXO_ONLY
+
+    /**
+     * 该容器是否值得「自动切换到 IJK」。
+     *
+     * = 必须走 IJK，且**不是**只有 EXO 能开的那几种。
+     * 两者互斥（IJK_ONLY 与 EXO_ONLY 无交集），这里写成显式判据是为了
+     * 让调用点读起来一目了然，也便于将来任一侧加成员时行为仍然正确。
+     */
+    fun shouldAutoRouteToIjk(ext: String): Boolean =
+        requiresIjk(ext) && !isExoOnly(ext)
 
     /**
      * 该 URI 是否需要「特殊处理提示」（ISO 镜像）。

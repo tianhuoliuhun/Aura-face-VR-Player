@@ -2388,7 +2388,10 @@ fun VRPlayerScreen(
         // ======================================================================
         val containerExt = MediaFormats.extensionOf(decodedUri)
         var effectiveEngine = decoderEngine
-        if (MediaFormats.requiresIjk(containerExt) && decoderEngine != DecoderEngine.IJK) {
+        // 用 shouldAutoRouteToIjk 而非 requiresIjk：后者是「只有 IJK 能解」，
+        // 前者额外排除 EXO_ONLY（avi/ogv 这类 IJK 反而解不了的）——
+        // 防止将来有人往 IJK_ONLY 里误加 avi 时把能播的格式路由成不能播。
+        if (MediaFormats.shouldAutoRouteToIjk(containerExt) && decoderEngine != DecoderEngine.IJK) {
             // 唯一的例外：SMB 上的这类片源**无解**（IJK 没有 smb 协议，
             // 回退 EXO 依然不认 ASF）→ 不做无谓的自动切换，直接提示。
             val scheme = decodedUri.scheme?.lowercase()

@@ -7,12 +7,26 @@ import android.view.Surface
 import tv.danmaku.ijk.media.player.IjkMediaPlayer
 
 /**
- * ijkplayer（Bilibili，FFmpeg 内核）接入层 —— v2.1.233。
+ * ijkplayer（Bilibili，FFmpeg 内核）接入层 —— v2.1.233，v2.1.242 校正能力描述。
  *
  * ## 为什么还要留 ijk
- * ExoPlayer/MediaCodec 只认设备厂商提供的编解码器；而 ijk 自带 FFmpeg，**能解设备
- * 根本不支持的格式**（如某些 MPEG-2 / VC-1 / 老 RMVB / 非常见 Profile 的 HEVC）。
- * 对 VR 播放器来说，"这个片源打不开"是最致命的，多一条 FFmpeg 通路就有兜底。
+ * ExoPlayer/MediaCodec 只认设备厂商提供的编解码器与**它自己认得的容器**；ijk 自带
+ * FFmpeg 的**容器解析**通路，能打开 EXO 完全不认的容器（**ASF/WMV、RealMedia(RM/RMVB)**）。
+ * 对 VR 播放器来说，"这个片源打不开"是最致命的，多一条通路就有兜底。
+ *
+ * ## ⚠️ 能力边界（v2.1.242 二进制实测校正，勿凭印象改）
+ * 这个 so 里的 FFmpeg 是**白名单式裁剪版**：`--disable-demuxers --enable-demuxer=...`，
+ * 实测只注册了 **23 个 demuxer / 28 个 decoder**。要点：
+ *  - **容器**：asf / rm / mov / matroska / flv / mpegts / mpegps / mpegvideo / rtsp /
+ *    hls / aac / mp3 / flac / hevc / concat / data / ivr / rdt / mpegtsraw / webm_dash 等。
+ *  - **软件解码器**：只有 aac / flac / flv / h263 / h264 / hevc / mpeg4 / mp3 / vp6~vp9 / pcm*。
+ *  - ⚠️ **没有** `ff_wmv3_decoder` / `ff_vc1_decoder` / `ff_mpeg2video_decoder`。
+ *    so 里能搜到 `wmv3`/`vc1`/`mpeg2video` 字样，但那只是 FFmpeg 的 **codec_tag /
+ *    descriptor 名字表**，不是可用的软解实现 —— 别被字符串骗了。
+ *    这些编码的实际解码靠 **IJK 自研的 MediaCodec 硬解通道**（`ffpipeline_android_media`
+ *    + `MediaCodec_*`），即最终还是走设备厂商的硬解器。
+ *  - ⚠️ **没有 `ff_avi_demuxer` / `ff_riff_demuxer`**（实测 0 命中）→ **AVI 不能交给 ijk**，
+ *    必须走 EXO 的 `AviExtractor`。同理 Ogg 也不行。见 `MediaFormats.EXO_ONLY`。
  *
  * ## 三条硬规则（都是踩过才知道的）
  * 1. **必须先 loadLibrariesOnce + native_profileBegin**，否则第一次 new IjkMediaPlayer()
