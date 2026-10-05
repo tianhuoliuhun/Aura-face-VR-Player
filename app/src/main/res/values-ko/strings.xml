@@ -265,6 +265,7 @@
     <string name="toast_container_fixed_no_audio">컨테이너 복구 완료 (오디오 트랙 비호환으로 무음 재생)</string>
     <string name="suffix_fixed"> (복구됨)</string>
     <string name="toast_seek_unsupported">이 형식은 탐색을 지원하지 않습니다 (자동 복구 실패)</string>
+    <string name="toast_avi_no_video_track">이 AVI 안의 비디오 코덱(예: AV1)은 시스템 디코더가 인식하지 못해 탐색할 수 없습니다. 설정 → 디코더에서 <b>MPV</b> 엔진으로 전환한 후 다시 시도하세요</string>
     <string name="toast_patching_header">하드웨어 디코더 한계를 넘었습니다. 헤더를 수정해 시도합니다 (실험적)...</string>
     <string name="toast_hw_patch_ok">하드웨어 디코딩 호환 버전을 만들어 재생합니다 (깨짐/검은 화면/무음이면 칩 모델을 알려주세요)</string>
     <string name="suffix_hw_patched"> (하드웨어 대응)</string>

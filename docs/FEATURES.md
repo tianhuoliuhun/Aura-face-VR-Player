@@ -195,3 +195,19 @@
   - Realtime subtitles work for http and SMB sources too
 
 ---
+
+## ⏩ 进度条拖动 / Seeking
+- **拖动只在松手时定位一次**（v2.1.247）：拖动过程中仅更新预览缩略图与时间文字，
+  松手才发出一次 seek —— 避免逐帧 seek 堆积导致 AVI 等格式卡死
+  - Seek is issued only once on release, keeping dragging smooth for AVI & similar
+- **AVI / AV1 定位更快**：EXO 显式使用关键帧级定位（`CLOSEST_SYNC`），
+  兼顾速度与精度，长 GOP 的 AV1 尤为明显
+  - Explicit keyframe-level seek for fast positioning on long-GOP AV1
+- **容器不支持定位时自动修复**：检测到 seek 无效（位置回 0）后，
+  不重新编码地重封装为标准 MP4（重建索引），修复后即可正常拖动
+  - Auto container remux (no re-encode) when a file cannot seek
+- **AVI 内嵌 AV1 的明确提示**：系统解码器无法识别该编码时提示切换到 MPV 内核，
+  而不是静默无响应
+  - Clear hint to switch to the MPV engine when an AVI's codec is unrecognised
+
+---

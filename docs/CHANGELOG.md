@@ -11,6 +11,7 @@
 
 | 版本 / Version | 更新内容 / Changes |
 |---|---|
+| v2.1.247 | **修复 AVI 等格式进度条拖不动**：拖动改为「松手才 seek」（此前每帧 seek 导致卡死）；EXO 显式设 `CLOSEST_SYNC` 提高 AVI/AV1 定位速度；重封装修复支持时间戳乱序的 AVI；识别 AVI 内 AV1 丢轨并提示改用 MPV / Fix progress-bar seeking for AVI & similar; seek only on release, explicit `CLOSEST_SYNC`, remux tolerates out-of-order AVI timestamps, and detect unrecognised AVI AV1 tracks |
 | v86 | ASR 重构：移除实时识别，专注整片转写 / ASR refactor: batch transcription focus |
 | v90 | 设置面板二级菜单 / Settings accordion groups |
 | v91 | 字幕模块提级为主入口 / Subtitles promoted to main entry |

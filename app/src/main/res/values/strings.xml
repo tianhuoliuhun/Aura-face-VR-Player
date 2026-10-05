@@ -283,6 +283,7 @@
     <string name="toast_container_fixed_no_audio">视频容器已修复（音频轨道不兼容，播放将无声）</string>
     <string name="suffix_fixed"> （已修复）</string>
     <string name="toast_seek_unsupported">该视频格式不支持拖动定位（自动修复失败）</string>
+    <string name="toast_avi_no_video_track">AVI 内的视频编码（如 AV1）系统解码器无法识别，无法拖动定位。请在「设置 → 解码内核」切换到 <b>MPV</b> 内核后重试</string>
     <string name="toast_patching_header">视频超出硬件解码标称上限，正在修改编码头尝试硬件解码（实验性）...</string>
     <string name="toast_hw_patch_ok">已生成硬件解码兼容版本，正在播放（若花屏/黑屏/无声请反馈芯片型号）</string>
     <string name="suffix_hw_patched"> （硬解适配）</string>

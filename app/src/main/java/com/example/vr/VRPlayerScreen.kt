@@ -11,6 +11,7 @@ import android.os.Build
 import android.view.Surface
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.common.Player
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.EditedMediaItem
@@ -1756,6 +1757,16 @@ fun VRPlayerScreen(
     var isRemuxing by remember { mutableStateOf(false) }
     var seekUnsupported by remember { mutableStateOf(false) }
 
+    // ⚠️ v2.1.247：**切换媒体时必须复位 seekUnsupported**。
+    //    它原来只在 `startRemuxFix()` 开头重置 → 一旦某个 AVI 触发了
+    //    「不支持拖动定位」，标志位就永久为 true，切到**别的**（本可自动修复的）
+    //    视频时也不会再触发重封装校验 —— 表现为「换个视频还是拖不动」。
+    //    （必须放在 `seekUnsupported` 声明之后：Kotlin 局部 var 先声明后使用。）
+    LaunchedEffect(selectedMediaItem.uri) {
+        seekUnsupported = false
+        isRemuxing = false
+    }
+
     // LAN (SMB) browser state (8/2 功能)
     var smbDialogOpen by remember { mutableStateOf(false) }
     // v2.1.241：点「+」时先选从哪个入口挑文件（相册 / 任意文件）。
@@ -2006,6 +2017,18 @@ fun VRPlayerScreen(
                         title = selectedMediaItem.title + context.getString(R.string.suffix_fixed)
                     )
                     photoReloadTrigger++
+                } else if (result.videoTrackMissing) {
+                    // ⚠️ v2.1.247：源文件有音频但**系统认不出视频轨** ——
+                    //    典型就是 AVI 容器里的 AV1（EXO 的 AviExtractor 只认 14 个
+                    //    fourcc，不含 `AV01`）。重封装救不了，唯一出路是换 **MPV** 内核
+                    //    （它有完整 FFmpeg，认 `V_AV1`）。这里给**针对性**提示，
+                    //    而不是笼统的「该文件不支持跳转」。
+                    seekUnsupported = true
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.toast_avi_no_video_track),
+                        Toast.LENGTH_LONG
+                    ).show()
                 } else {
                     seekUnsupported = true
                     Toast.makeText(context, context.getString(R.string.toast_seek_unsupported), Toast.LENGTH_SHORT).show()
@@ -2806,6 +2829,26 @@ fun VRPlayerScreen(
                 )
                 .build()
                 .apply {
+                // ⚠️ v2.1.247：显式设定 seek 精度（此前**从未设过**，走 Media3 默认）。
+                //
+                // 为什么必须有这一行（AVI 相关）：
+                //   · EXO 默认 `SeekParameters.DEFAULT` == EXACT（精确到帧）——
+                //     它会「跳到前一个关键帧，再解码并丢弃中间所有帧」。
+                //   · 对 **AVI**：`AviExtractor` 在**没有 `idx1` 索引**时，每次 seek 都要
+                //     从头**线性扫描 chunk** 才能找到目标点；叠加 EXACT 的「解码丢弃」，
+                //     单次 seek 可能耗时几百毫秒~数秒 → 用户观感就是「拖不动 / 拖了弹回去」。
+                //   · 对 **AV1**：GOP 通常比 H.264 长（8~16s），EXACT 的「解码丢弃」代价
+                //     进一步放大，4K AV1 上尤为明显。
+                //
+                // 选 `CLOSEST_SYNC`（关键帧级）的理由：
+                //   · 只跳到**最近的关键帧**，不额外解码丢弃 → AVI 的线性扫描代价降一个量级；
+                //   · 精度损失是「最多差一个 GOP」，对**拖动定位**场景完全够用
+                //     （用户拖的是大致位置，不是要逐帧对齐）；
+                //   · 与另三个后端（IJK/MPV/SYSTEM）的行为更一致 —— 它们默认都偏关键帧级。
+                //
+                // ⚠️ 仍保留 `enable-accurate-seek` 那类「需要逐帧精确」的场景：
+                //     IJK 参数面板里的 `accurateSeek` 不受此行影响（那是 IJK 自己的选项）。
+                setSeekParameters(SeekParameters.CLOSEST_SYNC)
                 setVideoSurface(nativeSurface)
                 setMediaItem(ExoMediaItem.fromUri(decodedUri))
                 repeatMode = Player.REPEAT_MODE_ALL
@@ -3989,28 +4032,84 @@ fun VRPlayerScreen(
                                                 videoPlaybackProgress = adjustedProgress
                                                 isHoverActive = true
                                                 keepUiAlight()
+                                                // ⚠️⚠️ v2.1.247：**拖动过程中绝不逐帧 seek**。
+                                                //
+                                                // 旧实现在这里每帧调 `mp.seekTo(targetTime)`，对 mp4
+                                                // 尚可，但对 **AVI 是灾难**：EXO 的 `AviExtractor` 若没有
+                                                // `idx1` 索引，每次 seek 都要**从头线性扫描 chunk**；逐帧 seek
+                                                // 会在几十毫秒内堆几十个未完成的 seek 请求 → 解码器被反复
+                                                // flush → 画面冻结、进度条回弹、最终卡死（用户报的「AVI 拖不动」）。
+                                                //
+                                                // 正确做法（所有成熟播放器的标准姿势）：
+                                                //   · 拖动中：只更新 UI 进度 + `hoverTimeMs`（驱动缩略图），**不 seek**；
+                                                //   · 松手时（onValueChangeFinished）：**只 seek 一次**到最终位置。
+                                                // 这样对 AVI 只有一次线性扫描，拖动全程跟手。
                                                 playerInstance?.let { mp ->
                                                     try {
                                                         val duration = mp.duration
+                                                        // ⚠️ v2.1.247：duration 在 buffering 阶段可能是
+                                                        //    `C.TIME_UNSET`（负数）或 0（尤其 AVI 刚开始解析时）
+                                                        //    → 若直接相乘会得到**负数**的 hoverTimeMs，
+                                                        //    松手 seek 到负数 = 位置不动（用户看到的「拖了没反应」）。
+                                                        //    这里只在 duration 有效时才更新，否则保留上一次有效值。
                                                         if (duration > 0) {
-                                                            val targetTime = (adjustedProgress * duration).toLong()
-                                                            hoverTimeMs = targetTime
-                                                            mp.seekTo(targetTime)
+                                                            hoverTimeMs = (adjustedProgress * duration).toLong()
                                                         }
                                                     } catch (e: Exception) {}
                                                 }
                                             },
                                             onValueChangeFinished = {
                                                 isSeekingActive = false
-                                                // Verify the seek took effect: some mp4 containers
-                                                // (moov-at-end / fragmented) reset the position to 0,
-                                                // in which case we offer an automatic container fix. (8/1 功能)
-                                                val seekTarget = hoverTimeMs
+                                                // ⚠️ v2.1.247：拖动结束才真正 seek（只此一次）。
+                                                //
+                                                // 这里**重新用当下的 duration × 进度**算目标位置，
+                                                // 而不是复用 `hoverTimeMs` —— 后者可能是拖动早期
+                                                // 用陈旧 duration 算出的值（见上），直接用会 seek 到错位置。
+                                                val finalProgress = videoPlaybackProgress
+                                                var seekTarget = hoverTimeMs
+                                                var seekIssued = false
+                                                playerInstance?.let { mp ->
+                                                    try {
+                                                        val duration = mp.duration
+                                                        if (duration > 0) {
+                                                            seekTarget = (finalProgress * duration).toLong()
+                                                                .coerceIn(0L, duration)
+                                                            hoverTimeMs = seekTarget
+                                                            mp.seekTo(seekTarget)
+                                                            seekIssued = true
+                                                        } else {
+                                                            // duration 不可用 → 退而求其次，用 hoverTimeMs
+                                                            if (seekTarget > 0) {
+                                                                mp.seekTo(seekTarget)
+                                                                seekIssued = true
+                                                            }
+                                                        }
+                                                    } catch (e: Exception) {}
+                                                }
+                                                // 拖动结束立即把 UI 进度对齐到目标（不等 1 秒轮询），
+                                                // 否则会出现「松手后进度条先弹回旧位置、1 秒后才跳过去」的错觉。
+                                                if (seekIssued) {
+                                                    videoPlaybackProgress = finalProgress
+                                                }
+                                                // Verify the seek took effect: some containers
+                                                // (moov-at-end / fragmented / AVI without idx1) reset the
+                                                // position to 0, in which case we offer an auto container fix.
+                                                //
+                                                // ⚠️ v2.1.247 收紧判据（AVI 相关）：
+                                                //   ① 只有在**确实发出过 seek** 时才校验（否则误判）；
+                                                //   ② 判定用「位置几乎没动」而不是「< 2s」—— 后者在
+                                                //      短片（< 10s）上会把正常位置也判成失败；
+                                                //   ③ 加长等待到 1.5s：AVI 无索引时线性扫描 1s 内可能还没到位，
+                                                //      过早判定会触发不必要的重封装。
+                                                val seekIssuedFlag = seekIssued
                                                 scope.launch {
-                                                    delay(1000L)
-                                                    if (seekTarget > 3000L) {
+                                                    delay(1500L)
+                                                    if (seekIssuedFlag && seekTarget > 3000L) {
                                                         val pos = playerInstance?.currentPosition ?: -1L
-                                                        if (pos < 2000L && !seekUnsupported && !isRemuxing &&
+                                                        val moved = kotlin.math.abs(pos - seekTarget)
+                                                        val stuckAtStart = pos < 2000L && seekTarget > 5000L
+                                                        if ((stuckAtStart || moved > 5000L) &&
+                                                            !seekUnsupported && !isRemuxing &&
                                                             selectedMediaItem.isVideo
                                                         ) {
                                                             startRemuxFix()

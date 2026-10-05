@@ -28,7 +28,14 @@ object VideoRemuxer {
     data class RemuxResult(
         val success: Boolean,
         val audioIncluded: Boolean,
-        val message: String? = null
+        val message: String? = null,
+        /**
+         * ⚠️ v2.1.247：源文件**有视频轨但被系统丢弃**（典型：AVI 里的 AV1 ——
+         * `MediaExtractor` 认不出 fourcc `AV01`，`trackCount` 里根本没有视频轨）。
+         * 这种情况重封装**必然失败或产出纯音频**，调用方应给出针对性提示
+         * （改用 MPV 内核），而不是笼统的「容器修复失败」。
+         */
+        val videoTrackMissing: Boolean = false
     )
 
     fun remux(context: Context, inputUri: Uri, outputFile: File): RemuxResult {
@@ -93,6 +100,15 @@ object VideoRemuxer {
                 if (mime.startsWith("video/") && videoTrack < 0) videoTrack = i
                 else if (mime.startsWith("audio/") && audioTrack < 0) audioTrack = i
             }
+            // ⚠️ v2.1.247（AVI + AV1 场景）：
+            //    若系统 extractor 只给出了音频轨（视频轨 fourcc 不被识别，见
+            //    `AviExtractor` 只认 14 个 fourcc、无 `AV01`），重封装出来的必然
+            //    是「纯音频 MP4」—— 对用户毫无价值，还会把原播放项换成一个残缺文件。
+            //    这里**直接判定失败**并让调用方走「换 MPV 内核」的提示路径。
+            if (videoTrack < 0 && audioTrack >= 0) {
+                Log.w(TAG, "no video track recognized (AVI+AV1?) — abort remux")
+                return RemuxResult(false, false, "no video track", videoTrackMissing = true)
+            }
             val order = mutableListOf<Int>()
             if (videoTrack >= 0) order.add(videoTrack)
             if (audioTrack >= 0) order.add(audioTrack)
@@ -139,12 +155,30 @@ object VideoRemuxer {
                 if (muxerIdx < 0) continue
                 extractor.selectTrack(t)
                 buffer.clear()
+                // ⚠️ v2.1.247（AVI 重封装成 MP4 的坑）：
+                //    MP4 的 `MediaMuxer` 要求**写入的样本时间戳单调不减**，否则抛
+                //    `IllegalArgumentException`（"Timestamp must be monotonically increasing"）。
+                //    而 AVI 的 chunk 时间戳**不保证有序**（B 帧交错、老编码器时间基准不同），
+                //    直接搬运会让整个 remux 失败。
+                //    这里做两件事：
+                //      ① 记 `lastPts`，遇到**倒退或相等**的时间戳就**跳过该样本**
+                //         （丢掉个别 B 帧首帧，不破坏整体可播性）；
+                //      ② 首样本强制为 0（MP4 要求，否则部分播放器会前插黑屏）。
+                var lastPts = -1L
+                var firstWritten = false
                 while (true) {
                     val size = extractor.readSampleData(buffer, 0)
                     if (size < 0) break
+                    val sampleTime = extractor.sampleTime
+                    // ① 时间戳倒退/相等 → 跳过（不写）
+                    if (sampleTime <= lastPts) {
+                        if (!extractor.advance()) break
+                        continue
+                    }
                     bufferInfo.offset = 0
                     bufferInfo.size = size
-                    bufferInfo.presentationTimeUs = extractor.sampleTime
+                    // ② 首样本归零
+                    bufferInfo.presentationTimeUs = if (!firstWritten) 0L else sampleTime
                     // ⚠️ 这里**不能**直接 `bufferInfo.flags = extractor.sampleFlags`。
                     //    `MediaExtractor.SAMPLE_FLAG_*` 与 `MediaCodec.BUFFER_FLAG_*` 是
                     //    **两套不同的位定义**，只是「同步帧/keyframe」恰好都等于 1 ——
@@ -160,6 +194,8 @@ object VideoRemuxer {
                             0
                         }
                     muxer.writeSampleData(muxerIdx, buffer, bufferInfo)
+                    lastPts = sampleTime
+                    firstWritten = true
                     if (!extractor.advance()) break
                 }
                 extractor.unselectTrack(t)
