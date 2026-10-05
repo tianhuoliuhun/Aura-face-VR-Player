@@ -10,11 +10,14 @@
 > **v1.0** 完成 VR 播放的基本功能（投影 / 立体 / 陀螺仪 / LUT 调色）·
 > **v2.0** 完成 AI 语音识别与翻译（实时字幕 / 离线 ASR / 在线翻译 / AI 美颜双引擎）·
 > **v2.1** 修复美颜引擎的问题（GPUPixel 闪退 / 覆盖范围 / 闪烁与性能），引入画质增强（MEMC 插帧 / FSR 超分）；
-> ASR 扩展至 **87 项语言与方言** 并把 **Dolphin 内置进 APK**（开箱即用），新增时间标记悬浮球与语言选择多级收纳。
+> ASR 扩展至 **87 项语言与方言** 并把 **Dolphin 内置进 APK**（开箱即用），新增时间标记悬浮球与语言选择多级收纳；
+> 后期（v2.1.24x）把播放内核扩到 **四个**（EXO / IJK / MPV / 系统解码），
+> **MPV 内置进 APK** 作为 WMV·ASF·RM·RMVB 的兜底内核，并用**容器白名单**做内核自动路由。
 >
 > **v1.0** delivered the core VR playback (projection / stereo / gyro / LUT) ·
 > **v2.0** delivered AI speech recognition & translation (realtime subtitles, offline ASR, online translation, dual-engine beauty) ·
-> **v2.1** fixed the beauty-engine issues (GPUPixel crash, coverage, flicker & performance) and added video enhancement (MEMC / FSR) plus a major ASR language expansion.
+> **v2.1** fixed the beauty-engine issues (GPUPixel crash, coverage, flicker & performance) and added video enhancement (MEMC / FSR) plus a major ASR language expansion;
+> later (v2.1.24x) expanded to **four playback kernels** (EXO / IJK / MPV / system) with **MPV bundled in-APK** as the fallback for WMV/ASF/RM/RMVB, plus container-based auto-routing.
 
 ![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
@@ -33,6 +36,7 @@
 | 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **Dolphin 已内置**（开箱即用）：**40 种东方语言 + 22 种中文方言**，自带语种识别；实时生成、整片转写、SRT 导出、去标点<br>Bundled offline ASR (Dolphin): 40 Eastern languages + 22 Chinese dialects with auto language detection, realtime generation, batch transcription and SRT export |
 | 🌐 **字幕在线翻译**<br>Online Translation | **10 种引擎**（4 个免密/免费：必应 / Google 免密 / MyMemory / LibreTranslate）；本地词库缓存（LRU + TTL + 按语言分文件）<br>10 engines including 4 keyless/free, with a local per-language translation memory |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
+| 🎞️ **多内核与格式兼容**<br>Multi-kernel & Formats | **四个内核可选**（EXO / IJK / MPV / 系统解码）+ 自动路由：打开 **WMV / ASF / RM / RMVB / ISO / VOB** 等片源时**本次自动切换**到能吃它的内核（不改写你的设置）。**MPV 已内置进 APK**，无需下载即可播放上述格式<br>Four selectable kernels with container-based auto-routing; **MPV is bundled in-APK** so WMV/ASF/RM/RMVB/ISO/VOB play out of the box |
 
 ---
 
@@ -50,8 +54,8 @@
 
 | 项目 | 说明 / Notes |
 |---|---|
-| 产物 | **单个全架构 APK**（`Aura-face-VR-Player-v<版本>.apk`，含内置 ASR 模型）/ Single universal APK (ASR model bundled) |
-| 体积 | 约 **186MB**（其中内置 Dolphin 模型占 99MB）/ ~186MB (99MB is the bundled ASR model) |
+| 产物 | **单个全架构 APK**（`Aura-face-VR-Player-v<版本>.apk`，含内置 ASR 模型与解码内核）/ Single universal APK (ASR model & decoder kernels bundled) |
+| 体积 | 约 **241MB**（其中内置 Dolphin ASR 模型占 99MB、MPV 解码内核占约 43MB）/ ~241MB (99MB ASR model + ~43MB MPV decoder) |
 | 包含 ABI | `arm64-v8a` + `armeabi-v7a` + `x86_64` + `x86` 全包含 / All ABIs in one package |
 | 安装 | 系统自动选取匹配 ABI 的原生库，无需挑选 / The OS picks the matching native libs |
 
@@ -147,6 +151,8 @@ The README keeps only the **overview and getting started**; everything else is s
 - [ ] 字幕时间轴对齐优化 / Subtitle timing alignment (VAD/endpoint calibration)
 - [ ] 人脸关键点 x86_64 支持 / x86_64 face-landmark support (emulator beauty)
 - [x] ~~**MPV 解码器**：native 库可选下载、UI 暂时停用~~ ✅ v2.1.243 已**内置进 APK 并恢复 UI 选项**，作为 WMV/ASF/RM/RMVB 的唯一兜底内核 / MPV decoder: **bundled in-APK and re-enabled in the engine picker** since v2.1.243 — the only kernel that can decode WMV/ASF/RM/RMVB
+- [x] ~~**MPV 兼容渲染**：WMV 等老编码无硬解器时播放失败~~ ✅ v2.1.244 起改用 `vo=gpu` 渲染，软解硬解都能出画 / MPV compatibility rendering: since v2.1.244 the player uses `vo=gpu` for legacy codecs that lack a hardware decoder
+- [x] ~~**MPV 播完被误判为出错**（一播完就回退内核）~~ ✅ v2.1.245 改用事件自带的结束原因判定，并补「打不开的文件」超时提示 / Fixed in v2.1.245: end-of-file detection now uses the event's own reason field, plus a timeout prompt for unopenable files
 - [ ] 更多投影模式（CAVE / 半球）/ More projection modes (CAVE / hemisphere)
 - [ ] 字幕样式模板 / Subtitle style templates
 - [ ] 播放列表与历史记录同步 / Playlist & history sync
