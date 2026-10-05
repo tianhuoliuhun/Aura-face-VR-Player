@@ -99,6 +99,15 @@ private fun friendlyVideoCodec(format: Format): String? {
         MimeTypes.VIDEO_MP4V -> "mpeg4"
         MimeTypes.VIDEO_MPEG2 -> "mpeg2"
         MimeTypes.VIDEO_H263 -> "h263"
+        // v2.1.241：WMV / VC-1。
+        // ⚠️ Media3 的 MimeTypes **只有 VIDEO_VC1（"video/wvc1"）**，
+        //    没有 VIDEO_WMV 常量 —— WMV 的 MIME 在实践中也不统一
+        //    （video/x-ms-wmv / video/x-ms-asf / application/vnd.ms-asf），
+        //    所以这里用字面量匹配而不是引用常量（引用不存在的常量会编译失败，
+        //    这正是本次踩到的坑）。Exo 侧基本走不到这几支（不解析 ASF 容器），
+        //    但 IJK 的 MediaInfo.mVideoDecoder 会给出裸名，走 else 分支也能显示对。
+        MimeTypes.VIDEO_VC1 -> "vc-1"
+        "video/x-ms-wmv", "video/x-ms-asf", "video/x-ms-wm" -> "wmv"
         else -> format.sampleMimeType?.removePrefix("video/")
     } ?: return null
     // codecs 形如 "avc1.640028"；把 profile 一并显示更有用（能看到 High/Main）
@@ -120,6 +129,10 @@ private fun friendlyAudioCodec(format: Format): String? = when (format.sampleMim
     MimeTypes.AUDIO_ALAC -> "alac"
     MimeTypes.AUDIO_AMR_NB -> "amr-nb"
     MimeTypes.AUDIO_AMR_WB -> "amr-wb"
+    // v2.1.241：WMA。Media3 同样**没有 WMA 常量**（见 friendlyVideoCodec 的说明），
+    // 这里用字面量。WMV 片源里的音轨几乎都是 WMA（wmav2 / wmapro），
+    // 不映射的话界面会显示 "x-ms-wma" 这类原始值。
+    "audio/x-ms-wma", "audio/x-ms-wmv", "audio/wma" -> "wma"
     else -> format.sampleMimeType?.removePrefix("audio/")
 }
 

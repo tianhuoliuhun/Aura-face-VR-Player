@@ -242,6 +242,11 @@
     <string name="unlock_ui">操作パネルのロック解除</string>
     <string name="lock_ui">操作パネルをロック</string>
     <string name="import_local_media">ローカルの写真・動画を読み込み</string>
+    <!-- v2.1.241：ファイルソース選択 -->
+    <string name="picker_source_title">ファイルの読み込み元を選択</string>
+    <string name="picker_source_gallery">写真 / 動画ギャラリー</string>
+    <string name="picker_source_any_file">任意のファイル（WMV / ISO / AVI など）</string>
+    <string name="picker_source_hint">ギャラリーからは WMV・ISO などの非標準形式を選べません。「任意のファイル」をご利用ください</string>
     <string name="beauty_projection_menu">美肌パラメータと投影のサブメニュー</string>
     <string name="image_static_panorama">パノラマを静止描画中・指でドラッグして見回せます</string>
     <string name="image_pinch_zoom">ピンチズームに対応</string>
@@ -752,6 +757,13 @@
     <string name="video_info_decoding">デコード方式</string>
     <string name="decoder_ijk">IJK デコーダ</string>
     <string name="toast_ijk_fallback">IJK のデコードに失敗しました。EXO に切り替えます</string>
+    <!-- v2.1.241：WMV / ISO 対応 -->
+    <string name="toast_auto_switch_ijk">%1$s 形式には FFmpeg エンジンが必要です。今回の再生は IJK デコーダーを使用します</string>
+    <string name="toast_need_ffmpeg_engine">%1$s 形式には FFmpeg エンジン（IJK）が必要ですが、この端末では利用できません。再生できない可能性があります</string>
+    <string name="toast_smb_ffmpeg_only">%1$s 形式には FFmpeg エンジンが必要ですが、そのエンジンはネットワーク共有（SMB）に非対応です。先にローカルへダウンロードしてください</string>
+    <string name="toast_iso_dvd_video">DVD ビデオディスクイメージ（VIDEO_TS を含む）です。直接再生には非対応です。先に VOB ファイルを抽出してください</string>
+    <string name="toast_iso_bluray">Blu-ray ディスクイメージ（BDMV を含む）です。直接再生には非対応です。先に M2TS ファイルを抽出してください</string>
+    <string name="toast_iso_unknown">この ISO イメージ形式を判別できません。暗号化または破損の可能性があり、再生できません</string>
     <string name="ijk_param_mediacodec">MediaCodec ハードウェアデコード</string>
     <string name="ijk_param_framedrop">フレームドロップで滑らかさ優先</string>
     <string name="ijk_param_accurate_seek">正確なシーク</string>

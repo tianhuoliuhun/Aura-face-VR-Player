@@ -1537,64 +1537,129 @@ fun VRPlayerScreen(
         hoverPreviewBitmap = null
     }
 
+    /**
+     * v2.1.241：把「用户选中的 URI」变成当前播放项 —— **相册选择器与文档选择器的唯一汇合点**。
+     *
+     * 抽出这个函数的原因：两个 launcher（`PickVisualMedia` / `OpenDocument`）的回调
+     * 逻辑必须完全一致，各写一份必然漏改其中一处（本项目踩过 6 次的「两份 UI」问题）。
+     *
+     * 与旧实现的区别 —— **视频判定改用 [MediaFormats.looksLikeVideoUri]**：
+     * 旧代码是 `mimeType.startsWith("video") || uri.contains(".mp4")`，
+     * 一个只认 mp4 扩展名的判据。选 `.iso` 或 MIME 缺失的 `.wmv` 时会判成**图片**，
+     * 然后走 `BitmapFactory.decodeStream` —— 对一个几百 MB 的 ISO 解码，
+     * 轻则 OOM、重则直接把主线程卡死。
+     */
+    fun applyPickedToMedia(uri: Uri) {
+        val resolver = context.contentResolver
+        val mimeType = runCatching { resolver.getType(uri) }.getOrNull()
+        val isVideo = MediaFormats.looksLikeVideoUri(uri, mimeType)
+
+        val realName = uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.substringBeforeLast('.')
+            ?.takeIf { it.isNotBlank() }
+            ?: if (isVideo) context.getString(R.string.action_import_video) else context.getString(R.string.action_import_image)
+        val customItem = MediaItem(
+            id = "custom_" + System.currentTimeMillis(),
+            title = realName,
+            uri = uri.toString(),
+            isVideo = isVideo,
+            isDemo = false,
+            description = context.getString(R.string.media_imported_desc, uri.lastPathSegment)
+        )
+
+        if (isVideo) {
+            projectionMode = ProjectionMode.STANDARD // default to standard 2D view for Video
+            selectedMediaItem = customItem
+            photoReloadTrigger++
+
+            // ⚠️ ISO 的「能不能播」判定必须放在**选中之后、播放之前**，且**必须在 IO 线程**：
+            //    它要读镜像头部（最多 33KB）。放在这里而不是 setupVideoPlayer 里，
+            //    是因为那是渲染路径，多一次随机读会拖慢首帧。
+            if (MediaFormats.needsSpecialHandling(uri)) {
+                scope.launch(Dispatchers.IO) {
+                    val kind = MediaFormats.inspectIso {
+                        runCatching { resolver.openInputStream(uri) }.getOrNull()
+                    }
+                    val msgRes = when (kind) {
+                        MediaFormats.IsoKind.DATA_IMAGE -> null // 数据镜像，正常播，不用提示
+                        MediaFormats.IsoKind.DVD_VIDEO -> R.string.toast_iso_dvd_video
+                        MediaFormats.IsoKind.BLU_RAY -> R.string.toast_iso_bluray
+                        MediaFormats.IsoKind.UNKNOWN -> R.string.toast_iso_unknown
+                    }
+                    if (msgRes != null) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, context.getString(msgRes), Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        // 数据镜像：确认走 IJK（EXO 读不了 UDF 挂载点）
+                        withContext(Dispatchers.Main) {
+                            if (decoderEngine != DecoderEngine.IJK) {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.toast_auto_switch_ijk, "ISO"),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // 图片路径保持不变（含 2:1 全景自动切 VR_360 的行为）
+            scope.launch {
+                try {
+                    val bmp = withContext(Dispatchers.IO) {
+                        resolver.openInputStream(uri)?.use { stream ->
+                            BitmapFactory.decodeStream(stream, null, BitmapFactory.Options())
+                        }
+                    }
+                    if (bmp != null) {
+                        customBitmap = bmp
+                        val r = bmp.width.toFloat() / bmp.height.toFloat()
+                        projectionMode = if (r in 1.8f..2.2f) ProjectionMode.VR_360 else ProjectionMode.STANDARD
+                        selectedMediaItem = customItem
+                        photoReloadTrigger++
+                    }
+                } catch (e: Exception) {
+                    Log.e("VRPlayerScreen", "Error loading custom picked bitmap", e)
+                }
+            }
+        }
+    }
+
     // Modern android system photo picker launcher to load custom panoramic/flat files
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
             keepUiAlight()
-            val resolver = context.contentResolver
-            val mimeType = resolver.getType(uri) ?: ""
-            val isVideo = mimeType.startsWith("video") || uri.toString().contains(".mp4")
+            applyPickedToMedia(uri)
+        }
+    }
 
-            val realName = uri.lastPathSegment
-                ?.substringAfterLast('/')
-                ?.substringBeforeLast('.')
-                ?.takeIf { it.isNotBlank() }
-                ?: if (isVideo) context.getString(R.string.action_import_video) else context.getString(R.string.action_import_image)
-            val customItem = MediaItem(
-                id = "custom_" + System.currentTimeMillis(),
-                title = realName,
-                uri = uri.toString(),
-                isVideo = isVideo,
-                isDemo = false,
-                description = context.getString(R.string.media_imported_desc, uri.lastPathSegment)
-            )
-
-            // Setup smart default projections
-            if (!isVideo) {
-                // If it is an image, let's load the bitmap in memory
-                scope.launch {
-                    try {
-                        val bmp = withContext(Dispatchers.IO) {
-                            resolver.openInputStream(uri)?.use { stream ->
-                                val opts = BitmapFactory.Options().apply {
-                                    inSampleSize = 1 // load full size, panorama requires quality
-                                }
-                                BitmapFactory.decodeStream(stream, null, opts)
-                            }
-                        }
-                        if (bmp != null) {
-                            customBitmap = bmp
-                            // Detect if the aspect ratio is 2:1 (common panoramic format)
-                            val r = bmp.width.toFloat() / bmp.height.toFloat()
-                            if (r in 1.8f..2.2f) {
-                                projectionMode = ProjectionMode.VR_360
-                            } else {
-                                projectionMode = ProjectionMode.STANDARD
-                            }
-                            selectedMediaItem = customItem
-                            photoReloadTrigger++
-                        }
-                    } catch (e: Exception) {
-                        Log.e("VRPlayerScreen", "Error loading custom picked bitmap", e)
-                    }
-                }
-            } else {
-                projectionMode = ProjectionMode.STANDARD // default to standard 2D view for Video
-                selectedMediaItem = customItem
-                photoReloadTrigger++
-            }
+    // v2.1.241：**通用文件**选择器（与上面的相册选择器并存）。
+    //
+    // 为什么必须再加一个：`PickVisualMedia` 是**相册**选择器，底层按 `video/*` 过滤 ——
+    //   · `.wmv` 的 MIME 常被 provider 报成 `video/x-ms-wmv`，部分机型**不列出**；
+    //   · `.iso` 根本不是视频 MIME，**永远不列出**。
+    // 于是「能播但选不到文件」就成了一道看不见的墙。`OpenDocument` 直接走
+    // SAF 文档树，配 `*/*` 可以选到任意文件。
+    //
+    // ⚠️ 两个 launcher 是**同一个 effect 的两种入口**，都调 [applyPickedToMedia] ——
+    //    绝不要各写一份解析逻辑（本项目头号事故源「同一功能两份 UI」）。
+    var documentPickerLauncher by remember {
+        mutableStateOf<androidx.activity.result.ActivityResultLauncher<Array<String>>?>(null)
+    }
+    documentPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            keepUiAlight()
+            // SAF 给的 content:// 往往**不带持久读权限**（进程重启后失效），
+            // 但对「选完立刻播」的场景够用。这里不做 takePersistableUriPermission，
+            // 因为一旦持久化，用户删了文件我们这边会留一堆失效记录。
+            applyPickedToMedia(uri)
         }
     }
 
@@ -1686,6 +1751,8 @@ fun VRPlayerScreen(
 
     // LAN (SMB) browser state (8/2 功能)
     var smbDialogOpen by remember { mutableStateOf(false) }
+    // v2.1.241：点「+」时先选从哪个入口挑文件（相册 / 任意文件）。
+    var pickerSourceDialogOpen by remember { mutableStateOf(false) }
     var smbHost by remember { mutableStateOf("") }
     var smbUser by remember { mutableStateOf("") }
     var smbPass by remember { mutableStateOf("") }
@@ -1881,6 +1948,24 @@ fun VRPlayerScreen(
         )
         smbDialogOpen = false
         photoReloadTrigger++
+
+        // v2.1.241：SMB 上的 WMV / ASF 是**当前架构下唯一无解的组合**，提前告知而不是让它黑屏。
+        //
+        // 为什么无解：
+        //  · WMV/ASF 必须走 IJK（EXO 不解析 ASF 容器）；
+        //  · 但 IJK 的 FFmpeg **没有 smb 协议**（见 IjkPlayerBackend 的类注释第 3 条），
+        //    它的数据源也拿不到本项目 jcifs 的 SmbDataSource → 只会回退 EXO；
+        //  · 回退到 EXO 后依然不认 ASF → 最终失败。
+        // 所以这里直接在**点开时**给提示，用户就不用等它转一圈再报错。
+        // 本地文件 / HTTP 上的 WMV 不受此限（走得到 IJK）。
+        val ext = MediaFormats.extensionOfName(entry.name)
+        if (MediaFormats.requiresIjk(ext)) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.toast_smb_ffmpeg_only, ext.uppercase()),
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     /**
@@ -2118,6 +2203,23 @@ fun VRPlayerScreen(
         }
     }
 
+    /**
+     * v2.1.241：在主线程弹一个 Toast。
+     *
+     * 为什么需要它：`setupVideoPlayer` **可能在非主线程被调用**（例如从 IO 协程
+     * 里切换片源后再起播），而 `Toast.makeText(...).show()` 必须在有 Looper 的
+     * 线程调用 —— 直接调在极少数路径下会抛 `RuntimeException: Can't create handler
+     * inside thread that has not called Looper.prepare()`。
+     *
+     * 注意：`Activity.runOnUiThread` 在**已是主线程**时也直接执行，不会多绕一圈消息，
+     * 所以这里不需要先判 `Looper.myLooper()`。
+     */
+    fun postToast(text: CharSequence) {
+        (context as? android.app.Activity)?.runOnUiThread {
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        } ?: Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+    }
+
     // Helper inside Compose to rebuild/re-bind Android ExoPlayer to GLES
     fun setupVideoPlayer(surfaceTexture: SurfaceTexture, videoUriStr: String) {
         try {
@@ -2269,6 +2371,43 @@ fun VRPlayerScreen(
 
 
         // ======================================================================
+        // v2.1.241：容器感知的**内核自动路由**（WMV / ASF / ISO）
+        //
+        // 背景：WMV(ASF) 与 ISO 镜像 EXO 与系统解码都接不住（EXO 的
+        // DefaultExtractorsFactory 没有 ASF 解析器；MediaPlayer 同理；
+        // 两者也都不认 UDF 文件系统），只有 IJK 的 FFmpeg 能解 ——
+        // 已在 libijkplayer.so 里实测到 wmv3/vc1/wmav2/wmapro/ff_asf_demuxer/udf。
+        //
+        // 若不自动路由，用户选了 EXO 打开一个 .wmv，会得到 ExoPlaybackException
+        // 然后**被现有的错误处理静默吞掉** —— 表现就是「点了没反应/黑屏」，
+        // 完全无从判断是片源问题还是应用问题。
+        //
+        // ⚠️ 刻意**不写回 prefs**：只改这一次播放用的 `effectiveEngine`。
+        //    用户的「解码器」设置保持原样 —— 否则打开一个 WMV 就永久改成 IJK，
+        //    下次播普通 MP4 也走 FFmpeg 软解，白掉性能（用户会以为是 bug）。
+        // ======================================================================
+        val containerExt = MediaFormats.extensionOf(decodedUri)
+        var effectiveEngine = decoderEngine
+        if (MediaFormats.requiresIjk(containerExt) && decoderEngine != DecoderEngine.IJK) {
+            // 唯一的例外：SMB 上的这类片源**无解**（IJK 没有 smb 协议，
+            // 回退 EXO 依然不认 ASF）→ 不做无谓的自动切换，直接提示。
+            val scheme = decodedUri.scheme?.lowercase()
+            if (scheme == "smb") {
+                Log.w("VRPlayerScreen", "SMB 上的 $containerExt 无内核可解（IJK 无 smb 协议），按原内核尝试")
+            } else if (IjkPlayerFactory.ensureLibraries() && IjkPlayerFactory.supports(decodedUri)) {
+                effectiveEngine = DecoderEngine.IJK
+                Log.i("VRPlayerScreen", "容器 .$containerExt 需 FFmpeg，本次自动改用 IJK 内核")
+                postToast(context.getString(R.string.toast_auto_switch_ijk, containerExt.uppercase()))
+            } else {
+                Log.w(
+                    "VRPlayerScreen",
+                    "容器 .$containerExt 需 FFmpeg 但 IJK 不可用（${IjkPlayerFactory.lastError}），按原内核尝试"
+                )
+                postToast(context.getString(R.string.toast_need_ffmpeg_engine, containerExt.uppercase()))
+            }
+        }
+
+        // ======================================================================
         // v2.1.233：IJK（FFmpeg 内核）分支
         //
         // 放在 Exo 的 renderersFactory 之前：选中 IJK 时**根本不创建 ExoPlayer**，
@@ -2282,7 +2421,7 @@ fun VRPlayerScreen(
         // ①②③ 在这里静默回退（只 Log，不打扰用户）；
         // ④ 会 Toast 并把内核切回 EXO（用户知情，且下次不再踩同一个坑）。
         // ======================================================================
-        if (decoderEngine == DecoderEngine.IJK) {
+        if (effectiveEngine == DecoderEngine.IJK) {
             val ijkUri = decodedUri
             val ijkUsable = IjkPlayerFactory.supports(ijkUri) && IjkPlayerFactory.ensureLibraries()
             if (ijkUsable) {
@@ -2361,7 +2500,10 @@ fun VRPlayerScreen(
         // ③ prepare 后暴露的错误（解码失败、END_FILE 非正常结束）
         //    → 走 onError 回调，Toast 并把内核切回 EXO（不在这里递归调用 setupVideoPlayer）
         // ======================================================================
-        if (decoderEngine == DecoderEngine.MPV) {
+        // ⚠️ v2.1.241：用 effectiveEngine（不是 decoderEngine）—— MPV_ENABLED=false 时
+        //    这段本来就走不到；但一旦恢复 MPV 开关，必须让「容器自动路由」也能把
+        //    WMV/ISO 派给 MPV 而不是被 decoderEngine 挡住。
+        if (effectiveEngine == DecoderEngine.MPV) {
             if (MpvPlayerFactory.isAvailable(context)) {
                 val backend = MpvPlayerFactory.create(
                     context = context,
@@ -2445,7 +2587,7 @@ fun VRPlayerScreen(
         //   ② create() 返回 null（MediaPlayer 建不起来/设数据源抛异常）→ 回退；
         //   ③ prepare 或播放中出错 → onError 回调 → 切回 EXO + Toast 提示。
         // ======================================================================
-        if (decoderEngine == DecoderEngine.SYSTEM) {
+        if (effectiveEngine == DecoderEngine.SYSTEM) {
             if (SystemPlayerFactory.supports(decodedUri)) {
                 val backend = SystemPlayerFactory.create(
                     context = context,
@@ -3464,9 +3606,10 @@ fun VRPlayerScreen(
                         IconButton(
                             onClick = {
                                 keepUiAlight()
-                                filePickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                                )
+                                // v2.1.241：原先是直接拉相册选择器，导致 .wmv / .iso
+                                // **永远列不出来**（相册只按 video/* 过滤）。
+                                // 现在改为先弹一个「从哪选」的选择框，两条入口并存。
+                                pickerSourceDialogOpen = true
                             },
                             colors = IconButtonDefaults.iconButtonColors(
                                 containerColor = Color(0x2BD0BCFF),
@@ -6681,6 +6824,55 @@ BatchTranscribeSection(
             )
         }
 
+        // v2.1.241：文件来源选择框。
+        // 两条入口必须都留着：相册选择器体验好（有缩略图、可按相册/时间浏览），
+        // 但它按 video/* 过滤，选不到 .wmv / .iso；文档选择器能选任意文件，
+        // 但界面是 SAF 的文件树，找图片反而绕。所以由用户按场景自己选。
+        if (pickerSourceDialogOpen) {
+            AlertDialog(
+                onDismissRequest = { pickerSourceDialogOpen = false },
+                containerColor = Color(0xFC18171C),
+                title = { Text(stringResource(R.string.picker_source_title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            onClick = {
+                                pickerSourceDialogOpen = false
+                                filePickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(stringResource(R.string.picker_source_gallery), color = AccentColor, fontSize = 13.sp)
+                        }
+                        TextButton(
+                            onClick = {
+                                pickerSourceDialogOpen = false
+                                // ⚠️ 必须先传 MIME 数组再 launch；`OpenDocument` 要求 Array<String>。
+                                //    用 "*/*" 而不是 "video/*"：WMV 的 MIME 常不是 video/*，
+                                //    而 ISO 完全不是 —— 用 video/* 等于把这次新增的意义抹掉。
+                                documentPickerLauncher?.launch(arrayOf("*/*"))
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(stringResource(R.string.picker_source_any_file), color = AccentColor, fontSize = 13.sp)
+                        }
+                        Text(
+                            stringResource(R.string.picker_source_hint),
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 10.sp
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { pickerSourceDialogOpen = false }) {
+                        Text(stringResource(R.string.action_close), color = Color.White.copy(alpha = 0.7f))
+                    }
+                }
+            )
+        }
+
         if (smbDialogOpen) {
             AlertDialog(
                 onDismissRequest = { smbDialogOpen = false },
@@ -6794,12 +6986,12 @@ BatchTranscribeSection(
                                                 val base = smbPath.trimEnd('/')
                                                 val next = "$base/${entry.name}/"
                                                 browseSmb(encodeSmb(next))
-                                            } else if (entry.name.endsWith(".mp4", true) ||
-                                                entry.name.endsWith(".mkv", true) ||
-                                                entry.name.endsWith(".avi", true) ||
-                                                entry.name.endsWith(".mov", true) ||
-                                                entry.name.endsWith(".webm", true)
+                                            } else if (MediaFormats.isSupportedVideoExtension(
+                                                    MediaFormats.extensionOfName(entry.name)
+                                                )
                                             ) {
+                                                // v2.1.241：扩展名判定收敛到 MediaFormats（原先 5 个
+                                                // endsWith 手写白名单，新增一种容器要再来改一遍）。
                                                 playSmbFile(entry)
                                             }
                                         }

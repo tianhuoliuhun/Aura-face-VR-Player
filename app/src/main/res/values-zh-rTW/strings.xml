@@ -268,6 +268,11 @@
     <string name="unlock_ui">解鎖控制界面</string>
     <string name="lock_ui">鎖定控制界面</string>
     <string name="import_local_media">導入本地照片或視頻</string>
+    <!-- v2.1.241：檔案來源選擇 -->
+    <string name="picker_source_title">選擇檔案來源</string>
+    <string name="picker_source_gallery">照片 / 影片相簿</string>
+    <string name="picker_source_any_file">任意檔案（含 WMV / ISO / AVI 等）</string>
+    <string name="picker_source_hint">相簿入口不支援 WMV、ISO 等非標準視訊格式，請改用「任意檔案」</string>
     <string name="beauty_projection_menu">磨皮參數與投影二級控制菜單</string>
     <string name="image_static_panorama">全景圖像已靜態渲染 • 手指拖曳查看</string>
     <string name="image_pinch_zoom">支持雙指縮放</string>
@@ -794,6 +799,13 @@
     <string name="video_info_decoding">解碼方式</string>
     <string name="decoder_ijk">IJK 解碼器</string>
     <string name="toast_ijk_fallback">IJK 解碼失敗，已切回 EXO 解碼器</string>
+    <!-- v2.1.241：WMV / ISO 相容 -->
+    <string name="toast_auto_switch_ijk">%1$s 格式需要 FFmpeg 核心，本次已自動使用 IJK 解碼器播放</string>
+    <string name="toast_need_ffmpeg_engine">%1$s 格式需要 FFmpeg 核心（IJK），但目前裝置無法使用，可能無法播放</string>
+    <string name="toast_smb_ffmpeg_only">%1$s 格式需要 FFmpeg 核心，但該核心不支援網路共享（SMB）。請先下載到本機再播放</string>
+    <string name="toast_iso_dvd_video">這是 DVD 視訊光碟映像檔（含 VIDEO_TS），不支援直接播放。請先用工具取出其中的 VOB 檔案</string>
+    <string name="toast_iso_bluray">這是藍光光碟映像檔（含 BDMV），不支援直接播放。請先用工具取出其中的 M2TS 檔案</string>
+    <string name="toast_iso_unknown">無法辨識此 ISO 映像檔格式，可能已加密或損毀，暫時無法播放</string>
     <string name="ijk_param_mediacodec">MediaCodec 硬解</string>
     <string name="ijk_param_framedrop">丟幀保流暢</string>
     <string name="ijk_param_accurate_seek">精確跳轉</string>

@@ -258,6 +258,11 @@
     <string name="unlock_ui">解锁控制界面</string>
     <string name="lock_ui">锁定控制界面</string>
     <string name="import_local_media">导入本地照片或视频</string>
+    <!-- v2.1.241：文件来源选择（相册 vs 任意文件） -->
+    <string name="picker_source_title">选择文件来源</string>
+    <string name="picker_source_gallery">照片 / 视频相册</string>
+    <string name="picker_source_any_file">任意文件（含 WMV / ISO / AVI 等）</string>
+    <string name="picker_source_hint">相册入口不支持 WMV、ISO 等非标准视频格式，请用「任意文件」选择</string>
     <string name="beauty_projection_menu">磨皮参数与投影二级控制菜单</string>
     <string name="image_static_panorama">全景图像已静态渲染 • 手指拖曳查看</string>
     <string name="image_pinch_zoom">支持双指缩放</string>
@@ -784,6 +789,14 @@
     <string name="video_info_decoding">解码方式</string>
     <string name="decoder_ijk">IJK 解码器</string>
     <string name="toast_ijk_fallback">IJK 解码失败，已切回 EXO 解码器</string>
+    <!-- v2.1.241：WMV / ISO 兼容 -->
+    <!-- %1$s = 容器扩展名（大写，如 WMV / ISO）。必须用 %1$s 而非 %1，后者在 Android 上是非法格式符 -->
+    <string name="toast_auto_switch_ijk">%1$s 格式需要 FFmpeg 内核，本次已自动使用 IJK 解码器播放</string>
+    <string name="toast_need_ffmpeg_engine">%1$s 格式需要 FFmpeg 内核（IJK），但当前设备不可用，可能无法播放</string>
+    <string name="toast_smb_ffmpeg_only">%1$s 格式需要 FFmpeg 内核，但该内核不支持网络共享（SMB）。请先下载到本地再播放</string>
+    <string name="toast_iso_dvd_video">这是 DVD 视频光盘镜像（含 VIDEO_TS），不支持直接播放。请先用工具提取其中的 VOB 文件</string>
+    <string name="toast_iso_bluray">这是蓝光光盘镜像（含 BDMV），不支持直接播放。请先用工具提取其中的 M2TS 文件</string>
+    <string name="toast_iso_unknown">无法识别该 ISO 镜像格式，可能已加密或已损坏，暂时无法播放</string>
     <string name="ijk_param_mediacodec">MediaCodec 硬解</string>
     <string name="ijk_param_framedrop">丢帧保流畅</string>
     <string name="ijk_param_accurate_seek">精确跳转</string>

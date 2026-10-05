@@ -266,6 +266,11 @@
     <string name="unlock_ui">Unlock controls</string>
     <string name="lock_ui">Lock controls</string>
     <string name="import_local_media">Import local photo or video</string>
+    <!-- v2.1.241: file source picker -->
+    <string name="picker_source_title">Choose file source</string>
+    <string name="picker_source_gallery">Photos / videos gallery</string>
+    <string name="picker_source_any_file">Any file (WMV / ISO / AVI …)</string>
+    <string name="picker_source_hint">The gallery entry does not list WMV, ISO and other non-standard video formats — use "Any file"</string>
     <string name="beauty_projection_menu">Skin smoothing &amp; projection submenu</string>
     <string name="image_static_panorama">Panorama rendered statically - drag to look around</string>
     <string name="image_pinch_zoom">Pinch to zoom supported</string>
@@ -792,6 +797,13 @@
     <string name="video_info_decoding">Decoding</string>
     <string name="decoder_ijk">IJK decoder</string>
     <string name="toast_ijk_fallback">IJK decoding failed, switched back to EXO</string>
+    <!-- v2.1.241: WMV / ISO support -->
+    <string name="toast_auto_switch_ijk">%1$s needs the FFmpeg engine — using the IJK decoder for this playback</string>
+    <string name="toast_need_ffmpeg_engine">%1$s needs the FFmpeg engine (IJK), which is unavailable on this device — playback may fail</string>
+    <string name="toast_smb_ffmpeg_only">%1$s needs the FFmpeg engine, which does not support network shares (SMB). Download the file locally first</string>
+    <string name="toast_iso_dvd_video">This is a DVD-Video disc image (has VIDEO_TS) — direct playback is not supported. Extract the VOB files first</string>
+    <string name="toast_iso_bluray">This is a Blu-ray disc image (has BDMV) — direct playback is not supported. Extract the M2TS files first</string>
+    <string name="toast_iso_unknown">Unrecognized ISO image — it may be encrypted or damaged, cannot play it for now</string>
     <string name="ijk_param_mediacodec">MediaCodec HW decode</string>
     <string name="ijk_param_framedrop">Drop frames for smoothness</string>
     <string name="ijk_param_accurate_seek">Accurate seek</string>

@@ -186,6 +186,29 @@
                 <data android:mimeType="video/*" />
             </intent-filter>
 
+            <!-- v2.1.241：WMV / ASF / 光盘镜像的 mimeType 兜底。
+                 ⚠️ 为什么 `video/*` 不够：WMV 的 MIME 在各家 provider 上五花八门
+                    （video/x-ms-wmv / video/x-ms-asf / application/vnd.ms-asf），
+                    部分系统版本上**不落在 video/* 通配范围内**；ISO 更是
+                    application/x-iso9660-image。文件管理器广播时要靠这些精确
+                    mimeType 才能把我们列进"打开方式"。
+                 ⚠️ **必须另开一个 filter**：同一 filter 内多个 <data android:mimeType>
+                    是「或」关系没错，但 mimeType 与上面那条的 scheme 组合会互相收窄，
+                    分开写最不容易出错（与 v2.1.237 加 rtsp/rtmp 时同一个理由）。 -->
+            <intent-filter tools:ignore="AppLinkUrlError">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="video/x-ms-wmv" />
+                <data android:mimeType="video/x-ms-asf" />
+                <data android:mimeType="video/x-msvideo" />
+                <data android:mimeType="application/vnd.ms-asf" />
+                <data android:mimeType="application/x-iso9660-image" />
+                <data android:mimeType="application/x-iso9660-appimage" />
+            </intent-filter>
+
             <!-- v2.1.237：流媒体协议（与上面的 filter 分开写，**刻意不带 mimeType**）
                  ⚠️ 为什么必须另开一个 filter：intent-filter 内多个 <data> 是**与**关系，
                     上面那个带 `video/*`，而 HLS 的 .m3u8 是 application/x-mpegURL、
