@@ -2388,10 +2388,32 @@ fun VRPlayerScreen(
         // ======================================================================
         val containerExt = MediaFormats.extensionOf(decodedUri)
         var effectiveEngine = decoderEngine
+        // ⚠️ v2.1.243：先判 MPV，再判 IJK。顺序不能反 ——
+        //    wmv/rm 这类格式**两边都可能被 shouldXxx 命中**（requiresMpv 与
+        //    shouldAutoRouteToIjk 的集合都是 IJK_ONLY 的子集），但只有 MPV 能真正解，
+        //    所以必须先给 MPV 优先权。
+        if (MediaFormats.shouldRouteToMpv(containerExt) && decoderEngine != DecoderEngine.MPV) {
+            // SMB 例外：MPV 有没有 smb 协议取决于 libmpv 的 protocol 白名单，
+            // 本项目未验证 → 与 IJK 一样不做自动切换，直接提示。
+            val scheme = decodedUri.scheme?.lowercase()
+            if (scheme == "smb") {
+                Log.w("VRPlayerScreen", "SMB 上的 $containerExt 无内核可稳定解（MPV 的 smb 未验证），按原内核尝试")
+            } else if (MpvPlayerFactory.isAvailable(context)) {
+                effectiveEngine = DecoderEngine.MPV
+                Log.i("VRPlayerScreen", "容器 .$containerExt 需完整 FFmpeg，本次自动改用 MPV 内核")
+                postToast(context.getString(R.string.toast_auto_switch_mpv, containerExt.uppercase()))
+            } else {
+                // MPV 未装（native 库需按需下载）→ 明确提示去哪装，而不是静默走 EXO（必然也失败）
+                Log.w("VRPlayerScreen", "容器 .$containerExt 需 MPV 但 native 库未安装，提示用户")
+                postToast(context.getString(R.string.toast_mpv_need_download))
+            }
+        }
         // 用 shouldAutoRouteToIjk 而非 requiresIjk：后者是「只有 IJK 能解」，
         // 前者额外排除 EXO_ONLY（avi/ogv 这类 IJK 反而解不了的）——
         // 防止将来有人往 IJK_ONLY 里误加 avi 时把能播的格式路由成不能播。
-        if (MediaFormats.shouldAutoRouteToIjk(containerExt) && decoderEngine != DecoderEngine.IJK) {
+        if (effectiveEngine != DecoderEngine.MPV &&
+            MediaFormats.shouldAutoRouteToIjk(containerExt) && decoderEngine != DecoderEngine.IJK
+        ) {
             // 唯一的例外：SMB 上的这类片源**无解**（IJK 没有 smb 协议，
             // 回退 EXO 依然不认 ASF）→ 不做无谓的自动切换，直接提示。
             val scheme = decodedUri.scheme?.lowercase()
@@ -2463,16 +2485,46 @@ fun VRPlayerScreen(
                         }
 
                         override fun onError(what: Int, extra: Int) {
-                            Log.e("VRPlayerScreen", "IJK 播放错误 what=" + what + " extra=" + extra + " -> 回退 EXO")
-                            // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
-                            //    改 decoderEngine 会触发 Effect B 重建播放器；同时把 EXO
-                            //    写进 prefs，下次打开不再踩同一个坑。
-                            decoderEngine = DecoderEngine.EXO
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.toast_ijk_fallback),
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            // ⚠️ v2.1.243：降级目标不再硬编码 EXO。
+                            //    对 wmv/rm 这类「只有 MPV 能解」的格式，回退 EXO 是**必然再失败**
+                            //    一次（EXO 无 ASF/RealMedia 解析器），用户会看到"转一圈还是黑屏"。
+                            //    改为：需要 MPV 且 MPV 可用 → 降级 MPV；否则才回退 EXO。
+                            val ext = MediaFormats.extensionOf(decodedUri)
+                            if (MediaFormats.requiresMpv(ext) && MpvPlayerFactory.isAvailable(context)) {
+                                Log.e(
+                                    "VRPlayerScreen",
+                                    "IJK 播放错误 what=$what extra=$extra -> .$ext 需完整 FFmpeg，降级 MPV"
+                                )
+                                // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
+                                //    改 decoderEngine 会触发 Effect B 重建播放器；
+                                //    这里**写回 prefs** 是刻意的 —— wmv/rm 在本项目就该走 MPV，
+                                //    下次打开不必再"IJK 失败一次再降级"。
+                                decoderEngine = DecoderEngine.MPV
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.toast_ijk_fallback_mpv),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else if (MediaFormats.requiresMpv(ext)) {
+                                // 需要 MPV 但库没装 → 提示去装，不回退 EXO（EXO 必然也失败）
+                                Log.e(
+                                    "VRPlayerScreen",
+                                    "IJK 播放错误 what=$what extra=$extra；.$ext 需 MPV 但 native 库未装"
+                                )
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.toast_mpv_need_download),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else {
+                                Log.e("VRPlayerScreen", "IJK 播放错误 what=$what extra=$extra -> 回退 EXO")
+                                decoderEngine = DecoderEngine.EXO
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.toast_ijk_fallback),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
 
                         override fun onFirstFrame() {

@@ -771,7 +771,7 @@
     <string name="mpv_param_hwdec">MediaCodec 硬解</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV 解碼庫</string>
-    <string name="mpv_lib_not_installed">未安裝。MPV 解碼庫不隨安裝包提供（省約 32MB），首次使用需下載（約 16MB）</string>
+    <string name="mpv_lib_not_installed">未偵測到 MPV 解碼函式庫，可嘗試下載安裝（約 16MB）</string>
     <string name="mpv_lib_download">下載並安裝</string>
     <string name="mpv_lib_installing">安裝中…</string>
     <string name="mpv_lib_downloading">正在下載</string>
@@ -781,6 +781,8 @@
     <string name="mpv_lib_ready_hint">解碼庫已就緒，可在上方選擇「MPV 解碼器」</string>
     <string name="mpv_lib_delete">刪除</string>
     <string name="mpv_lib_failed">安裝失敗</string>
+    <string name="mpv_lib_builtin">已內建</string>
+    <string name="mpv_lib_builtin_hint">解碼函式庫已隨安裝包內建，可直接使用，無需下載</string>
     <string name="toast_mpv_need_download">MPV 解碼庫未安裝，請至「設定 → 解碼核心」下載後使用</string>
     <string name="mpv_param_hwdec_hint">關閉後畫面直出通路（mediacodec_embed）不會有畫格輸出，會黑屏；僅供排查問題時關閉</string>
     <string name="mpv_param_framedrop">丟幀保流暢</string>
@@ -800,6 +802,9 @@
     <string name="decoder_ijk">IJK 解碼器</string>
     <string name="toast_ijk_fallback">IJK 解碼失敗，已切回 EXO 解碼器</string>
     <!-- v2.1.241：WMV / ISO 相容 -->
+    <!-- v2.1.243：WMV / RM 只能靠 MPV（IJK 裁剪版无对应解码器） -->
+    <string name="toast_auto_switch_mpv">%1$s 格式需要完整 FFmpeg 核心，本次已自動使用 MPV 解碼器播放</string>
+    <string name="toast_ijk_fallback_mpv">該格式 IJK 核心不支援，已自動切換到 MPV 解碼器</string>
     <string name="toast_auto_switch_ijk">%1$s 格式需要 FFmpeg 核心，本次已自動使用 IJK 解碼器播放</string>
     <string name="toast_need_ffmpeg_engine">%1$s 格式需要 FFmpeg 核心（IJK），但目前裝置無法使用，可能無法播放</string>
     <string name="toast_smb_ffmpeg_only">%1$s 格式需要 FFmpeg 核心，但該核心不支援網路共享（SMB）。請先下載到本機再播放</string>

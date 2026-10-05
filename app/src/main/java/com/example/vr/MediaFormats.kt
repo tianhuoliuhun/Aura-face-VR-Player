@@ -49,22 +49,31 @@ import android.net.Uri
  * Subtitle Ts Wav Webp
  * ```
  * ⚠️ **没有 ASF/WMV 解析器、没有 RealMedia(RM/RMVB)、没有 ISO** →
- * 这三类只能交给 IJK。
+ * 这三类只能交给「完整 FFmpeg」。
+ *
+ * **(3) MPV 真实能力（v2.1.243 补充）** —— libmpv 自带**完整** libavcodec/libavformat
+ * （10 个 so，avcodec+avformat+avfilter 齐全），因此**能解** IJK 裁剪版解不了的一切：
+ * `wmv/asf`（wmv2/vc1/wmav2）、`rm/rmvb`（rv10~rv40）、以及各种冷门编码。
+ * → 它是本项目唯一的「万能兜底内核」。**代价**：native 库按需下载（约 36MB，
+ *   见 `MpvLibLoader`），未安装时会明确提示而不是黑屏。
  *
  * ## 由此得出的分组（务必保持与上表一致）
- * | 容器 | IJK | EXO | 归入 |
- * |---|---|---|---|
- * | mp4/m4v/mov/3gp/3g2 | ✅ mov | ✅ Mp4 | COMMON |
- * | mkv/webm | ✅ matroska | ✅ Matroska | COMMON |
- * | avi/divx | ❌ 无 demuxer | ✅ Avi | COMMON（**必须靠 EXO**，见 EXO_ONLY） |
- * | flv/f4v | ✅ flv | ✅ Flv | COMMON |
- * | ts/m2ts/mts | ✅ mpegts | ✅ Ts | COMMON |
- * | mpg/mpeg/vob/dat | ✅ mpegps | ✅ Ps | COMMON |
- * | ogv | ❌ 无 ogg | ✅ Ogg | COMMON（**必须靠 EXO**） |
- * | **wmv/asf** | ✅ asf | ❌ | IJK_ONLY |
- * | **rm/rmvb/ra** | ✅ rm | ❌ | IJK_ONLY |
- * | **iso** | ⚠️ 仅数据镜像 | ❌ | IJK_ONLY + 特殊处理 |
- * | mp3/flac/m4a/ogg/mka/wma… | 部分 | 部分 | AUDIO_ONLY |
+ * | 容器 | IJK | EXO | MPV | 归入 |
+ * |---|---|---|---|---|
+ * | mp4/m4v/mov/3gp/3g2 | ✅ mov | ✅ Mp4 | ✅ | COMMON |
+ * | mkv/webm | ✅ matroska | ✅ Matroska | ✅ | COMMON |
+ * | avi/divx | ❌ 无 demuxer | ✅ Avi | ✅ | COMMON（**必须靠 EXO**，见 EXO_ONLY） |
+ * | flv/f4v | ✅ flv | ✅ Flv | ✅ | COMMON |
+ * | ts/m2ts/mts | ✅ mpegts | ✅ Ts | ✅ | COMMON |
+ * | mpg/mpeg/vob/dat | ✅ mpegps | ✅ Ps | ✅ | COMMON |
+ * | ogv | ❌ 无 ogg | ✅ Ogg | ✅ | COMMON（**必须靠 EXO**） |
+ * | **wmv/asf** | ❌ 无 wmv2/wmav2 解码器 | ❌ | ✅ | **仅 MPV**（见 [shouldRouteToMpv]） |
+ * | **rm/rmvb/ra** | ❌ 无 rv 系解码器 | ❌ | ✅ | **仅 MPV** |
+ * | **iso** | ⚠️ 仅数据镜像 | ❌ | ⚠️ | IJK_ONLY + 特殊处理 |
+ * | mp3/flac/m4a/ogg/mka/wma… | 部分 | 部分 | ✅ | AUDIO_ONLY |
+ *
+ * ⚠️⚠️ **上表 wmv/rm 两行的「❌」是 v2.1.243 才查实的** —— v2.1.241/242 曾以为
+ * 「IJK 有 asf/rm demuxer 就能解」，实测被证伪。详见 [IJK_ONLY] 的注释。
  *
  * ## ⚠️ 三个集合的语义不同，允许重叠，勿"去重"掉
  * - [COMMON] / [IJK_ONLY] / [AUDIO_ONLY] 管的是「**放不放行**」（能不能点开）。
@@ -134,15 +143,37 @@ object MediaFormats {
     )
 
     /**
-     * **必须走 IJK（FFmpeg）内核**的容器 —— EXO 与系统解码都接不住。
+     * **只有「完整 FFmpeg」才可能打开**的容器 —— EXO 与系统解码都接不住。
      *
-     * 判定依据（实测）：
-     * - `wmv` / `asf`：ASF 容器。EXO 的 `DefaultExtractorsFactory` **没有 ASF 解析器**；
-     *   系统 `MediaPlayer` 同样不认。IJK 有 `ff_asf_demuxer`，视频走 MediaCodec 硬解
-     *   （so 内无 `ff_wmv3_decoder` 软件解码器，全靠硬解通道）、音频 WMA 走 MediaCodec。
-     * - `rm` / `rmvb` / `ra`：RealMedia。EXO **没有 RealMedia 解析器**；
-     *   IJK 有 `ff_rm_demuxer`（`ff_sipr_*` / `rv10~rv40` 名字表也在）。
-     *   ⚠️ v2.1.241 原先把 `rm/rmvb` 错放在 COMMON，实测 EXO 打不开 → v2.1.242 修正。
+     * ⚠️⚠️ **v2.1.243 重要更正（此前 v2.1.241/242 的论断是错的）**
+     *
+     * 曾经认为「IJK 有 `ff_asf_demuxer` / `ff_rm_demuxer`，所以这些容器交给 IJK 就行」。
+     * 实测（MuMu + 真机日志）证明**这是错的**：**本项目那个 IJK 构建根本解不了**，
+     * 它只会在软解器查找阶段失败，压根走不到任何兜底：
+     *
+     * ```
+     * No codec could be found with id 86024     ← wmav2 (AV_CODEC_ID_WMAV2)
+     * No codec could be found with id 18        ← wmv2  (AV_CODEC_ID_WMV2)
+     * Failed to open file 'pipe:153' or configure filtergraph
+     * IjkMediaPlayer: Error (-10000,0)
+     * ```
+     *
+     * 根因（从 `libijkplayer.so` 的编译横幅与符号表实测得到）—— **三条路全堵**：
+     *  1. **软解器被裁掉**：横幅是 `--disable-decoders --enable-decoder=aac/flv/h264/
+     *     mp3-star/vp6f/flac/hevc/vp8/vp9/pcm-star` —— **没有 wmv2/wmav2/vc1**。
+     *     （上行的 `mp3-star` / `pcm-star` 原文是 `mp3` 与 `pcm` 后接通配符星号；
+     *      此处刻意写成 star 是为了避免出现会提前闭合块注释的两字符序列。）
+     *  2. **FFmpeg hwaccel 全关**：横幅 `--disable-hwaccels`，编译期整体禁用。
+     *  3. **IJK 自建 MediaCodec 通道**：符号齐全（`AMediaCodec*` 163 处），但它的
+     *     codec→MIME 映射表**只有 12 项**（`video/avc`、`video/hevc`、`video/mp4`、
+     *     `video/mp4v-es`、`video/mpeg2`、`video/webm`、`video/x-matroska`、`audio/aac`…），
+     *     **没有 `video/x-ms-wmv` / `video/x-msvideo` / `audio/x-ms-wma`**，
+     *     且这些表**编译进 so，改不了**。所以 `mediacodec=1` 开了也是徒劳。
+     *
+     * 结论：`wmv/asf/rm/rmvb` 这类**只有 MPV 内核能解**（MPV 自带完整 libavcodec）。
+     * 路由与降级请看 [shouldRouteToMpv]；`IJK_ONLY` 这个名字保留是历史原因，
+     * 语义已变为「IJK 的名字占位」，**不要再据此把片源交给 IJK**。
+     *
      * - `iso`：光盘镜像。**注意能力边界** —— FFmpeg 只能读**未加密的 UDF / ISO9660
      *   *数据*镜像**；DVD-Video 的 `.VOB` + `VIDEO_TS.IFO` 有 CSS 加密与
      *   导航（IFO）结构、蓝光有 BDMV 结构与 AACS，这些**都不在本项目能力范围内**，
@@ -236,9 +267,43 @@ object MediaFormats {
      * = 必须走 IJK，且**不是**只有 EXO 能开的那几种。
      * 两者互斥（IJK_ONLY 与 EXO_ONLY 无交集），这里写成显式判据是为了
      * 让调用点读起来一目了然，也便于将来任一侧加成员时行为仍然正确。
+     *
+     * ⚠️ **v2.1.243 提示**：由于 `IJK_ONLY` 现在装的其实都是「只有完整 FFmpeg
+     * （= MPV）能解」的格式，本方法**实际会命中的正是 wmv/rm 那一批**。
+     * 调用点（`VRPlayerScreen`）的正确顺序是：**先 [shouldRouteToMpv] 把这类
+     * 派给 MPV**，本方法作为「MPV 不可用时的次要尝试」。
+     * 换句话说：将来若 IJK 换成了全量 FFmpeg 构建，本方法才真正独立起作用。
      */
     fun shouldAutoRouteToIjk(ext: String): Boolean =
         requiresIjk(ext) && !isExoOnly(ext)
+
+    /**
+     * 该容器是否**只有 MPV 内核能解**（v2.1.243 新增）。
+     *
+     * 详见 [IJK_ONLY] 头部那段 v2.1.243 更正 —— 简言之：`wmv/asf/rm/rmvb` 这些
+     * 「完整 FFmpeg 才有的格式」，**本项目的 IJK 构建解不了**（软解器被裁、
+     * 硬解全关、MediaCodec 白名单无 WMV），EXO 与系统解码也接不住。
+     * 唯一出路是 MPV（自带完整 libavcodec）。
+     *
+     * ⚠️ 判据里**排除 `iso`**：ISO 走 [NEEDS_SPECIAL_HANDLING] 的魔数探测流程
+     * （可能是加密镜像/数据镜像），不应被「路由到 MPV」抢先接管。
+     *
+     * 用途：内核路由与失败降级都据此决定是否改用 MPV。
+     */
+    fun requiresMpv(ext: String): Boolean =
+        ext in IJK_ONLY && ext != "iso"
+
+    /**
+     * 该容器是否值得「自动切换到 MPV」。
+     *
+     * 与 [shouldAutoRouteToIjk] 互斥（前者管「只有 MPV 能解」、后者管「只有 IJK 能解」），
+     * 调用方按顺序判：先 [requiresMpv] 再 [shouldAutoRouteToIjk]。
+     *
+     * 之所以单独提供一个 `should...` 名字而不是直接暴露 [requiresMpv]：
+     * 与 [shouldAutoRouteToIjk] 保持同名风格，将来若 MPV 侧要加例外（如某格式
+     * EXO 也能凑合）只需改这一处，调用点不动。
+     */
+    fun shouldRouteToMpv(ext: String): Boolean = requiresMpv(ext)
 
     /**
      * 该 URI 是否需要「特殊处理提示」（ISO 镜像）。

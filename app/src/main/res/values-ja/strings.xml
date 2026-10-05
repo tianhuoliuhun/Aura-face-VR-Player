@@ -729,7 +729,7 @@
     <string name="mpv_param_hwdec">MediaCodec ハードウェア</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV ライブラリ</string>
-    <string name="mpv_lib_not_installed">未インストール。MPV ライブラリは同梱していません（約 32MB 削減）。初回のみ約 16MB のダウンロードが必要です。</string>
+    <string name="mpv_lib_not_installed">MPV デコーダーライブラリが見つかりません。ダウンロードしてインストールできます（約 16MB）</string>
     <string name="mpv_lib_download">ダウンロード</string>
     <string name="mpv_lib_installing">インストール中…</string>
     <string name="mpv_lib_downloading">ダウンロード中</string>
@@ -739,6 +739,8 @@
     <string name="mpv_lib_ready_hint">準備完了。上の「MPV デコーダ」を選ぶと使えます</string>
     <string name="mpv_lib_delete">削除</string>
     <string name="mpv_lib_failed">インストール失敗</string>
+    <string name="mpv_lib_builtin">組み込み済み</string>
+    <string name="mpv_lib_builtin_hint">デコーダーライブラリはアプリに同梱済みです。ダウンロード不要でそのまま使えます</string>
     <string name="toast_mpv_need_download">MPV ライブラリが未インストールです。「設定 → デコーダ」からダウンロードしてください。</string>
     <string name="mpv_param_hwdec_hint">オフにすると mediacodec_embed にフレームが供給されず画面が真っ黒になります。問題の切り分け時のみオフにしてください。</string>
     <string name="mpv_param_framedrop">フレームドロップ</string>
@@ -758,6 +760,9 @@
     <string name="decoder_ijk">IJK デコーダ</string>
     <string name="toast_ijk_fallback">IJK のデコードに失敗しました。EXO に切り替えます</string>
     <!-- v2.1.241：WMV / ISO 対応 -->
+    <!-- v2.1.243：WMV / RM 只能靠 MPV（IJK 裁剪版无对应解码器） -->
+    <string name="toast_auto_switch_mpv">%1$s は完全版 FFmpeg カーネルが必要です。今回 MPV デコーダーに自動切替しました</string>
+    <string name="toast_ijk_fallback_mpv">この形式は IJK カーネルでは非対応のため、MPV デコーダーに切替しました</string>
     <string name="toast_auto_switch_ijk">%1$s 形式には FFmpeg エンジンが必要です。今回の再生は IJK デコーダーを使用します</string>
     <string name="toast_need_ffmpeg_engine">%1$s 形式には FFmpeg エンジン（IJK）が必要ですが、この端末では利用できません。再生できない可能性があります</string>
     <string name="toast_smb_ffmpeg_only">%1$s 形式には FFmpeg エンジンが必要ですが、そのエンジンはネットワーク共有（SMB）に非対応です。先にローカルへダウンロードしてください</string>

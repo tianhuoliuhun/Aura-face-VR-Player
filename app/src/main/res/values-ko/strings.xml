@@ -729,7 +729,7 @@
     <string name="mpv_param_hwdec">MediaCodec 하드웨어</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV 라이브러리</string>
-    <string name="mpv_lib_not_installed">설치되지 않음. MPV 라이브러리는 앱에 포함되지 않습니다(약 32MB 절약). 최초 사용 시 약 16MB 다운로드가 필요합니다.</string>
+    <string name="mpv_lib_not_installed">MPV 디코더 라이브러리를 찾을 수 없습니다. 다운로드하여 설치할 수 있습니다(약 16MB)</string>
     <string name="mpv_lib_download">다운로드</string>
     <string name="mpv_lib_installing">설치 중…</string>
     <string name="mpv_lib_downloading">다운로드 중</string>
@@ -739,6 +739,8 @@
     <string name="mpv_lib_ready_hint">준비 완료. 위에서 MPV 디코더를 선택해 사용하세요</string>
     <string name="mpv_lib_delete">삭제</string>
     <string name="mpv_lib_failed">설치 실패</string>
+    <string name="mpv_lib_builtin">내장됨</string>
+    <string name="mpv_lib_builtin_hint">디코더 라이브러리가 앱에 내장되어 있어 다운로드 없이 바로 사용할 수 있습니다</string>
     <string name="toast_mpv_need_download">MPV 라이브러리가 설치되지 않았습니다. 설정 → 디코더에서 다운로드하세요.</string>
     <string name="mpv_param_hwdec_hint">끄면 mediacodec_embed로 전달되는 프레임이 없어 화면이 검게 나옵니다. 문제 확인 시에만 끄세요.</string>
     <string name="mpv_param_framedrop">프레임 드롭</string>
@@ -758,6 +760,9 @@
     <string name="decoder_ijk">IJK 디코더</string>
     <string name="toast_ijk_fallback">IJK 디코딩 실패, EXO로 전환했습니다</string>
     <!-- v2.1.241: WMV / ISO 지원 -->
+    <!-- v2.1.243：WMV / RM 只能靠 MPV（IJK 裁剪版无对应解码器） -->
+    <string name="toast_auto_switch_mpv">%1$s 형식은 완전한 FFmpeg 커널이 필요하여 이번 재생은 MPV 디코더로 전환했습니다</string>
+    <string name="toast_ijk_fallback_mpv">IJK 커널에서 지원하지 않는 형식이라 MPV 디코더로 전환했습니다</string>
     <string name="toast_auto_switch_ijk">%1$s 형식은 FFmpeg 엔진이 필요합니다. 이번 재생은 IJK 디코더를 사용합니다</string>
     <string name="toast_need_ffmpeg_engine">%1$s 형식은 FFmpeg 엔진(IJK)이 필요하지만 이 기기에서는 사용할 수 없습니다. 재생되지 않을 수 있습니다</string>
     <string name="toast_smb_ffmpeg_only">%1$s 형식은 FFmpeg 엔진이 필요하지만, 해당 엔진은 네트워크 공유(SMB)를 지원하지 않습니다. 먼저 로컬로 다운로드하세요</string>

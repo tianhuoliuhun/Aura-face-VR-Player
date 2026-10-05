@@ -105,17 +105,22 @@ enum class DecoderEngine(val displayName: String, @StringRes val labelRes: Int, 
      * prefs 读取处：那里的 `find { it.id == id && it.isImplemented }` 正是靠本属性过滤）。
      * **注意本属性同时承担"UI 是否展示"的职责**，所以停用一个内核不用改 UI 代码。
      *
-     * v2.1.240：SYSTEM（系统解码）无需 native 库、也不依赖任何可选组件，
-     * 所以**恒为可用** —— 它只在运行时（MediaPlayer 创建/prepare 失败）才回退 EXO。
-     */
+ * v2.1.240：SYSTEM（系统解码）无需 native 库、也不依赖任何可选组件，
+ * 所以**恒为可用** —— 它只在运行时（MediaPlayer 创建/prepare 失败）才回退 EXO。
+ *
+ * v2.1.243：MPV **重新启用**（[MPV_ENABLED] = true）。原因是查实了 IJK 的裁剪版
+ * FFmpeg 解不了 WMV/RM（软解器被裁、硬解全关、MediaCodec 白名单无 WMV），
+ * 而 EXO 也没有 ASF/RealMedia 解析器 —— **MPV 是这些格式唯一的出路**。
+ */
     val isImplemented: Boolean
         get() = this != MPV || MPV_ENABLED
 }
 
 /**
- * **MPV 内核总开关** —— v2.1.236。
+ * **MPV 内核总开关** —— v2.1.236 首次引入，v2.1.243 重新打开。
  *
- * 用户反馈"暂时不需要 MPV 了"，于是从界面上停用。这里刻意**用开关而不是把代码
+ * ## 为什么 v2.1.236 曾关闭
+ * 用户当时反馈"暂时不需要 MPV 了"，于是从界面上停用。这里刻意**用开关而不是把代码
  * 注释掉**，原因有三：
  *  1. 注释掉大段代码极易引发语法错（本项目的 Kotlin 块注释**可嵌套**，注释里出现
  *     斜杠紧跟星号就会吃掉后面整个文件），且 IDE 无法对注释代码做引用检查；
@@ -124,15 +129,21 @@ enum class DecoderEngine(val displayName: String, @StringRes val labelRes: Int, 
  *  3. 将来要恢复只需把这里改回 `true`，**一处生效**（`isImplemented` 已经承担了
  *     "UI 是否展示 / 是否允许选中"的全部判断）。
  *
- * 关掉后**仍然保留**（不删、不失效）的东西：
+ * ## 为什么 v2.1.243 重新打开（当前）
+ * 实测日志证实：`wmv/asf/rm/rmvb` 这几个容器在本项目的 IJK 构建上**无解**
+ * （`No codec could be found with id 18` → `Error (-10000,0)`），EXO 也无解析器。
+ * 而 MPV 自带**完整** libavcodec，是唯一能播这些格式的内核。
+ * 详见 `MediaFormats.IJK_ONLY` 的注释与 `docs/CHANGELOG.md` v2.1.243 条目。
+ *
+ * 关闭时**仍然保留**（不删、不失效）的东西：
  *  - `MpvPlayerBackend.kt` / `MpvLibLoader.kt` / `MpvLibPanel.kt` / `MpvOptionsPanel.kt`
  *    全部代码与 `packaging.jniLibs.excludes` 里的排除项；
  *  - 已下载到 `filesDir/mpv-libs/` 的库文件（不会自动删；将来恢复就不用重新下）。
- *    ⚠️ 已下载过 MPV 库的用户现在**在界面上看不到删除入口**了（那段 UI 在 MPV 分支内，
+ *    ⚠️ 已下载过 MPV 库的用户在开关关闭期间**看不到删除入口**（那段 UI 在 MPV 分支内，
  *       不可达）。那部分空间（约 36MB）只能靠"清除应用数据"释放 —— 可接受，
  *       因为恢复开关后入口就回来了。
  */
-const val MPV_ENABLED = false
+const val MPV_ENABLED = true
 
 data class MediaItem(
     val id: String,

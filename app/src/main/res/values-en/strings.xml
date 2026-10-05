@@ -769,7 +769,7 @@
     <string name="mpv_param_hwdec">MediaCodec (HW)</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV libraries</string>
-    <string name="mpv_lib_not_installed">Not installed. The MPV libraries are not bundled (saves ~32MB) — a one-time ~16MB download is needed.</string>
+    <string name="mpv_lib_not_installed">MPV decoder library not found; you can try downloading it (about 16 MB)</string>
     <string name="mpv_lib_download">Download</string>
     <string name="mpv_lib_installing">Installing…</string>
     <string name="mpv_lib_downloading">Downloading</string>
@@ -779,6 +779,8 @@
     <string name="mpv_lib_ready_hint">Ready — pick the MPV decoder above to use it</string>
     <string name="mpv_lib_delete">Delete</string>
     <string name="mpv_lib_failed">Install failed</string>
+    <string name="mpv_lib_builtin">Built in</string>
+    <string name="mpv_lib_builtin_hint">The decoder library is bundled with the app — ready to use, no download needed</string>
     <string name="toast_mpv_need_download">MPV libraries are not installed. Download them in Settings → Decoder.</string>
     <string name="mpv_param_hwdec_hint">Turning this off leaves mediacodec_embed with no decoded frames — the screen will go black. Only disable it for troubleshooting.</string>
     <string name="mpv_param_framedrop">Frame drop</string>
@@ -798,6 +800,9 @@
     <string name="decoder_ijk">IJK decoder</string>
     <string name="toast_ijk_fallback">IJK decoding failed, switched back to EXO</string>
     <!-- v2.1.241: WMV / ISO support -->
+    <!-- v2.1.243：WMV / RM 只能靠 MPV（IJK 裁剪版无对应解码器） -->
+    <string name="toast_auto_switch_mpv">%1$s needs the full FFmpeg kernel; switched to the MPV decoder for this playback</string>
+    <string name="toast_ijk_fallback_mpv">The IJK kernel cannot handle this format; switched to the MPV decoder</string>
     <string name="toast_auto_switch_ijk">%1$s needs the FFmpeg engine — using the IJK decoder for this playback</string>
     <string name="toast_need_ffmpeg_engine">%1$s needs the FFmpeg engine (IJK), which is unavailable on this device — playback may fail</string>
     <string name="toast_smb_ffmpeg_only">%1$s needs the FFmpeg engine, which does not support network shares (SMB). Download the file locally first</string>

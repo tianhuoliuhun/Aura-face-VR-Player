@@ -27,15 +27,18 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 
 /**
- * 「MPV 解码库」的下载 / 管理面板 —— v2.1.235。
+ * 「MPV 解码库」的状态 / 管理面板。
  *
- * MPV 的 native 库不进 APK（省 arm64 36.5MB / v7a 31.8MB），用户首次使用
- * MPV 内核时在这里下载（约 16MB 压缩包）。下载、解压、加载的全部逻辑在
- * [MpvLibLoader]，本文件只负责展示与触发。
+ * ## v2.1.243 起的语义变化
+ * MPV 的 native 库**已改回内置 APK**（见 `app/build.gradle.kts` 的 packaging 注释）。
+ * 所以正常情况下这里显示的是「**已内置**」——不提供下载、也不提供删除
+ * （内置库跟着 APK 走，删了下次也还在，给"删除"按钮只会让用户困惑）。
  *
- * ⚠️ `isInstalled` 会读文件系统，**不能每次重组都调** —— 用 `remember` 缓存，
- *    并以 `isInstalling` 作为失效依据（安装结束后 isInstalling 由 true→false，
- *    正好触发重算，不需要额外的刷新信号）。
+ * 旧的「后下载」模式**仍然保留为兜底**：若因某种原因 APK 没带上这些 so，
+ * 用户可以回到这里下载（逻辑仍在 [MpvLibLoader]）。
+ *
+ * ⚠️ `isInstalled` 会读文件系统、`isReady` 会触发一次 native 加载（幂等有缓存），
+ *    **不能每次重组都调** —— 都用 `remember` 缓存，以 `isInstalling` 作为失效依据。
  */
 @Composable
 internal fun MpvLibPanel(
@@ -48,6 +51,8 @@ internal fun MpvLibPanel(
     // 安装中/完成都会让 isInstalling 变化 → 这会作为 remember 的 key 使缓存失效
     val installing = MpvLibLoader.isInstalling
     val installed = remember(context, installing) { MpvLibLoader.isInstalled(context) }
+    // v2.1.243：APK 内置库是否可用（幂等，内部有 loaded 缓存）
+    val builtInReady = remember(context, installing) { MpvLibLoader.isReady(context) }
 
     Column(
         modifier = modifier
@@ -65,13 +70,23 @@ internal fun MpvLibPanel(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
             )
-            if (installed && !installing) {
-                Text(
-                    text = stringResource(R.string.mpv_lib_installed) + " · " +
-                        "%.1f MB".format(MpvLibLoader.installedBytes(context) / 1048576.0),
-                    color = Color.White.copy(alpha = 0.4f),
-                    fontSize = 8.sp
-                )
+            when {
+                // 内置可用优先展示"已内置"（下载目录即便有旧副本也不提，避免误导）
+                builtInReady && !installing -> {
+                    Text(
+                        text = stringResource(R.string.mpv_lib_builtin),
+                        color = Color.White.copy(alpha = 0.4f),
+                        fontSize = 8.sp
+                    )
+                }
+                installed && !installing -> {
+                    Text(
+                        text = stringResource(R.string.mpv_lib_installed) + " · " +
+                            "%.1f MB".format(MpvLibLoader.installedBytes(context) / 1048576.0),
+                        color = Color.White.copy(alpha = 0.4f),
+                        fontSize = 8.sp
+                    )
+                }
             }
         }
 
@@ -91,6 +106,16 @@ internal fun MpvLibPanel(
                     text = installStatusText() + "  ${(p * 100).toInt()}%",
                     color = Color.White.copy(alpha = 0.55f),
                     fontSize = 8.sp
+                )
+            }
+
+            // v2.1.243：内置库随 APK 分发，**不给删除按钮**（删了也没用，下次仍在）
+            builtInReady -> {
+                Text(
+                    text = stringResource(R.string.mpv_lib_builtin_hint),
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontSize = 7.sp,
+                    lineHeight = 9.sp
                 )
             }
 
@@ -128,7 +153,7 @@ internal fun MpvLibPanel(
         }
 
         // 失败原因（只在非安装中且有 status 时显示 —— status 仅失败时保留）
-        if (!installing && MpvLibLoader.status.isNotBlank() && !installed) {
+        if (!installing && MpvLibLoader.status.isNotBlank() && !builtInReady && !installed) {
             Text(
                 text = stringResource(R.string.mpv_lib_failed) + ": " + MpvLibLoader.status,
                 color = Color(0xFFFF8A80),

@@ -60,10 +60,14 @@ object MpvPlayerFactory {
     /**
      * 库是否可用。
      *
-     * ⚠️ v2.1.235 起 MPV 的 so **不再打进 APK**（见 `MpvLibLoader`），
-     * 所以这里不能再去试 `MPVLib.create` —— 那样只会抛 UnsatisfiedLinkError。
-     * 必须先走 `MpvLibLoader.isReady()`：它负责"已安装 且 已按依赖顺序加载成功"。
-     * 未安装时返回 false，调用方（VRPlayerScreen）会提示下载并回退 Exo。
+     * ⚠️ v2.1.235 曾把 MPV 的 so 从 APK 移除（改后下载），当时这里必须走
+     * `MpvLibLoader.isReady()`（检查下载目录）。
+     * **v2.1.243 已改回内置**：so 随 APK 分发，`MpvLibLoader.ensureLoaded()` 会
+     * **优先用 `System.loadLibrary`** 从 APK 的 `nativeLibraryDir` 加载，失败才回退
+     * 到下载目录。所以这里的语义恢复为「内置可用 **或** 下载已就绪」，一个方法覆盖两种。
+     *
+     * 仍**不应**直接试 `MPVLib.create` —— 那只在"库已加载"时才安全；
+     * 未加载时调用会抛 `UnsatisfiedLinkError`，而我们要的是一个干净的 false。
      */
     fun isAvailable(context: Context): Boolean = MpvLibLoader.isReady(context)
 

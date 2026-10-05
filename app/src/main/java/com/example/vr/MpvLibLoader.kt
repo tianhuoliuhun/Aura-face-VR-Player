@@ -18,41 +18,42 @@ import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
- * MPV native 库的**按需下载 / 安装 / 加载** —— v2.1.235。
+ * MPV native 库的**加载 / 管理** —— v2.1.235 引入，v2.1.243 改为「内置优先」。
  *
- * ## 为什么要有这一层
- * MPV 的 native 库（10 个 so，arm64 展开 36.5 MB / v7a 31.8 MB）此前直接打进 APK，
- * 但它只是**三个解码内核里的一个**，很多用户根本不会用 —— 为它让所有人的安装包
- * 都大 36MB 不划算。改成：APK 不含这些 so，用户第一次选 MPV 内核时下载。
+ * ## ⚠️ v2.1.243：库已**内置 APK**，本类的角色变成"加载器 + 可选下载兜底"
  *
- * ## ⚠️ 为什么"下载来的 so 能加载"这件事需要先实测
- * Android 从 7.0 起就收紧了 dlopen：应用只能加载**白名单路径**（APK 的
- * `nativeLibraryDir`、系统库）里的 so，从其他位置加载会报
- * `dlopen failed: library "…" is not accessible for the namespace`。
- * 而"下载到应用私有目录再加载"恰恰是白名单之外的路径，所以**必须先实测**。
+ * ### 历史
+ * v2.1.235 曾把 MPV 的 native 库（10 个 so，arm64 展开 36.5 MB / v7a 31.8 MB）
+ * **移出 APK**，改成用户第一次选 MPV 内核时下载。理由：MPV 只是三个内核里的一个，
+ * 为它让所有人的安装包都大 36MB 不划算。
  *
- * 实测方式（v2.1.235 做过，探针工程保留在 .workbuddy/tmp/so-probe/）：
- *   用 NDK 编一个探针 so，**只放进 assets 目录**（assets 不会被 AGP 解压进 lib/ 目录，
- *   因此该 so 是"APK 里完全不存在"的库），运行时复制到 filesDir 再 `System.load`。
- *   ⚠️ 只测"把 APK 里已有的 libmpv.so 复制到私有目录"是**无效**的 ——
- *      linker 可能因为这个名字已在可访问范围内而放行，测不出真实限制。
- *   实测结果：**探针加载成功**（MuMu / Android 15 / API 35 / targetSdk 36）。
- *   ⚠️ 保留意见：该模拟器用 ARM 转译，其 linker 未必与真机 AOSP 完全一致。
- *      因此本类**所有失败路径都必须能优雅降级**（加载失败 → 调用方回退 EXO，
- *      绝不黑屏、绝不崩），这也是它每个环节都返回 Boolean 而不抛异常的原因。
+ * ### 为什么 v2.1.243 又改回内置
+ * 查实 `wmv/asf/rm/rmvb` 这类格式**只有 MPV 能解**（IJK 是裁剪版 FFmpeg，
+ * 没有 wmv2/wmav2/rv 系解码器；EXO 没有 ASF/RealMedia 解析器）。
+ * 于是 MPV 从"可选内核"变成"兜底必需" —— 再要求用户先下载 36MB 才能播一个 WMV，
+ * 体验上不可接受；且下载模式多了一条"Release 可达性/下载成功率"的失败路径。
+ * 内置后由 linker 从 APK 的 `nativeLibraryDir`（Android 白名单路径）解析，最稳。
+ *
+ * ### 现在的加载顺序（[ensureLoaded]）
+ * 1. **首选**：`System.loadLibrary(短名)` —— 从 APK 内置目录加载。
+ *    此时 [LOAD_ORDER] 的**顺序不再关键**（linker 自行按 DT_NEEDED 解析），
+ *    但仍逐个加载，目的是让"某个库缺失"在这里就暴露，而不是等 mpv 初始化时崩。
+ * 2. **兜底**：若 APK 因故没带上这些 so，而 `filesDir/mpv-libs/` 下有下载副本，
+ *    则退回"按 [LOAD_ORDER] 用绝对路径 `System.load`"的方式 —— 这条路径
+ *    **顺序仍然关键**（原因见下）。
+ *
+ * ## ⚠️ 为什么下载兜底那条路必须按固定顺序加载
+ * `System.load` 走 dlopen，会按 so 的 `DT_NEEDED` 找依赖：先在**已加载库**里按
+ * SONAME 匹配，找不到才会去文件系统找（而后者会撞上 namespace 路径限制）。
+ * 所以下载路径按**依赖拓扑序**逐个加载（`LOAD_ORDER`，被依赖的在前）：
+ * 轮到 libmpv.so 时，它依赖的 avcodec/avformat/… 全都已在已加载表里，
+ * linker 直接从内存里匹配，**根本不会去碰文件系统**。
+ * （依赖拓扑已用 `DT_NEEDED` 实测核对：libplayer → libmpv → av* → c++_shared。）
  *
  * ⚠️ 写这个文件的注释时注意：**不要在块注释里写出"斜杠紧跟星号"**。
  *    Kotlin 的块注释是**可嵌套**的，注释里出现那个两字符序列会再开一层注释，
  *    结果整个文件后半段都变成注释，编译器只在文件末尾报一句
- *    "Unclosed comment"，极难定位。（本文件 v2.1.235 第一次编译就栽在这上面：
- *    上面那句原本写的是 "只放进 assets 通配符 " 位置，含连续斜杠星号。）
- *
- * ## 为什么必须按固定顺序加载
- * `System.load` 走 dlopen，会按 so 的 `DT_NEEDED` 找依赖：先在**已加载库**里按
- * SONAME 匹配，找不到才会去文件系统找（而后者会撞上 namespace 路径限制）。
- * 所以这里按**依赖拓扑序**逐个加载（`LOAD_ORDER`，被依赖的在前）：
- * 轮到 libmpv.so 时，它依赖的 avcodec/avformat/… 全都已在已加载表里，
- * linker 直接从内存里匹配，**根本不会去碰文件系统**。
+ *    "Unclosed comment"，极难定位。
  */
 object MpvLibLoader {
 
@@ -141,7 +142,13 @@ object MpvLibLoader {
         abi == "arm64-v8a" || abi == "armeabi-v7a"
     } ?: "arm64-v8a"
 
-    /** 是否已安装完成（10 个文件都在，且大小不像半截文件）。 */
+    /**
+     * **下载目录**里是否已装齐（10 个文件都在，且大小不像半截文件）。
+     *
+     * ⚠️ v2.1.243：这**只反映"下载兜底"路径**的状态，不再等于"库是否可用"。
+     *    内置模式下下载目录是空的，但库完全可用 → 判"能不能用"请用 [isReady]。
+     *    本方法只用于 UI 决定"显示下载入口还是删除按钮"。
+     */
     fun isInstalled(context: Context): Boolean {
         val dir = libDir(context)
         return LOAD_ORDER.all { name ->
@@ -151,26 +158,50 @@ object MpvLibLoader {
     }
 
     /**
-     * 按 [LOAD_ORDER] 逐个 `System.load`。幂等；成功返回 true。
+     * 按 [LOAD_ORDER] 逐个加载。幂等；成功返回 true。
+     *
+     * ## ⚠️ v2.1.243：两条加载路径，**优先 APK 内置**
+     * MPV 的 so 已改回**内置 APK**（见 `app/build.gradle.kts` 的 packaging 注释），
+     * 所以正常情况走的是 `System.loadLibrary(短名)` —— 它由 linker 从 APK 的
+     * `nativeLibraryDir`（Android 白名单路径）解析，**最稳**。此时
+     * [LOAD_ORDER] 里的 **加载顺序不再重要**（`loadLibrary` 会自行按 DT_NEEDED
+     * 解析依赖，且不撞 namespace 路径限制）—— 但仍逐个加载一次，目的是让
+     * "某个库缺失"这件事在**这里就暴露**，而不是等 mpv 初始化时崩在 native。
+     *
+     * 旧的"后下载"路径**保留**为兜底：若 APK 因某种原因没带上这些 so
+     * （例如自定义 ABI 过滤、或不慎又加了 excludes），而 `filesDir/mpv-libs/`
+     * 下有已下载的副本，则退回到"按 LOAD_ORDER 用绝对路径 System.load"的方式。
+     * 这条路径的顺序**仍然关键**（见上方 LOAD_ORDER 的说明）。
      *
      * ⚠️ 任何一步失败都返回 false（不抛）—— 调用方据此回退 EXO。
      *    失败时会把已部分加载的状态保持原样（**不做卸载**：dlopen 的库无法安全卸载，
      *    强行 dlclose 会让其他仍在使用的库崩）。
-     *
-     * ⚠️ 这里用的是 `System.load(绝对路径)` 而不是 `System.loadLibrary(名字)` ——
-     *    因为库是**运行时下载**到 `filesDir` 的，不在 APK 的 `nativeLibraryDir` 里，
-     *    `loadLibrary` 根本找不到它。lint 会报 `UnsafeDynamicallyLoadedCode`
-     *    （"从任意路径加载代码有风险"），但那正是本功能的实现方式本身 ——
-     *    所以这里显式抑制，并把风险边界写清楚：
-     *      · 来源是本仓库固定 tag `mpv-libs` 的 Release（HTTPS）；
-     *      · 解压时**只接受 LOAD_ORDER 白名单里的文件名**（防 zip 路径穿越）；
-     *      · 解压后校验文件数与大小，再逐个加载。
      */
     @android.annotation.SuppressLint("UnsafeDynamicallyLoadedCode")
     fun ensureLoaded(context: Context): Boolean {
         if (loaded) return true
         synchronized(this) {
             if (loaded) return true
+
+            // ---- 路径 1（首选）：APK 内置，用短名让 linker 自己解析 ----
+            val builtIn = try {
+                for (name in LOAD_ORDER) {
+                    // LOAD_ORDER 里是 "libxxx.so"，loadLibrary 要的是去掉 "lib" 前缀与 ".so" 的短名
+                    val short = name.removePrefix("lib").removeSuffix(".so")
+                    System.loadLibrary(short)
+                }
+                true
+            } catch (t: Throwable) {
+                Log.w(TAG, "APK 内置的 MPV 库加载失败（转试下载目录）: ${t.javaClass.simpleName}: ${t.message}")
+                false
+            }
+            if (builtIn) {
+                loaded = true
+                Log.i(TAG, "MPV native 库（APK 内置）全部加载成功（${LOAD_ORDER.size} 个）")
+                return true
+            }
+
+            // ---- 路径 2（兜底）：下载目录，绝对路径 + 严格依赖顺序 ----
             if (!isInstalled(context)) return false
             val dir = libDir(context)
             return try {
@@ -178,7 +209,7 @@ object MpvLibLoader {
                     System.load(File(dir, name).absolutePath)
                 }
                 loaded = true
-                Log.i(TAG, "MPV native 库全部加载成功（${LOAD_ORDER.size} 个）")
+                Log.i(TAG, "MPV native 库（下载目录）全部加载成功（${LOAD_ORDER.size} 个）")
                 true
             } catch (t: Throwable) {
                 // UnsatisfiedLinkError 是 Error 不是 Exception；路径限制报的
@@ -189,8 +220,19 @@ object MpvLibLoader {
         }
     }
 
-    /** 库是否可用（= 已安装 且 已成功加载）。UI 据此决定是否让用户选 MPV。 */
-    fun isReady(context: Context): Boolean = isInstalled(context) && ensureLoaded(context)
+    /**
+     * 库是否可用（= 能成功加载 native 库）。
+     *
+     * ⚠️ **v2.1.243 改法**：不再要求 `isInstalled()`（那是"下载目录 10 个文件都在"）。
+     * 因为 so 已改回**内置 APK**，此时下载目录是空的，但库完全可用 ——
+     * 若仍要求 `isInstalled`，`isReady` 会永远返回 false，MPV 就白内置了。
+     *
+     * 现在的判据是直接试加载：[ensureLoaded] 内部**先试 APK 内置（System.loadLibrary）**，
+     * 失败才回退下载目录；两条都不行才 false。
+     *
+     * 幂等且带缓存（`loaded`），所以 UI 反复调用无额外代价。
+     */
+    fun isReady(context: Context): Boolean = ensureLoaded(context)
 
     /** 是否正在安装（下载/解压中）。 */
     fun isBusy(): Boolean = installJob?.isActive == true
