@@ -36,6 +36,7 @@
 | 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **Dolphin 已内置**（开箱即用）：**40 种东方语言 + 22 种中文方言**，自带语种识别；实时生成、整片转写、SRT 导出、去标点。语言面板点**「自动」即直接使用随包内置模型**（真·语种识别，不下载）<br>Bundled offline ASR (Dolphin): 40 Eastern languages + 22 Chinese dialects with auto language detection, realtime generation, batch transcription and SRT export. The 「Auto」 entry uses the **bundled** model directly — no download |
 | 🌐 **字幕在线翻译**<br>Online Translation | **10 种引擎**（4 个免密/免费：必应 / Google 免密 / MyMemory / LibreTranslate）；本地词库缓存（LRU + TTL + 按语言分文件）<br>10 engines including 4 keyless/free, with a local per-language translation memory |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
+| ⏩ **进度条拖动**<br>Seeking | **松手才定位**（拖动中只更新预览，不堆积 seek）—— **AVI / AV1 也能顺畅拖动**；容器不支持定位时**不重新编码**地自动重封装修复；AVI 内嵌 AV1 明确提示改用 MPV 内核<br>Seek-on-release keeps AVI/AV1 dragging smooth; auto remux (no re-encode) when a file cannot seek |
 | 🎞️ **多内核与格式兼容**<br>Multi-kernel & Formats | **四个内核可选**（EXO / IJK / MPV / 系统解码）+ 自动路由：打开 **WMV / ASF / RM / RMVB / ISO / VOB** 等片源时**本次自动切换**到能吃它的内核（不改写你的设置）。**MPV 已内置进 APK**，无需下载即可播放上述格式<br>Four selectable kernels with container-based auto-routing; **MPV is bundled in-APK** so WMV/ASF/RM/RMVB/ISO/VOB play out of the box |
 
 ---
