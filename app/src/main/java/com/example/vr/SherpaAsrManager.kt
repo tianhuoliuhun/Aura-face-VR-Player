@@ -227,6 +227,10 @@ object SherpaAsrManager {
         // 2026-10-02 用户要求「自动模型也改为这个」——
         // SenseVoice 的 auto 实际上只能在 中/英/日/韩/粤 里猜，而 Dolphin 能真正自动判定语种，
         // 语义上更贴合「自动」。
+        // ⚠️ v2.1.246：`modelId = DOLPHIN_DIR` 必须与 `AsrExtModels.DOLPHIN_LANGS` 里的
+        //    `"auto"` 条目**配套**（那里已登记）—— chips 的选中判定是 `code@modelId`
+        //    的精确匹配，`activeModelId` 走 `resolveExtModel(..., "auto")?.dirName ?: "builtin"`；
+        //    少登记一处就退回 `"builtin"`，这条 chip 永不点亮。
         add(SherpaLang("auto", R.string.asr_lang_auto, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.COMMON))
         add(SherpaLang("zh", R.string.asr_lang_zh, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.CHINESE))
         add(SherpaLang("ja", R.string.asr_lang_ja, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.EAST_ASIA))
@@ -564,12 +568,18 @@ object SherpaAsrManager {
     }
 
     /**
-     * 创建 SenseVoice 识别器。
+     * 创建离线识别器（当前实现只有 **Dolphin** 一条主线，SenseVoice 已于 v2.1.208 退役）。
      *
      * [threads] 为推理线程数（1~10）；传 0 或越界时按设备核心数自动取 `min(核数, 4)`。
      * 推荐值 4–6：太少跟不上播放速度，太多会挤占视频解码与渲染。
      *
-     * 模型来源：下载版（filesDir）优先，其次内置 assets —— 前者便于不发版换模型。
+     * 路由（v2.1.246 起）：
+     * - `language == "auto"` → **[createDolphinRecognizer]**（内置 assets 优先）
+     * - 有扩展候选且用户选了它 → [createExtRecognizer]
+     * - 其余（`zh` / `ja` / `ko` / `yue` …）→ [createDolphinRecognizer]
+     *
+     * ⚠️ 模型来源：**内置 assets 优先**，assets 缺失时才回退 filesDir 的下载版
+     * （v2.1.208 起模型已随 APK 打包，不再需要先复制到 filesDir）。
      * 传 asset 路径时必须同时给非空 AssetManager，传绝对路径时必须给 null
      * （sherpa-onnx 对"绝对路径 + 非空 AssetManager"会判定冲突并终止进程）。
      */
@@ -590,6 +600,14 @@ object SherpaAsrManager {
         // 这既不符合「自动」的语义，且 SenseVoice 本身已在 v2.1.208 退役
         // （assets 可能已不存在）。此前选「自动」就落在这条废弃路径上，
         // 表现为「识别器创建失败」或「只能在五语里瞎猜」。
+        //
+        // ⚠️ v2.1.246（用户：「AI 字幕面板自动选项路由到内置模型」）：
+        //    这个短路分支**显式锁定内置 Dolphin**，不再依赖「`candidatesByKey("auto")`
+        //    恰好为空 → 落到最后的兜底 return」这条隐式路径。
+        //    配套改动见 [AsrExtModels.DOLPHIN_LANGS] —— 那里把 `auto` 登记成了
+        //    Dolphin 的语言键，于是 `resolveExtModel(ctx, "auto")` 不再返回 null，
+        //    chip 的选中判定（`auto@<DOLPHIN_DIR>`）终于能对上 `activeModelId`。
+        //    两条路都通向 `createDolphinRecognizer`，结论一致。
         // =======================================================================
         if (language == "auto") {
             return createDolphinRecognizer(context, threads)

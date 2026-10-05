@@ -122,7 +122,8 @@
   - **40 种东方语言 + 22 种中文方言**，自带语种识别（LID），无需指定语言
   - 中文 WER 9.2%（Whisper large-v3 为 27.9%）；RTF 0.094（官方四个 Dolphin 变体中最快）
   - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载
-  - Offline ASR: **Dolphin bundled in the APK** — 40 Eastern languages + 22 Chinese dialects with auto language detection, no download needed
+  - 语言选择里的**「自动」= 直接使用随包内置的 Dolphin**（真·语种识别，不是下载版）：点「自动」后模型来源显示为「内置版（assets）」，面板上该 chip 会正常高亮（v2.1.246 修复）
+  - Offline ASR: **Dolphin bundled in the APK** — 40 Eastern languages + 22 Chinese dialects with auto language detection, no download needed. The 「Auto」 entry in the language picker routes to the **bundled** Dolphin (source label: *built-in (assets)*), fixed in v2.1.246
 - 🌍 **多语言扩展识别（共 17 种语言）/ Multi-language ASR (17 languages)**
   - 内置 5 语之外，可在设置里**按需下载**官方离线模型：越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
   - Beyond the 5 bundled languages, more official offline models can be **downloaded on demand** in Settings: Vietnamese / Russian / French / German / Spanish / Belarusian / Croatian / Italian / Polish / Ukrainian / Thai

@@ -406,6 +406,24 @@ object AsrExtModels {
      * 以及已有专用模型的 ru/th/vi，避免同语言三四个候选）。
      */
     private val DOLPHIN_LANGS: List<Pair<String, Int>> = listOf(
+        // ⚠️ v2.1.246：**「自动」必须登记在这里**（用户 2026-10-05 要求
+        //    「AI 字幕面板自动选项路由到内置模型」）。
+        //
+        // 病根：`SherpaAsrManager.sherpaLanguages` 里「自动」那条 chip 的
+        //   `modelId = DOLPHIN_DIR`，而 chips 的选中判定是
+        //   `"$code@$modelId" == "$langCode@$activeModelId"`；
+        //   但 `activeModelId` 走 `resolveExtModel(ctx, "auto")?.dirName ?: "builtin"`，
+        //   而 `candidatesByKey("auto")` 原先**返回空**（下表没有 auto 键）
+        //   → 解析出 `null` → 回落成 `"builtin"`
+        //   → chip 拼出 `auto@dolphin-base-ctc-multi-lang-int8`、当前值拼出 `auto@builtin`
+        //   → **永不相等 → 「自动」永远不高亮**（识别本身其实已走内置 Dolphin，
+        //     因为 `createRecognizer` 对 "auto" 有短路分支，但用户看不到任何选中反馈）。
+        //
+        // 登记后：`candidatesByKey("auto")` → [Dolphin] → `resolveExtModel` 返回它
+        //   → `activeModelId = DOLPHIN_DIR` → 与 chip uid 对齐 → 正常高亮。
+        // 顺带让 `isModelReadyFor("auto")` / `isDownloadNeededFor("auto")` 走**显式**候选链路
+        //   （此前靠 `cands.isEmpty()` 的兜底分支，结论相同但现在有据可依）。
+        "auto" to R.string.asr_lang_auto,  // 自动（Dolphin 自带 LID，真·语种识别）
         // 2026-10-02 新增：**中日韩** —— Dolphin 同样覆盖这三种语言，
         // 因此它们与内置 SenseVoice 形成「同语言多候选」，用户可切换（中文1=内置 / 中文2=Dolphin）。
         // ⚠️ 注：`zh` 与方言 `zh_cn`（普通话）语义重叠，但分属不同组、序号不同，
@@ -723,6 +741,10 @@ object AsrExtModels {
         // ⚠️ `zh` 不匹配上面的 `zh_` 前缀分支，若不单独列出就会落进 else → 被误判成 EUROPE
         key == "zh" -> AsrLangGroup.CHINESE
         key == "yue" -> AsrLangGroup.CHINESE
+        // v2.1.246：`auto`（语种识别）不属于任何语区 —— 显式归 COMMON。
+        // 漏了它会落进 else → EUROPE，于是「按语区」视角会在「欧洲」组里
+        // 冒出一条「自动」，语义完全不对。
+        key == "auto" -> AsrLangGroup.COMMON
         GROUP_OVERRIDE.containsKey(key) -> GROUP_OVERRIDE.getValue(key)
         else -> AsrLangGroup.EUROPE       // ru/fr/de/es/be/hr/it/pl/uk + Parakeet v3 的 16 种
     }
