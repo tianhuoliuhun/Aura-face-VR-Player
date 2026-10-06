@@ -50,6 +50,10 @@ fun DanmuSettingsPanel(
     onConfigChange: (DanmuConfig) -> Unit,
     /** 记忆模式关时禁止写入敏感项（与项目既有 is_memory_mode_enabled 门控一致） */
     canPersistSecrets: Boolean,
+    /** v2.3.1：已生成的弹幕累计条数（渲染层未接前，用于确认「取帧→请求→入队」链路已通） */
+    generatedCount: Int = 0,
+    /** v2.3.1：最近一次失败原因（空串 = 无错误） */
+    lastError: String = "",
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -78,6 +82,15 @@ fun DanmuSettingsPanel(
             Switch(
                 checked = config.isEnabled,
                 onCheckedChange = { onConfigChange(config.copy(isEnabled = it)) }
+            )
+        }
+
+        // ===== v2.3.1：运行状态（仅在开启时显示）=====
+        if (config.isEnabled) {
+            DanmuStatusCard(
+                isConfigured = config.isReadyToRequest(),
+                generatedCount = generatedCount,
+                lastError = lastError
             )
         }
 
@@ -248,6 +261,71 @@ fun DanmuSettingsPanel(
             fontSize = 10.sp
         )
     }
+}
+
+/**
+ * v2.3.1：运行状态卡片。
+ *
+ * 让用户能**一眼看出链路是否通了** —— 本版弹幕还没有渲染层（P5 未做），
+ * 若不显示状态，用户开启后会以为「没反应 = 坏了」。
+ */
+@Composable
+private fun DanmuStatusCard(
+    isConfigured: Boolean,
+    generatedCount: Int,
+    lastError: String
+) {
+    val statusColor = when {
+        !isConfigured -> Color(0xFFFFB74D)   // 橙：配置不全
+        lastError.isNotEmpty() -> Color(0xFFEF5350)  // 红：最近一次失败
+        generatedCount > 0 -> Color(0xFF81C784)      // 绿：已产出
+        else -> Color.White.copy(alpha = 0.6f)       // 灰：等待首次结果
+    }
+    val statusText = when {
+        !isConfigured -> stringResource(R.string.danmu_status_not_configured)
+        lastError.isNotEmpty() -> lastError
+        generatedCount > 0 -> stringResource(R.string.danmu_status_generated, generatedCount)
+        else -> stringResource(R.string.danmu_status_waiting)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(statusColor)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.danmu_status_title),
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Text(
+            text = statusText,
+            color = statusColor,
+            fontSize = 11.sp,
+            lineHeight = 15.sp
+        )
+        // ⚠️ 本版弹幕**尚未上屏**（渲染层在下一版），必须如实告知，否则用户会以为功能失灵
+        Text(
+            text = stringResource(R.string.danmu_status_render_pending),
+            color = Color.White.copy(alpha = 0.4f),
+            fontSize = 10.sp,
+            lineHeight = 14.sp
+        )
+    }
+    Spacer(modifier = Modifier.height(6.dp))
 }
 
 @Composable

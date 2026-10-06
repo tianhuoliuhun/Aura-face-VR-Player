@@ -251,6 +251,16 @@
     <string name="danmu_stroke">Stroke</string>
     <string name="danmu_bg">Background</string>
     <string name="danmu_color_hint">Color is a global setting applied to all AI danmaku; it is independent of the subtitle color.</string>
+    <string name="danmu_status_title">Status</string>
+    <string name="danmu_status_not_configured">Not configured yet: fill in endpoint, model name and API key</string>
+    <string name="danmu_status_waiting">Ready, waiting for the first frame analysis... (a few seconds)</string>
+    <string name="danmu_status_generated">%1$d danmaku generated</string>
+    <string name="danmu_status_render_pending">Note: this build covers capture → recognition → generation only. On-screen rendering comes next.</string>
+    <string name="danmu_err_not_configured">Incomplete config: check endpoint, model and API key</string>
+    <string name="danmu_err_no_renderer">Renderer not ready yet, will retry automatically</string>
+    <string name="danmu_err_capture_timeout">Frame capture timed out, will retry automatically</string>
+    <string name="danmu_err_empty_response">Model returned no usable danmaku, will retry automatically</string>
+    <string name="danmu_err_unexpected">Unexpected error, this round was skipped (playback unaffected)</string>
     <string name="group_title_enhance">Image enhancement</string>
     <string name="group_title_about">About &amp; open source licenses</string>
     <string name="licenses_title">Open source licenses</string>

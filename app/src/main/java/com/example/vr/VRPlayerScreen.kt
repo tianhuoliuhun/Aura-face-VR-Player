@@ -823,6 +823,7 @@ fun VRPlayerScreen(
             apply()
         }
     }
+
     // v126：实时 AI 字幕引擎（方案文档「边播边生成」，不写 SRT 文件）
     val realtimeSubtitleEngine = remember { RealtimeSubtitleEngine(context) }
     var isRealtimeSubtitleEnabled by remember {
@@ -1787,6 +1788,122 @@ fun VRPlayerScreen(
         playerInstance?.setPlaybackSpeed(speedToApply)
     }
     var currentGlSurfaceView by remember { mutableStateOf<VRGLSurfaceView?>(null) }
+
+    // ===== v2.3.1（P2 + P4）：AI 弹幕编排 =====
+    // 链路：定时触发 → GL 取帧（P3）→ 视觉模型（P2）→ 引擎入队/去重/分轨（P4）→ 渲染（P5，未做）
+    //
+    // ⚠️ 本版**只做「取帧→请求→入队」**，弹幕**尚未上屏**（渲染层 P5 在下一版）。
+    //    因此这里产生的结果会存进 danmuEngine，供下一版渲染层直接消费。
+    // ⚠️ 本块**必须位于 `currentGlSurfaceView` 声明之后**（依赖它取 renderer）。
+    //
+    // 设计要点（对应方案文档 P2/P4）：
+    // - 视觉客户端与引擎都 remember 一次，不随重组重建
+    // - 定时器用 LaunchedEffect + while(true) + delay，**仅在开启时运行**（关闭即取消协程）
+    // - 请求在 IO 线程、串行（一次未回来不再发起下一次），天然限流
+    // - 帧异常/请求失败一律静默跳过，绝不影响播放
+    val danmuVisionClient = remember { DanmuVisionClient() }
+    val danmuEngine = remember { DanmuEngine() }
+    // 供 UI 显示「已生成」条数（渲染层未接前，用于确认链路已通）
+    var danmuGeneratedCount by remember { mutableIntStateOf(0) }
+    var danmuLastError by remember { mutableStateOf("") }
+
+    // 运行参数跟随配置变化
+    LaunchedEffect(danmuConfig.speedPxPerSec, danmuConfig.maxTracks, danmuConfig.dedupThresholdPercent) {
+        danmuEngine.speedPxPerSec = danmuConfig.speedPxPerSec
+        danmuEngine.maxTracks = danmuConfig.maxTracks
+        danmuEngine.dedupThresholdPercent = danmuConfig.dedupThresholdPercent
+    }
+
+    // 关闭弹幕时清空（避免重新打开后立刻涌出旧弹幕）
+    LaunchedEffect(danmuConfig.isEnabled) {
+        if (!danmuConfig.isEnabled) {
+            danmuEngine.reset()
+            danmuGeneratedCount = 0
+            danmuLastError = ""
+        }
+    }
+
+    // 主循环：按 intervalSec 周期执行一次「取帧 → 请求 → 入队」
+    LaunchedEffect(danmuConfig.isEnabled, danmuConfig.intervalSec) {
+        if (!danmuConfig.isEnabled) return@LaunchedEffect
+        if (!danmuConfig.isReadyToRequest()) {
+            danmuLastError = context.getString(R.string.danmu_err_not_configured)
+            return@LaunchedEffect
+        }
+        val periodMs = danmuConfig.intervalSec.coerceIn(
+            DanmuConfig.MIN_INTERVAL_SEC, DanmuConfig.MAX_INTERVAL_SEC
+        ) * 1000L
+        // 首次稍作等待，避免刚进页面就抓一帧（可能还是黑帧/加载图）
+        delay(FIRST_CAPTURE_DELAY_MS)
+        while (true) {
+            try {
+                // ① 请求一帧（GL 线程在下一帧末尾回读；false 表示间隔未到/已禁用）
+                val renderer = currentGlSurfaceView?.renderer
+                if (renderer == null) {
+                    danmuLastError = context.getString(R.string.danmu_err_no_renderer)
+                    delay(periodMs)
+                    continue
+                }
+                val requested = renderer.requestDanmuFrame(danmuConfig.imageMaxWidth)
+                if (!requested) {
+                    // 节流中（距上次太近）—— 等下一周期，不算错误
+                    delay(periodMs)
+                    continue
+                }
+                // ② 轮询取出结果（GL 回读发生在下一帧，给它若干次机会）
+                var frame: android.graphics.Bitmap? = null
+                var tries = 0
+                while (tries < FRAME_POLL_MAX_TRIES && frame == null) {
+                    delay(FRAME_POLL_INTERVAL_MS)
+                    val taken = renderer.takeDanmuFrame()
+                    if (taken != null) {
+                        val (px, w, h) = taken
+                        // 渲染层交给我们的 pix 行序已翻正，可直接构 Bitmap
+                        frame = android.graphics.Bitmap.createBitmap(
+                            px, w, h, android.graphics.Bitmap.Config.ARGB_8888
+                        )
+                    }
+                    tries++
+                }
+                if (frame == null) {
+                    danmuLastError = context.getString(R.string.danmu_err_capture_timeout)
+                    delay(periodMs)
+                    continue
+                }
+                // ③ 交给视觉模型（内部已切 IO；失败返回空列表，不抛）
+                val lines = danmuVisionClient.requestDanmu(frame, danmuConfig)
+                // ⚠️ 用完立刻回收：1024×576 ARGB ≈ 2.3 MB，long-running 页面不能泄漏
+                if (!frame.isRecycled) frame.recycle()
+
+                if (lines.isEmpty()) {
+                    danmuLastError = context.getString(R.string.danmu_err_empty_response)
+                } else {
+                    danmuLastError = ""
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    // 同步屏幕宽度（引擎按它算位置与过期）
+                    danmuEngine.screenWidthPx = (currentGlSurfaceView?.width ?: 0).toFloat()
+                    val added = danmuEngine.enqueue(lines, now)
+                    danmuGeneratedCount += added
+                    // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）
+                    danmuEngine.prune(now)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e  // 协程取消必须原样抛出，否则 LaunchedEffect 无法正确结束
+            } catch (e: Exception) {
+                // 任何意外都不能让弹幕拖垮播放页
+                android.util.Log.e("VRPlayerScreen", "弹幕编排循环异常: ${e.message}", e)
+                danmuLastError = context.getString(R.string.danmu_err_unexpected)
+            }
+            delay(periodMs)
+        }
+    }
+
+    // 退出页面时清理（引擎是纯内存对象，reset 即释放）
+    DisposableEffect(Unit) {
+        onDispose {
+            danmuEngine.reset()
+        }
+    }
 
     // v104：手机自选 LUT 文件（.cube）选择器
     val lutPickerLauncher = rememberLauncherForActivityResult(
@@ -6700,7 +6817,9 @@ BatchTranscribeSection(
                                     DanmuSettingsPanel(
                                         config = danmuConfig,
                                         onConfigChange = { danmuConfig = it },
-                                        canPersistSecrets = isMemoryModeEnabled
+                                        canPersistSecrets = isMemoryModeEnabled,
+                                        generatedCount = danmuGeneratedCount,
+                                        lastError = danmuLastError
                                     )
                                 }
                                 /** 区块 6：美颜设置（Shader 实时磨皮美白 + 预设方案 + 对比原图 + 2D 人像精修） */
@@ -7955,6 +8074,20 @@ private const val SEEK_THUMB_QUANTUM_MS = 1000L
 /** 拖动预览目标尺寸（匹配 UI 的 160dp×90dp，在 xxhdpi 上足够清晰）。 */
 private const val SEEK_THUMB_W = 320
 private const val SEEK_THUMB_H = 180
+
+// ===================== v2.3.1（P2+P4）：AI 弹幕编排参数 =====================
+
+/**
+ * 首次取帧前的等待时间（ms）。
+ * 刚进播放页时画面可能还是黑帧/封面图，立刻抓一帧会让模型看到无意义内容（浪费 token）。
+ */
+private const val FIRST_CAPTURE_DELAY_MS = 8_000L
+
+/** 请求取帧后，轮询结果的最大尝试次数（GL 回读发生在下一帧） */
+private const val FRAME_POLL_MAX_TRIES = 20
+
+/** 每次轮询的间隔（ms）—— 20 × 100ms = 最多等 2s */
+private const val FRAME_POLL_INTERVAL_MS = 100L
 
 /**
  * 把抓到的原始帧缩放到拖动预览尺寸（320×180，16:9）。

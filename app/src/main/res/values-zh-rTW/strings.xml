@@ -253,6 +253,16 @@
     <string name="danmu_stroke">描邊</string>
     <string name="danmu_bg">背景底</string>
     <string name="danmu_color_hint">顏色為全域設定，對所有 AI 彈幕統一生效；可與影片內的字幕顏色分開設定。</string>
+    <string name="danmu_status_title">執行狀態</string>
+    <string name="danmu_status_not_configured">尚未設定完成：請填寫服務端點、模型名稱與 API Key</string>
+    <string name="danmu_status_waiting">已就緒，正在等待首次畫面辨識…（約需數秒）</string>
+    <string name="danmu_status_generated">已生成 %1$d 條彈幕</string>
+    <string name="danmu_status_render_pending">註：本版只完成「取幀 → 辨識 → 生成」，彈幕上屏將於下一版提供。</string>
+    <string name="danmu_err_not_configured">設定不完整：請檢查端點、模型與 API Key</string>
+    <string name="danmu_err_no_renderer">渲染器尚未就緒，稍後自動重試</string>
+    <string name="danmu_err_capture_timeout">畫面擷取逾時，稍後自動重試</string>
+    <string name="danmu_err_empty_response">模型未回傳可用彈幕，稍後自動重試</string>
+    <string name="danmu_err_unexpected">出現意外錯誤，已跳過本輪（不影響播放）</string>
     <string name="group_title_enhance">畫質增強</string>
     <string name="group_title_about">關於與開源許可</string>
     <string name="licenses_title">開源軟件許可</string>

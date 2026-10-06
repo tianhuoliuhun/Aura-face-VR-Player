@@ -166,32 +166,44 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- 🚧 **AI 弹幕（v2.2.0 配置与取帧 / v2.3.0 独立分组与全局颜色）/ AI Danmaku (v2.2.0 capture, v2.3.0 own group + global color)**
-  - **当前状态**：已含「设置项」「GL 取帧通道」「全局颜色」，**尚无弹幕上屏**；
-    视觉请求与弹幕渲染在后续版本落地
-  - Settings panel, GL frame-capture channel and global color. **No on-screen
-    rendering yet** — vision requests and the renderer land in a later version
+- 🚧 **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎）/ AI Danmaku**
+  - **当前状态**：已完成「设置项」「GL 取帧」「全局颜色」「视觉识别」「弹幕引擎」，
+    **弹幕尚未上屏**（渲染层在下一版）；设置面板内会显示**运行状态卡片**便于确认链路
+  - Settings, GL capture, global color, vision and engine are done.
+    **No on-screen rendering yet** — a status card in settings shows pipeline health
   - **独立分组**（v2.3.0）：弹幕设置是**独立的顶级折叠分组**，不再混在「字幕功能设置」里
     —— 两者是两条独立链路（字幕来自文件/ASR，弹幕来自视觉模型实时生成）
-  - Own top-level group (v2.3.0): danmaku settings are no longer nested inside subtitles
+  - Own top-level group (v2.3.0), no longer nested inside subtitles
   - **全局颜色**（v2.3.0）：文字颜色、描边、背景底三项**统一作用于所有弹幕**，
-    且与字幕颜色**互相独立**；颜色选项复用字幕的既有色板
-  - Global color (v2.3.0): text color, stroke and background apply to **all** danmaku
-    and stay independent from subtitle colors
+    且与字幕颜色**互相独立**
+  - Global color (v2.3.0): text color, stroke and background apply to **all** danmaku,
+    independent from subtitle colors
   - **视觉模型**：默认接入 **小米 MiMo V2.6 Flash**（OpenAI 兼容协议，支持图片输入），
     端点与模型名均可改，也可换成任意 OpenAI 兼容的视觉模型
   - Vision model defaults to **Xiaomi MiMo V2.6 Flash** (OpenAI-compatible, image input
     supported); endpoint and model name are editable
+  - **识别链路**（v2.3.1）：按间隔定时取一帧 → 缩放为 JPEG 后 base64 上传 → 解析返回文本
+    ；图片**先缩放再编码**（1024 宽 JPEG 通常 60–150 KB，而原图 base64 可达数 MB）
+  - Vision pipeline (v2.3.1): periodic frame capture → downscale to JPEG → base64 upload → parse.
+    Frames are **downscaled before encoding** (1024px JPEG is typically 60–150 KB)
+  - **弹幕引擎**（v2.3.1，纯逻辑 + 17 条单元测试）：相似度去重（编辑距离归一化）、
+    轨道避让（同批分散 + 不追尾）、队列上限、暂停恢复
+  - Engine (v2.3.1, pure logic + 17 unit tests): similarity dedup, track avoidance,
+    queue cap, pause/resume
+  - **运行状态卡片**（v2.3.1）：设置面板内实时显示链路状态（未配置 / 等待中 / 已生成 N 条 /
+    出错原因），并明确标注「弹幕尚未上屏」，避免误判功能失效
+  - Status card (v2.3.1) surfaces pipeline state (unconfigured / waiting / N generated /
+    error) and states plainly that on-screen rendering is not yet wired up
   - **可调项**：识别间隔、每批条数、滚动速度、轨道数、不透明度、字号、弹幕人格提示词
   - Tunable: interval, batch size, scroll speed, tracks, opacity, font size, persona prompt
   - **取帧机制**：独立 FBO + `glBlitFramebuffer` 真缩放 + 行序翻转；
     VR 分屏下**只取左眼**（送整屏会让模型看到两张一样的图）
   - Capture uses a dedicated FBO with true downscaling and row-order flip;
     **left-eye-only** in split-screen VR
-  - **性能**：取帧按需触发（未请求时零开销）、低频节流、独立 FBO 不干扰美颜管线；
-    颜色为纯渲染参数，不增加任何开销
-  - Performance: capture is on-demand (zero cost when idle), throttled, and uses a
-    dedicated FBO so the beauty pipeline is untouched; colors add no runtime cost
+  - **性能与容错**：取帧按需触发（未请求时零开销）、低频节流、独立 FBO 不干扰美颜管线；
+    视觉请求失败/超时一律**静默降级**，绝不影响播放；帧用完立即回收
+  - Performance & resilience: capture is on-demand (zero cost when idle), throttled, and
+    uses a separate FBO; vision failures degrade silently and never affect playback
   - **隐私**：开启后画面会压缩后上传至你所配置的服务，请自行确认其隐私政策
   - Privacy: frames are compressed and uploaded to the endpoint you configure
   - When nothing parses, an explicit toast is shown instead of failing silently

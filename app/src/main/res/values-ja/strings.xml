@@ -227,6 +227,16 @@
     <string name="danmu_stroke">縁取り</string>
     <string name="danmu_bg">背景</string>
     <string name="danmu_color_hint">色は全体設定で、すべての AI コメントに適用されます。字幕の色とは別に設定できます。</string>
+    <string name="danmu_status_title">動作状況</string>
+    <string name="danmu_status_not_configured">未設定です：エンドポイント・モデル名・API キーを入力してください</string>
+    <string name="danmu_status_waiting">準備完了。最初の画面認識を待機中…（数秒）</string>
+    <string name="danmu_status_generated">%1$d 件のコメントを生成</string>
+    <string name="danmu_status_render_pending">注：この版は「キャプチャ→認識→生成」までです。画面表示は次版で対応します。</string>
+    <string name="danmu_err_not_configured">設定が不完全です：エンドポイント・モデル・API キーを確認してください</string>
+    <string name="danmu_err_no_renderer">レンダラー未準備。自動的に再試行します</string>
+    <string name="danmu_err_capture_timeout">画面キャプチャがタイムアウトしました。自動的に再試行します</string>
+    <string name="danmu_err_empty_response">モデルが有効なコメントを返しませんでした。自動的に再試行します</string>
+    <string name="danmu_err_unexpected">予期しないエラー。今回はスキップしました（再生に影響なし）</string>
     <string name="group_title_enhance">画質強化</string>
     <string name="group_title_about">アプリについてとオープンソースライセンス</string>
     <string name="licenses_title">オープンソースライセンス</string>
