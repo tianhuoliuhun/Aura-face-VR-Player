@@ -61,6 +61,7 @@
     <string name="subtitle_translate_engine">Translation engine</string>
 
     <!-- ===== batch ===== -->
+    <string name="toast_subtitle_empty_format">No subtitles could be parsed from %1$s. Supported: SRT / VTT / ASS / SSA — please check that the file is not empty or corrupted.</string>
     <string name="toast_subtitle_loaded">Loaded %1$d subtitle cues</string>
     <string name="toast_subtitle_load_failed">Failed to load subtitle: %1$s</string>
     <string name="asr_lang_switch_hint">Recognition language: %1$s (reloading model, ~5s)</string>
@@ -270,6 +271,10 @@
     <string name="picker_source_title">Choose file source</string>
     <string name="picker_source_gallery">Photos / videos gallery</string>
     <string name="picker_source_any_file">Any file (WMV / ISO / AVI …)</string>
+    <string name="picker_source_gallery_desc">Thumbnails, browsable by album / date — best for everyday use</string>
+    <string name="picker_source_any_file_desc">File tree — reach WMV / ISO / AVI that the gallery hides</string>
+    <string name="picker_source_formats_title">Main supported formats</string>
+    <string name="picker_source_formats_list">Containers: MP4 / MKV / WebM / AVI / MOV / FLV / TS / MPG / VOB / WMV / RMVB / ISO\nCodecs: H.264 / HEVC / AV1 / VP9 / MPEG-4\nSubtitles: SRT / VTT / ASS / SSA (external + embedded)</string>
     <string name="picker_source_hint">The gallery entry does not list WMV, ISO and other non-standard video formats — use "Any file"</string>
     <string name="beauty_projection_menu">Skin smoothing &amp; projection submenu</string>
     <string name="image_static_panorama">Panorama rendered statically - drag to look around</string>

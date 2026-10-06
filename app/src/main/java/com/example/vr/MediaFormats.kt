@@ -182,8 +182,31 @@ object MediaFormats {
     val IJK_ONLY = setOf(
         "wmv", "asf", "wmvhd",           // ASF 家族（.wmvhd 是老高清 WMV 的写法）
         "rm", "rmvb", "ra", "ram", "rmhd", // RealMedia 家族
-        "iso"                            // 光盘镜像
+        "iso",                           // 光盘镜像
+        "ivf"                            // ⚠️ v2.1.248 新增：AV1 裸流（IVF 容器）
     )
+
+    /**
+     * **AV1 裸流容器**（v2.1.248 新增）。
+     *
+     * 为什么单列：`.ivf` 是本项目**唯一**会被归入 [IJK_ONLY]（= 仅 MPV 能解）
+     * 的「现代编码」格式 —— 它既不是老旧的 WMV/RM，也和 `iso` 的特殊处理无关，
+     * 分开记录便于将来审计时一眼看出「MPV 兜底集合里混进了一个 AV1 容器」。
+     *
+     * ⚠️⚠️ **实证依据（务必别再改动这里而不重新验证）**：
+     *  - `androidx.media3:media3-extractor:1.4.1` 的 `classes.jar` 共 **453 个类**，
+     *    搜 `Ivf` / `Obu` / `Av1` **全部零命中** → **EXO 没有 IVF 抽取器**，不可行。
+     *  - MPV 的 `libavformat.so`（3.38 MB，全量 FFmpeg）在偏移 `@371556` 处有
+     *    **`On2 IVF`** 这个字符串 —— 那正是 FFmpeg `ivf` demuxer 的 `long_name`
+     *    （紧邻 `matroska,webm`等同级 demuxer 描述串）→ **MPV 可以开 `.ivf`**。
+     *  - `.ivf` 文件内部是 `AV1` 编码 → MPV 侧有 `libdav1d` / `cbs_av1`（已实测存在）。
+     *
+     * ⚠️ **`obu`（裸 OBU 流）与 `av1`（裸 AV1 扩展名）故意不登记**：
+     *    FFmpeg 没有 `.obu` 的 demuxer（`libavformat.so` 里 `obu_*` 全是
+     *    `cbs_av1` 的语法元素名，不是 demuxer 名），登记了只会「能选中、打不开」。
+     *    宁可不放行，也不要重蹈 v2.1.241「搜到名字就以为支持」的覆辙。
+     */
+    val AV1_RAW = setOf("ivf")
 
     /**
      * **只有 EXO 能开、绝不能路由到 IJK** 的容器。
@@ -244,14 +267,14 @@ object MediaFormats {
      * 语义已扩展为「媒体容器」；需要**严格只要视频**时请用 [isSupportedVideoOnly]。
      */
     fun isSupportedVideoExtension(ext: String): Boolean =
-        ext in COMMON || ext in IJK_ONLY || ext in AUDIO_ONLY
+        ext in COMMON || ext in IJK_ONLY || ext in AUDIO_ONLY || ext in AV1_RAW
 
     /** 只判「视频容器」（不含纯音频）。 */
     fun isSupportedVideoOnly(ext: String): Boolean =
-        ext in COMMON || ext in IJK_ONLY
+        ext in COMMON || ext in IJK_ONLY || ext in AV1_RAW
 
     /** 该容器是否**必须**交给 IJK，EXO / 系统解码接不住。 */
-    fun requiresIjk(ext: String): Boolean = ext in IJK_ONLY
+    fun requiresIjk(ext: String): Boolean = ext in IJK_ONLY && ext !in AV1_RAW
 
     /**
      * 该容器是否**只能**由 EXO 打开（IJK 的裁剪版 FFmpeg 没有对应 demuxer）。
@@ -291,7 +314,7 @@ object MediaFormats {
      * 用途：内核路由与失败降级都据此决定是否改用 MPV。
      */
     fun requiresMpv(ext: String): Boolean =
-        ext in IJK_ONLY && ext != "iso"
+        (ext in IJK_ONLY || ext in AV1_RAW) && ext != "iso"
 
     /**
      * 该容器是否值得「自动切换到 MPV」。

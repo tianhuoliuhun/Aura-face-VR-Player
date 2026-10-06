@@ -53,6 +53,7 @@
     <string name="subtitle_mode_bilingual">이중 언어</string>
     <string name="subtitle_mode_translated_only">번역만</string>
     <string name="subtitle_translate_engine">번역 엔진</string>
+    <string name="toast_subtitle_empty_format">%1$s에서 자막을 추출하지 못했습니다. 지원 형식: SRT / VTT / ASS / SSA. 파일이 비어 있거나 손상되지 않았는지 확인해 주세요.</string>
     <string name="toast_subtitle_loaded">자막 %1$d개를 불러왔습니다</string>
     <string name="toast_subtitle_load_failed">자막 불러오기 실패: %1$s</string>
     <string name="asr_lang_switch_hint">인식 언어: %1$s (모델 다시 로드, 약 5초)</string>
@@ -246,6 +247,10 @@
     <string name="picker_source_title">파일 소스 선택</string>
     <string name="picker_source_gallery">사진 / 동영상 갤러리</string>
     <string name="picker_source_any_file">모든 파일(WMV / ISO / AVI 등)</string>
+    <string name="picker_source_gallery_desc">썸네일 제공, 앨범/날짜별 탐색. 평소에는 이쪽을 권장</string>
+    <string name="picker_source_any_file_desc">파일 트리. 갤러리에 안 보이는 WMV / ISO / AVI 선택 가능</string>
+    <string name="picker_source_formats_title">주요 지원 형식</string>
+    <string name="picker_source_formats_list">컨테이너: MP4 / MKV / WebM / AVI / MOV / FLV / TS / MPG / VOB / WMV / RMVB / ISO\n코덱: H.264 / HEVC / AV1 / VP9 / MPEG-4\n자막: SRT / VTT / ASS / SSA (외부 + 내장)</string>
     <string name="picker_source_hint">갤러리에서는 WMV, ISO 등 비표준 동영상 형식을 선택할 수 없습니다. "모든 파일"을 사용하세요</string>
     <string name="beauty_projection_menu">미용 파라미터와 투영 하위 메뉴</string>
     <string name="image_static_panorama">파노라마를 정지 렌더링했습니다. 드래그하여 둘러보세요</string>

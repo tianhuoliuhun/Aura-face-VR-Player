@@ -53,6 +53,7 @@
     <string name="subtitle_mode_bilingual">バイリンガル</string>
     <string name="subtitle_mode_translated_only">翻訳のみ</string>
     <string name="subtitle_translate_engine">翻訳エンジン</string>
+    <string name="toast_subtitle_empty_format">%1$s から字幕を解析できませんでした。対応形式：SRT / VTT / ASS / SSA。ファイルが空か壊れていないかご確認ください。</string>
     <string name="toast_subtitle_loaded">字幕を %1$d 件読み込みました</string>
     <string name="toast_subtitle_load_failed">字幕の読み込みに失敗：%1$s</string>
     <string name="asr_lang_switch_hint">認識言語：%1$s（モデルを再読み込みします。約 5 秒）</string>
@@ -246,6 +247,10 @@
     <string name="picker_source_title">ファイルの読み込み元を選択</string>
     <string name="picker_source_gallery">写真 / 動画ギャラリー</string>
     <string name="picker_source_any_file">任意のファイル（WMV / ISO / AVI など）</string>
+    <string name="picker_source_gallery_desc">サムネイル表示・アルバム/日付で閲覧。通常はこちら</string>
+    <string name="picker_source_any_file_desc">ファイルツリー。ギャラリーに出ない WMV / ISO / AVI も選択可</string>
+    <string name="picker_source_formats_title">主な対応形式</string>
+    <string name="picker_source_formats_list">コンテナ：MP4 / MKV / WebM / AVI / MOV / FLV / TS / MPG / VOB / WMV / RMVB / ISO\nコーデック：H.264 / HEVC / AV1 / VP9 / MPEG-4\n字幕：SRT / VTT / ASS / SSA（外部＋内蔵）</string>
     <string name="picker_source_hint">ギャラリーからは WMV・ISO などの非標準形式を選べません。「任意のファイル」をご利用ください</string>
     <string name="beauty_projection_menu">美肌パラメータと投影のサブメニュー</string>
     <string name="image_static_panorama">パノラマを静止描画中・指でドラッグして見回せます</string>

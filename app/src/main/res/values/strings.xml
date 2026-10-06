@@ -61,6 +61,7 @@
     <string name="subtitle_translate_engine">翻译引擎</string>
 
     <!-- ===== batch ===== -->
+    <string name="toast_subtitle_empty_format">未能从 %1$s 解析出字幕。已支持 SRT / VTT / ASS / SSA，请确认文件内容完整。</string>
     <string name="toast_subtitle_loaded">成功加载 %1$d 条字幕！</string>
     <string name="toast_subtitle_load_failed">字幕加载失败：%1$s</string>
     <string name="asr_lang_switch_hint">识别语言：%1$s（重新加载模型，约 5 秒）</string>
@@ -262,6 +263,10 @@
     <string name="picker_source_title">选择文件来源</string>
     <string name="picker_source_gallery">照片 / 视频相册</string>
     <string name="picker_source_any_file">任意文件（含 WMV / ISO / AVI 等）</string>
+    <string name="picker_source_gallery_desc">有缩略图，可按相册 / 时间浏览，日常首选</string>
+    <string name="picker_source_any_file_desc">文件树浏览，可选中 WMV / ISO / AVI 等相册看不到的格式</string>
+    <string name="picker_source_formats_title">支持的主要格式</string>
+    <string name="picker_source_formats_list">容器：MP4 / MKV / WebM / AVI / MOV / FLV / TS / MPG / VOB / WMV / RMVB / ISO\n编码：H.264 / HEVC / AV1 / VP9 / MPEG-4\n字幕：SRT / VTT / ASS / SSA（外挂 + 内挂）</string>
     <string name="picker_source_hint">相册入口不支持 WMV、ISO 等非标准视频格式，请用「任意文件」选择</string>
     <string name="beauty_projection_menu">磨皮参数与投影二级控制菜单</string>
     <string name="image_static_panorama">全景图像已静态渲染 • 手指拖曳查看</string>

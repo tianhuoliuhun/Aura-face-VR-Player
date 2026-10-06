@@ -153,6 +153,20 @@
   - Downloads: progress, resume, 5 retries, 90s read-timeout reconnect; tar.bz2 whole-package fallback with streaming extract
 - 字幕样式：字体/字号/位置/描边自定义，内置 MiSans、OPPO Sans 等中文字体；**字号为无级连续调节**
   - Subtitle styles: font/size/position/outline customizable (stepless size slider); bundled MiSans / OPPO Sans
+- 📄 **字幕格式支持（v2.1.248 扩展）/ Subtitle formats**
+  - **外挂文件**：SRT / VTT / **ASS / SSA** —— 自动按内容嗅探格式，无需手动指定
+    （此前 `.ass` / `.ssa` 会被静默忽略：解析出 0 条且不提示）
+  - External files: SRT / VTT / **ASS / SSA**, auto-detected by content (previously `.ass` / `.ssa`
+    were silently ignored — 0 cues parsed with no feedback)
+  - **内挂字幕轨**：容器内封装的字幕（如 **MKV 里的 ASS/SRT**）可直接在「轨道选择」里切换
+    （v2.1.248 起支持内嵌 ASS —— Media3 自带解析器但默认未登记该 MIME）
+  - Embedded tracks: switchable in the track picker, including **ASS inside MKV** (v2.1.248)
+  - **编码自动探测**：BOM / UTF-8 / GBK / GB18030 / Big5 依次尝试，修掉中文老字幕乱码
+    （此前一律按 UTF-8 硬解，GBK 字幕会整片变成 `锟斤拷` 且不报错）
+  - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
+    subtitles that were previously force-decoded as UTF-8
+  - 解析不出内容时会**明确提示**，不再静默无反应
+  - When nothing parses, an explicit toast is shown instead of failing silently
 
 #### 🌍 多语言识别支持矩阵 / ASR Language Matrix
 

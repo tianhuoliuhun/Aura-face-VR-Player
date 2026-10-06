@@ -801,12 +801,27 @@ fun VRPlayerScreen(
             scope.launch(Dispatchers.IO) {
                 try {
                     val inputStream = context.contentResolver.openInputStream(uri)
-                    val content = inputStream?.bufferedReader()?.use { it.readText() } ?: ""
-                    val cues = SubtitleParser.parseSrtOrVtt(content)
+                    // ⚠️ v2.1.248：**必须读 ByteArray 再自己解码**，不能用
+                    //    `bufferedReader()` —— 那走平台默认字符集（UTF-8），
+                    //    GBK/Big5 的老字幕会静默变成乱码。见 SubtitleParser.decodeBytes。
+                    val bytes = inputStream?.use { it.readBytes() } ?: ByteArray(0)
+                    val content = SubtitleParser.decodeBytes(bytes)
+                    val cues = SubtitleParser.parse(content)
                     withContext(Dispatchers.Main) {
-                        loadedSubtitleCues = cues
-                        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "外部字幕.srt"
+                        val name = uri.lastPathSegment?.substringAfterLast('/') ?: "外部字幕"
                         loadedSubtitleFileName = name
+                        // ⚠️ v2.1.248：**解析出 0 条时必须明确告知**，不能静默。
+                        //    此前 `.ass` 走到这里返回空列表、却照样弹「已加载 0 句」，
+                        //    用户不知道是格式不支持还是文件坏了。
+                        if (cues.isEmpty()) {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.toast_subtitle_empty_format, name),
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@withContext
+                        }
+                        loadedSubtitleCues = cues
                         Toast.makeText(context, context.getString(R.string.toast_subtitle_loaded, cues.size), Toast.LENGTH_SHORT).show()
                         if (subtitleTranslator.config.isEnabled) {
                             subtitleTranslator.translateCuesBatch(cues)
@@ -913,9 +928,19 @@ fun VRPlayerScreen(
         //       改一处漏一处」。两处现在都走 IO 线程。
         scope.launch(Dispatchers.IO) {
             try {
-                val cues = SubtitleParser.parseSrtOrVtt(f.readText())
+                // ⚠️ v2.1.248：读字节自行解码（GBK/Big5 老字幕）+ 走统一嗅探入口
+                //    （自动识别 ASS/SSA）。见 SubtitleParser.decodeBytes / parse。
+                val content = SubtitleParser.decodeBytes(f.readBytes())
+                val cues = SubtitleParser.parse(content)
                 withContext(Dispatchers.Main) {
-                    if (cues.isEmpty()) return@withContext
+                    if (cues.isEmpty()) {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.toast_subtitle_empty_format, f.name),
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@withContext
+                    }
                     loadedSubtitleCues = cues
                     loadedSubtitleFileName = f.name
                     isSubtitleEnabled = true
@@ -972,8 +997,9 @@ fun VRPlayerScreen(
             isBatchTranscribing = false
             if (file != null) {
                 // v89：生成后自动加载并显示字幕
-                val content = withContext(Dispatchers.IO) { file.readText() }
-                val cues = SubtitleParser.parseSrtOrVtt(content)
+                // v2.1.248：改走解码 + 嗅探统一入口（与其余字幕加载点保持一致）
+                val content = withContext(Dispatchers.IO) { SubtitleParser.decodeBytes(file.readBytes()) }
+                val cues = SubtitleParser.parse(content)
                 loadedSubtitleCues = cues
                 loadedSubtitleFileName = file.name
                 isSubtitleEnabled = true
@@ -2826,6 +2852,20 @@ fun VRPlayerScreen(
                 .setMediaSourceFactory(
                     androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
                         .setDataSourceFactory(smbAwareFactory)
+                        // ⚠️ v2.1.248：**补上内嵌 ASS/SSA 字幕支持**。
+                        //    Media3 自带 `ssa/SsaParser`，但默认的
+                        //    `DefaultSubtitleParserFactory` **没登记 `text/x-ssa`**
+                        //    （只有 dvbsubs/pgs/ttml/mp4-vtt/tx3g/subrip 六个 MIME），
+                        //    于是 MKV 内挂的 ASS 轨会走
+                        //    `Unsupported MIME type: text/x-ssa` → 字幕静默不显示。
+                        //    SsaAwareSubtitleParserFactory 把 text/x-ssa 路由给 SsaParser，
+                        //    其余 MIME 原样委托默认工厂（零回归）。
+                        .setSubtitleParserFactory(SsaAwareSubtitleParserFactory())
+                        // ⚠️ **必须同时开这个开关**：agent 只有在「抽取阶段」就解析字幕，
+                        //    内嵌字幕才会经 Player.Listener.onCues 回调出来（本文件的
+                        //    exoCueText 兜底显示就挂在那上面）。只挂 parserFactory 不开它，
+                        //    内嵌 ASS 仍然不会显示。
+                        .experimentalParseSubtitlesDuringExtraction(true)
                 )
                 .build()
                 .apply {
@@ -3096,8 +3136,9 @@ fun VRPlayerScreen(
 
         if (matchedFile != null && matchedFile.length() > 0) {
             try {
-                val content = withContext(Dispatchers.IO) { matchedFile.readText() }
-                val cues = SubtitleParser.parseSrtOrVtt(content)
+                // v2.1.248：读字节自行解码 + 统一嗅探入口
+                val content = withContext(Dispatchers.IO) { SubtitleParser.decodeBytes(matchedFile.readBytes()) }
+                val cues = SubtitleParser.parse(content)
                 if (cues.isNotEmpty()) {
                                     loadedSubtitleCues = cues
                                     loadedSubtitleFileName = matchedFile.name
@@ -6507,9 +6548,18 @@ fun VRPlayerScreen(
                                     onSubtitleFileLoaded = { file ->
                                         scope.launch(Dispatchers.IO) {
                                             try {
-                                                val content = file.readText()
-                                                val cues = SubtitleParser.parseSrtOrVtt(content)
+                                                // v2.1.248：读字节自行解码 + 统一嗅探入口
+                                                val content = SubtitleParser.decodeBytes(file.readBytes())
+                                                val cues = SubtitleParser.parse(content)
                                                 withContext(Dispatchers.Main) {
+                                                    if (cues.isEmpty()) {
+                                                        Toast.makeText(
+                                                            context,
+                                                            context.getString(R.string.toast_subtitle_empty_format, file.name),
+                                                            Toast.LENGTH_LONG
+                                                        ).show()
+                                                        return@withContext
+                                                    }
                                                     loadedSubtitleCues = cues
                                                     loadedSubtitleFileName = file.name
                                                     isSubtitleEnabled = true
@@ -7025,35 +7075,145 @@ BatchTranscribeSection(
             AlertDialog(
                 onDismissRequest = { pickerSourceDialogOpen = false },
                 containerColor = Color(0xFC18171C),
-                title = { Text(stringResource(R.string.picker_source_title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = AccentColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.picker_source_title), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(
-                            onClick = {
-                                pickerSourceDialogOpen = false
-                                filePickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    // ⚠️ v2.1.248：**优化视频选择 UI**。
+                    //    此前是两个等权重的纯文字按钮（无图标、无副标题）+ 一行小字提示，
+                    //    「相册」和「任意文件」的差别只能靠用户读完那行提示才明白，
+                    //    而这两条入口的实际差异（能不能看到缩略图、能不能选到 WMV/ISO）
+                    //    正是最需要一眼看出的信息。
+                    //    现在改为「图标 + 主标题 + 副标题」两行式卡片，并按「日常用 / 兜底用」
+                    //    做视觉分层：相册卡为强调色描边（推荐），任意文件卡为中性面。
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+                        // ── 入口 1：相册（有缩略图，日常主路径）──
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AccentColor.copy(alpha = 0.12f))
+                                .border(1.dp, AccentColor.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    pickerSourceDialogOpen = false
+                                    filePickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                    )
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhotoLibrary,
+                                contentDescription = null,
+                                tint = AccentColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.picker_source_gallery),
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(stringResource(R.string.picker_source_gallery), color = AccentColor, fontSize = 13.sp)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    stringResource(R.string.picker_source_gallery_desc),
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = AccentColor.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
-                        TextButton(
-                            onClick = {
-                                pickerSourceDialogOpen = false
-                                // ⚠️ 必须先传 MIME 数组再 launch；`OpenDocument` 要求 Array<String>。
-                                //    用 "*/*" 而不是 "video/*"：WMV 的 MIME 常不是 video/*，
-                                //    而 ISO 完全不是 —— 用 video/* 等于把这次新增的意义抹掉。
-                                documentPickerLauncher?.launch(arrayOf("*/*"))
-                            },
-                            modifier = Modifier.fillMaxWidth()
+
+                        // ── 入口 2：任意文件（兜底，可覆盖 WMV / ISO / AVI）──
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    pickerSourceDialogOpen = false
+                                    // ⚠️ 必须先传 MIME 数组再 launch；`OpenDocument` 要求 Array<String>。
+                                    //    用 "*/*" 而不是 "video/*"：WMV 的 MIME 常不是 video/*，
+                                    //    而 ISO 完全不是 —— 用 video/* 等于把这次新增的意义抹掉。
+                                    documentPickerLauncher?.launch(arrayOf("*/*"))
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(stringResource(R.string.picker_source_any_file), color = AccentColor, fontSize = 13.sp)
+                            Icon(
+                                imageVector = Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.picker_source_any_file),
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    stringResource(R.string.picker_source_any_file_desc),
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.45f),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
+
+                        // ── 支持的格式一览（让用户事先知道能放什么）──
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.04f))
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                stringResource(R.string.picker_source_formats_title),
+                                color = AccentColor.copy(alpha = 0.9f),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                stringResource(R.string.picker_source_formats_list),
+                                color = Color.White.copy(alpha = 0.55f),
+                                fontSize = 9.5.sp,
+                                lineHeight = 14.sp
+                            )
+                        }
+
                         Text(
                             stringResource(R.string.picker_source_hint),
-                            color = Color.White.copy(alpha = 0.5f),
+                            color = Color.White.copy(alpha = 0.45f),
                             fontSize = 10.sp
                         )
                     }
