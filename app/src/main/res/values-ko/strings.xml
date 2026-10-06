@@ -786,4 +786,23 @@
     <string name="decoder_params_placeholder">이 디코더 백엔드는 아직 연결되지 않았습니다. 나중에 조정할 항목(버퍼, probe 크기, 하드웨어 디코딩 정책 등)을 위해 예약된 영역입니다.</string>
     <string name="asr_no_download_needed">내장됨</string>
     <string name="theme_liquid_glass_26">iOS26 글래스</string>
+    <string name="danmu_enable_title">AI 탄막</string>
+    <string name="danmu_enable_desc">주기적으로 화면을 분석해 탄막을 자동 생성</string>
+    <string name="danmu_section_model">비전 모델</string>
+    <string name="danmu_base_url">API 기본 URL (OpenAI 호환)</string>
+    <string name="danmu_model_name">모델 이름</string>
+    <string name="danmu_api_key">API Key</string>
+    <string name="danmu_memory_mode_hint">메모리 모드가 꺼져 있어 자격 증명이 저장되지 않습니다</string>
+    <string name="danmu_section_persona">탄막 페르소나</string>
+    <string name="danmu_persona">프롬프트</string>
+    <string name="danmu_persona_hint">{count}는 배치 개수로 치환됩니다</string>
+    <string name="danmu_section_runtime">실행 파라미터</string>
+    <string name="danmu_interval">인식 간격</string>
+    <string name="danmu_batch_size">배치당 개수</string>
+    <string name="danmu_section_display">표시 효과</string>
+    <string name="danmu_speed">스크롤 속도</string>
+    <string name="danmu_max_tracks">트랙 수</string>
+    <string name="danmu_opacity">불투명도</string>
+    <string name="danmu_font_size">글자 크기</string>
+    <string name="danmu_privacy_hint">활성화하면 화면이 압축되어 설정한 서비스로 전송됩니다</string>
 </resources>

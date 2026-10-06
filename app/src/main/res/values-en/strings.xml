@@ -826,4 +826,23 @@
     <string name="decoder_params_placeholder">This backend is not wired up yet; the slot is reserved for future tuning (buffers, probe size, hardware decoding policy, etc.).</string>
     <string name="asr_no_download_needed">Built-in</string>
     <string name="theme_liquid_glass_26">iOS26 Glass</string>
+    <string name="danmu_enable_title">AI Danmaku</string>
+    <string name="danmu_enable_desc">Periodically analyze the frame and generate danmaku</string>
+    <string name="danmu_section_model">Vision Model</string>
+    <string name="danmu_base_url">API Base URL (OpenAI compatible)</string>
+    <string name="danmu_model_name">Model Name</string>
+    <string name="danmu_api_key">API Key</string>
+    <string name="danmu_memory_mode_hint">Memory mode is off; credentials will not be saved</string>
+    <string name="danmu_section_persona">Danmaku Persona</string>
+    <string name="danmu_persona">Prompt</string>
+    <string name="danmu_persona_hint">{count} will be replaced by the batch size</string>
+    <string name="danmu_section_runtime">Runtime</string>
+    <string name="danmu_interval">Interval</string>
+    <string name="danmu_batch_size">Per Batch</string>
+    <string name="danmu_section_display">Display</string>
+    <string name="danmu_speed">Speed</string>
+    <string name="danmu_max_tracks">Tracks</string>
+    <string name="danmu_opacity">Opacity</string>
+    <string name="danmu_font_size">Font Size</string>
+    <string name="danmu_privacy_hint">Frames will be compressed and uploaded to the endpoint you configure</string>
 </resources>

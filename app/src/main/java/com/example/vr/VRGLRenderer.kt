@@ -22,6 +22,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         /** 面积 ≥ 此值（≈ 2048×2048）时改用分块上传，单张 ≥ 16 MB */
         private const val CHUNK_UPLOAD_AREA_THRESHOLD = 2048L * 2048L
+
+        /**
+         * v2.2.0（P3）：AI 弹幕取帧的最小间隔（ms）。
+         *
+         * `glReadPixels` 是同步阻塞调用，会让 GL 线程 flush 整条 GPU 管线。
+         * 即便业务层或未来代码误以高频调用 [requestDanmuFrame]，也不会把帧率打垮。
+         * 业务层正常间隔是 5s，本守卫只是兜底。
+         */
+        private const val DANMU_MIN_CAPTURE_INTERVAL_MS = 1500L
     }
 
     // Volatile settings accessible from Compose UI
@@ -2099,6 +2108,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // v2.1.233：本帧已经画完、尚未 swap —— 此刻把画面降采样一份给 Compose 的
         // backdrop，让玻璃/模糊效果有真实内容可糊（详见 VideoBackdrop 的注释）。
         captureBackdropIfNeeded()
+        // v2.2.0（P3）：AI 弹幕取帧（低频、按需触发；未请求时零开销）
+        captureDanmuFrameIfNeeded()
     }
 
     // ======================= 华为 VR（OpenXR）单眼绘制 =======================
@@ -3084,6 +3095,238 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var bdFrame = 0
     /** 一旦失败就永久停用，避免每帧都抛异常刷日志 */
     private var bdDisabled = false
+
+    // =======================================================================
+    // v2.2.0（P3）：AI 弹幕取帧
+    //
+    // 用途：给「AI 弹幕」业务层提供「用户当前看到的画面」的低频快照。
+    //
+    // ⚠️ 与 backdrop 采样的三点关键差异：
+    //   1) **独立 FBO** —— 刻意不复用 `bdFboId` / `gpHalfFboId`。
+    //      本项目已有多条回读链路（美颜 GPUPixel、背景采样），共用 FBO 会出现
+    //      「谁最后绑定谁赢了」的竞态，且尺寸需求不同（弹幕要 1024 宽，backdrop 只要 96）。
+    //   2) **由业务层按需触发**（`requestDanmuFrame()`），不是每帧自动跑。
+    //   3) **分屏时只取左眼** —— 送模型只需一张单眼图，送整屏（并排双画面）
+    //      会让模型看到两张一样的图并生成重复弹幕（方案文档 D5 决策）。
+    //
+    // ⚠️ glReadPixels 是**同步阻塞**调用（会让 GL 线程 flush 整条 GPU 管线），
+    //    因此本功能有两重节流：业务层按 intervalSec 触发 + 此处的最小帧间隔守卫。
+    //    反面判例见 v2.0.182（8.29MB 全分辨率回读拖垮帧率）。
+    // =======================================================================
+    private var danmuFboId = 0
+    private var danmuTexId = 0
+    private var danmuW = 0
+    private var danmuH = 0
+    private var danmuBuffer: java.nio.IntBuffer? = null
+    private var danmuPixels: IntArray? = null
+    private var danmuRow: IntArray? = null
+
+    /** 待取帧请求：非 null 表示本帧结束后要回读一次。值为目标最大宽度。 */
+    @Volatile private var danmuPendingMaxWidth: Int = 0
+
+    /** 最近一次成功回读的结果（RGBA_8888 ARGB 数组 + 尺寸）。业务层取走即清空。 */
+    @Volatile private var danmuResultPixels: IntArray? = null
+    @Volatile private var danmuResultW: Int = 0
+    @Volatile private var danmuResultH: Int = 0
+
+    /** 失败计数：连续失败超过阈值就停用，避免每帧刷日志 */
+    private var danmuFailCount = 0
+    private var danmuDisabled = false
+
+    /** 上次实际回读的时间戳（ms）。用于最小间隔守卫。 */
+    private var danmuLastCaptureMs = 0L
+
+    /**
+     * 请求在**本帧结束后**回读一张画面快照（低频、按需）。
+     *
+     * @param maxWidth 目标最大宽度（会被裁剪到 [256, 1920]）。业务层应传 1024 左右。
+     * @return true 表示请求已受理；false 表示当前不可用（已被停用/尺寸未就绪/节流中）。
+     *
+     * 线程安全：只写一个 `@Volatile Int`，实际回读发生在 GL 线程的 [onDrawFrame]。
+     * 结果通过 [takeDanmuFrame] 取走。
+     */
+    fun requestDanmuFrame(maxWidth: Int = 1024): Boolean {
+        if (danmuDisabled) return false
+        if (displayWidth <= 0 || displayHeight <= 0) return false
+        // 最小间隔守卫：即便业务层调用过密，也不会连续多帧阻塞 GL 线程
+        val now = System.currentTimeMillis()
+        if (now - danmuLastCaptureMs < DANMU_MIN_CAPTURE_INTERVAL_MS) return false
+        danmuPendingMaxWidth = maxWidth.coerceIn(256, 1920)
+        return true
+    }
+
+    /**
+     * 取走最近一次回读结果（业务层在任意线程调用）。
+     *
+     * @return (pixels, width, height)；无新结果时返回 null。
+     *         pixels 为 ARGB_8888 可直接填进 `Bitmap.setPixels` 的 IntArray，
+     *         行序**已翻正**（自上而下），业务层无需再处理。
+     *
+     * ⚠️ 取出后即清空（一次性消费），避免业务层意外重复使用同一块内存。
+     */
+    fun takeDanmuFrame(): Triple<IntArray, Int, Int>? {
+        val px = danmuResultPixels ?: return null
+        val w = danmuResultW
+        val h = danmuResultH
+        danmuResultPixels = null
+        danmuResultW = 0
+        danmuResultH = 0
+        if (w <= 0 || h <= 0 || px.size < w * h) return null
+        return Triple(px, w, h)
+    }
+
+    private fun releaseDanmuTarget() {
+        if (danmuFboId != 0) {
+            GLES20.glDeleteFramebuffers(1, intArrayOf(danmuFboId), 0)
+            danmuFboId = 0
+        }
+        if (danmuTexId != 0) {
+            GLES20.glDeleteTextures(1, intArrayOf(danmuTexId), 0)
+            danmuTexId = 0
+        }
+        danmuW = 0
+        danmuH = 0
+        danmuBuffer = null
+        danmuPixels = null
+        danmuRow = null
+    }
+
+    private fun ensureDanmuTarget(w: Int, h: Int) {
+        if (danmuFboId != 0 && danmuW == w && danmuH == h) return
+        releaseDanmuTarget()
+        val tex = IntArray(1)
+        val fbo = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glGenFramebuffers(1, fbo, 0)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
+        GLES20.glFramebufferTexture2D(
+            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+            GLES20.GL_TEXTURE_2D, tex[0], 0
+        )
+        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            Log.w(TAG, "danmu FBO incomplete: 0x${Integer.toHexString(status)}")
+            GLES20.glDeleteTextures(1, tex, 0)
+            GLES20.glDeleteFramebuffers(1, fbo, 0)
+            return
+        }
+        danmuTexId = tex[0]
+        danmuFboId = fbo[0]
+        danmuW = w
+        danmuH = h
+        danmuBuffer = java.nio.IntBuffer.allocate(w * h)
+        danmuPixels = IntArray(w * h)
+        danmuRow = IntArray(w)
+    }
+
+    /**
+     * 在本帧绘制完成后调用（见 [onDrawFrame] 末尾，与 [captureBackdropIfNeeded] 同级）。
+     *
+     * 实现要点（三条都是本项目踩过的坑）：
+     *  ① `glReadPixels` **只裁剪、不缩放** → 必须先用 `glBlitFramebuffer` 真缩放到小 FBO
+     *     （v2.0.182 判例：误以为减小宽高就是缩略图，实际只拿到左下角 1/4）
+     *  ② `glReadPixels` 行序**自下而上** → 填进 Bitmap 前必须翻转，否则画面颠倒
+     *  ③ `glGetError()` 要在 `glBindFramebuffer` **之前**取（bind 会改写错误状态）
+     */
+    private fun captureDanmuFrameIfNeeded() {
+        if (danmuDisabled) return
+        val reqW = danmuPendingMaxWidth
+        if (reqW <= 0) return
+        danmuPendingMaxWidth = 0
+
+        val dw = displayWidth
+        val dh = displayHeight
+        if (dw <= 0 || dh <= 0) return
+
+        // 分屏时屏幕是「并排双画面」：只取左眼那一半，避免模型看到两张一样的图。
+        // 非分屏（单眼铺满）时整屏即单眼画面，无需裁剪。
+        val srcX = 0
+        val srcW = if (isSplitScreenVR) dw / 2 else dw
+        val srcY = 0
+        val srcH = dh
+        if (srcW <= 0 || srcH <= 0) return
+
+        val tw = reqW.coerceAtMost(srcW)
+        val th = (tw.toLong() * srcH / srcW).toInt().coerceIn(1, 2048)
+
+        try {
+            ensureDanmuTarget(tw, th)
+            if (danmuFboId == 0) {
+                danmuFailCount++
+                if (danmuFailCount >= 3) {
+                    danmuDisabled = true
+                    Log.w(TAG, "danmu 取帧目标创建失败 3 次，已停用")
+                }
+                return
+            }
+
+            // ① 先真缩放（只读源区域 = 左眼）
+            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
+            GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, danmuFboId)
+            GLES30.glBlitFramebuffer(
+                srcX, srcY, srcX + srcW, srcY + srcH,
+                0, 0, tw, th,
+                GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_LINEAR
+            )
+            val err1 = GLES20.glGetError()
+            if (err1 != GLES20.GL_NO_ERROR) {
+                Log.w(TAG, "danmu blit failed err=$err1")
+                danmuFailCount++
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+                if (danmuFailCount >= 3) danmuDisabled = true
+                return
+            }
+
+            // ② 再回读
+            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, danmuFboId)
+            val buf = danmuBuffer ?: return
+            buf.position(0)
+            GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+            val err2 = GLES20.glGetError()
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            if (err2 != GLES20.GL_NO_ERROR) {
+                Log.w(TAG, "danmu readPixels failed err=$err2")
+                danmuFailCount++
+                if (danmuFailCount >= 3) danmuDisabled = true
+                return
+            }
+
+            // ③ 行序翻转（GL 自下而上 → Bitmap 自上而下）
+            buf.position(0)
+            val px = danmuPixels ?: return
+            buf.get(px)
+            val row = danmuRow ?: return
+            var y = 0
+            while (y < th / 2) {
+                val a = y * tw
+                val b = (th - 1 - y) * tw
+                System.arraycopy(px, a, row, 0, tw)
+                System.arraycopy(px, b, px, a, tw)
+                System.arraycopy(row, 0, px, b, tw)
+                y++
+            }
+
+            danmuFailCount = 0
+            danmuLastCaptureMs = System.currentTimeMillis()
+            danmuResultPixels = px.copyOf(tw * th)  // 复制一份交给业务层，避免被下帧覆盖
+            danmuResultW = tw
+            danmuResultH = th
+        } catch (t: Throwable) {
+            Log.w(TAG, "danmu capture 异常：${t.message}")
+            danmuFailCount++
+            if (danmuFailCount >= 3) danmuDisabled = true
+        }
+    }
 
     private fun releaseBackdropTarget() {
         if (bdFboId != 0) {

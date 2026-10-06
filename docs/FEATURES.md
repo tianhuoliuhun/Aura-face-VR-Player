@@ -166,6 +166,23 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
+- 🚧 **AI 弹幕（v2.2.0 第一阶段：配置与取帧）/ AI Danmaku (v2.2.0 stage 1)**
+  - **当前状态**：本阶段只含「设置项」与「GL 取帧通道」两部分，**尚无弹幕上屏**；
+    视觉请求与弹幕渲染在后续版本落地
+  - Settings panel for AI danmaku plus a GL frame-capture channel. **No on-screen
+    rendering yet** — vision requests and the renderer land in a later version
+  - **视觉模型**：默认接入 **小米 MiMo V2.6 Flash**（OpenAI 兼容协议，支持图片输入），
+    端点与模型名均可改，也可换成任意 OpenAI 兼容的视觉模型
+  - Vision model defaults to **Xiaomi MiMo V2.6 Flash** (OpenAI-compatible, image input
+    supported); endpoint and model name are editable
+  - **可调项**：识别间隔、每批条数、滚动速度、轨道数、不透明度、字号、弹幕人格提示词
+  - Tunable: interval, batch size, scroll speed, tracks, opacity, font size, persona prompt
+  - **取帧机制**：独立 FBO + `glBlitFramebuffer` 真缩放 + 行序翻转；
+    VR 分屏下**只取左眼**（送整屏会让模型看到两张一样的图）
+  - Capture uses a dedicated FBO with true downscaling and row-order flip;
+    **left-eye-only** in split-screen VR
+  - **隐私**：开启后画面会压缩后上传至你所配置的服务，请自行确认其隐私政策
+  - Privacy: frames are compressed and uploaded to the endpoint you configure
   - When nothing parses, an explicit toast is shown instead of failing silently
 
 #### 🌍 多语言识别支持矩阵 / ASR Language Matrix

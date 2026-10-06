@@ -750,6 +750,69 @@ fun VRPlayerScreen(
             apply()
         }
     }
+
+    // ===== v2.2.0（P1）：AI 弹幕配置 =====
+    // 与翻译配置**有意分离**：翻译用文本模型、弹幕用视觉模型，复用同一份会互相污染
+    // （方案文档 D1 决策）。默认端点/模型为小米 MiMo V2.6 Flash（OpenAI 兼容）。
+    var danmuSettingsRestored by remember { mutableStateOf(false) }
+    var danmuConfig by remember { mutableStateOf(DanmuConfig()) }
+    LaunchedEffect(Unit) {
+        if (isMemoryModeEnabled) {
+            danmuConfig = DanmuConfig(
+                isEnabled = prefs.getBoolean("danmu_enabled", false),
+                apiKey = prefs.getString("danmu_api_key", "") ?: "",
+                baseUrl = prefs.getString("danmu_base_url", DanmuConfig.DEFAULT_BASE_URL)
+                    ?: DanmuConfig.DEFAULT_BASE_URL,
+                modelName = prefs.getString("danmu_model_name", DanmuConfig.DEFAULT_MODEL)
+                    ?: DanmuConfig.DEFAULT_MODEL,
+                personaPrompt = prefs.getString("danmu_persona", DanmuConfig.DEFAULT_PERSONA)
+                    ?: DanmuConfig.DEFAULT_PERSONA,
+                intervalSec = prefs.getInt("danmu_interval_sec", DanmuConfig.DEFAULT_INTERVAL_SEC),
+                batchSize = prefs.getInt("danmu_batch_size", DanmuConfig.DEFAULT_BATCH_SIZE),
+                speedPxPerSec = prefs.getInt("danmu_speed", DanmuConfig.DEFAULT_SPEED_PX_PER_SEC),
+                maxTracks = prefs.getInt("danmu_max_tracks", DanmuConfig.DEFAULT_MAX_TRACKS),
+                opacityPercent = prefs.getInt("danmu_opacity", DanmuConfig.DEFAULT_OPACITY),
+                fontSizeSp = prefs.getInt("danmu_font_size", DanmuConfig.DEFAULT_FONT_SIZE_SP)
+            )
+        }
+        danmuSettingsRestored = true
+    }
+    // ⚠️ 三处同步之「写回」与「remove」——详见 docs/DANMUAI_PLAN_C_IMPLEMENTATION §P1
+    LaunchedEffect(
+        danmuSettingsRestored,
+        isMemoryModeEnabled,
+        danmuConfig
+    ) {
+        if (!danmuSettingsRestored) return@LaunchedEffect
+        prefs.edit().apply {
+            if (isMemoryModeEnabled) {
+                putBoolean("danmu_enabled", danmuConfig.isEnabled)
+                putString("danmu_api_key", danmuConfig.apiKey)
+                putString("danmu_base_url", danmuConfig.baseUrl)
+                putString("danmu_model_name", danmuConfig.modelName)
+                putString("danmu_persona", danmuConfig.personaPrompt)
+                putInt("danmu_interval_sec", danmuConfig.intervalSec)
+                putInt("danmu_batch_size", danmuConfig.batchSize)
+                putInt("danmu_speed", danmuConfig.speedPxPerSec)
+                putInt("danmu_max_tracks", danmuConfig.maxTracks)
+                putInt("danmu_opacity", danmuConfig.opacityPercent)
+                putInt("danmu_font_size", danmuConfig.fontSizeSp)
+            } else {
+                remove("danmu_enabled")
+                remove("danmu_api_key")
+                remove("danmu_base_url")
+                remove("danmu_model_name")
+                remove("danmu_persona")
+                remove("danmu_interval_sec")
+                remove("danmu_batch_size")
+                remove("danmu_speed")
+                remove("danmu_max_tracks")
+                remove("danmu_opacity")
+                remove("danmu_font_size")
+            }
+            apply()
+        }
+    }
     // v126：实时 AI 字幕引擎（方案文档「边播边生成」，不写 SRT 文件）
     val realtimeSubtitleEngine = remember { RealtimeSubtitleEngine(context) }
     var isRealtimeSubtitleEnabled by remember {
@@ -6488,6 +6551,14 @@ fun VRPlayerScreen(
                                         }
                                     }
                                 }
+
+                                // ===== v2.2.0（P1）：AI 弹幕设置 =====
+                                // 独立成块，与字幕设置并列（避免「同一功能两份 UI」）
+                                DanmuSettingsPanel(
+                                    config = danmuConfig,
+                                    onConfigChange = { danmuConfig = it },
+                                    canPersistSecrets = isMemoryModeEnabled
+                                )
 
                                 SubtitleSettingsPanel(
                                     isSubtitleEnabled = isSubtitleEnabled,

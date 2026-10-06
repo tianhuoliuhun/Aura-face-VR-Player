@@ -819,4 +819,23 @@
     <string name="decoder_params_placeholder">该解码内核尚未接入，此处为后续调参预留（如缓冲区、探测尺寸、硬件解码策略等）。</string>
     <string name="asr_no_download_needed">已内置</string>
     <string name="theme_liquid_glass_26">iOS26 玻璃</string>
+    <string name="danmu_enable_title">AI 弹幕</string>
+    <string name="danmu_enable_desc">定时识别画面并自动生成弹幕</string>
+    <string name="danmu_section_model">视觉模型</string>
+    <string name="danmu_base_url">接口地址（OpenAI 兼容）</string>
+    <string name="danmu_model_name">模型名称</string>
+    <string name="danmu_api_key">API Key</string>
+    <string name="danmu_memory_mode_hint">记忆模式已关闭，凭据不会被保存</string>
+    <string name="danmu_section_persona">弹幕人格</string>
+    <string name="danmu_persona">提示词</string>
+    <string name="danmu_persona_hint">可自行改写，{count} 会被替换为每批条数</string>
+    <string name="danmu_section_runtime">运行参数</string>
+    <string name="danmu_interval">识别间隔</string>
+    <string name="danmu_batch_size">每批条数</string>
+    <string name="danmu_section_display">显示效果</string>
+    <string name="danmu_speed">滚动速度</string>
+    <string name="danmu_max_tracks">轨道数</string>
+    <string name="danmu_opacity">不透明度</string>
+    <string name="danmu_font_size">字号</string>
+    <string name="danmu_privacy_hint">开启后画面会压缩上传至所填服务，请自行确认其隐私政策</string>
 </resources>
