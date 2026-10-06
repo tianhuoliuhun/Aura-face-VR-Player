@@ -2,6 +2,7 @@ package com.example.vr
 
 import com.example.R
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Source
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -33,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +49,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 
 /**
  * AI 弹幕设置面板（v2.2.0 / P1，v2.4.2 起与字幕面板统一范式）
@@ -226,6 +230,15 @@ fun DanmuSettingsPanel(
                 )
             }
         }
+
+        // ===== v2.4.4：测试连接 =====
+        // 背景：v2.4.3→v2.4.4 排查「弹幕完全不出现」时，先后踩了两个坑
+        //   ① Base URL 打成 `hhttps://`（v2.4.2 已加语法拦截）
+        //   ② 模型名大小写错（`mimo-v2.6-flash` vs `MiMo-V2.6-Flash` → HTTP 404，
+        //      在 OkHttp h2 通道下表现为 StreamResetException）
+        // 两者**都只能翻 logcat 才能发现**。加这个按钮后，点一下就能看到原因。
+        Spacer(modifier = Modifier.height(10.dp))
+        DanmuTestConnectionRow(config = config, accentColor = accentColor)
         }
 
         // ===== 人格提示词（v2.4.2：加预设 chip 行）=====
@@ -511,7 +524,139 @@ private fun DanmuStatusCard(
 }
 
 /**
- * v2.4.2：输入框深色定制配色（与 `SubtitleSettingsPanel` 同一口径）。
+ * v2.4.4：**测试连接**按钮 + 结果展示。
+ *
+ * ## 为什么要做
+ * v2.4.3→v2.4.4 排查「弹幕完全不出现」的过程中，两个真实故障
+ * （URL 拼错 `hhttps://`、模型名大小写错 `mimo-v2.6-flash`）都**只能通过翻 logcat 发现**。
+ * 用户完全没有反馈通道 —— 面板上只有一个笼统的「意外错误」。
+ *
+ * ## 设计要点
+ * - **走真实请求路径**：直接调 [DanmuVisionClient.testConnection]，
+ *   它内部复用 `executeChat`（与正式弹幕请求同一套「发送+状态码+解析」逻辑）。
+ *   ⚠️ 不能另写一套探测逻辑，否则会出现「测通了但真跑不通」。
+ * - **client 临时创建**：测试是低频的一次性动作，`remember` 一个会一直占着连接池；
+ *   每次点击 new 一个、用完由 GC 回收更干净。
+ * - **状态面板自持**：测试结果是「面板长什么样」而非业务状态，**不走三处同步**，
+ *   也不写入 prefs（避免把一次偶然结果永久固化）。
+ * - **不进服务端的"人格"路径**：请求只有一条 user 消息「请只回复两个字：可用」，
+ *   不带图片、不带人格提示词 —— 最小化 token 与耗时。
+ */
+@Composable
+private fun DanmuTestConnectionRow(
+    config: DanmuConfig,
+    accentColor: Color
+) {
+    val scope = rememberCoroutineScope()
+    var testing by remember { mutableStateOf(false) }
+    // null = 还没测过；非 null = 上次结果
+    var result by remember { mutableStateOf<DanmuVisionClient.ConnectionTestResult?>(null) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 用自绘按钮（不用 Button/OutlinedButton）—— 本项目面板内统一用这种
+            // 「圆角 + 半透明底 + 边框」的轻量样式，避免 Material 默认配色在深色浮层上突兀。
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(accentColor.copy(alpha = 0.14f))
+                    .border(0.6.dp, accentColor.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                    .clickable(enabled = !testing) {
+                        testing = true
+                        result = null
+                        scope.launch {
+                            // client 用完即弃（低频操作，不必常驻）
+                            val r = DanmuVisionClient().testConnection(config)
+                            result = r
+                            testing = false
+                        }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .testTag("danmu_test_connection_button"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (testing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(11.dp),
+                        strokeWidth = 1.4.dp,
+                        color = accentColor
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                Text(
+                    text = if (testing) {
+                        stringResource(R.string.danmu_test_running)
+                    } else {
+                        stringResource(R.string.danmu_test_connection)
+                    },
+                    color = accentColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        // ---- 结果展示 ----
+        val r = result
+        if (r != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            val (color, text) = if (r.ok) {
+                val sample = if (r.sample.isNotEmpty()) {
+                    stringResource(R.string.danmu_test_ok_sample, r.sample)
+                } else {
+                    ""
+                }
+                Color(0xFF81C784) to (stringResource(R.string.danmu_test_ok) + sample)
+            } else {
+                Color(0xFFEF5350) to (danmuTestHintFor(r.kind) + "\n" + r.message)
+            }
+            Text(
+                text = text,
+                color = color,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+                modifier = Modifier.testTag("danmu_test_connection_result")
+            )
+        }
+    }
+}
+
+/**
+ * v2.4.4：把失败类别翻译成**可操作的修复建议**。
+ *
+ * ⚠️ 这里是「告诉用户怎么办」，不是「报错」—— 每条都要能直接指向一个具体动作。
+ */
+@Composable
+private fun danmuTestHintFor(kind: DanmuVisionClient.ChatErrorKind): String = when (kind) {
+    DanmuVisionClient.ChatErrorKind.NOT_CONFIGURED ->
+        stringResource(R.string.danmu_test_hint_not_configured)
+    DanmuVisionClient.ChatErrorKind.BAD_URL ->
+        stringResource(R.string.danmu_test_hint_bad_url)
+    DanmuVisionClient.ChatErrorKind.AUTH ->
+        stringResource(R.string.danmu_test_hint_auth)
+    // ⚠️ v2.4.4 头号坑：模型 id 大小写敏感（MiMo-V2.6-Flash ≠ mimo-v2.6-flash）
+    DanmuVisionClient.ChatErrorKind.MODEL_NOT_FOUND ->
+        stringResource(R.string.danmu_test_hint_model_not_found)
+    DanmuVisionClient.ChatErrorKind.RATE_LIMIT ->
+        stringResource(R.string.danmu_test_hint_rate_limit)
+    DanmuVisionClient.ChatErrorKind.SERVER_ERROR ->
+        stringResource(R.string.danmu_test_hint_server_error)
+    // RST_STREAM 与 404 同源（网关对不认识的模型直接复位 h2 流）→ 复用同一提示
+    DanmuVisionClient.ChatErrorKind.STREAM_RESET ->
+        stringResource(R.string.danmu_test_hint_stream_reset)
+    DanmuVisionClient.ChatErrorKind.DNS ->
+        stringResource(R.string.danmu_test_hint_dns)
+    DanmuVisionClient.ChatErrorKind.TIMEOUT ->
+        stringResource(R.string.danmu_test_hint_timeout)
+    DanmuVisionClient.ChatErrorKind.NO_CONTENT,
+    DanmuVisionClient.ChatErrorKind.EMPTY_RESPONSE ->
+        stringResource(R.string.danmu_test_hint_no_content)
+    else ->
+        stringResource(R.string.danmu_test_hint_generic)
+}
+
+/**
+ * v2.4.4：输入框深色定制配色（与 `SubtitleSettingsPanel` 同一口径）。
  *
  * 字幕面板里这段 colors 是**逐处内联**的（6 处）；弹幕面板有 4 处，
  * 抽成一个函数，避免「同一件事写四遍」——本项目头号事故源。

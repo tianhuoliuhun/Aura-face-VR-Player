@@ -151,7 +151,32 @@ class DanmuVisionClient {
             .build()
 
         // ③ 发送
-        try {
+        when (val result = executeChat(request, config)) {
+            is ChatResult.Success -> {
+                val lines = parseDanmuLines(result.content, config.batchSize)
+                Log.d(TAG, "视觉请求成功，解析出 ${lines.size} 条弹幕")
+                lines
+            }
+            is ChatResult.Failure -> {
+                Log.e(TAG, "视觉请求失败（${result.kind}）: ${result.detail}")
+                emptyList()
+            }
+        }
+    }
+
+    /**
+     * 执行一次 chat/completions 请求，把结果**结构化**返回（v2.4.4 新抽）。
+     *
+     * ## 为什么抽出来
+     * 原来「发送 + 判 status + 取 content」全内联在 [requestDanmu] 里，导致：
+     * ① 错误只有一句 `Log.e`，**无法在 UI 上得知失败原因**（用户必须翻 logcat）；
+     * ② 无法复用（测试连接按钮需要同一套逻辑）。
+     *
+     * 现在把「网络 + 状态码 + 解析」收在这里，[requestDanmu] 与 [testConnection] 共用，
+     * 保证**测试连接走的就是真实请求路径**（否则测通了也可能真跑不通）。
+     */
+    private fun executeChat(request: Request, config: DanmuConfig): ChatResult {
+        return try {
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     // ⚠️ 不要把 response body 直接打全（可能很大），只打 code + 前 300 字符
@@ -160,32 +185,182 @@ class DanmuVisionClient {
                     } catch (e: Exception) {
                         null
                     }
-                    Log.e(TAG, "视觉请求失败 HTTP ${response.code} ${response.message} | $snippet")
-                    return@withContext emptyList()
+                    return ChatResult.Failure(
+                        kind = classifyHttpCode(response.code),
+                        detail = "HTTP ${response.code} ${response.message} | $snippet"
+                    )
                 }
 
                 val bodyStr = response.body?.string()
                 if (bodyStr.isNullOrBlank()) {
-                    Log.e(TAG, "视觉请求返回空 body")
-                    return@withContext emptyList()
+                    return ChatResult.Failure(ChatErrorKind.EMPTY_RESPONSE, "返回空 body")
                 }
 
                 val content = extractMessageContent(bodyStr)
                 if (content.isNullOrBlank()) {
-                    Log.e(TAG, "响应中没有解析到 content")
-                    return@withContext emptyList()
+                    return ChatResult.Failure(
+                        ChatErrorKind.NO_CONTENT,
+                        "响应中没有解析到 content: ${bodyStr.take(200)}"
+                    )
                 }
-
-                val lines = parseDanmuLines(content, config.batchSize)
-                Log.d(TAG, "视觉请求成功，解析出 ${lines.size} 条弹幕")
-                lines
+                ChatResult.Success(content)
             }
         } catch (e: Exception) {
-            // 网络异常/超时/JSON 解析失败 —— 一律降级为空，绝不影响播放
-            Log.e(TAG, "视觉请求异常: ${e.message}", e)
-            emptyList()
+            // 网络异常/超时/JSON 解析失败
+            // ⚠️ v2.4.4：`StreamResetException`（HTTP/2 RST_STREAM）单独归类。
+            //    实测该异常最常见的成因是**模型名不被识别**——网关不返回 404 JSON，
+            //    而是直接复位 h2 流。若不单独提示，用户只会看到笼统的"网络异常"。
+            ChatResult.Failure(classifyException(e), "${e.javaClass.simpleName}: ${e.message}")
         }
     }
+
+    /**
+     * v2.4.4：把 HTTP 状态码映射为可展示的错误类别。
+     */
+    private fun classifyHttpCode(code: Int): ChatErrorKind = when (code) {
+        401, 403 -> ChatErrorKind.AUTH
+        404 -> ChatErrorKind.MODEL_NOT_FOUND
+        429 -> ChatErrorKind.RATE_LIMIT
+        in 500..599 -> ChatErrorKind.SERVER_ERROR
+        else -> ChatErrorKind.HTTP_ERROR
+    }
+
+    /**
+     * v2.4.4：把异常映射为可展示的错误类别。
+     *
+     * ⚠️ `StreamResetException` 是 `okhttp3.internal.http2` 里的内部类，
+     *    直接 import 会依赖内部 API（本项目为 K2，可能报 Unresolved）。
+     *    → 用**类名判断**，稳妥。
+     */
+    private fun classifyException(e: Exception): ChatErrorKind {
+        if (e is java.net.SocketTimeoutException) return ChatErrorKind.TIMEOUT
+        if (e is java.net.UnknownHostException) return ChatErrorKind.DNS
+        if (e is java.net.ConnectException) return ChatErrorKind.CONNECT
+        val name = e.javaClass.simpleName
+        if (name.contains("StreamReset") || name.contains("StreamResetException")) {
+            return ChatErrorKind.STREAM_RESET
+        }
+        return ChatErrorKind.NETWORK
+    }
+
+    /**
+     * v2.4.4：**测试连接** —— 发一个最小请求，返回可展示的结果。
+     *
+     * 设计目的：本次（v2.4.3→v2.4.4）排查「弹幕完全不出现」时，先后踩了
+     * ① URL 拼错（`hhttps://`）、② 模型名大小写错（`MiMo-V2.6-Flash` vs `mimo-v2.6-flash`），
+     * 两者都**只能靠翻 logcat** 才发现。加这个方法后，用户点一下就能看到原因。
+     *
+     * ⚠️ **走的是与真实弹幕请求完全相同的代码路径**（[executeChat]），
+     *    只把内容换成"请回复 OK"以最小化耗时与 token。
+     * ⚠️ **不含图片**：测试连接只验证 端点/密钥/模型名 三件事，
+     *    不验证视觉能力（那需要真的截一张图，代价大）。
+     *    模型不支持视觉时，正式请求会失败并显示 [ChatErrorKind.NO_CONTENT]/[ChatErrorKind.SERVER_ERROR]。
+     *
+     * @return 供 UI 展示的结果
+     */
+    suspend fun testConnection(config: DanmuConfig): ConnectionTestResult = withContext(Dispatchers.IO) {
+        if (!config.isReadyToRequest()) {
+            return@withContext ConnectionTestResult(
+                ok = false, kind = ChatErrorKind.NOT_CONFIGURED,
+                message = "配置不完整（需要 Base URL / 模型名 / API Key）"
+            )
+        }
+        val problem = config.baseUrlProblem()
+        if (problem != null) {
+            return@withContext ConnectionTestResult(
+                ok = false, kind = ChatErrorKind.BAD_URL,
+                message = "Base URL 不合法（$problem）：'${config.baseUrl.trim()}'"
+            )
+        }
+
+        val endpoint = config.resolveEndpoint()
+        val bodyJson = JSONObject().apply {
+            put("model", config.modelName.trim())
+            put("temperature", 0.0)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", "请只回复两个字：可用")
+                })
+            })
+        }
+        val request = Request.Builder()
+            .url(endpoint)
+            .addHeader("Authorization", "Bearer ${config.apiKey.trim()}")
+            .addHeader("Content-Type", "application/json")
+            .post(bodyJson.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+        when (val r = executeChat(request, config)) {
+            is ChatResult.Success -> ConnectionTestResult(
+                ok = true, kind = ChatErrorKind.NONE,
+                message = "连接成功，模型已响应", sample = r.content.trim().take(60)
+            )
+            is ChatResult.Failure -> ConnectionTestResult(
+                ok = false, kind = r.kind, message = r.detail.take(300)
+            )
+        }
+    }
+
+    /** v2.4.4：一次 chat 请求的结果 */
+    private sealed interface ChatResult {
+        data class Success(val content: String) : ChatResult
+        data class Failure(val kind: ChatErrorKind, val detail: String) : ChatResult
+    }
+
+    /**
+     * v2.4.4：弹幕请求的失败类别。
+     *
+     * 每个类别都对应**一条可操作的修复建议**（见 UI 层文案），
+     * 而不是让用户对着 `INTERNAL_ERROR` 猜。
+     */
+    enum class ChatErrorKind {
+        /** 成功 */
+        NONE,
+        /** 配置不完整（baseUrl/model/key 缺） */
+        NOT_CONFIGURED,
+        /** Base URL 语法错误（`hhttps://` 之类） */
+        BAD_URL,
+        /** HTTP 401/403：密钥无效或过期 */
+        AUTH,
+        /** HTTP 404：**模型名不被识别**（v2.4.4 头号坑：大小写敏感） */
+        MODEL_NOT_FOUND,
+        /** HTTP 429：限流/额度不足 */
+        RATE_LIMIT,
+        /** HTTP 5xx */
+        SERVER_ERROR,
+        /** 其他非 2xx */
+        HTTP_ERROR,
+        /** HTTP/2 流被复位（RST_STREAM）—— 常见成因即上面的 MODEL_NOT_FOUND */
+        STREAM_RESET,
+        /** DNS 解析失败 */
+        DNS,
+        /** 连接被拒 */
+        CONNECT,
+        /** 超时 */
+        TIMEOUT,
+        /** 其他网络异常 */
+        NETWORK,
+        /** 2xx 但没解析出内容 */
+        NO_CONTENT,
+        /** 2xx 但 body 为空 */
+        EMPTY_RESPONSE
+    }
+
+    /**
+     * v2.4.4：测试连接的结果（供 UI 直接展示）。
+     *
+     * @param ok      是否通过
+     * @param kind    失败类别（成功为 [ChatErrorKind.NONE]）
+     * @param message 可展示的详情
+     * @param sample  成功时模型回的内容片段（证明真的通了）
+     */
+    data class ConnectionTestResult(
+        val ok: Boolean,
+        val kind: ChatErrorKind,
+        val message: String,
+        val sample: String = ""
+    )
 
     /**
      * 把帧压成 JPEG 并转 base64 data URL。

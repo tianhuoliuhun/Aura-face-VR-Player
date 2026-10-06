@@ -29,15 +29,21 @@ enum class DanmuSourceMode(@StringRes val labelRes: Int, val id: Int) {
 }
 
 /**
- * AI 弹幕配置（v2.2.0 / P1）
+ * AI 弹幕配置（v2.2.0 / P1，v2.4.4 更换默认端点）
  *
  * 设计说明（与方案文档 `docs/DANMUAI_PLAN_C_IMPLEMENTATION_2026-10-06.md` 对应）：
  * - **API 协议固定为 OpenAI 兼容**（用户 2026-10-06 定案）：POST {baseUrl}/chat/completions
- * - 默认视觉模型 **MiMo V2.6 Flash**：
- *     · 端点 https://api.xiaomimimo.com/v1
- *     · 模型 id `mimo-v2.6-flash`
- *     · 官方支持 `input: ["text", "image"]`（即图片输入可用）
- *     · Base64 data URL 单图上限 50 MB，格式 JPEG/PNG/GIF/WebP/BMP
+ * - **v2.4.4 默认端点改为 AMD Radeon 开发者平台**（用户 2026-10-06 指定）：
+ *     · 端点 https://developer.amd.com.cn/radeon/api/v1
+ *     · 模型 id `MiMo-V2.6-Flash`（⚠️ 大小写敏感，小写会 404）
+ *     · 该平台是聚合网关，`/v1/models` 实测返回 9 个模型，其中支持图像输入的：
+ *         - `MiMo-V2.6-Flash`（默认）
+ *         - `DeepSeek-V4.1-Flash`
+ *         - `DeepSeek-V4-Flash-Vision-Exp`
+ *         - `Qwen3.8-27B`
+ *         - `Qwen3.8-Flash-Next`
+ *       （`DeepSeek-V4-Flash` / `GLM-5.3-Flash` / `MinerU2.5-Pro` / `MiniCPM5-2B` 为纯文本）
+ *     · Base64 data URL 带图实测通过（192 KB 请求体正常返回 200）
  *
  * ⚠️ 与 `TranslationEngine.MIMO` 的区别：翻译引擎里的 MIMO 填的是
  *    `api.minimax.chat` + `abab6.5g-chat`（那是 MiniMax 平台，与小米 MiMo 不是一回事）。
@@ -183,11 +189,40 @@ data class DanmuConfig(
     }
 
     companion object {
-        /** 小米 MiMo 官方 OpenAI 兼容端点 */
-        const val DEFAULT_BASE_URL = "https://api.xiaomimimo.com/v1"
+        /**
+         * 默认 OpenAI 兼容端点（v2.4.4 改为 AMD Radeon 开发者平台）。
+         *
+         * ## 为什么换
+         * v2.4.3 及之前默认指向小米官方 `api.xiaomimimo.com` + `mimo-v2.6-flash`。
+         * v2.4.4 排查「弹幕完全不出现」时实测发现：
+         * - 该平台的模型 id 是**大小写敏感**的 `MiMo-V2.6-Flash`，
+         *   小写 `mimo-v2.6-flash` 会得到 **HTTP 404 model_not_found**；
+         * - 在 OkHttp 的 HTTP/2 通道下，这个 404 表现为
+         *   `StreamResetException: stream was reset: INTERNAL_ERROR`，
+         *   用户**完全看不出是模型名写错**（会误判成网络/密钥问题）。
+         *
+         * AMD Radeon 平台是**聚合网关**（内置 9 个模型：DeepSeek / GLM / MiMo / Qwen 等，
+         * 且都提供 OpenAI 兼容的 `/chat/completions`），对多模型切换更友好。
+         *
+         * ⚠️ 迁移提示：老的 prefs 里若已存过小米端点，**不会被自动覆盖**
+         *    （设置项遵循「用户填过就不动」原则）→ 需用户自行在面板改，
+         *    或用「测试连接」按钮发现 404。
+         */
+        const val DEFAULT_BASE_URL = "https://developer.amd.com.cn/radeon/api/v1"
 
-        /** 默认模型 id（MiMo V2.6 Flash，支持图片输入） */
-        const val DEFAULT_MODEL = "mimo-v2.6-flash"
+        /**
+         * 默认模型 id（v2.4.4）。
+         *
+         * ⚠️⚠️ **大小写敏感**：必须是 `MiMo-V2.6-Flash`（`M`/`i`/`M`/`o` 与 `V`/`F` 大写）。
+         *     实测同一端点下：
+         *       - `MiMo-V2.6-Flash` → HTTP 200 ✅
+         *       - `mimo-v2.6-flash` → HTTP 404 `model_not_found` ❌
+         *     平台返回的 `model` 字段也会回显为 `self-dploy/MiMo-V2.6-Flash`。
+         *
+         * 该模型 `architecture.input_modalities = ["text","image"]`、`vision = true`，
+         * 即**支持图片输入**（弹幕所需的视觉能力）。
+         */
+        const val DEFAULT_MODEL = "MiMo-V2.6-Flash"
 
         /**
          * 默认人格提示词 —— **完全原创**。

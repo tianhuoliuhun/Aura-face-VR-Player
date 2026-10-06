@@ -166,7 +166,7 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材 / v2.4.2 面板统一与预设人格）/ AI Danmaku**
+- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材 / v2.4.2 面板统一与预设人格 / v2.4.4 换默认端点与「测试连接」）/ AI Danmaku**
   - **当前状态**：**全链路已打通并上屏** —— 设置项 → **素材（截图 / AI 字幕台词）** → 视觉识别 → 弹幕引擎 → **画面渲染**
   - Fully working end-to-end: settings → **material (frame / AI subtitle lines)** → vision → engine → **on-screen rendering**
   - **设置面板与字幕面板统一**（v2.4.2）：六个区块均为**可折叠**标题（主题色图标 + 标题 +
@@ -182,6 +182,17 @@
     会在发请求前**明确报出原因**，不再被归为笼统的「意外错误」而每 5 秒静默重试
   - Endpoint validation (v2.4.2): a malformed Base URL (empty / missing scheme / wrong protocol like
     `hhttps://` / missing host) now reports a **precise reason** before any request is sent
+  - **「测试连接」按钮 + 默认端点更换**（v2.4.4）：点一下即发一个最小请求，走与正式弹幕请求
+    **完全相同**的代码路径，把 **密钥无效 / 模型名不被识别 / 流被重置 / 域名解析失败 / 超时 / 限流**
+    等**逐类**显示在面板上，每类都配**可操作的修复建议**。默认端点换为 **AMD Radeon 开发者平台**
+    （`developer.amd.com.cn/radeon/api/v1`），默认模型 **`MiMo-V2.6-Flash`** ——
+    ⚠️ 该平台模型 id **大小写敏感**，小写 `mimo-v2.6-flash` 会得到 HTTP 404
+  - "Test connection" button + new default endpoint (v2.4.4): one tap sends a minimal request through
+    **the exact same code path** as real danmaku requests and reports **invalid key / model not found /
+    stream reset / DNS failure / timeout / rate limit** individually, each with an actionable fix.
+    Default endpoint is now the **AMD Radeon developer platform** (`developer.amd.com.cn/radeon/api/v1`)
+    with default model **`MiMo-V2.6-Flash`** — note its ids are **case-sensitive**; the lowercase form
+    returns HTTP 404
   - **素材来源**（v2.4.1）：三选一 —— **画面+台词**（默认）/ **仅画面** / **仅台词**。
     「台词」取自**当前播放位置附近**的 AI 字幕（前 15 秒 / 后 5 秒，超长时优先保留更近的台词），
     让模型能对台词本身做出反应（弹幕的灵魂），而不只是对画面构图泛泛而谈
