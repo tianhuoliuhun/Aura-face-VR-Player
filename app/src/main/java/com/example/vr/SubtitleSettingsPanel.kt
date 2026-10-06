@@ -1080,6 +1080,15 @@ internal fun SubtitleSection(
     expanded: Boolean,
     onToggle: () -> Unit,
     summary: String? = null,
+    /**
+     * v2.4.2：testTag 前缀。
+     *
+     * ⚠️ 原先 testTag 硬编码为 `subtitle_section_$id`，但本组件已**被 AI 弹幕面板复用**
+     *    （见 DanmuSettingsPanel）——同一个 `id` 名（如 "model"）会与字幕面板的
+     *    testTag 语义混淆。改为显式传入前缀，字幕面板传 "subtitle"，弹幕面板传 "danmu"。
+     *    默认值保留 "subtitle" 以免影响既有 UI 自动化脚本。
+     */
+    tagPrefix: String = "subtitle",
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column {
@@ -1089,7 +1098,7 @@ internal fun SubtitleSection(
                 .clip(RoundedCornerShape(8.dp))
                 .clickable { onToggle() }
                 .padding(horizontal = 6.dp, vertical = 8.dp)
-                .testTag("subtitle_section_$id"),
+                .testTag("${tagPrefix}_section_$id"),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(

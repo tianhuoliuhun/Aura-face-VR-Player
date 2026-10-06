@@ -81,6 +81,17 @@ class DanmuVisionClient {
             return@withContext emptyList()
         }
 
+        // v2.4.2：先做 URL 语法粗筛。
+        // ⚠️ 必要性：`https://` 打成 `hhttps://` 时，OkHttp 会在 Request.Builder.url()
+        //    抛 IllegalArgumentException，被编排循环归为笼统的「意外错误」——
+        //    用户完全看不出是 URL 拼错。这里提前拦下并给出**可操作**的日志。
+        //    （编排层在调用前也会查一次并显示本地化提示；这里兜底防漏。）
+        val problem = config.baseUrlProblem()
+        if (problem != null) {
+            Log.e(TAG, "Base URL 不合法（$problem）: '${config.baseUrl.trim()}' —— 需要形如 https://host/v1")
+            return@withContext emptyList()
+        }
+
         val endpoint = config.resolveEndpoint()
         if (endpoint.isBlank()) {
             Log.w(TAG, "端点为空，跳过视觉请求")

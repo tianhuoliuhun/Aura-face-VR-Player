@@ -118,7 +118,11 @@ data class DanmuConfig(
     val bgOption: SubtitleBgOption
         get() = SubtitleBgOption.values().find { it.id == bgId } ?: SubtitleBgOption.TRANSPARENT
 
-    /** 拼接后的完整 chat/completions 端点（幂等：已带后缀则不重复拼） */
+    /**
+     * 拼接后的完整 chat/completions 端点（幂等：已带后缀则不重复拼）。
+     *
+     * v2.4.2：**不再对非法 scheme 做「宽容拼接」** —— 见 [baseUrlProblem]。
+     */
     fun resolveEndpoint(): String {
         val base = baseUrl.trim().trimEnd('/')
         if (base.isEmpty()) return ""
@@ -128,6 +132,55 @@ data class DanmuConfig(
     /** 是否已具备可请求的最少信息 */
     fun isReadyToRequest(): Boolean =
         apiKey.isNotBlank() && baseUrl.isNotBlank() && modelName.isNotBlank()
+
+    /**
+     * v2.4.2：Base URL 本身的问题（`null` = 没问题）。
+     *
+     * ## 为什么需要它
+     * v2.4.1 及之前只判断 `baseUrl.isNotBlank()`。用户把 `https://` 打成 `hhttps://`（多一个 h）时：
+     * - 一路通过校验 →
+     * - `resolveEndpoint()` 拼成 `hhttps://api.xiaomimimo.com/v1/chat/completions` →
+     * - OkHttp 在 `Request.Builder.url()` 抛 `IllegalArgumentException:
+     *   Expected URL scheme 'http' or 'https' but was 'hhttps'` →
+     * - 编排循环把它归到笼统的 `danmu_err_unexpected`。
+     *
+     * 结果是**用户完全看不出是 URL 拼错**（会以为是网络/密钥问题），且每 5 秒重复一次。
+     * 这里把「明显能一眼判定的 URL 错误」提前暴露成**可操作的提示**。
+     *
+     * ⚠️ 只做**语法层面**的粗筛（scheme 是否存在、是否为 http/https），
+     *    不做 DNS / 可达性判断 —— 后者靠真实请求失败提示。
+     *
+     * @return 错误码，供 UI 映射到本地化文案；`null` 表示语法上没问题
+     */
+    fun baseUrlProblem(): BaseUrlProblem? {
+        val base = baseUrl.trim()
+        if (base.isEmpty()) return BaseUrlProblem.EMPTY
+        // 取出 scheme（第一个 ':' 之前）
+        val colon = base.indexOf(':')
+        if (colon <= 0) return BaseUrlProblem.MISSING_SCHEME
+        val scheme = base.substring(0, colon).lowercase()
+        if (scheme !in VALID_SCHEMES) {
+            // 常见笔误：https 多打/少打一个字母、写成 httpx 等 → 提示期望的是什么
+            return BaseUrlProblem.BAD_SCHEME
+        }
+        // 形如 "https://" 但没有主机名
+        val afterScheme = base.substring(colon + 1).removePrefix("//").trim()
+        val host = afterScheme.substringBefore('/')
+        if (host.isBlank()) return BaseUrlProblem.MISSING_HOST
+        return null
+    }
+
+    /** v2.4.2：Base URL 的语法问题分类 */
+    enum class BaseUrlProblem {
+        /** 空 */
+        EMPTY,
+        /** 没有 `://`，例如 `api.xiaomimimo.com/v1` */
+        MISSING_SCHEME,
+        /** scheme 不是 http/https，例如 `hhttps://...` */
+        BAD_SCHEME,
+        /** 只有 `https://` 没有主机名 */
+        MISSING_HOST
+    }
 
     companion object {
         /** 小米 MiMo 官方 OpenAI 兼容端点 */
@@ -204,5 +257,123 @@ data class DanmuConfig(
 
         // v2.4.1：素材来源默认值
         const val DEFAULT_SOURCE_MODE_ID = 0  // DanmuSourceMode.IMAGE_AND_SUBTITLE
+
+        /**
+         * v2.4.2：允许的 URL scheme。
+         *
+         * 只放 http/https：OkHttp 也**只接受这两个**，其余会在
+         * `Request.Builder.url()` 抛 IllegalArgumentException。
+         * 提前用同一口径校验，就能把「URL 拼错」和「网络失败」区分开。
+         */
+        private val VALID_SCHEMES = setOf("http", "https")
+
+        // ===== v2.4.2：预设人格 =====
+
+        /**
+         * 预设人格列表（**全部原创**）。
+         *
+         * ⚠️ **版权红线**：DanmuAI 内置的 14 个人格（胡桃 / 阿库娅 / 银狼 / 芙莉莲等）
+         *    属于**受版权保护的角色与表达**，「借鉴思路、不复制表达」正是本方案能规避
+         *    其 GPL/AGPL 与角色版权的前提（见方案文档 §D8）。
+         *    因此这里**只提供风格描述，不含任何第三方角色的名称、口癖或台本**。
+         *
+         * 用法：面板上以 chip 一行呈现，点选后把 `prompt` 填进 `personaPrompt`
+         *      （**可编辑**，用户改完不会被覆盖 —— 见 DanmuSettingsPanel 的选中判定）。
+         *      `Custom` 档不参与"选中高亮"，代表"我自己写的"。
+         */
+        val PERSONA_PRESETS = listOf(
+            DanmuPersonaPreset(
+                id = 0,
+                labelRes = R.string.danmu_persona_preset_default,
+                prompt = DEFAULT_PERSONA
+            ),
+            DanmuPersonaPreset(
+                id = 1,
+                labelRes = R.string.danmu_persona_preset_humor,
+                prompt = """
+                    你是一位反应极快的搞笑型观众，正在实时观看当前画面。
+                    请根据画面内容，写出 {count} 条自然、口语化、有网感的中文弹幕。
+                    要求：
+                    1. 每条弹幕独立成行，不加序号、不加引号、不加任何前缀
+                    2. 单条长度不超过 18 个汉字，越短越有弹幕感
+                    3. 多用反差、夸张、自嘲、接梗的方式制造笑点，但不要人身攻击
+                    4. 紧扣画面里的具体人物、动作、场景，别写放之四海皆准的废话
+                    5. 不要描述"这是一张图片"，直接说弹幕内容本身
+                """.trimIndent()
+            ),
+            DanmuPersonaPreset(
+                id = 2,
+                labelRes = R.string.danmu_persona_preset_pro,
+                prompt = """
+                    你是一位懂行的影迷观众，正在实时观看当前画面。
+                    请根据画面内容，写出 {count} 条自然、有见地的中文弹幕。
+                    要求：
+                    1. 每条弹幕独立成行，不加序号、不加引号、不加任何前缀
+                    2. 单条长度不超过 24 个汉字
+                    3. 从镜头语言、表演细节、剧情铺垫、道具布景等角度点评，像行家聊天
+                    4. 只谈论**画面上已经出现**的内容，绝不推测或剧透后续剧情
+                    5. 语气专业但不掉书袋，不要写成影评段落
+                """.trimIndent()
+            ),
+            DanmuPersonaPreset(
+                id = 3,
+                labelRes = R.string.danmu_persona_preset_emo,
+                prompt = """
+                    你是一位情绪外放、共情力强的观众，正在实时观看当前画面。
+                    请根据画面内容，写出 {count} 条自然、口语化的中文弹幕。
+                    要求：
+                    1. 每条弹幕独立成行，不加序号、不加引号、不加任何前缀
+                    2. 单条长度不超过 16 个汉字，要短促有力
+                    3. 以第一人称直白表达当下的感受（惊讶、心疼、紧张、被甜到等）
+                    4. 感受必须由**画面上具体发生了什么**触发，不能空喊
+                    5. 不要描述"这是一张图片"，直接说弹幕内容本身
+                """.trimIndent()
+            ),
+            DanmuPersonaPreset(
+                id = 4,
+                labelRes = R.string.danmu_persona_preset_zen,
+                prompt = """
+                    你是一位冷静克制的观众，正在实时观看当前画面。
+                    请根据画面内容，写出 {count} 条简短、留白感强的中文弹幕。
+                    要求：
+                    1. 每条弹幕独立成行，不加序号、不加引号、不加任何前缀
+                    2. 单条长度不超过 14 个汉字，宁短勿长
+                    3. 像在安静地发一句感慨，不要浮夸，不要堆形容词
+                    4. 只针对画面里真实可见的元素，不添加画面外的信息
+                    5. 不要描述"这是一张图片"，直接说弹幕内容本身
+                """.trimIndent()
+            )
+        )
+
+        /** 「自定义」档的代表 id：与任何预设都不相等（`PERSONA_PRESETS` 的 id 从 0 起） */
+        const val PERSONA_CUSTOM_ID = -1
+
+        /**
+         * 判断当前 `personaPrompt` 是否**恰好等于**某个预设的提示词。
+         *
+         * 用于 chip 行的选中高亮：用户只要改过一个字，就不该再高亮那个预设
+         * （否则会出现「明明改了却还显示选中 🔒 原预设」的错位感）。
+         *
+         * @return 命中的预设 id；没有命中返回 [PERSONA_CUSTOM_ID]
+         */
+        fun matchPersonaPresetId(personaPrompt: String): Int {
+            val trimmed = personaPrompt.trim()
+            if (trimmed.isEmpty()) return PERSONA_CUSTOM_ID
+            return PERSONA_PRESETS.firstOrNull { it.prompt.trim() == trimmed }?.id
+                ?: PERSONA_CUSTOM_ID
+        }
     }
 }
+
+/**
+ * v2.4.2：预设人格。
+ *
+ * @param id       稳定 id（**勿用 ordinal**，项目既有约定）
+ * @param labelRes chip 上显示的名字
+ * @param prompt   点击后填入 `DanmuConfig.personaPrompt` 的全文（含 `{count}` 占位符）
+ */
+data class DanmuPersonaPreset(
+    val id: Int,
+    @androidx.annotation.StringRes val labelRes: Int,
+    val prompt: String
+)

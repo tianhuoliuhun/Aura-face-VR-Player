@@ -270,6 +270,10 @@
     <string name="danmu_source_subtitle">僅台詞</string>
     <string name="danmu_source_hint">「台詞」取自目前播放位置附近的 AI 字幕（前 15 秒 / 後 5 秒）。僅台詞模式不傳送截圖，更快也更省流量，但看不到畫面。</string>
     <string name="danmu_err_no_subtitle">目前位置還沒有台詞：請先開啟 AI 字幕並稍等生成</string>
+    <string name="danmu_err_url_empty">介面位址不能為空：請在設定中填寫以 http:// 或 https:// 開頭的位址</string>
+    <string name="danmu_err_url_no_scheme">介面位址缺少前綴：需要以 http:// 或 https:// 開頭（例如 https://api.xiaomimovie.com/v1）</string>
+    <string name="danmu_err_url_bad_scheme">介面位址的通訊協定寫錯了：只支援 http 或 https（常見誤寫 hhttps:// 或 htps://）</string>
+    <string name="danmu_err_url_no_host">介面位址缺少主機名稱：請檢查斜線位置，例如 https://api.xiaomimovie.com/v1</string>
     <string name="group_title_enhance">畫質增強</string>
     <string name="group_title_about">關於與開源許可</string>
     <string name="licenses_title">開源軟件許可</string>
@@ -861,6 +865,13 @@
     <string name="danmu_section_persona">彈幕人格</string>
     <string name="danmu_persona">提示詞</string>
     <string name="danmu_persona_hint">{count} 會被替換為每批條數</string>
+    <string name="danmu_persona_preset">預設風格</string>
+    <string name="danmu_persona_preset_default">預設</string>
+    <string name="danmu_persona_preset_humor">搞笑</string>
+    <string name="danmu_persona_preset_pro">影迷</string>
+    <string name="danmu_persona_preset_emo">情緒</string>
+    <string name="danmu_persona_preset_zen">安靜</string>
+    <string name="danmu_persona_preset_custom">自訂</string>
     <string name="danmu_section_runtime">執行參數</string>
     <string name="danmu_interval">辨識間隔</string>
     <string name="danmu_batch_size">每批條數</string>

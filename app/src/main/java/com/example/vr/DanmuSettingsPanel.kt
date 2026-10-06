@@ -16,16 +16,29 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Source
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -35,7 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * AI 弹幕设置面板（v2.2.0 / P1）
+ * AI 弹幕设置面板（v2.2.0 / P1，v2.4.2 起与字幕面板统一范式）
  *
  * 结构照 `SubtitleSettingsPanel.kt` 的既定范式（无自持状态，全部参数由调用方传入/回写），
  * 避免出现「同一功能两份 UI」这一项目头号事故源。
@@ -43,6 +56,14 @@ import androidx.compose.ui.unit.sp
  * ⚠️ 本面板**不持有** SharedPreferences：落盘由调用方（VRPlayerScreen）按三处同步规则完成。
  * ⚠️ 配色与 `SubtitleSettingsPanel` 一致：一律用 `Color.White` 的不同 alpha，
  *    不引入主题变量（该面板在播放页浮层中使用，背景恒为深色）。
+ *
+ * ## v2.4.2 改动：向字幕面板看齐
+ * 用户反馈「AI 字幕的 UI 不统一，复用其他 UI」→ 澄清后为**弹幕面板向字幕面板看齐**：
+ * 1. 七个纯文字小标题（`DanmuSubTitle`）→ 可折叠区块 [`SubtitleSection`]
+ *    （图标 + 标题 + 折叠摘要 + 展开动画），展开状态持久化到 prefs（本面板负责读写）。
+ * 2. 四个裸 `OutlinedTextField` → 加 [`OutlinedTextFieldDefaults.colors`] 深色定制。
+ * 3. 裸 `Slider` → 加 [`SliderDefaults.colors`] 定制（与字幕面板同口径）。
+ * 4. 新增「预设风格」chip 行（v2.4.2 需求：增加预设人格），点选填入提示词、仍可手改。
  */
 @Composable
 fun DanmuSettingsPanel(
@@ -54,8 +75,14 @@ fun DanmuSettingsPanel(
     generatedCount: Int = 0,
     /** v2.3.1：最近一次失败原因（空串 = 无错误） */
     lastError: String = "",
+    /**
+     * v2.4.2：主题强调色（与字幕面板同一入口，由调用方传 `AccentColor`）。
+     * 默认值仅在预览/测试下生效。
+     */
+    accentColor: Color = Color(0xFFD0BCFF),
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -94,8 +121,53 @@ fun DanmuSettingsPanel(
             )
         }
 
+        // ===== v2.4.2：各折叠区块的展开状态（照字幕面板范式，持久化到同一 prefs）=====
+        // 默认：视觉模型 / 人格 展开（高频），其余折叠 —— 让面板一进来不至于太长。
+        val sectionPrefs = remember {
+            context.getSharedPreferences("vr_player_prefs", android.content.Context.MODE_PRIVATE)
+        }
+        var secModelExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_model", true))
+        }
+        var secPersonaExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_persona", true))
+        }
+        var secSourceExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_source", false))
+        }
+        var secRuntimeExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_runtime", false))
+        }
+        var secDisplayExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_display", false))
+        }
+        var secColorExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_color", false))
+        }
+        fun setSectionExpanded(id: String, value: Boolean) {
+            when (id) {
+                "model" -> secModelExpanded = value
+                "persona" -> secPersonaExpanded = value
+                "source" -> secSourceExpanded = value
+                "runtime" -> secRuntimeExpanded = value
+                "display" -> secDisplayExpanded = value
+                "color" -> secColorExpanded = value
+            }
+            sectionPrefs.edit().putBoolean("danmu_section_expanded_$id", value).apply()
+        }
+
         // ===== 视觉模型 =====
-        DanmuSubTitle(stringResource(R.string.danmu_section_model))
+        val modelSummary = config.modelName.ifBlank { stringResource(R.string.danmu_section_model) }
+        SubtitleSection(
+            id = "model",
+            title = stringResource(R.string.danmu_section_model),
+            icon = Icons.Default.Psychology,
+            accentColor = accentColor,
+            expanded = secModelExpanded,
+            onToggle = { setSectionExpanded("model", !secModelExpanded) },
+            summary = modelSummary,
+            tagPrefix = "danmu"
+        ) {
 
         OutlinedTextField(
             value = config.baseUrl,
@@ -103,7 +175,8 @@ fun DanmuSettingsPanel(
             label = { Text(stringResource(R.string.danmu_base_url)) },
             singleLine = true,
             enabled = canPersistSecrets,
-            modifier = Modifier.fillMaxWidth()
+            colors = DanmuTextFieldColors(accentColor),
+            modifier = Modifier.fillMaxWidth().height(48.dp)
         )
         Spacer(modifier = Modifier.height(6.dp))
         OutlinedTextField(
@@ -112,7 +185,8 @@ fun DanmuSettingsPanel(
             label = { Text(stringResource(R.string.danmu_model_name)) },
             singleLine = true,
             enabled = canPersistSecrets,
-            modifier = Modifier.fillMaxWidth()
+            colors = DanmuTextFieldColors(accentColor),
+            modifier = Modifier.fillMaxWidth().height(48.dp)
         )
         Spacer(modifier = Modifier.height(6.dp))
         OutlinedTextField(
@@ -122,7 +196,8 @@ fun DanmuSettingsPanel(
             singleLine = true,
             enabled = canPersistSecrets,
             visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
+            colors = DanmuTextFieldColors(accentColor),
+            modifier = Modifier.fillMaxWidth().height(48.dp)
         )
 
         if (!canPersistSecrets) {
@@ -142,15 +217,48 @@ fun DanmuSettingsPanel(
                 )
             }
         }
+        }
 
-        // ===== 人格提示词 =====
-        DanmuSubTitle(stringResource(R.string.danmu_section_persona))
+        // ===== 人格提示词（v2.4.2：加预设 chip 行）=====
+        val personaPresetId = DanmuConfig.matchPersonaPresetId(config.personaPrompt)
+        val personaSummary = when (personaPresetId) {
+            DanmuConfig.PERSONA_CUSTOM_ID -> stringResource(R.string.danmu_persona_preset_custom)
+            else -> DanmuConfig.PERSONA_PRESETS
+                .firstOrNull { it.id == personaPresetId }
+                ?.let { stringResource(it.labelRes) }
+                ?: stringResource(R.string.danmu_persona_preset_custom)
+        }
+        SubtitleSection(
+            id = "persona",
+            title = stringResource(R.string.danmu_section_persona),
+            icon = Icons.Default.Person,
+            accentColor = accentColor,
+            expanded = secPersonaExpanded,
+            onToggle = { setSectionExpanded("persona", !secPersonaExpanded) },
+            summary = personaSummary,
+            tagPrefix = "danmu"
+        ) {
+        // 预设风格：一行 chip 选填（点选即把提示词写进输入框，**不锁定**，仍可手改）。
+        // 「自定义」不由用户点选 —— 它只在用户手改到与任何预设都不相等时自动高亮。
+        DanmuTextChipRow(
+            title = stringResource(R.string.danmu_persona_preset),
+            options = DanmuConfig.PERSONA_PRESETS,
+            selectedId = personaPresetId,
+            labelOf = { stringResource(it.labelRes) },
+            onPick = { presetId ->
+                DanmuConfig.PERSONA_PRESETS.firstOrNull { it.id == presetId }?.let {
+                    onConfigChange(config.copy(personaPrompt = it.prompt))
+                }
+            }
+        )
+        Spacer(modifier = Modifier.height(6.dp))
         OutlinedTextField(
             value = config.personaPrompt,
             onValueChange = { onConfigChange(config.copy(personaPrompt = it)) },
             label = { Text(stringResource(R.string.danmu_persona)) },
             minLines = 3,
             maxLines = 8,
+            colors = DanmuTextFieldColors(accentColor),
             modifier = Modifier.fillMaxWidth()
         )
         Text(
@@ -159,10 +267,23 @@ fun DanmuSettingsPanel(
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 4.dp)
         )
+        }
 
         // ===== v2.4.1：素材来源（画面 / 台词 / 两者）=====
-        DanmuSubTitle(stringResource(R.string.danmu_section_source))
-
+        val sourceSummary = DanmuSourceMode.values()
+            .firstOrNull { it.id == config.sourceModeId }
+            ?.let { stringResource(it.labelRes) }
+            ?: stringResource(R.string.danmu_section_source)
+        SubtitleSection(
+            id = "source",
+            title = stringResource(R.string.danmu_section_source),
+            icon = Icons.Default.Source,
+            accentColor = accentColor,
+            expanded = secSourceExpanded,
+            onToggle = { setSectionExpanded("source", !secSourceExpanded) },
+            summary = sourceSummary,
+            tagPrefix = "danmu"
+        ) {
         DanmuTextChipRow(
             title = stringResource(R.string.danmu_source),
             options = DanmuSourceMode.values().toList(),
@@ -176,16 +297,26 @@ fun DanmuSettingsPanel(
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 4.dp)
         )
+        }
 
         // ===== 运行参数 =====
-        DanmuSubTitle(stringResource(R.string.danmu_section_runtime))
-
+        SubtitleSection(
+            id = "runtime",
+            title = stringResource(R.string.danmu_section_runtime),
+            icon = Icons.Default.Settings,
+            accentColor = accentColor,
+            expanded = secRuntimeExpanded,
+            onToggle = { setSectionExpanded("runtime", !secRuntimeExpanded) },
+            summary = "${config.intervalSec}s · ${config.batchSize}",
+            tagPrefix = "danmu"
+        ) {
         DanmuSliderRow(
             title = stringResource(R.string.danmu_interval),
             valueText = "${config.intervalSec}s",
             value = config.intervalSec.toFloat(),
             range = DanmuConfig.MIN_INTERVAL_SEC.toFloat()..DanmuConfig.MAX_INTERVAL_SEC.toFloat(),
             steps = (DanmuConfig.MAX_INTERVAL_SEC - DanmuConfig.MIN_INTERVAL_SEC) - 1,
+            accentColor = accentColor,
             onChange = { onConfigChange(config.copy(intervalSec = it.toInt())) }
         )
         DanmuSliderRow(
@@ -194,18 +325,29 @@ fun DanmuSettingsPanel(
             value = config.batchSize.toFloat(),
             range = DanmuConfig.MIN_BATCH_SIZE.toFloat()..DanmuConfig.MAX_BATCH_SIZE.toFloat(),
             steps = DanmuConfig.MAX_BATCH_SIZE - DanmuConfig.MIN_BATCH_SIZE - 1,
+            accentColor = accentColor,
             onChange = { onConfigChange(config.copy(batchSize = it.toInt())) }
         )
+        }
 
         // ===== 显示参数 =====
-        DanmuSubTitle(stringResource(R.string.danmu_section_display))
-
+        SubtitleSection(
+            id = "display",
+            title = stringResource(R.string.danmu_section_display),
+            icon = Icons.Default.Visibility,
+            accentColor = accentColor,
+            expanded = secDisplayExpanded,
+            onToggle = { setSectionExpanded("display", !secDisplayExpanded) },
+            summary = "${config.opacityPercent}% · ${config.fontSizeSp}sp",
+            tagPrefix = "danmu"
+        ) {
         DanmuSliderRow(
             title = stringResource(R.string.danmu_speed),
             valueText = config.speedPxPerSec.toString(),
             value = config.speedPxPerSec.toFloat(),
             range = 60f..600f,
             steps = 8,
+            accentColor = accentColor,
             onChange = { onConfigChange(config.copy(speedPxPerSec = it.toInt())) }
         )
         DanmuSliderRow(
@@ -214,6 +356,7 @@ fun DanmuSettingsPanel(
             value = config.maxTracks.toFloat(),
             range = 2f..DanmuConfig.MAX_TRACKS_LIMIT.toFloat(),
             steps = DanmuConfig.MAX_TRACKS_LIMIT - 3,
+            accentColor = accentColor,
             onChange = { onConfigChange(config.copy(maxTracks = it.toInt())) }
         )
         DanmuSliderRow(
@@ -222,6 +365,7 @@ fun DanmuSettingsPanel(
             value = config.opacityPercent.toFloat(),
             range = 20f..100f,
             steps = 7,
+            accentColor = accentColor,
             onChange = { onConfigChange(config.copy(opacityPercent = it.toInt())) }
         )
         DanmuSliderRow(
@@ -230,12 +374,22 @@ fun DanmuSettingsPanel(
             value = config.fontSizeSp.toFloat(),
             range = 12f..32f,
             steps = 19,
+            accentColor = accentColor,
             onChange = { onConfigChange(config.copy(fontSizeSp = it.toInt())) }
         )
+        }
 
         // ===== v2.3.0：全局颜色（作用于全部弹幕）=====
-        DanmuSubTitle(stringResource(R.string.danmu_section_color))
-
+        SubtitleSection(
+            id = "color",
+            title = stringResource(R.string.danmu_section_color),
+            icon = Icons.Default.Palette,
+            accentColor = accentColor,
+            expanded = secColorExpanded,
+            onToggle = { setSectionExpanded("color", !secColorExpanded) },
+            summary = stringResource(R.string.danmu_text_color),
+            tagPrefix = "danmu"
+        ) {
         // 文字颜色：色块网格（照 SubtitleSettingsPanel 的既有交互）
         DanmuColorRow(
             title = stringResource(R.string.danmu_text_color),
@@ -270,6 +424,7 @@ fun DanmuSettingsPanel(
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 4.dp)
         )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
@@ -345,16 +500,21 @@ private fun DanmuStatusCard(
     Spacer(modifier = Modifier.height(6.dp))
 }
 
+/**
+ * v2.4.2：输入框深色定制配色（与 `SubtitleSettingsPanel` 同一口径）。
+ *
+ * 字幕面板里这段 colors 是**逐处内联**的（6 处）；弹幕面板有 4 处，
+ * 抽成一个函数，避免「同一件事写四遍」——本项目头号事故源。
+ */
 @Composable
-private fun DanmuSubTitle(text: String) {
-    Text(
-        text = text,
-        color = Color.White.copy(alpha = 0.85f),
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)
-    )
-}
+private fun DanmuTextFieldColors(accentColor: Color) = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = accentColor,
+    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+    focusedLabelColor = accentColor,
+    unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White
+)
 
 @Composable
 private fun DanmuSliderRow(
@@ -363,6 +523,7 @@ private fun DanmuSliderRow(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
+    accentColor: Color,
     onChange: (Float) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
@@ -388,6 +549,14 @@ private fun DanmuSliderRow(
             onValueChange = onChange,
             valueRange = range,
             steps = steps.coerceAtLeast(0),
+            // v2.4.2：与字幕面板统一，活动轨用主题强调色
+            colors = SliderDefaults.colors(
+                thumbColor = accentColor,
+                activeTrackColor = accentColor,
+                inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent
+            ),
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -529,5 +698,7 @@ private fun colorOptionId(opt: Any?): Int = when (opt) {
     is SubtitleStrokeOption -> opt.id
     is SubtitleBgOption -> opt.id
     is DanmuSourceMode -> opt.id
+    // v2.4.2：预设人格 chip 行（选中 id 用 DanmuConfig.matchPersonaPresetId 匹配）
+    is DanmuPersonaPreset -> opt.id
     else -> 0
 }

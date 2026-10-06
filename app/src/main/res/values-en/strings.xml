@@ -268,6 +268,10 @@
     <string name="danmu_source_subtitle">Lines only</string>
     <string name="danmu_source_hint">"Lines" comes from AI subtitles near the current position (15s before / 5s after). Lines-only mode sends no screenshot — faster and lighter, but it cannot see the picture.</string>
     <string name="danmu_err_no_subtitle">No lines at this position yet — enable AI subtitles and wait for them to generate</string>
+    <string name="danmu_err_url_empty">Endpoint address is empty — enter an address starting with http:// or https://</string>
+    <string name="danmu_err_url_no_scheme">Endpoint address is missing a prefix — it must start with http:// or https:// (e.g. https://api.xiaomimovie.com/v1)</string>
+    <string name="danmu_err_url_bad_scheme">Wrong protocol in endpoint address — only http or https is supported (common typos: hhttps:// or htps://)</string>
+    <string name="danmu_err_url_no_host">Endpoint address is missing a host name — check the slashes, e.g. https://api.xiaomimovie.com/v1</string>
     <string name="group_title_enhance">Image enhancement</string>
     <string name="group_title_about">About &amp; open source licenses</string>
     <string name="licenses_title">Open source licenses</string>
@@ -859,6 +863,13 @@
     <string name="danmu_section_persona">Danmaku Persona</string>
     <string name="danmu_persona">Prompt</string>
     <string name="danmu_persona_hint">{count} will be replaced by the batch size</string>
+    <string name="danmu_persona_preset">Preset Style</string>
+    <string name="danmu_persona_preset_default">Default</string>
+    <string name="danmu_persona_preset_humor">Comedy</string>
+    <string name="danmu_persona_preset_pro">Cinephile</string>
+    <string name="danmu_persona_preset_emo">Emotional</string>
+    <string name="danmu_persona_preset_zen">Calm</string>
+    <string name="danmu_persona_preset_custom">Custom</string>
     <string name="danmu_section_runtime">Runtime</string>
     <string name="danmu_interval">Interval</string>
     <string name="danmu_batch_size">Per Batch</string>

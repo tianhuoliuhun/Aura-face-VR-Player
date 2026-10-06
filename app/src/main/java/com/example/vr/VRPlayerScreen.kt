@@ -1841,6 +1841,19 @@ fun VRPlayerScreen(
             danmuLastError = context.getString(R.string.danmu_err_not_configured)
             return@LaunchedEffect
         }
+        // v2.4.2：URL 拼错（如 `hhttps://`）要**明确指出**，不能混进「意外错误」。
+        // 这是最容易犯、也最容易被误判成「网络/密钥问题」的一类配置错误。
+        val urlErr = when (danmuConfig.baseUrlProblem()) {
+            DanmuConfig.BaseUrlProblem.EMPTY -> context.getString(R.string.danmu_err_url_empty)
+            DanmuConfig.BaseUrlProblem.MISSING_SCHEME -> context.getString(R.string.danmu_err_url_no_scheme)
+            DanmuConfig.BaseUrlProblem.BAD_SCHEME -> context.getString(R.string.danmu_err_url_bad_scheme)
+            DanmuConfig.BaseUrlProblem.MISSING_HOST -> context.getString(R.string.danmu_err_url_no_host)
+            null -> ""
+        }
+        if (urlErr.isNotEmpty()) {
+            danmuLastError = urlErr
+            return@LaunchedEffect
+        }
         val periodMs = danmuConfig.intervalSec.coerceIn(
             DanmuConfig.MIN_INTERVAL_SEC, DanmuConfig.MAX_INTERVAL_SEC
         ) * 1000L
@@ -6918,7 +6931,9 @@ BatchTranscribeSection(
                                         onConfigChange = { danmuConfig = it },
                                         canPersistSecrets = isMemoryModeEnabled,
                                         generatedCount = danmuGeneratedCount,
-                                        lastError = danmuLastError
+                                        lastError = danmuLastError,
+                                        // v2.4.2：与字幕面板用同一强调色
+                                        accentColor = AccentColor
                                     )
                                 }
                                 /** 区块 6：美颜设置（Shader 实时磨皮美白 + 预设方案 + 对比原图 + 2D 人像精修） */

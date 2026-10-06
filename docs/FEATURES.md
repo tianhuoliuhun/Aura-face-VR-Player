@@ -166,9 +166,22 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材）/ AI Danmaku**
+- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材 / v2.4.2 面板统一与预设人格）/ AI Danmaku**
   - **当前状态**：**全链路已打通并上屏** —— 设置项 → **素材（截图 / AI 字幕台词）** → 视觉识别 → 弹幕引擎 → **画面渲染**
   - Fully working end-to-end: settings → **material (frame / AI subtitle lines)** → vision → engine → **on-screen rendering**
+  - **设置面板与字幕面板统一**（v2.4.2）：六个区块均为**可折叠**标题（主题色图标 + 标题 +
+    折叠时右侧显示当前值摘要 + 展开动画），展开状态**跨会话记忆**；输入框与滑块套用字幕面板同款深色配色
+  - Panel unified with subtitles (v2.4.2): six **collapsible** sections (accent icon + title +
+    collapsed-state value summary + animation) whose expansion state **persists across sessions**;
+    text fields and slider use the same dark styling as the subtitle panel
+  - **预设人格**（v2.4.2）：一行 chip 选「默认 / 搞笑 / 影迷 / 情绪 / 安静」，点选即填入提示词，
+    **不锁定** —— 手改后自动高亮为「自定义」。文案**全部原创**，不含第三方角色名称或口癖
+  - Persona presets (v2.4.2): a chip row (Default / Comedy / Cinephile / Emotional / Calm) fills the
+    prompt **without locking it**; editing switches the highlight to "Custom". All texts are original
+  - **接口地址校验**（v2.4.2）：填错（空 / 缺协议前缀 / 协议写错如 `hhttps://` / 缺主机名）
+    会在发请求前**明确报出原因**，不再被归为笼统的「意外错误」而每 5 秒静默重试
+  - Endpoint validation (v2.4.2): a malformed Base URL (empty / missing scheme / wrong protocol like
+    `hhttps://` / missing host) now reports a **precise reason** before any request is sent
   - **素材来源**（v2.4.1）：三选一 —— **画面+台词**（默认）/ **仅画面** / **仅台词**。
     「台词」取自**当前播放位置附近**的 AI 字幕（前 15 秒 / 后 5 秒，超长时优先保留更近的台词），
     让模型能对台词本身做出反应（弹幕的灵魂），而不只是对画面构图泛泛而谈
