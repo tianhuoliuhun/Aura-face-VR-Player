@@ -166,11 +166,23 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- 🚧 **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎）/ AI Danmaku**
-  - **当前状态**：已完成「设置项」「GL 取帧」「全局颜色」「视觉识别」「弹幕引擎」，
-    **弹幕尚未上屏**（渲染层在下一版）；设置面板内会显示**运行状态卡片**便于确认链路
-  - Settings, GL capture, global color, vision and engine are done.
-    **No on-screen rendering yet** — a status card in settings shows pipeline health
+- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏）/ AI Danmaku**
+  - **当前状态**：**全链路已打通并上屏** —— 设置项 → GL 取帧 → 视觉识别 → 弹幕引擎 → **画面渲染**
+  - Fully working end-to-end: settings → GL capture → vision → engine → **on-screen rendering**
+  - **弹幕上屏**（v2.4.0）：弹幕在**画面上方约 30% 区域**分轨道从右往左飘；
+    **分屏 VR 下左右眼各画一份**（各自的宽度坐标系，避免位置算错）
+  - On-screen rendering (v2.4.0): danmaku scroll right-to-left across the **top ~30%** on
+    multiple tracks; **one copy per eye** in split-screen VR
+  - **绘制方式**（v2.4.0）：一次测量 + 多次 `drawText` 的 Canvas 绘制（与字幕层同款），
+    并对每条文本做 layout 缓存 —— 几十条同屏也不会退化成几十个 composable
+  - Drawing (v2.4.0): single measure + multiple `drawText` Canvas pass with a per-text layout
+    cache, so dozens of on-screen items never turn into dozens of composables
+  - **暂停 / 跳转联动**（v2.4.0）：**暂停时弹幕冻结**（平移出生时间，位置公式自然连续）；
+    **seek 后清空弹幕**（复用「位置突跳 > 2 秒」判据，进度条 / 章节 / 双击重置统一生效）
+  - Pause / seek (v2.4.0): **pause freezes** danmaku (born-time shift keeps positions
+    continuous); **seek clears** them (reusing the "position jump > 2s" test)
+  - **帧驱动**：沿 VSync（`withFrameNanos`）推进，与刷新率天然同步；**关闭时零开销**
+  - Frame-driven on VSync (`withFrameNanos`); **zero cost when disabled**
   - **独立分组**（v2.3.0）：弹幕设置是**独立的顶级折叠分组**，不再混在「字幕功能设置」里
     —— 两者是两条独立链路（字幕来自文件/ASR，弹幕来自视觉模型实时生成）
   - Own top-level group (v2.3.0), no longer nested inside subtitles
@@ -191,9 +203,8 @@
   - Engine (v2.3.1, pure logic + 17 unit tests): similarity dedup, track avoidance,
     queue cap, pause/resume
   - **运行状态卡片**（v2.3.1）：设置面板内实时显示链路状态（未配置 / 等待中 / 已生成 N 条 /
-    出错原因），并明确标注「弹幕尚未上屏」，避免误判功能失效
-  - Status card (v2.3.1) surfaces pipeline state (unconfigured / waiting / N generated /
-    error) and states plainly that on-screen rendering is not yet wired up
+    出错原因）
+  - Status card (v2.3.1) surfaces pipeline state (unconfigured / waiting / N generated / error)
   - **可调项**：识别间隔、每批条数、滚动速度、轨道数、不透明度、字号、弹幕人格提示词
   - Tunable: interval, batch size, scroll speed, tracks, opacity, font size, persona prompt
   - **取帧机制**：独立 FBO + `glBlitFramebuffer` 真缩放 + 行序翻转；

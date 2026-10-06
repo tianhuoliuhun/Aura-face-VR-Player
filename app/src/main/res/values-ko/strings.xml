@@ -231,7 +231,7 @@
     <string name="danmu_status_not_configured">설정이 필요합니다: 엔드포인트, 모델 이름, API 키를 입력하세요</string>
     <string name="danmu_status_waiting">준비 완료. 첫 화면 인식을 기다리는 중… (수 초)</string>
     <string name="danmu_status_generated">%1$d개 댓글 생성됨</string>
-    <string name="danmu_status_render_pending">참고: 이 버전은 캡처 → 인식 → 생성까지만 지원합니다. 화면 표시는 다음 버전입니다.</string>
+    <string name="danmu_status_render_pending">이제 댓글이 화면 상단을 흐릅니다. 보이지 않으면 기능이 켜져 있는지 확인하고 첫 인식이 끝날 때까지 기다려 주세요.</string>
     <string name="danmu_err_not_configured">설정이 불완전합니다: 엔드포인트, 모델, API 키를 확인하세요</string>
     <string name="danmu_err_no_renderer">렌더러가 준비되지 않았습니다. 자동으로 재시도합니다</string>
     <string name="danmu_err_capture_timeout">화면 캡처 시간 초과. 자동으로 재시도합니다</string>

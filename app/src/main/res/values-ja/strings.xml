@@ -231,7 +231,7 @@
     <string name="danmu_status_not_configured">未設定です：エンドポイント・モデル名・API キーを入力してください</string>
     <string name="danmu_status_waiting">準備完了。最初の画面認識を待機中…（数秒）</string>
     <string name="danmu_status_generated">%1$d 件のコメントを生成</string>
-    <string name="danmu_status_render_pending">注：この版は「キャプチャ→認識→生成」までです。画面表示は次版で対応します。</string>
+    <string name="danmu_status_render_pending">コメントは画面上部を流れるようになりました。表示されない場合は、機能がオンになっているか確認し、最初の認識が終わるまでお待ちください。</string>
     <string name="danmu_err_not_configured">設定が不完全です：エンドポイント・モデル・API キーを確認してください</string>
     <string name="danmu_err_no_renderer">レンダラー未準備。自動的に再試行します</string>
     <string name="danmu_err_capture_timeout">画面キャプチャがタイムアウトしました。自動的に再試行します</string>

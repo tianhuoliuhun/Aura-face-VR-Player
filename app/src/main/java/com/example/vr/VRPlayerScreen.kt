@@ -1905,6 +1905,60 @@ fun VRPlayerScreen(
         }
     }
 
+    // ===== v2.4.0（P6）：弹幕与播放状态的联动 =====
+
+    /** 进入暂停的时刻（0 = 未暂停）。暂停/恢复与 seek 都要用它，故先声明。 */
+    var danmuPausedAtMs by remember { mutableLongStateOf(0L) }
+
+    /** 上一次观察到的播放位置，用于识别 seek 突跳。 */
+    var danmuLastPosMs by remember { mutableLongStateOf(0L) }
+
+    // ① 暂停/恢复：暂停时弹幕必须**冻结**，否则视频停了弹幕还在飘。
+    //
+    // 做法：记录进入暂停的时刻；恢复时把已存活弹幕的出生时间整体后移「暂停时长」，
+    // 位置公式 `x = W - (now - born) * speed` 于是自然保持连续（引擎的 shiftBornTime 正是为此设计）。
+    // ⚠️ 只在**暂停→播放**这一次跳变时平移；播放中反复重组不能重复平移（会越推越远）。
+    LaunchedEffect(isVideoPlaying, danmuConfig.isEnabled) {
+        if (!danmuConfig.isEnabled) return@LaunchedEffect
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!isVideoPlaying) {
+            // 刚进入暂停：记下时刻（若已在暂停则不覆盖，避免跳变基准漂移）
+            if (danmuPausedAtMs == 0L) danmuPausedAtMs = now
+        } else {
+            // 恢复播放：把暂停时长补给所有弹幕
+            if (danmuPausedAtMs != 0L) {
+                danmuEngine.shiftBornTime(now - danmuPausedAtMs)
+                danmuPausedAtMs = 0L
+            }
+        }
+    }
+
+    // ② seek 后清空弹幕。
+    //
+    // 理由：跳转后旧弹幕的「出生时间」与新画面毫无关系，会以一堆陈旧文本糊在屏幕上；
+    // 且它们的 x 多已越界，视觉上表现为「跳转后突然闪一下错位弹幕」。
+    // 判据复用实时字幕的「位置突跳 > 2 秒」—— 这样不必逐个改各 seek 调用点，
+    // 进度条拖动 / 章节跳转 / 双击重置都能被统一捕获。
+    //
+    // ⚠️ **不能把 currentPositionMs 当 LaunchedEffect 的 key**：它是高频写入的 state
+    //    （上游每 ~100ms 写一次），用作 key 会让协程不断重启 → 每帧新建协程。
+    //    改为在长驻协程内轮询比较（与实时字幕同款做法），开销可控且语义清晰。
+    LaunchedEffect(danmuConfig.isEnabled) {
+        if (!danmuConfig.isEnabled) return@LaunchedEffect
+        while (true) {
+            val pos = currentPositionMs
+            val jumped = kotlin.math.abs(pos - danmuLastPosMs) > 2_000L
+            danmuLastPosMs = pos
+            if (jumped) {
+                // clear 保留去重窗口：跳转后模型很可能给出相似内容，继续压制能避免刷屏
+                danmuEngine.clear()
+                // 跳转同时重置暂停基准，否则恢复播放时会补一段错误时长
+                danmuPausedAtMs = 0L
+            }
+            kotlinx.coroutines.delay(DANMU_SEEK_POLL_MS)
+        }
+    }
+
     // v104：手机自选 LUT 文件（.cube）选择器
     val lutPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -3724,6 +3778,15 @@ fun VRPlayerScreen(
                 Text("R", color = Color(0x40FFFFFF), fontSize = 24.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             }
         }
+
+        // 2.4 弹幕层（v2.4.0 / P5）：位于字幕层**之下**（弹幕在顶部区域，字幕通常在下半部）
+        //     ⚠️ 必须放在 SubtitleOverlay 之前，让字幕能盖在弹幕上（万一位置撞上，字幕可读性优先）
+        DanmuOverlay(
+            engine = danmuEngine,
+            config = danmuConfig,
+            isSplitScreenVR = isSplitScreenVR,
+            modifier = Modifier.fillMaxSize()
+        )
 
         // 2.5 Dual-Eye & Flat Mode Universal Subtitle Overlay
 
@@ -8088,6 +8151,14 @@ private const val FRAME_POLL_MAX_TRIES = 20
 
 /** 每次轮询的间隔（ms）—— 20 × 100ms = 最多等 2s */
 private const val FRAME_POLL_INTERVAL_MS = 100L
+
+/**
+ * 弹幕 seek 检测的轮询间隔（ms）。
+ *
+ * 只用于比较「播放位置是否突跳 > 2s」，不做任何重活，故可以放慢；
+ * 200ms 足以让跳转后的陈旧弹幕在肉眼反应前被清掉。
+ */
+private const val DANMU_SEEK_POLL_MS = 200L
 
 /**
  * 把抓到的原始帧缩放到拖动预览尺寸（320×180，16:9）。

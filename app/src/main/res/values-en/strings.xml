@@ -255,7 +255,7 @@
     <string name="danmu_status_not_configured">Not configured yet: fill in endpoint, model name and API key</string>
     <string name="danmu_status_waiting">Ready, waiting for the first frame analysis... (a few seconds)</string>
     <string name="danmu_status_generated">%1$d danmaku generated</string>
-    <string name="danmu_status_render_pending">Note: this build covers capture → recognition → generation only. On-screen rendering comes next.</string>
+    <string name="danmu_status_render_pending">Danmaku now scrolls across the top of the screen. If you see none, make sure the feature is on and wait for the first recognition pass.</string>
     <string name="danmu_err_not_configured">Incomplete config: check endpoint, model and API key</string>
     <string name="danmu_err_no_renderer">Renderer not ready yet, will retry automatically</string>
     <string name="danmu_err_capture_timeout">Frame capture timed out, will retry automatically</string>

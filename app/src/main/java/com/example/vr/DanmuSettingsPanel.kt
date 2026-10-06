@@ -317,7 +317,7 @@ private fun DanmuStatusCard(
             fontSize = 11.sp,
             lineHeight = 15.sp
         )
-        // ⚠️ 本版弹幕**尚未上屏**（渲染层在下一版），必须如实告知，否则用户会以为功能失灵
+        // v2.4.0：弹幕**已上屏**（渲染层 DanmuOverlay），此提示改为告知「没看到时怎么办」
         Text(
             text = stringResource(R.string.danmu_status_render_pending),
             color = Color.White.copy(alpha = 0.4f),

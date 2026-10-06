@@ -257,7 +257,7 @@
     <string name="danmu_status_not_configured">尚未設定完成：請填寫服務端點、模型名稱與 API Key</string>
     <string name="danmu_status_waiting">已就緒，正在等待首次畫面辨識…（約需數秒）</string>
     <string name="danmu_status_generated">已生成 %1$d 條彈幕</string>
-    <string name="danmu_status_render_pending">註：本版只完成「取幀 → 辨識 → 生成」，彈幕上屏將於下一版提供。</string>
+    <string name="danmu_status_render_pending">彈幕已可在畫面上方即時飄出；若沒看到，請確認已開啟彈幕並等待首次辨識完成。</string>
     <string name="danmu_err_not_configured">設定不完整：請檢查端點、模型與 API Key</string>
     <string name="danmu_err_no_renderer">渲染器尚未就緒，稍後自動重試</string>
     <string name="danmu_err_capture_timeout">畫面擷取逾時，稍後自動重試</string>
