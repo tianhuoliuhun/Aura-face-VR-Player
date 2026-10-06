@@ -172,32 +172,41 @@ fun DanmuSettingsPanel(
         OutlinedTextField(
             value = config.baseUrl,
             onValueChange = { onConfigChange(config.copy(baseUrl = it)) },
-            label = { Text(stringResource(R.string.danmu_base_url)) },
+            label = { Text(stringResource(R.string.danmu_base_url), fontSize = 8.sp) },
+            placeholder = { Text(DanmuConfig.DEFAULT_BASE_URL, fontSize = 8.sp) },
             singleLine = true,
             enabled = canPersistSecrets,
+            textStyle = DanmuFieldTextStyle,
             colors = DanmuTextFieldColors(accentColor),
-            modifier = Modifier.fillMaxWidth().height(48.dp)
+            // ⚠️ v2.4.3：**不设固定高度**。v2.4.2 用 height(48.dp) 导致
+            //    「文字下沉贴下边框 / label 被下边线穿过」（M3 单行输入框
+            //    含 label 浮动动画需要约 56dp）。交给组件自身默认高度。
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(6.dp))
         OutlinedTextField(
             value = config.modelName,
             onValueChange = { onConfigChange(config.copy(modelName = it)) },
-            label = { Text(stringResource(R.string.danmu_model_name)) },
+            label = { Text(stringResource(R.string.danmu_model_name), fontSize = 8.sp) },
+            placeholder = { Text(DanmuConfig.DEFAULT_MODEL, fontSize = 8.sp) },
             singleLine = true,
             enabled = canPersistSecrets,
+            textStyle = DanmuFieldTextStyle,
             colors = DanmuTextFieldColors(accentColor),
-            modifier = Modifier.fillMaxWidth().height(48.dp)
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(6.dp))
         OutlinedTextField(
             value = config.apiKey,
             onValueChange = { onConfigChange(config.copy(apiKey = it)) },
-            label = { Text(stringResource(R.string.danmu_api_key)) },
+            label = { Text(stringResource(R.string.danmu_api_key), fontSize = 8.sp) },
+            placeholder = { Text("sk-...", fontSize = 8.sp) },
             singleLine = true,
             enabled = canPersistSecrets,
             visualTransformation = PasswordVisualTransformation(),
+            textStyle = DanmuFieldTextStyle,
             colors = DanmuTextFieldColors(accentColor),
-            modifier = Modifier.fillMaxWidth().height(48.dp)
+            modifier = Modifier.fillMaxWidth()
         )
 
         if (!canPersistSecrets) {
@@ -255,9 +264,10 @@ fun DanmuSettingsPanel(
         OutlinedTextField(
             value = config.personaPrompt,
             onValueChange = { onConfigChange(config.copy(personaPrompt = it)) },
-            label = { Text(stringResource(R.string.danmu_persona)) },
+            label = { Text(stringResource(R.string.danmu_persona), fontSize = 8.sp) },
             minLines = 3,
             maxLines = 8,
+            textStyle = DanmuFieldTextStyle,
             colors = DanmuTextFieldColors(accentColor),
             modifier = Modifier.fillMaxWidth()
         )
@@ -513,7 +523,25 @@ private fun DanmuTextFieldColors(accentColor: Color) = OutlinedTextFieldDefaults
     focusedLabelColor = accentColor,
     unfocusedLabelColor = Color.White.copy(alpha = 0.5f),
     focusedTextColor = Color.White,
-    unfocusedTextColor = Color.White
+    unfocusedTextColor = Color.White,
+    // ⚠️ v2.4.2 修复：placeholder 与光标也要跟着深色主题，否则默认深色在深底上看不见
+    focusedPlaceholderColor = Color.White.copy(alpha = 0.3f),
+    unfocusedPlaceholderColor = Color.White.copy(alpha = 0.3f),
+    cursorColor = accentColor
+)
+
+/**
+ * v2.4.2：输入框文字样式。
+ *
+ * ⚠️ **这一条是「文字被切一半」的真正修复**。
+ *    在 `Modifier.height(48.dp)` 的约束下，若正文/标签用默认的 16sp，
+ *    单行输入框内部可用高度不够 → 文字**上下都被裁掉**（截图现象）。
+ *    字幕面板之所以没事，是因为它每处 label 都显式写了 `fontSize = 8.sp`。
+ *    这里统一用 12sp 正文 + 8sp 标签，与字幕面板完全一致。
+ */
+private val DanmuFieldTextStyle = androidx.compose.ui.text.TextStyle(
+    fontSize = 12.sp,
+    color = Color.White
 )
 
 @Composable
