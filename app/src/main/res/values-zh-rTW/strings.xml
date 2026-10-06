@@ -247,6 +247,12 @@
     <string name="group_title_floating_ball">懸浮球與播放倍速</string>
     <string name="group_title_decoder">解碼內核與幀率</string>
     <string name="group_title_subtitle">字幕功能設置</string>
+    <string name="group_title_danmu">AI 彈幕</string>
+    <string name="danmu_section_color">全域顏色（作用於全部彈幕）</string>
+    <string name="danmu_text_color">文字顏色</string>
+    <string name="danmu_stroke">描邊</string>
+    <string name="danmu_bg">背景底</string>
+    <string name="danmu_color_hint">顏色為全域設定，對所有 AI 彈幕統一生效；可與影片內的字幕顏色分開設定。</string>
     <string name="group_title_enhance">畫質增強</string>
     <string name="group_title_about">關於與開源許可</string>
     <string name="licenses_title">開源軟件許可</string>

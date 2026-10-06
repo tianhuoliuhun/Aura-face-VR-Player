@@ -166,11 +166,18 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- 🚧 **AI 弹幕（v2.2.0 第一阶段：配置与取帧）/ AI Danmaku (v2.2.0 stage 1)**
-  - **当前状态**：本阶段只含「设置项」与「GL 取帧通道」两部分，**尚无弹幕上屏**；
+- 🚧 **AI 弹幕（v2.2.0 配置与取帧 / v2.3.0 独立分组与全局颜色）/ AI Danmaku (v2.2.0 capture, v2.3.0 own group + global color)**
+  - **当前状态**：已含「设置项」「GL 取帧通道」「全局颜色」，**尚无弹幕上屏**；
     视觉请求与弹幕渲染在后续版本落地
-  - Settings panel for AI danmaku plus a GL frame-capture channel. **No on-screen
+  - Settings panel, GL frame-capture channel and global color. **No on-screen
     rendering yet** — vision requests and the renderer land in a later version
+  - **独立分组**（v2.3.0）：弹幕设置是**独立的顶级折叠分组**，不再混在「字幕功能设置」里
+    —— 两者是两条独立链路（字幕来自文件/ASR，弹幕来自视觉模型实时生成）
+  - Own top-level group (v2.3.0): danmaku settings are no longer nested inside subtitles
+  - **全局颜色**（v2.3.0）：文字颜色、描边、背景底三项**统一作用于所有弹幕**，
+    且与字幕颜色**互相独立**；颜色选项复用字幕的既有色板
+  - Global color (v2.3.0): text color, stroke and background apply to **all** danmaku
+    and stay independent from subtitle colors
   - **视觉模型**：默认接入 **小米 MiMo V2.6 Flash**（OpenAI 兼容协议，支持图片输入），
     端点与模型名均可改，也可换成任意 OpenAI 兼容的视觉模型
   - Vision model defaults to **Xiaomi MiMo V2.6 Flash** (OpenAI-compatible, image input
@@ -181,6 +188,10 @@
     VR 分屏下**只取左眼**（送整屏会让模型看到两张一样的图）
   - Capture uses a dedicated FBO with true downscaling and row-order flip;
     **left-eye-only** in split-screen VR
+  - **性能**：取帧按需触发（未请求时零开销）、低频节流、独立 FBO 不干扰美颜管线；
+    颜色为纯渲染参数，不增加任何开销
+  - Performance: capture is on-demand (zero cost when idle), throttled, and uses a
+    dedicated FBO so the beauty pipeline is untouched; colors add no runtime cost
   - **隐私**：开启后画面会压缩后上传至你所配置的服务，请自行确认其隐私政策
   - Privacy: frames are compressed and uploaded to the endpoint you configure
   - When nothing parses, an explicit toast is shown instead of failing silently

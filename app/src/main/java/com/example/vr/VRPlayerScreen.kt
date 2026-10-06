@@ -772,7 +772,11 @@ fun VRPlayerScreen(
                 speedPxPerSec = prefs.getInt("danmu_speed", DanmuConfig.DEFAULT_SPEED_PX_PER_SEC),
                 maxTracks = prefs.getInt("danmu_max_tracks", DanmuConfig.DEFAULT_MAX_TRACKS),
                 opacityPercent = prefs.getInt("danmu_opacity", DanmuConfig.DEFAULT_OPACITY),
-                fontSizeSp = prefs.getInt("danmu_font_size", DanmuConfig.DEFAULT_FONT_SIZE_SP)
+                fontSizeSp = prefs.getInt("danmu_font_size", DanmuConfig.DEFAULT_FONT_SIZE_SP),
+                // v2.3.0：全局颜色（存 id，不存 ordinal）
+                textColorId = prefs.getInt("danmu_text_color", DanmuConfig.DEFAULT_TEXT_COLOR_ID),
+                strokeId = prefs.getInt("danmu_stroke", DanmuConfig.DEFAULT_STROKE_ID),
+                bgId = prefs.getInt("danmu_bg", DanmuConfig.DEFAULT_BG_ID)
             )
         }
         danmuSettingsRestored = true
@@ -797,6 +801,9 @@ fun VRPlayerScreen(
                 putInt("danmu_max_tracks", danmuConfig.maxTracks)
                 putInt("danmu_opacity", danmuConfig.opacityPercent)
                 putInt("danmu_font_size", danmuConfig.fontSizeSp)
+                putInt("danmu_text_color", danmuConfig.textColorId)
+                putInt("danmu_stroke", danmuConfig.strokeId)
+                putInt("danmu_bg", danmuConfig.bgId)
             } else {
                 remove("danmu_enabled")
                 remove("danmu_api_key")
@@ -809,6 +816,9 @@ fun VRPlayerScreen(
                 remove("danmu_max_tracks")
                 remove("danmu_opacity")
                 remove("danmu_font_size")
+                remove("danmu_text_color")
+                remove("danmu_stroke")
+                remove("danmu_bg")
             }
             apply()
         }
@@ -6552,13 +6562,9 @@ fun VRPlayerScreen(
                                     }
                                 }
 
-                                // ===== v2.2.0（P1）：AI 弹幕设置 =====
-                                // 独立成块，与字幕设置并列（避免「同一功能两份 UI」）
-                                DanmuSettingsPanel(
-                                    config = danmuConfig,
-                                    onConfigChange = { danmuConfig = it },
-                                    canPersistSecrets = isMemoryModeEnabled
-                                )
+                                // ===== v2.3.0：AI 弹幕设置已**独立成组**（见 SettingsSectionDanmu）
+                                // 此前 v2.2.0 曾把弹幕面板放在本分组内，导致「弹幕」与「字幕」混在一起。
+                                // 现已在左列以顶级分组 `SettingsGroup(group_title_danmu)` 与字幕并列。
 
                                 SubtitleSettingsPanel(
                                     isSubtitleEnabled = isSubtitleEnabled,
@@ -6678,6 +6684,24 @@ BatchTranscribeSection(
                                                             onSherpaLangCodeChange = { changeAsrLanguage(it) },
                                                             onUserInteraction = { keepUiAlight() }
                                                         )
+                                }
+                                /**
+                                 * 区块 6b：AI 弹幕设置（v2.3.0 从「字幕」分组中独立出来）
+                                 *
+                                 * 独立理由：弹幕与字幕是**两条独立链路** —— 字幕来自文件/ASR，
+                                 * 弹幕来自视觉模型实时生成。混在同一分组里，用户改弹幕要去字幕里找，
+                                 * 且以后两边各自长大必然互相干扰。
+                                 *
+                                 * 本分组只承载**配置 UI**；渲染与取帧分别由
+                                 * `DanmuOverlay`（P5）/ `VRGLRenderer.captureDanmuFrameIfNeeded`（P3）负责。
+                                 */
+                                @Composable
+                                fun SettingsSectionDanmu() {
+                                    DanmuSettingsPanel(
+                                        config = danmuConfig,
+                                        onConfigChange = { danmuConfig = it },
+                                        canPersistSecrets = isMemoryModeEnabled
+                                    )
                                 }
                                 /** 区块 6：美颜设置（Shader 实时磨皮美白 + 预设方案 + 对比原图 + 2D 人像精修） */
                                 @Composable
@@ -6932,7 +6956,7 @@ BatchTranscribeSection(
                                         }
                                     }
 
-                                    // 左列分组（二级菜单）：主题 → 投影 → 8K → 倍速 → 解码 → 画质增强 → 字幕
+                                    // 左列分组（二级菜单）：主题 → 投影 → 8K → 倍速 → 解码 → 画质增强 → 字幕 → 弹幕
                                     SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme") { SettingsSection0() }
                                     SettingsGroup(stringResource(R.string.group_title_projection), "proj") { SettingsSection1() }
                                     SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k") { SettingsSection8K() }
@@ -6941,6 +6965,8 @@ BatchTranscribeSection(
                                     // v2.0.206：MEMC 插帧 / FSR 超分
                                     SettingsGroup(stringResource(R.string.group_title_enhance), "enhance") { SettingsSectionEnhance() }
                                     SettingsGroup(stringResource(R.string.group_title_subtitle), "sub") { SettingsSectionSubtitle() }
+                                    // v2.3.0：AI 弹幕独立成组（此前挂在「字幕」分组内，与字幕混在一起）
+                                    SettingsGroup(stringResource(R.string.group_title_danmu), "danmu") { SettingsSectionDanmu() }
                                     // v106：关于与开源许可（合规署名入口）
                                     SettingsGroup(stringResource(R.string.group_title_about), "about") {
                                         Row(

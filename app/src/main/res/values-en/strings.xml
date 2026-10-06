@@ -245,6 +245,12 @@
     <string name="group_title_floating_ball">Floating ball &amp; speed</string>
     <string name="group_title_decoder">Decoder core &amp; FPS</string>
     <string name="group_title_subtitle">Subtitle settings</string>
+    <string name="group_title_danmu">AI Danmaku</string>
+    <string name="danmu_section_color">Global Color (all danmaku)</string>
+    <string name="danmu_text_color">Text Color</string>
+    <string name="danmu_stroke">Stroke</string>
+    <string name="danmu_bg">Background</string>
+    <string name="danmu_color_hint">Color is a global setting applied to all AI danmaku; it is independent of the subtitle color.</string>
     <string name="group_title_enhance">Image enhancement</string>
     <string name="group_title_about">About &amp; open source licenses</string>
     <string name="licenses_title">Open source licenses</string>

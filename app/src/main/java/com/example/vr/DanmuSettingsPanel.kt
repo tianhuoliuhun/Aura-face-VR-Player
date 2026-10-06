@@ -1,7 +1,10 @@
 package com.example.vr
 
 import com.example.R
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
@@ -20,10 +24,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -196,6 +203,44 @@ fun DanmuSettingsPanel(
             onChange = { onConfigChange(config.copy(fontSizeSp = it.toInt())) }
         )
 
+        // ===== v2.3.0：全局颜色（作用于全部弹幕）=====
+        DanmuSubTitle(stringResource(R.string.danmu_section_color))
+
+        // 文字颜色：色块网格（照 SubtitleSettingsPanel 的既有交互）
+        DanmuColorRow(
+            title = stringResource(R.string.danmu_text_color),
+            options = SubtitleColorOption.values().toList(),
+            selectedId = config.textColorId,
+            swatchColor = { it.color },
+            labelOf = { stringResource(it.labelRes) },
+            onPick = { onConfigChange(config.copy(textColorId = it)) }
+        )
+
+        // 描边
+        DanmuTextChipRow(
+            title = stringResource(R.string.danmu_stroke),
+            options = SubtitleStrokeOption.values().toList(),
+            selectedId = config.strokeId,
+            labelOf = { stringResource(it.labelRes) },
+            onPick = { onConfigChange(config.copy(strokeId = it)) }
+        )
+
+        // 背景底
+        DanmuTextChipRow(
+            title = stringResource(R.string.danmu_bg),
+            options = SubtitleBgOption.values().toList(),
+            selectedId = config.bgId,
+            labelOf = { stringResource(it.labelRes) },
+            onPick = { onConfigChange(config.copy(bgId = it)) }
+        )
+
+        Text(
+            text = stringResource(R.string.danmu_color_hint),
+            color = Color.White.copy(alpha = 0.4f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = stringResource(R.string.danmu_privacy_hint),
@@ -251,4 +296,141 @@ private fun DanmuSliderRow(
             modifier = Modifier.fillMaxWidth()
         )
     }
+}
+
+/**
+ * 带色块的选项网格（用于**文字颜色**这类需要直观看到颜色的选择）。
+ *
+ * 泛型 T 让「颜色 / 描边 / 背景」三种枚举共用同一份实现 —— 避免为每种枚举
+ * 各写一份（「同一功能两份 UI」是本项目头号事故源）。
+ */
+@Composable
+private fun <T> DanmuColorRow(
+    title: String,
+    options: List<T>,
+    selectedId: Int,
+    swatchColor: (T) -> Color,
+    labelOf: @Composable (T) -> String,
+    onPick: (Int) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text = title,
+            color = Color.White,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        options.chunked(4).forEach { rowOptions ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rowOptions.forEach { opt ->
+                    val id = colorOptionId(opt)
+                    val isSelected = id == selectedId
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (isSelected) Color.White.copy(alpha = 0.18f)
+                                else Color.White.copy(alpha = 0.05f)
+                            )
+                            .clickable { onPick(id) }
+                            .padding(vertical = 5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(swatchColor(opt))
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = labelOf(opt),
+                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
+                            fontSize = 9.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                repeat(4 - rowOptions.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 纯文字 chip 行（用于**描边 / 背景**这类无需色块的选择）。
+ * 同样泛型复用，三个枚举共用一份实现。
+ */
+@Composable
+private fun <T> DanmuTextChipRow(
+    title: String,
+    options: List<T>,
+    selectedId: Int,
+    labelOf: @Composable (T) -> String,
+    onPick: (Int) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text = title,
+            color = Color.White,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        options.chunked(3).forEach { rowOptions ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rowOptions.forEach { opt ->
+                    val id = colorOptionId(opt)
+                    val isSelected = id == selectedId
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (isSelected) Color.White.copy(alpha = 0.18f)
+                                else Color.White.copy(alpha = 0.05f)
+                            )
+                            .clickable { onPick(id) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = labelOf(opt),
+                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
+                            fontSize = 9.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+                repeat(3 - rowOptions.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 从三种颜色类枚举之一取出 `id`。
+ *
+ * ⚠️ 三个枚举都有 `id` 属性，但 Kotlin 泛型无法直接访问 —— 用 `when` 显式分发，
+ *    且**必须穷尽**（新增枚举时编译期就会报错提醒，好过运行时静默错配）。
+ */
+private fun colorOptionId(opt: Any?): Int = when (opt) {
+    is SubtitleColorOption -> opt.id
+    is SubtitleStrokeOption -> opt.id
+    is SubtitleBgOption -> opt.id
+    else -> 0
 }

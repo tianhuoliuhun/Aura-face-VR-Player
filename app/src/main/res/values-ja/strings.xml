@@ -221,6 +221,12 @@
     <string name="group_title_floating_ball">フローティングボールと速度</string>
     <string name="group_title_decoder">デコーダとフレームレート</string>
     <string name="group_title_subtitle">字幕機能の設定</string>
+    <string name="group_title_danmu">AI コメント</string>
+    <string name="danmu_section_color">全体カラー（全コメントに適用）</string>
+    <string name="danmu_text_color">文字色</string>
+    <string name="danmu_stroke">縁取り</string>
+    <string name="danmu_bg">背景</string>
+    <string name="danmu_color_hint">色は全体設定で、すべての AI コメントに適用されます。字幕の色とは別に設定できます。</string>
     <string name="group_title_enhance">画質強化</string>
     <string name="group_title_about">アプリについてとオープンソースライセンス</string>
     <string name="licenses_title">オープンソースライセンス</string>

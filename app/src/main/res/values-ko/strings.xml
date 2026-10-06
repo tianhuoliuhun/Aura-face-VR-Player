@@ -221,6 +221,12 @@
     <string name="group_title_floating_ball">플로팅 볼과 재생 속도</string>
     <string name="group_title_decoder">디코더와 FPS</string>
     <string name="group_title_subtitle">자막 기능 설정</string>
+    <string name="group_title_danmu">AI 댓글</string>
+    <string name="danmu_section_color">전체 색상 (모든 댓글 적용)</string>
+    <string name="danmu_text_color">텍스트 색상</string>
+    <string name="danmu_stroke">외곽선</string>
+    <string name="danmu_bg">배경</string>
+    <string name="danmu_color_hint">색상은 전체 설정으로 모든 AI 댓글에 적용되며, 자막 색상과 별도로 설정됩니다.</string>
     <string name="group_title_enhance">화질 향상</string>
     <string name="group_title_about">정보와 오픈소스 라이선스</string>
     <string name="licenses_title">오픈소스 라이선스</string>

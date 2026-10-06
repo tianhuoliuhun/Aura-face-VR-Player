@@ -50,8 +50,30 @@ data class DanmuConfig(
     /** 弹幕字号（sp） */
     val fontSizeSp: Int = DEFAULT_FONT_SIZE_SP,
     /** 相似度去重阈值 0-100（越大越严格） */
-    val dedupThresholdPercent: Int = DEFAULT_DEDUP_PERCENT
+    val dedupThresholdPercent: Int = DEFAULT_DEDUP_PERCENT,
+
+    // ===== v2.3.0：全局颜色（作用于**全部**弹幕，非逐条随机）=====
+    // 复用 `SubtitleModels.kt` 里既有枚举，避免为弹幕另造一套同义类型
+    //（「同一份数据两处登记」是本项目反复事故源）。
+    /** 弹幕文字颜色（全局） */
+    val textColorId: Int = SubtitleColorOption.WHITE.id,
+    /** 弹幕描边（全局） */
+    val strokeId: Int = SubtitleStrokeOption.MEDIUM_BLACK.id,
+    /** 弹幕背景底（全局） */
+    val bgId: Int = SubtitleBgOption.TRANSPARENT.id
 ) {
+    /** 解析后的文字颜色（id 找不到时回落到白色，不抛异常） */
+    val textColorOption: SubtitleColorOption
+        get() = SubtitleColorOption.values().find { it.id == textColorId } ?: SubtitleColorOption.WHITE
+
+    /** 解析后的描边（id 找不到时回落到无描边） */
+    val strokeOption: SubtitleStrokeOption
+        get() = SubtitleStrokeOption.values().find { it.id == strokeId } ?: SubtitleStrokeOption.NONE
+
+    /** 解析后的背景（id 找不到时回落到全透明） */
+    val bgOption: SubtitleBgOption
+        get() = SubtitleBgOption.values().find { it.id == bgId } ?: SubtitleBgOption.TRANSPARENT
+
     /** 拼接后的完整 chat/completions 端点（幂等：已带后缀则不重复拼） */
     fun resolveEndpoint(): String {
         val base = baseUrl.trim().trimEnd('/')
@@ -99,6 +121,11 @@ data class DanmuConfig(
         const val DEFAULT_OPACITY = 90
         const val DEFAULT_FONT_SIZE_SP = 18
         const val DEFAULT_DEDUP_PERCENT = 80
+
+        // v2.3.0：全局颜色默认值（id 取自 SubtitleModels.kt 的既有枚举）
+        const val DEFAULT_TEXT_COLOR_ID = 0  // SubtitleColorOption.WHITE
+        const val DEFAULT_STROKE_ID = 2      // SubtitleStrokeOption.MEDIUM_BLACK
+        const val DEFAULT_BG_ID = 0          // SubtitleBgOption.TRANSPARENT
 
         /** 间隔下限（秒）：低于此值会因 glReadPixels 同步阻塞拖累 GL 线程 */
         const val MIN_INTERVAL_SEC = 2
