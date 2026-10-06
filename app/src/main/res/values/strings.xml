@@ -261,9 +261,9 @@
     <string name="danmu_source_hint">「台词」取自当前播放位置附近的 AI 字幕（前 15 秒 / 后 5 秒）。仅台词模式不发送截图，更快也更省流量，但看不到画面。</string>
     <string name="danmu_err_no_subtitle">当前位置还没有台词：请先开启 AI 字幕并稍等生成</string>
     <string name="danmu_err_url_empty">接口地址不能为空：请在设置里填写以 http:// 或 https:// 开头的地址</string>
-    <string name="danmu_err_url_no_scheme">接口地址缺少前缀：需要以 http:// 或 https:// 开头（例如 https://api.xiaomimovie.com/v1）</string>
+    <string name="danmu_err_url_no_scheme">接口地址缺少前缀：需要以 http:// 或 https:// 开头（例如 https://api.xiaomimimo.com/v1）</string>
     <string name="danmu_err_url_bad_scheme">接口地址的协议写错了：只支持 http 或 https（常见误写 hhttps:// 或 htps://）</string>
-    <string name="danmu_err_url_no_host">接口地址缺少主机名：请检查斜杠位置，例如 https://api.xiaomimovie.com/v1</string>
+    <string name="danmu_err_url_no_host">接口地址缺少主机名：请检查斜杠位置，例如 https://api.xiaomimimo.com/v1</string>
     <string name="group_title_enhance">画质增强</string>
     <string name="group_title_about">关于与开源许可</string>
     <string name="licenses_title">开源软件许可</string>
@@ -863,6 +863,11 @@
     <string name="danmu_persona_preset_emo">情绪</string>
     <string name="danmu_persona_preset_zen">安静</string>
     <string name="danmu_persona_preset_custom">自定义</string>
+    <string name="danmu_api_key_hint">粘贴平台提供的密钥</string>
+    <string name="danmu_err_auth">API Key 无效或已过期：请到设置里重新填写密钥</string>
+    <string name="danmu_err_model_not_found">模型名不被识别：请核对模型 ID 是否与平台一致（部分平台区分大小写，如 MiMo-V2.6-Flash）</string>
+    <string name="danmu_err_stream_reset">连接被服务端重置：常见原因是模型名不被识别（大小写敏感）或端点不正确</string>
+    <string name="danmu_err_network">网络请求失败：请检查网络连接与接口地址</string>
     <string name="danmu_test_connection">测试连接</string>
     <string name="danmu_test_running">测试中…</string>
     <string name="danmu_test_ok">连接成功</string>

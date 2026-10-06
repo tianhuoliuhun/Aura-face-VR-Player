@@ -753,7 +753,8 @@ fun VRPlayerScreen(
 
     // ===== v2.2.0（P1）：AI 弹幕配置 =====
     // 与翻译配置**有意分离**：翻译用文本模型、弹幕用视觉模型，复用同一份会互相污染
-    // （方案文档 D1 决策）。默认端点/模型为小米 MiMo V2.6 Flash（OpenAI 兼容）。
+    // （方案文档 D1 决策）。默认端点/模型见 `DanmuConfig.DEFAULT_BASE_URL` / `DEFAULT_MODEL`
+    // —— v2.4.4 起为 **AMD Radeon 开发者平台 + `MiMo-V2.6-Flash`**（OpenAI 兼容）。
     var danmuSettingsRestored by remember { mutableStateOf(false) }
     var danmuConfig by remember { mutableStateOf(DanmuConfig()) }
     LaunchedEffect(Unit) {
@@ -1914,13 +1915,17 @@ fun VRPlayerScreen(
                     continue
                 }
 
-                // ③ 交给视觉模型（内部已切 IO；失败返回空列表，不抛）
-                val lines = danmuVisionClient.requestDanmu(frame, danmuConfig, subtitleText)
+                // ③ 交给视觉模型（内部已切 IO；失败返回结构化结果，不抛）
+                //    ⚠️ v2.4.5：改用 fetchDanmu（带失败原因），不再用只返回列表的 requestDanmu。
+                //       此前失败一律塌缩成空列表 → 无论真实原因是 401 还是 404，
+                //       UI 都只显示「模型未返回可用弹幕」，把用户引向错误方向
+                //       （实测事故：日志是 `HTTP 401 Invalid bearer token`）。
+                val fetched = danmuVisionClient.fetchDanmu(frame, danmuConfig, subtitleText)
                 // ⚠️ 用完立刻回收：1024×576 ARGB ≈ 2.3 MB，long-running 页面不能泄漏
                 if (frame != null && !frame.isRecycled) frame.recycle()
 
-                if (lines.isEmpty()) {
-                    danmuLastError = context.getString(R.string.danmu_err_empty_response)
+                if (!fetched.isSuccess) {
+                    danmuLastError = danmuErrorText(context, fetched.kind)
                 } else {
                     danmuLastError = ""
                     val now = android.os.SystemClock.elapsedRealtime()
@@ -1931,7 +1936,7 @@ fun VRPlayerScreen(
                     if (glW > 0f && danmuEngine.screenWidthPx <= 0f) {
                         danmuEngine.screenWidthPx = glW
                     }
-                    val added = danmuEngine.enqueue(lines, now)
+                    val added = danmuEngine.enqueue(fetched.lines, now)
                     danmuGeneratedCount += added
                     // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）
                     danmuEngine.prune(now)
@@ -8250,3 +8255,57 @@ private fun scaleSeekThumb(src: Bitmap): Bitmap {
 }
 
 
+
+/**
+ * v2.4.5：把弹幕请求的失败原因（[DanmuVisionClient.ChatErrorKind]）映射为本地化文案。
+ *
+ * ## 为什么需要（实测事故）
+ * v2.4.4 及之前，弹幕请求失败一律塌缩成「空列表」，编排层只能显示
+ * `danmu_err_empty_response`（「模型未返回可用弹幕」）。而实际日志里可能是
+ * `视觉请求失败（AUTH）: HTTP 401 | {"detail":"Invalid bearer token"}` ——
+ * **密钥无效**，与「模型没返回内容」是完全不同的问题，
+ * 用户会去查模型名与网络，**排查方向全错**。
+ *
+ * 现在按 kind 给出**准确的、可操作的**提示。
+ *
+ * ⚠️ `NO_CONTENT` / `EMPTY_RESPONSE` 才回落到原来那句「模型未返回可用弹幕」——
+ *    因为只有这一类才是**真的**「模型没给出可用内容」。
+ *
+ * @param context 取字符串资源
+ * @param kind    客户端返回的失败类别
+ */
+private fun danmuErrorText(
+    context: android.content.Context,
+    kind: DanmuVisionClient.ChatErrorKind
+): String = when (kind) {
+    // 成功 —— 调用方不应走到这里；兜底返回空串（状态卡片会显示「已生成」）
+    DanmuVisionClient.ChatErrorKind.NONE -> ""
+    DanmuVisionClient.ChatErrorKind.NOT_CONFIGURED ->
+        context.getString(R.string.danmu_err_not_configured)
+    DanmuVisionClient.ChatErrorKind.BAD_URL ->
+        context.getString(R.string.danmu_err_url_bad_scheme)
+    // 🔴 v2.4.4 实测事故：密钥无效（HTTP 401 Invalid bearer token）
+    DanmuVisionClient.ChatErrorKind.AUTH ->
+        context.getString(R.string.danmu_err_auth)
+    // 🔴 模型名不被识别（大小写敏感）—— v2.4.4 头号坑
+    DanmuVisionClient.ChatErrorKind.MODEL_NOT_FOUND ->
+        context.getString(R.string.danmu_err_model_not_found)
+    // HTTP/2 RST_STREAM：多数情况下与 MODEL_NOT_FOUND 同源
+    DanmuVisionClient.ChatErrorKind.STREAM_RESET ->
+        context.getString(R.string.danmu_err_stream_reset)
+    DanmuVisionClient.ChatErrorKind.RATE_LIMIT ->
+        context.getString(R.string.danmu_test_hint_rate_limit)
+    DanmuVisionClient.ChatErrorKind.SERVER_ERROR ->
+        context.getString(R.string.danmu_test_hint_server_error)
+    DanmuVisionClient.ChatErrorKind.HTTP_ERROR ->
+        context.getString(R.string.danmu_err_network)
+    DanmuVisionClient.ChatErrorKind.DNS,
+    DanmuVisionClient.ChatErrorKind.CONNECT,
+    DanmuVisionClient.ChatErrorKind.TIMEOUT,
+    DanmuVisionClient.ChatErrorKind.NETWORK ->
+        context.getString(R.string.danmu_err_network)
+    // 只有这两类才是真的「模型返回了但不可用」
+    DanmuVisionClient.ChatErrorKind.NO_CONTENT,
+    DanmuVisionClient.ChatErrorKind.EMPTY_RESPONSE ->
+        context.getString(R.string.danmu_err_empty_response)
+}

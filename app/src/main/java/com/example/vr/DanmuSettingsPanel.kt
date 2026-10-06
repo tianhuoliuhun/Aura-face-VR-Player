@@ -202,9 +202,14 @@ fun DanmuSettingsPanel(
         Spacer(modifier = Modifier.height(6.dp))
         OutlinedTextField(
             value = config.apiKey,
-            onValueChange = { onConfigChange(config.copy(apiKey = it)) },
+            // ⚠️ v2.4.5：**去掉首尾空白**。从网页/聊天里复制 Key 时常带上
+            //    尾随空格或换行，服务端会当作密钥的一部分 → `401 Invalid bearer token`，
+            //    而用户肉眼看不出差别。这里在输入时就清掉，从源头消灭这类问题。
+            onValueChange = { onConfigChange(config.copy(apiKey = it.trim())) },
             label = { Text(stringResource(R.string.danmu_api_key), fontSize = 8.sp) },
-            placeholder = { Text("sk-...", fontSize = 8.sp) },
+            // ⚠️ v2.4.5：placeholder 原来写死 "sk-..."，但本项目默认的 AMD 平台
+            //    Key 形如 `rc-...`。写死前缀会误导用户以为填错了。
+            placeholder = { Text(stringResource(R.string.danmu_api_key_hint), fontSize = 8.sp) },
             singleLine = true,
             enabled = canPersistSecrets,
             visualTransformation = PasswordVisualTransformation(),

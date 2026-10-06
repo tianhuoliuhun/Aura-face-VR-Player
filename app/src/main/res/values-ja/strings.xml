@@ -245,9 +245,9 @@
     <string name="danmu_source_hint">「セリフ」は現在の再生位置付近の AI 字幕から取得します（前 15 秒 / 後 5 秒）。セリフのみモードはスクリーンショットを送信しないため高速・省通信ですが、映像は見えません。</string>
     <string name="danmu_err_no_subtitle">現在位置のセリフがまだありません。AI 字幕を有効にして生成をお待ちください</string>
     <string name="danmu_err_url_empty">エンドポイントが空です。http:// または https:// で始まるアドレスを入力してください</string>
-    <string name="danmu_err_url_no_scheme">エンドポイントに接頭辞がありません。http:// または https:// で始める必要があります（例: https://api.xiaomimovie.com/v1）</string>
+    <string name="danmu_err_url_no_scheme">エンドポイントに接頭辞がありません。http:// または https:// で始める必要があります（例: https://api.xiaomimimo.com/v1）</string>
     <string name="danmu_err_url_bad_scheme">エンドポイントのプロトコルが誤っています。http または https のみ対応（よくある誤記: hhttps:// や htps://）</string>
-    <string name="danmu_err_url_no_host">エンドポイントにホスト名がありません。スラッシュの位置を確認してください（例: https://api.xiaomimovie.com/v1）</string>
+    <string name="danmu_err_url_no_host">エンドポイントにホスト名がありません。スラッシュの位置を確認してください（例: https://api.xiaomimimo.com/v1）</string>
     <string name="group_title_enhance">画質強化</string>
     <string name="group_title_about">アプリについてとオープンソースライセンス</string>
     <string name="licenses_title">オープンソースライセンス</string>
@@ -830,6 +830,11 @@
     <string name="danmu_persona_preset_emo">感情派</string>
     <string name="danmu_persona_preset_zen">静か</string>
     <string name="danmu_persona_preset_custom">カスタム</string>
+    <string name="danmu_api_key_hint">プラットフォームが提供するキーを貼り付け</string>
+    <string name="danmu_err_auth">API Key が無効か期限切れです。設定で再入力してください</string>
+    <string name="danmu_err_model_not_found">モデル名が認識されません。プラットフォーム上のモデル ID と一致するか確認してください（大文字小文字を区別する場合があります。例：MiMo-V2.6-Flash）</string>
+    <string name="danmu_err_stream_reset">サーバーに接続をリセットされました。よくある原因はモデル名が認識されないこと（大文字小文字を区別）やエンドポイントの誤りです</string>
+    <string name="danmu_err_network">ネットワークリクエストに失敗しました。接続とエンドポイントを確認してください</string>
     <string name="danmu_test_connection">接続テスト</string>
     <string name="danmu_test_running">テスト中…</string>
     <string name="danmu_test_ok">接続成功</string>

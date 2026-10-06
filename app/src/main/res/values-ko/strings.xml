@@ -245,9 +245,9 @@
     <string name="danmu_source_hint">"대사"는 현재 재생 위치 부근의 AI 자막에서 가져옵니다(앞 15초 / 뒤 5초). 대사만 모드는 스크린샷을 보내지 않아 더 빠르고 가볍지만 화면은 볼 수 없습니다.</string>
     <string name="danmu_err_no_subtitle">현재 위치에 아직 대사가 없습니다. AI 자막을 켜고 생성을 기다려 주세요</string>
     <string name="danmu_err_url_empty">엔드포인트 주소가 비어 있습니다. http:// 또는 https://로 시작하는 주소를 입력하세요</string>
-    <string name="danmu_err_url_no_scheme">엔드포인트 주소에 접두사가 없습니다. http:// 또는 https://로 시작해야 합니다(예: https://api.xiaomimovie.com/v1)</string>
+    <string name="danmu_err_url_no_scheme">엔드포인트 주소에 접두사가 없습니다. http:// 또는 https://로 시작해야 합니다(예: https://api.xiaomimimo.com/v1)</string>
     <string name="danmu_err_url_bad_scheme">엔드포인트 주소의 프로토콜이 잘못되었습니다. http 또는 https만 지원합니다(흔한 오타: hhttps:// 또는 htps://)</string>
-    <string name="danmu_err_url_no_host">엔드포인트 주소에 호스트 이름이 없습니다. 슬래시 위치를 확인하세요(예: https://api.xiaomimovie.com/v1)</string>
+    <string name="danmu_err_url_no_host">엔드포인트 주소에 호스트 이름이 없습니다. 슬래시 위치를 확인하세요(예: https://api.xiaomimimo.com/v1)</string>
     <string name="group_title_enhance">화질 향상</string>
     <string name="group_title_about">정보와 오픈소스 라이선스</string>
     <string name="licenses_title">오픈소스 라이선스</string>
@@ -830,6 +830,11 @@
     <string name="danmu_persona_preset_emo">감성</string>
     <string name="danmu_persona_preset_zen">차분</string>
     <string name="danmu_persona_preset_custom">사용자 지정</string>
+    <string name="danmu_api_key_hint">플랫폼에서 제공한 키를 붙여넣으세요</string>
+    <string name="danmu_err_auth">API Key가 유효하지 않거나 만료되었습니다. 설정에서 다시 입력하세요</string>
+    <string name="danmu_err_model_not_found">모델 이름을 인식할 수 없습니다. 플랫폼의 모델 ID와 일치하는지 확인하세요 (일부 플랫폼은 대소문자를 구분합니다. 예: MiMo-V2.6-Flash)</string>
+    <string name="danmu_err_stream_reset">서버가 연결을 재설정했습니다. 흔한 원인은 모델 이름 미인식(대소문자 구분) 또는 잘못된 엔드포인트입니다</string>
+    <string name="danmu_err_network">네트워크 요청 실패: 연결과 엔드포인트를 확인하세요</string>
     <string name="danmu_test_connection">연결 테스트</string>
     <string name="danmu_test_running">테스트 중…</string>
     <string name="danmu_test_ok">연결 성공</string>

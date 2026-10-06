@@ -269,9 +269,9 @@
     <string name="danmu_source_hint">"Lines" comes from AI subtitles near the current position (15s before / 5s after). Lines-only mode sends no screenshot — faster and lighter, but it cannot see the picture.</string>
     <string name="danmu_err_no_subtitle">No lines at this position yet — enable AI subtitles and wait for them to generate</string>
     <string name="danmu_err_url_empty">Endpoint address is empty — enter an address starting with http:// or https://</string>
-    <string name="danmu_err_url_no_scheme">Endpoint address is missing a prefix — it must start with http:// or https:// (e.g. https://api.xiaomimovie.com/v1)</string>
+    <string name="danmu_err_url_no_scheme">Endpoint address is missing a prefix — it must start with http:// or https:// (e.g. https://api.xiaomimimo.com/v1)</string>
     <string name="danmu_err_url_bad_scheme">Wrong protocol in endpoint address — only http or https is supported (common typos: hhttps:// or htps://)</string>
-    <string name="danmu_err_url_no_host">Endpoint address is missing a host name — check the slashes, e.g. https://api.xiaomimovie.com/v1</string>
+    <string name="danmu_err_url_no_host">Endpoint address is missing a host name — check the slashes, e.g. https://api.xiaomimimo.com/v1</string>
     <string name="group_title_enhance">Image enhancement</string>
     <string name="group_title_about">About &amp; open source licenses</string>
     <string name="licenses_title">Open source licenses</string>
@@ -870,6 +870,11 @@
     <string name="danmu_persona_preset_emo">Emotional</string>
     <string name="danmu_persona_preset_zen">Calm</string>
     <string name="danmu_persona_preset_custom">Custom</string>
+    <string name="danmu_api_key_hint">Paste the key provided by your platform</string>
+    <string name="danmu_err_auth">API Key is invalid or expired: please re-enter it in settings</string>
+    <string name="danmu_err_model_not_found">Model name not recognized: check the model ID against the platform (some platforms are case-sensitive, e.g. MiMo-V2.6-Flash)</string>
+    <string name="danmu_err_stream_reset">Connection reset by server: common causes are an unrecognized model name (case-sensitive) or a wrong endpoint</string>
+    <string name="danmu_err_network">Network request failed: please check your connection and endpoint</string>
     <string name="danmu_test_connection">Test connection</string>
     <string name="danmu_test_running">Testing…</string>
     <string name="danmu_test_ok">Connected</string>

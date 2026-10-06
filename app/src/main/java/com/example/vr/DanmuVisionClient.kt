@@ -59,26 +59,51 @@ class DanmuVisionClient {
         .build()
 
     /**
-     * 请求一批弹幕。
+     * 请求一批弹幕（**保持向后兼容的薄封装**）。
      *
-     * v2.4.1 起支持三种素材组合（由 [config] 的 `sourceMode` 决定）：
-     * - **画面 + 台词**：同时发图片与台词文本，模型可对台词本身做出反应（弹幕的灵魂）
-     * - **仅画面**：与 v2.4.0 行为一致
-     * - **仅台词**：不发图，只发台词；省带宽省 token，但看不到画面
+     * ⚠️ v2.4.5 起请优先用 [fetchDanmu] —— 它会同时带回**失败原因**。
+     *    本方法只返回列表，调用方无法区分「模型真的没返回内容」和
+     *    「401 密钥无效 / 404 模型名错」—— v2.4.4 的实测事故正是如此：
+     *    日志里明明是 `HTTP 401 Invalid bearer token`，UI 却显示
+     *    「模型未返回可用弹幕」，把用户引向了完全错误的方向。
      *
-     * @param frame   画面帧（ARGB_8888，行序**已翻正**）。仅台词模式下可传 null
-     * @param subtitleText 当前播放位置附近的台词（已拼成纯文本）。无台词/不用台词时传空串
-     * @param config  弹幕配置（端点/模型/密钥/人格/批量/图像参数/素材来源）
      * @return 弹幕文本列表；任何失败都返回**空列表**（不抛异常）
      */
     suspend fun requestDanmu(
         frame: Bitmap?,
         config: DanmuConfig,
         subtitleText: String = ""
-    ): List<String> = withContext(Dispatchers.IO) {
+    ): List<String> = fetchDanmu(frame, config, subtitleText).lines
+
+    /**
+     * 请求一批弹幕，**并带回失败原因**（v2.4.5）。
+     *
+     * v2.4.1 起支持三种素材组合（由 [config] 的 `sourceMode` 决定）：
+     * - **画面 + 台词**：同时发图片与台词文本，模型可对台词本身做出反应（弹幕的灵魂）
+     * - **仅画面**：与 v2.4.0 行为一致
+     * - **仅台词**：不发图，只发台词；省带宽省 token，但看不到画面
+     *
+     * ## 为什么要有这个版本（v2.4.5）
+     * v2.4.4 之前，失败一律塌缩成「空列表」→ 编排层只能显示
+     * 「模型未返回可用弹幕」这种**笼统且常常错误**的提示。
+     * 实测事故：日志里是 `HTTP 401 Invalid bearer token`（密钥无效），
+     * 面板却提示「模型未返回可用弹幕」—— 用户会去检查模型名/网络，**方向全错**。
+     *
+     * 现在把 [ChatErrorKind] 一路带到 UI，让用户看到**真实原因**。
+     *
+     * @param frame   画面帧（ARGB_8888，行序**已翻正**）。仅台词模式下可传 null
+     * @param subtitleText 当前播放位置附近的台词（已拼成纯文本）。无台词/不用台词时传空串
+     * @param config  弹幕配置（端点/模型/密钥/人格/批量/图像参数/素材来源）
+     * @return [DanmuFetchResult]：`kind == NONE` 表示成功
+     */
+    suspend fun fetchDanmu(
+        frame: Bitmap?,
+        config: DanmuConfig,
+        subtitleText: String = ""
+    ): DanmuFetchResult = withContext(Dispatchers.IO) {
         if (!config.isReadyToRequest()) {
             Log.w(TAG, "配置不完整，跳过视觉请求（apiKey/baseUrl/model 需齐全）")
-            return@withContext emptyList()
+            return@withContext DanmuFetchResult(emptyList(), ChatErrorKind.NOT_CONFIGURED)
         }
 
         // v2.4.2：先做 URL 语法粗筛。
@@ -89,21 +114,22 @@ class DanmuVisionClient {
         val problem = config.baseUrlProblem()
         if (problem != null) {
             Log.e(TAG, "Base URL 不合法（$problem）: '${config.baseUrl.trim()}' —— 需要形如 https://host/v1")
-            return@withContext emptyList()
+            return@withContext DanmuFetchResult(emptyList(), ChatErrorKind.BAD_URL, problem.name)
         }
 
         val endpoint = config.resolveEndpoint()
         if (endpoint.isBlank()) {
             Log.w(TAG, "端点为空，跳过视觉请求")
-            return@withContext emptyList()
+            return@withContext DanmuFetchResult(emptyList(), ChatErrorKind.BAD_URL)
         }
+
 
         // ① 编码（仅画面模式需要；CPU 密集，已在 IO 线程）
         //    ⚠️ 仅台词模式**完全跳过编码**，省掉 JPEG 压缩与 base64（那是耗时大头）
         val dataUrl = if (config.needsImage) {
             if (frame == null) {
                 Log.w(TAG, "需要画面但帧为 null，跳过本次请求")
-                return@withContext emptyList()
+                return@withContext DanmuFetchResult(emptyList(), ChatErrorKind.NO_CONTENT, "frame=null")
             }
             encodeFrameToDataUrl(frame, config)
         } else {
@@ -111,7 +137,7 @@ class DanmuVisionClient {
         }
         if (config.needsImage && dataUrl == null) {
             Log.e(TAG, "帧编码失败")
-            return@withContext emptyList()
+            return@withContext DanmuFetchResult(emptyList(), ChatErrorKind.NO_CONTENT, "encode failed")
         }
 
         // ② 组请求体
@@ -151,15 +177,26 @@ class DanmuVisionClient {
             .build()
 
         // ③ 发送
+        //    ⚠️ v2.4.5：**必须把 kind 带回去**。此前这里失败只 `Log.e` 后返回空列表，
+        //       编排层拿不到原因 → UI 只能显示笼统的「模型未返回可用弹幕」。
+        //       实测事故：日志是 `HTTP 401 Invalid bearer token`，UI 却说「模型未返回可用弹幕」，
+        //       用户会去查模型名/网络，**方向全错**。
         when (val result = executeChat(request, config)) {
             is ChatResult.Success -> {
                 val lines = parseDanmuLines(result.content, config.batchSize)
                 Log.d(TAG, "视觉请求成功，解析出 ${lines.size} 条弹幕")
-                lines
+                if (lines.isEmpty()) {
+                    // 拿到了 200 但一条也没解析出来 —— 这是**真的**"模型没返回可用内容"
+                    // （例如模型只回了「好的」这类无弹幕内容，或全被清洗规则过滤）
+                    Log.w(TAG, "响应成功但解析为空。原始内容前 200 字: ${result.content.take(200)}")
+                    DanmuFetchResult(emptyList(), ChatErrorKind.NO_CONTENT, result.content.take(200))
+                } else {
+                    DanmuFetchResult(lines, ChatErrorKind.NONE)
+                }
             }
             is ChatResult.Failure -> {
                 Log.e(TAG, "视觉请求失败（${result.kind}）: ${result.detail}")
-                emptyList()
+                DanmuFetchResult(emptyList(), result.kind, result.detail)
             }
         }
     }
@@ -361,6 +398,32 @@ class DanmuVisionClient {
         val message: String,
         val sample: String = ""
     )
+
+    /**
+     * v2.4.5：一次弹幕请求的结果（**带失败原因**）。
+     *
+     * ## 为什么需要它
+     * v2.4.4 及之前，[requestDanmu] 失败一律返回空列表 → 编排层无法区分
+     * 「模型真的没返回可用内容」与「401 密钥无效 / 404 模型名错 / 连接被重置」，
+     * 只能显示笼统的「模型未返回可用弹幕」。
+     *
+     * 实测事故（v2.4.4 发布后）：日志里明明是
+     * `视觉请求失败（AUTH）: HTTP 401 | {"detail":"Invalid bearer token"}`
+     * —— **密钥无效**，但面板显示「模型未返回可用弹幕」，
+     * 用户会去查模型名与网络，**排查方向完全错**。
+     *
+     * @param lines  解析出的弹幕（失败时为空）
+     * @param kind   结果类别；[ChatErrorKind.NONE] 表示成功
+     * @param detail 原始失败详情（HTTP code / body 片段 / 异常信息），供诊断
+     */
+    data class DanmuFetchResult(
+        val lines: List<String>,
+        val kind: ChatErrorKind,
+        val detail: String = ""
+    ) {
+        /** 是否成功（拿到了至少一条弹幕） */
+        val isSuccess: Boolean get() = kind == ChatErrorKind.NONE && lines.isNotEmpty()
+    }
 
     /**
      * 把帧压成 JPEG 并转 base64 data URL。
