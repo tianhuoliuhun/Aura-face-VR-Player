@@ -61,13 +61,20 @@ class DanmuVisionClient {
     /**
      * 请求一批弹幕。
      *
-     * @param frame   画面帧（ARGB_8888，行序**已翻正**，来自 `VRGLRenderer.takeDanmuFrame`）
-     * @param config  弹幕配置（端点/模型/密钥/人格/批量/图像参数）
+     * v2.4.1 起支持三种素材组合（由 [config] 的 `sourceMode` 决定）：
+     * - **画面 + 台词**：同时发图片与台词文本，模型可对台词本身做出反应（弹幕的灵魂）
+     * - **仅画面**：与 v2.4.0 行为一致
+     * - **仅台词**：不发图，只发台词；省带宽省 token，但看不到画面
+     *
+     * @param frame   画面帧（ARGB_8888，行序**已翻正**）。仅台词模式下可传 null
+     * @param subtitleText 当前播放位置附近的台词（已拼成纯文本）。无台词/不用台词时传空串
+     * @param config  弹幕配置（端点/模型/密钥/人格/批量/图像参数/素材来源）
      * @return 弹幕文本列表；任何失败都返回**空列表**（不抛异常）
      */
     suspend fun requestDanmu(
-        frame: Bitmap,
-        config: DanmuConfig
+        frame: Bitmap?,
+        config: DanmuConfig,
+        subtitleText: String = ""
     ): List<String> = withContext(Dispatchers.IO) {
         if (!config.isReadyToRequest()) {
             Log.w(TAG, "配置不完整，跳过视觉请求（apiKey/baseUrl/model 需齐全）")
@@ -80,9 +87,18 @@ class DanmuVisionClient {
             return@withContext emptyList()
         }
 
-        // ① 编码（CPU 密集，已在 IO 线程）
-        val dataUrl = encodeFrameToDataUrl(frame, config)
-        if (dataUrl == null) {
+        // ① 编码（仅画面模式需要；CPU 密集，已在 IO 线程）
+        //    ⚠️ 仅台词模式**完全跳过编码**，省掉 JPEG 压缩与 base64（那是耗时大头）
+        val dataUrl = if (config.needsImage) {
+            if (frame == null) {
+                Log.w(TAG, "需要画面但帧为 null，跳过本次请求")
+                return@withContext emptyList()
+            }
+            encodeFrameToDataUrl(frame, config)
+        } else {
+            null
+        }
+        if (config.needsImage && dataUrl == null) {
             Log.e(TAG, "帧编码失败")
             return@withContext emptyList()
         }
@@ -90,6 +106,13 @@ class DanmuVisionClient {
         // ② 组请求体
         val persona = config.personaPrompt.ifBlank { DanmuConfig.DEFAULT_PERSONA }
         val prompt = persona.replace("{count}", config.batchSize.toString())
+
+        val instruction = buildUserInstruction(
+            count = config.batchSize,
+            hasImage = dataUrl != null,
+            hasSubtitle = subtitleText.isNotBlank(),
+            subtitleText = subtitleText
+        )
 
         val bodyJson = JSONObject().apply {
             put("model", config.modelName.trim())
@@ -102,20 +125,13 @@ class DanmuVisionClient {
                 })
                 put(JSONObject().apply {
                     put("role", "user")
-                    put("content", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("type", "text")
-                            put("text", buildUserInstruction(config.batchSize))
-                        })
-                        put(JSONObject().apply {
-                            put("type", "image_url")
-                            put("image_url", JSONObject().apply { put("url", dataUrl) })
-                        })
-                    })
+                    // ⚠️ OpenAI 协议允许 content 为**纯字符串**（纯文本时）或**数组**（含图片时）。
+                    //    仅台词模式没有图片 → 用字符串形式，兼容性最好
+                    //    （部分实现不接受 `[{type:text}]` 这种单元素数组）。
+                    put("content", buildUserContent(instruction, dataUrl))
                 })
             })
         }
-
         val request = Request.Builder()
             .url(endpoint)
             .addHeader("Authorization", "Bearer ${config.apiKey.trim()}")
@@ -275,8 +291,56 @@ class DanmuVisionClient {
         return metaHints.any { s.contains(it, ignoreCase = true) }
     }
 
-    private fun buildUserInstruction(count: Int): String =
-        "请观察这张视频画面截图，写出 $count 条弹幕。直接输出弹幕文本，每行一条。"
+    /**
+     * 组装 `content` 字段。
+     *
+     * - 有图片 → 数组形式 `[{type:text}, {type:image_url}]`
+     * - 仅文本 → **纯字符串**（兼容性最好；部分 OpenAI 兼容实现不接受单元素数组）
+     */
+    private fun buildUserContent(instruction: String, dataUrl: String?): Any {
+        if (dataUrl == null) return instruction
+        return JSONArray().apply {
+            put(JSONObject().apply {
+                put("type", "text")
+                put("text", instruction)
+            })
+            put(JSONObject().apply {
+                put("type", "image_url")
+                put("image_url", JSONObject().apply { put("url", dataUrl) })
+            })
+        }
+    }
+
+    /**
+     * 生成 user 指令。
+     *
+     * v2.4.1：按**实际已有的素材**措辞 —— 只给台词时若还说"请观察这张截图"，
+     * 模型会困惑甚至幻觉出画面内容。措辞必须与素材严格对应。
+     */
+    private fun buildUserInstruction(
+        count: Int,
+        hasImage: Boolean,
+        hasSubtitle: Boolean,
+        subtitleText: String
+    ): String {
+        val head = when {
+            hasImage && hasSubtitle ->
+                "请结合这张视频画面截图、以及当前这段台词，写出 $count 条弹幕。"
+            hasImage ->
+                "请观察这张视频画面截图，写出 $count 条弹幕。"
+            hasSubtitle ->
+                "请根据当前这段台词，写出 $count 条弹幕。"
+            else ->
+                "请写出 $count 条弹幕。"
+        }
+        val sb = StringBuilder(head)
+        sb.append("直接输出弹幕文本，每行一条。")
+        if (hasSubtitle) {
+            sb.append("\n\n当前台词（仅供参考，不要复述台词，要像观众那样对台词做出反应）：\n")
+            sb.append(subtitleText)
+        }
+        return sb.toString()
+    }
 
     companion object {
         private const val TAG = "DanmuVisionClient"

@@ -263,6 +263,13 @@
     <string name="danmu_err_capture_timeout">畫面擷取逾時，稍後自動重試</string>
     <string name="danmu_err_empty_response">模型未回傳可用彈幕，稍後自動重試</string>
     <string name="danmu_err_unexpected">出現意外錯誤，已跳過本輪（不影響播放）</string>
+    <string name="danmu_section_source">素材來源</string>
+    <string name="danmu_source">生成依據</string>
+    <string name="danmu_source_both">畫面+台詞</string>
+    <string name="danmu_source_image">僅畫面</string>
+    <string name="danmu_source_subtitle">僅台詞</string>
+    <string name="danmu_source_hint">「台詞」取自目前播放位置附近的 AI 字幕（前 15 秒 / 後 5 秒）。僅台詞模式不傳送截圖，更快也更省流量，但看不到畫面。</string>
+    <string name="danmu_err_no_subtitle">目前位置還沒有台詞：請先開啟 AI 字幕並稍等生成</string>
     <string name="group_title_enhance">畫質增強</string>
     <string name="group_title_about">關於與開源許可</string>
     <string name="licenses_title">開源軟件許可</string>

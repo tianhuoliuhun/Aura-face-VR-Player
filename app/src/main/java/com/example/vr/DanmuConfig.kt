@@ -1,5 +1,33 @@
 package com.example.vr
 
+import androidx.annotation.StringRes
+import com.example.R
+
+/**
+ * 弹幕素材来源模式（v2.4.1）
+ *
+ * 背景：弹幕的输入原本只有**截图**（视觉模型看画面）。但本项目自带 ASR 实时字幕，
+ * 那批台词文本已经在内存里（`realtimeCues`）—— 让它一起参与，弹幕才能"接住剧情"：
+ * 光看画面只能吐槽构图与人物，加上台词才能对台词本身做出反应（这才是弹幕的灵魂）。
+ *
+ * 用户 2026-10-06 定案：**做成开关让用户自己选**，而不是替他决定。
+ */
+enum class DanmuSourceMode(@StringRes val labelRes: Int, val id: Int) {
+    /** 画面 + 台词（默认）：视觉模型同时收到截图与当前时间附近的台词 */
+    IMAGE_AND_SUBTITLE(R.string.danmu_source_both, 0),
+
+    /** 仅画面：与 v2.4.0 行为一致 */
+    IMAGE_ONLY(R.string.danmu_source_image, 1),
+
+    /** 仅台词：不发图，只把台词交给模型（成本低、速度快，但看不到画面） */
+    SUBTITLE_ONLY(R.string.danmu_source_subtitle, 2);
+
+    companion object {
+        /** id 失配时安全回落（防旧 prefs 脏 id） */
+        fun fromId(id: Int): DanmuSourceMode = values().find { it.id == id } ?: IMAGE_AND_SUBTITLE
+    }
+}
+
 /**
  * AI 弹幕配置（v2.2.0 / P1）
  *
@@ -60,8 +88,24 @@ data class DanmuConfig(
     /** 弹幕描边（全局） */
     val strokeId: Int = SubtitleStrokeOption.MEDIUM_BLACK.id,
     /** 弹幕背景底（全局） */
-    val bgId: Int = SubtitleBgOption.TRANSPARENT.id
+    val bgId: Int = SubtitleBgOption.TRANSPARENT.id,
+
+    // ===== v2.4.1：素材来源 =====
+    /** 素材来源模式（画面 / 台词 / 两者） */
+    val sourceModeId: Int = DanmuSourceMode.IMAGE_AND_SUBTITLE.id
 ) {
+    /** 解析后的素材来源（id 找不到时回落到「画面+台词」） */
+    val sourceMode: DanmuSourceMode
+        get() = DanmuSourceMode.fromId(sourceModeId)
+
+    /** 是否需要把截图发给模型 */
+    val needsImage: Boolean
+        get() = sourceMode != DanmuSourceMode.SUBTITLE_ONLY
+
+    /** 是否需要把台词文本发给模型 */
+    val needsSubtitle: Boolean
+        get() = sourceMode != DanmuSourceMode.IMAGE_ONLY
+
     /** 解析后的文字颜色（id 找不到时回落到白色，不抛异常） */
     val textColorOption: SubtitleColorOption
         get() = SubtitleColorOption.values().find { it.id == textColorId } ?: SubtitleColorOption.WHITE
@@ -137,5 +181,28 @@ data class DanmuConfig(
 
         /** 轨道数上限（超过会挤压画面） */
         const val MAX_TRACKS_LIMIT = 20
+
+        // ===== v2.4.1：台词窗口 =====
+        /**
+         * 取当前播放位置**之前**多少毫秒的台词。
+         *
+         * 取「之前」而非「之后」为主：弹幕是对**刚刚发生**的画面的反应。
+         * 15 秒约等于 3~5 句对白，足够让模型理解上下文，又不至于把文本撑大。
+         */
+        const val SUBTITLE_WINDOW_BEFORE_MS = 15_000L
+
+        /**
+         * 取当前播放位置**之后**多少毫秒的台词。
+         *
+         * 少量「后视」是为了让模型知道"话还没说完"，避免对半句话做反应；
+         * 不宜过大，否则模型会**剧透**（把还没播的剧情写进弹幕）。
+         */
+        const val SUBTITLE_WINDOW_AFTER_MS = 5_000L
+
+        /** 台词文本总长上限（字符）：防止长片源一次性塞爆 prompt */
+        const val SUBTITLE_TEXT_MAX_CHARS = 600
+
+        // v2.4.1：素材来源默认值
+        const val DEFAULT_SOURCE_MODE_ID = 0  // DanmuSourceMode.IMAGE_AND_SUBTITLE
     }
 }

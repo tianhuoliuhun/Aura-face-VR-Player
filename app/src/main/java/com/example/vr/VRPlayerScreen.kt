@@ -776,7 +776,11 @@ fun VRPlayerScreen(
                 // v2.3.0：全局颜色（存 id，不存 ordinal）
                 textColorId = prefs.getInt("danmu_text_color", DanmuConfig.DEFAULT_TEXT_COLOR_ID),
                 strokeId = prefs.getInt("danmu_stroke", DanmuConfig.DEFAULT_STROKE_ID),
-                bgId = prefs.getInt("danmu_bg", DanmuConfig.DEFAULT_BG_ID)
+                bgId = prefs.getInt("danmu_bg", DanmuConfig.DEFAULT_BG_ID),
+                // v2.4.1：素材来源（存枚举 id，不存 ordinal）
+                sourceModeId = prefs.getInt(
+                    "danmu_source_mode", DanmuConfig.DEFAULT_SOURCE_MODE_ID
+                )
             )
         }
         danmuSettingsRestored = true
@@ -804,6 +808,7 @@ fun VRPlayerScreen(
                 putInt("danmu_text_color", danmuConfig.textColorId)
                 putInt("danmu_stroke", danmuConfig.strokeId)
                 putInt("danmu_bg", danmuConfig.bgId)
+                putInt("danmu_source_mode", danmuConfig.sourceModeId)
             } else {
                 remove("danmu_enabled")
                 remove("danmu_api_key")
@@ -819,6 +824,7 @@ fun VRPlayerScreen(
                 remove("danmu_text_color")
                 remove("danmu_stroke")
                 remove("danmu_bg")
+                remove("danmu_source_mode")
             }
             apply()
         }
@@ -1823,7 +1829,12 @@ fun VRPlayerScreen(
         }
     }
 
-    // 主循环：按 intervalSec 周期执行一次「取帧 → 请求 → 入队」
+    // 主循环：按 intervalSec 周期执行一次「取素材 → 请求 → 入队」
+    //
+    // v2.4.1：素材不再只有截图 —— 由 `danmuConfig.sourceMode` 决定：
+    //   · 需要画面 → 走 GL 取帧（P3）
+    //   · 需要台词 → 从当前播放位置附近的 AI 字幕里裁一段（DanmuSubtitleSnippet）
+    // 仅台词模式**完全不碰 GL**（不请求、不轮询），因此更快、也不占用渲染线程。
     LaunchedEffect(danmuConfig.isEnabled, danmuConfig.intervalSec) {
         if (!danmuConfig.isEnabled) return@LaunchedEffect
         if (!danmuConfig.isReadyToRequest()) {
@@ -1837,43 +1848,63 @@ fun VRPlayerScreen(
         delay(FIRST_CAPTURE_DELAY_MS)
         while (true) {
             try {
-                // ① 请求一帧（GL 线程在下一帧末尾回读；false 表示间隔未到/已禁用）
-                val renderer = currentGlSurfaceView?.renderer
-                if (renderer == null) {
-                    danmuLastError = context.getString(R.string.danmu_err_no_renderer)
-                    delay(periodMs)
-                    continue
-                }
-                val requested = renderer.requestDanmuFrame(danmuConfig.imageMaxWidth)
-                if (!requested) {
-                    // 节流中（距上次太近）—— 等下一周期，不算错误
-                    delay(periodMs)
-                    continue
-                }
-                // ② 轮询取出结果（GL 回读发生在下一帧，给它若干次机会）
+                // ① 取画面（仅当本模式需要画面时）
                 var frame: android.graphics.Bitmap? = null
-                var tries = 0
-                while (tries < FRAME_POLL_MAX_TRIES && frame == null) {
-                    delay(FRAME_POLL_INTERVAL_MS)
-                    val taken = renderer.takeDanmuFrame()
-                    if (taken != null) {
-                        val (px, w, h) = taken
-                        // 渲染层交给我们的 pix 行序已翻正，可直接构 Bitmap
-                        frame = android.graphics.Bitmap.createBitmap(
-                            px, w, h, android.graphics.Bitmap.Config.ARGB_8888
-                        )
+                if (danmuConfig.needsImage) {
+                    val renderer = currentGlSurfaceView?.renderer
+                    if (renderer == null) {
+                        danmuLastError = context.getString(R.string.danmu_err_no_renderer)
+                        delay(periodMs)
+                        continue
                     }
-                    tries++
+                    // 请求一帧（GL 线程在下一帧末尾回读；false 表示间隔未到/已禁用）
+                    val requested = renderer.requestDanmuFrame(danmuConfig.imageMaxWidth)
+                    if (!requested) {
+                        // 节流中（距上次太近）—— 等下一周期，不算错误
+                        delay(periodMs)
+                        continue
+                    }
+                    // 轮询取出结果（GL 回读发生在下一帧，给它若干次机会）
+                    var tries = 0
+                    while (tries < FRAME_POLL_MAX_TRIES && frame == null) {
+                        delay(FRAME_POLL_INTERVAL_MS)
+                        val taken = renderer.takeDanmuFrame()
+                        if (taken != null) {
+                            val (px, w, h) = taken
+                            // 渲染层交给我们的 pix 行序已翻正，可直接构 Bitmap
+                            frame = android.graphics.Bitmap.createBitmap(
+                                px, w, h, android.graphics.Bitmap.Config.ARGB_8888
+                            )
+                        }
+                        tries++
+                    }
+                    if (frame == null) {
+                        danmuLastError = context.getString(R.string.danmu_err_capture_timeout)
+                        delay(periodMs)
+                        continue
+                    }
                 }
-                if (frame == null) {
-                    danmuLastError = context.getString(R.string.danmu_err_capture_timeout)
+
+                // ② 取台词（仅当本模式需要台词时）
+                //    只取**当前播放位置附近**的一段：前 15s / 后 5s（DanmuConfig 常量）。
+                //    ⚠️ 字幕可能尚未生成到当前位置（ASR 是 1x 速度），此时 substring 为空串 →
+                //       在「仅台词」模式下就变成"没有素材"，用专门的错误文案提示，便于用户理解。
+                val subtitleText = if (danmuConfig.needsSubtitle) {
+                    val cues = if (isRealtimeSubtitleEnabled) realtimeCues else loadedSubtitleCues
+                    DanmuSubtitleSnippet.extract(cues, currentPositionMs)
+                } else {
+                    ""
+                }
+                if (danmuConfig.needsSubtitle && subtitleText.isBlank() && !danmuConfig.needsImage) {
+                    danmuLastError = context.getString(R.string.danmu_err_no_subtitle)
                     delay(periodMs)
                     continue
                 }
+
                 // ③ 交给视觉模型（内部已切 IO；失败返回空列表，不抛）
-                val lines = danmuVisionClient.requestDanmu(frame, danmuConfig)
+                val lines = danmuVisionClient.requestDanmu(frame, danmuConfig, subtitleText)
                 // ⚠️ 用完立刻回收：1024×576 ARGB ≈ 2.3 MB，long-running 页面不能泄漏
-                if (!frame.isRecycled) frame.recycle()
+                if (frame != null && !frame.isRecycled) frame.recycle()
 
                 if (lines.isEmpty()) {
                     danmuLastError = context.getString(R.string.danmu_err_empty_response)
@@ -1881,7 +1912,12 @@ fun VRPlayerScreen(
                     danmuLastError = ""
                     val now = android.os.SystemClock.elapsedRealtime()
                     // 同步屏幕宽度（引擎按它算位置与过期）
-                    danmuEngine.screenWidthPx = (currentGlSurfaceView?.width ?: 0).toFloat()
+                    // ⚠️ 分屏 VR 下引擎坐标系是**单眼宽**，由渲染层接管（DanmuOverlay 内同步），
+                    //    这里只在拿到非 0 值时兜底设置，避免覆盖渲染层已设好的单眼宽。
+                    val glW = (currentGlSurfaceView?.width ?: 0).toFloat()
+                    if (glW > 0f && danmuEngine.screenWidthPx <= 0f) {
+                        danmuEngine.screenWidthPx = glW
+                    }
                     val added = danmuEngine.enqueue(lines, now)
                     danmuGeneratedCount += added
                     // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）

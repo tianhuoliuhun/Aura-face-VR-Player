@@ -237,6 +237,13 @@
     <string name="danmu_err_capture_timeout">画面キャプチャがタイムアウトしました。自動的に再試行します</string>
     <string name="danmu_err_empty_response">モデルが有効なコメントを返しませんでした。自動的に再試行します</string>
     <string name="danmu_err_unexpected">予期しないエラー。今回はスキップしました（再生に影響なし）</string>
+    <string name="danmu_section_source">素材ソース</string>
+    <string name="danmu_source">生成の根拠</string>
+    <string name="danmu_source_both">映像+セリフ</string>
+    <string name="danmu_source_image">映像のみ</string>
+    <string name="danmu_source_subtitle">セリフのみ</string>
+    <string name="danmu_source_hint">「セリフ」は現在の再生位置付近の AI 字幕から取得します（前 15 秒 / 後 5 秒）。セリフのみモードはスクリーンショットを送信しないため高速・省通信ですが、映像は見えません。</string>
+    <string name="danmu_err_no_subtitle">現在位置のセリフがまだありません。AI 字幕を有効にして生成をお待ちください</string>
     <string name="group_title_enhance">画質強化</string>
     <string name="group_title_about">アプリについてとオープンソースライセンス</string>
     <string name="licenses_title">オープンソースライセンス</string>

@@ -160,6 +160,23 @@ fun DanmuSettingsPanel(
             modifier = Modifier.padding(top = 4.dp)
         )
 
+        // ===== v2.4.1：素材来源（画面 / 台词 / 两者）=====
+        DanmuSubTitle(stringResource(R.string.danmu_section_source))
+
+        DanmuTextChipRow(
+            title = stringResource(R.string.danmu_source),
+            options = DanmuSourceMode.values().toList(),
+            selectedId = config.sourceModeId,
+            labelOf = { stringResource(it.labelRes) },
+            onPick = { onConfigChange(config.copy(sourceModeId = it)) }
+        )
+        Text(
+            text = stringResource(R.string.danmu_source_hint),
+            color = Color.White.copy(alpha = 0.4f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+
         // ===== 运行参数 =====
         DanmuSubTitle(stringResource(R.string.danmu_section_runtime))
 
@@ -501,14 +518,16 @@ private fun <T> DanmuTextChipRow(
 }
 
 /**
- * 从三种颜色类枚举之一取出 `id`。
+ * 从各个带 `id` 属性的枚举之一取出 `id`。
  *
- * ⚠️ 三个枚举都有 `id` 属性，但 Kotlin 泛型无法直接访问 —— 用 `when` 显式分发，
- *    且**必须穷尽**（新增枚举时编译期就会报错提醒，好过运行时静默错配）。
+ * ⚠️ 这些枚举都有 `id` 属性，但 Kotlin 泛型无法直接访问 —— 用 `when` 显式分发。
+ *    **新增枚举时必须在此补一行**：`else -> 0` 会让新枚举静默全部选中 0 号项
+ *    （表现为「点了没反应」），因此这里刻意保留 else 兜底并把分支写全。
  */
 private fun colorOptionId(opt: Any?): Int = when (opt) {
     is SubtitleColorOption -> opt.id
     is SubtitleStrokeOption -> opt.id
     is SubtitleBgOption -> opt.id
+    is DanmuSourceMode -> opt.id
     else -> 0
 }

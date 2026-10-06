@@ -166,9 +166,18 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏）/ AI Danmaku**
-  - **当前状态**：**全链路已打通并上屏** —— 设置项 → GL 取帧 → 视觉识别 → 弹幕引擎 → **画面渲染**
-  - Fully working end-to-end: settings → GL capture → vision → engine → **on-screen rendering**
+- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材）/ AI Danmaku**
+  - **当前状态**：**全链路已打通并上屏** —— 设置项 → **素材（截图 / AI 字幕台词）** → 视觉识别 → 弹幕引擎 → **画面渲染**
+  - Fully working end-to-end: settings → **material (frame / AI subtitle lines)** → vision → engine → **on-screen rendering**
+  - **素材来源**（v2.4.1）：三选一 —— **画面+台词**（默认）/ **仅画面** / **仅台词**。
+    「台词」取自**当前播放位置附近**的 AI 字幕（前 15 秒 / 后 5 秒，超长时优先保留更近的台词），
+    让模型能对台词本身做出反应（弹幕的灵魂），而不只是对画面构图泛泛而谈
+  - Source material (v2.4.1): frame+lines (default) / frame only / lines only. "Lines" come from AI
+    subtitles near the current position (15s before / 5s after, nearest lines kept when long)
+  - **仅台词模式**（v2.4.1）：**完全不请求截图** —— 省掉 JPEG 编码与 base64（耗时大头），
+    更快更省流量，且不占用 GL 线程；代价是看不到画面
+  - Lines-only mode (v2.4.1): **no screenshot at all** — skips JPEG encode / base64, faster, lighter,
+    and never touches the GL thread; the trade-off is it cannot see the picture
   - **弹幕上屏**（v2.4.0）：弹幕在**画面上方约 30% 区域**分轨道从右往左飘；
     **分屏 VR 下左右眼各画一份**（各自的宽度坐标系，避免位置算错）
   - On-screen rendering (v2.4.0): danmaku scroll right-to-left across the **top ~30%** on

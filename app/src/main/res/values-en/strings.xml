@@ -261,6 +261,13 @@
     <string name="danmu_err_capture_timeout">Frame capture timed out, will retry automatically</string>
     <string name="danmu_err_empty_response">Model returned no usable danmaku, will retry automatically</string>
     <string name="danmu_err_unexpected">Unexpected error, this round was skipped (playback unaffected)</string>
+    <string name="danmu_section_source">Source Material</string>
+    <string name="danmu_source">Generate from</string>
+    <string name="danmu_source_both">Frame+Lines</string>
+    <string name="danmu_source_image">Frame only</string>
+    <string name="danmu_source_subtitle">Lines only</string>
+    <string name="danmu_source_hint">"Lines" comes from AI subtitles near the current position (15s before / 5s after). Lines-only mode sends no screenshot — faster and lighter, but it cannot see the picture.</string>
+    <string name="danmu_err_no_subtitle">No lines at this position yet — enable AI subtitles and wait for them to generate</string>
     <string name="group_title_enhance">Image enhancement</string>
     <string name="group_title_about">About &amp; open source licenses</string>
     <string name="licenses_title">Open source licenses</string>
