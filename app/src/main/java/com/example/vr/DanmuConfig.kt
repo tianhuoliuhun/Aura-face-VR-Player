@@ -1,6 +1,7 @@
 package com.example.vr
 
 import androidx.annotation.StringRes
+import androidx.compose.ui.graphics.Color
 import com.example.R
 
 /**
@@ -25,6 +26,35 @@ enum class DanmuSourceMode(@StringRes val labelRes: Int, val id: Int) {
     companion object {
         /** id 失配时安全回落（防旧 prefs 脏 id） */
         fun fromId(id: Int): DanmuSourceMode = values().find { it.id == id } ?: IMAGE_AND_SUBTITLE
+    }
+}
+
+/**
+ * 弹幕颜色模式（v2.4.6）
+ *
+ * 背景：v2.3.0 起弹幕只有「全局单一颜色」——所有弹幕同一个色，视觉上比较单调，
+ * 与真实弹幕网站的观感有差距（真人弹幕本身就五颜六色）。
+ *
+ * 用户 2026-10-06 定案：在「单一颜色」之外增加两种**逐条随机**模式，
+ * 并给出真实弹幕站最常见的分布 —— **大部分白、少量彩色**（既不单调，也不花哨到看不清）。
+ *
+ * ⚠️ 随机色板刻意**不含黑色**：弹幕浮在视频画面上，黑字在暗场景里几乎看不见
+ *    （且默认描边就是黑边，黑字+黑边 = 糊成一团）。
+ *    字幕面板的 8 色里黑色是合理的（字幕有背景底框可衬），弹幕则不适合直接复用那套。
+ */
+enum class DanmuColorMode(@StringRes val labelRes: Int, val id: Int) {
+    /** 单一颜色（默认）：全部弹幕用 textColorId 指定的那一个颜色 —— 与 v2.3.0 行为一致 */
+    SINGLE(R.string.danmu_color_mode_single, 0),
+
+    /** 完全随机：每条从 [DanmuConfig.DANMU_PALETTE] 里等概率取色 */
+    RANDOM(R.string.danmu_color_mode_random, 1),
+
+    /** 80% 白 + 其余随机：80% 概率纯白，20% 概率从彩色板里取 —— 最接近真实弹幕站观感 */
+    MOSTLY_WHITE(R.string.danmu_color_mode_mostly_white, 2);
+
+    companion object {
+        /** id 失配时安全回落（防旧 prefs 脏 id） */
+        fun fromId(id: Int): DanmuColorMode = values().find { it.id == id } ?: SINGLE
     }
 }
 
@@ -96,6 +126,16 @@ data class DanmuConfig(
     /** 弹幕背景底（全局） */
     val bgId: Int = SubtitleBgOption.TRANSPARENT.id,
 
+    // ===== v2.4.6：颜色模式（单一 / 完全随机 / 80%白+随机）=====
+    /**
+     * 颜色模式。
+     *
+     * ⚠️ 与 [textColorId] 的关系：**只在 [DanmuColorMode.SINGLE] 下才用 [textColorId]**；
+     *    两种随机模式下 [textColorId] 被忽略（但**不重置**，用户切回单一色时仍保留上次的选择）。
+     *    这是刻意的 —— 「切到随机再切回来发现颜色被重置了」是典型的体验刺点。
+     */
+    val colorModeId: Int = DanmuColorMode.SINGLE.id,
+
     // ===== v2.4.1：素材来源 =====
     /** 素材来源模式（画面 / 台词 / 两者） */
     val sourceModeId: Int = DanmuSourceMode.IMAGE_AND_SUBTITLE.id
@@ -123,6 +163,10 @@ data class DanmuConfig(
     /** 解析后的背景（id 找不到时回落到全透明） */
     val bgOption: SubtitleBgOption
         get() = SubtitleBgOption.values().find { it.id == bgId } ?: SubtitleBgOption.TRANSPARENT
+
+    /** v2.4.6：解析后的颜色模式（id 找不到时回落到单一颜色） */
+    val colorMode: DanmuColorMode
+        get() = DanmuColorMode.fromId(colorModeId)
 
     /**
      * 拼接后的完整 chat/completions 端点（幂等：已带后缀则不重复拼）。
@@ -258,6 +302,72 @@ data class DanmuConfig(
         const val DEFAULT_TEXT_COLOR_ID = 0  // SubtitleColorOption.WHITE
         const val DEFAULT_STROKE_ID = 2      // SubtitleStrokeOption.MEDIUM_BLACK
         const val DEFAULT_BG_ID = 0          // SubtitleBgOption.TRANSPARENT
+
+        // ===== v2.4.6：颜色模式 =====
+
+        /** 默认颜色模式（单一颜色，与 v2.3.0 行为一致） */
+        const val DEFAULT_COLOR_MODE_ID = 0  // DanmuColorMode.SINGLE
+
+        /**
+         * 「80% 白 + 其余随机」模式下的纯白占比（百分比）。
+         *
+         * 取 80% 的理由：真实弹幕站的弹幕**绝大多数是白色**（默认色），彩色只占少数。
+         * 比例太高（全彩）会显得花哨且影响读画面；太低（如 95%）则几乎看不出随机效果。
+         */
+        const val MOSTLY_WHITE_PERCENT = 80
+
+        /**
+         * 弹幕随机色板（v2.4.6）—— **5 色，刻意不含黑色/深色**。
+         *
+         * ⚠️ 与 `SubtitleColorOption`（8 色）是**两套不同用途**的色板，不要合并：
+         * - 字幕有背景底框（可选半透明黑），深色字仍可读 → 8 色含黑合理；
+         * - 弹幕**没有底框**（默认全透明）且描边是黑边，黑字在暗场景会糊掉 → 必须排除。
+         *
+         * 同时排除「漆黑」与过深的色，只留高亮、在深浅两种画面上都够醒目的颜色。
+         * 顺序即权重（等概率取，顺序仅影响可读性）。
+         */
+        val DANMU_PALETTE: List<Color> = listOf(
+            Color.White,               // 纯白（出现频率最高，见 MOSTLY_WHITE_PERCENT）
+            Color(0xFFFFEB3B),         // 柠檬黄
+            Color(0xFF00E5FF),         // 青蓝
+            Color(0xFF00E676),         // 荧光绿
+            Color(0xFFFF4081),         // 樱花粉
+            Color(0xFFFF9100)          // 暖阳橙
+        )
+
+        /** 色板里的「纯白」下标（[DANMU_PALETTE] 的首位） */
+        const val PALETTE_WHITE_INDEX = 0
+
+        /**
+         * 按颜色模式为**单条**弹幕选色（v2.4.6）。
+         *
+         * ⚠️ **逐条独立随机**，不是每批一个色 —— 同批内颜色各异才有真实弹幕的层次感。
+         *    （若每批统一一个色，视觉上仍像「单一颜色」，失去随机的意义。）
+         *
+         * @param mode        颜色模式
+         * @param singleColor [DanmuColorMode.SINGLE] 下使用的颜色（即 `textColorOption.color`）
+         * @param roll        0..1 的随机数提供者（注入以便单测确定性验证）
+         */
+        fun pickColor(mode: DanmuColorMode, singleColor: Color, roll: () -> Float): Color =
+            when (mode) {
+                DanmuColorMode.SINGLE -> singleColor
+
+                // 完全随机：等概率从整个色板取
+                DanmuColorMode.RANDOM ->
+                    DANMU_PALETTE[(roll() * DANMU_PALETTE.size).toInt()
+                        .coerceIn(0, DANMU_PALETTE.size - 1)]
+
+                // 80% 白 + 其余随机：先掷一次决定「是不是白」
+                DanmuColorMode.MOSTLY_WHITE -> {
+                    if (roll() * 100f < MOSTLY_WHITE_PERCENT) {
+                        DANMU_PALETTE[PALETTE_WHITE_INDEX]
+                    } else {
+                        // 从**彩色部分**取（跳过首位白色，否则 20% 里还会再出现白色）
+                        val colored = DANMU_PALETTE.subList(1, DANMU_PALETTE.size)
+                        colored[(roll() * colored.size).toInt().coerceIn(0, colored.size - 1)]
+                    }
+                }
+            }
 
         /** 间隔下限（秒）：低于此值会因 glReadPixels 同步阻塞拖累 GL 线程 */
         const val MIN_INTERVAL_SEC = 2

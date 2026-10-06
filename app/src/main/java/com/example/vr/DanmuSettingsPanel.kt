@@ -408,6 +408,7 @@ fun DanmuSettingsPanel(
         }
 
         // ===== v2.3.0：全局颜色（作用于全部弹幕）=====
+        // v2.4.6：颜色模式（单一 / 完全随机 / 80%白+随机）+ 单一色块网格
         SubtitleSection(
             id = "color",
             title = stringResource(R.string.danmu_section_color),
@@ -415,18 +416,42 @@ fun DanmuSettingsPanel(
             accentColor = accentColor,
             expanded = secColorExpanded,
             onToggle = { setSectionExpanded("color", !secColorExpanded) },
-            summary = stringResource(R.string.danmu_text_color),
+            summary = stringResource(config.colorMode.labelRes),
             tagPrefix = "danmu"
         ) {
-        // 文字颜色：色块网格（照 SubtitleSettingsPanel 的既有交互）
+        val colorMode = config.colorMode
+        // 颜色模式：chip 行（3 档）
+        DanmuTextChipRow(
+            title = stringResource(R.string.danmu_color_mode),
+            options = DanmuColorMode.values().toList(),
+            selectedId = config.colorModeId,
+            labelOf = { stringResource(it.labelRes) },
+            onPick = { onConfigChange(config.copy(colorModeId = it)) }
+        )
+
+        // 色块网格仅在「单一颜色」模式下可交互。
+        // ⚠️ 随机模式下**置灰但保留显示**（不是隐藏）：让用户仍能看到自己上次选的色，
+        //    切回单一色时不会被重置 —— 隐藏会让人以为「设置丢了」。
+        val singleModeActive = colorMode == DanmuColorMode.SINGLE
         DanmuColorRow(
             title = stringResource(R.string.danmu_text_color),
             options = SubtitleColorOption.values().toList(),
             selectedId = config.textColorId,
             swatchColor = { it.color },
             labelOf = { stringResource(it.labelRes) },
+            enabled = singleModeActive,
             onPick = { onConfigChange(config.copy(textColorId = it)) }
         )
+
+        // 随机模式下提示可用的色板（让用户知道会随机出哪些色）
+        if (!singleModeActive) {
+            Text(
+                text = stringResource(R.string.danmu_color_random_hint),
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
 
         // 描边
         DanmuTextChipRow(
@@ -753,12 +778,13 @@ private fun <T> DanmuColorRow(
     selectedId: Int,
     swatchColor: (T) -> Color,
     labelOf: @Composable (T) -> String,
+    enabled: Boolean = true,
     onPick: (Int) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(
             text = title,
-            color = Color.White,
+            color = Color.White.copy(alpha = if (enabled) 1f else 0.4f),
             fontSize = 13.sp,
             modifier = Modifier.padding(bottom = 4.dp)
         )
@@ -770,15 +796,18 @@ private fun <T> DanmuColorRow(
                 rowOptions.forEach { opt ->
                     val id = colorOptionId(opt)
                     val isSelected = id == selectedId
+                    // ⚠️ 禁用态：整体降透明度 + 不响应点击（用 clickable 的 enabled 参数而非去掉 clickable，
+                    //    保留水波纹组件结构，避免布局跳动）
+                    val contentAlpha = if (enabled) 1f else 0.35f
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(6.dp))
                             .background(
-                                if (isSelected) Color.White.copy(alpha = 0.18f)
+                                if (isSelected && enabled) Color.White.copy(alpha = 0.18f)
                                 else Color.White.copy(alpha = 0.05f)
                             )
-                            .clickable { onPick(id) }
+                            .clickable(enabled = enabled) { onPick(id) }
                             .padding(vertical = 5.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
@@ -786,12 +815,13 @@ private fun <T> DanmuColorRow(
                             modifier = Modifier
                                 .size(18.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(swatchColor(opt))
+                                .background(swatchColor(opt).copy(alpha = contentAlpha))
                         )
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = labelOf(opt),
-                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
+                            color = if (isSelected && enabled) Color.White
+                            else Color.White.copy(alpha = 0.65f * contentAlpha),
                             fontSize = 9.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -878,5 +908,7 @@ private fun colorOptionId(opt: Any?): Int = when (opt) {
     is DanmuSourceMode -> opt.id
     // v2.4.2：预设人格 chip 行（选中 id 用 DanmuConfig.matchPersonaPresetId 匹配）
     is DanmuPersonaPreset -> opt.id
+    // v2.4.6：颜色模式 chip 行
+    is DanmuColorMode -> opt.id
     else -> 0
 }

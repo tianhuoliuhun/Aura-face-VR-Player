@@ -250,7 +250,7 @@
     <string name="danmu_text_color">Text Color</string>
     <string name="danmu_stroke">Stroke</string>
     <string name="danmu_bg">Background</string>
-    <string name="danmu_color_hint">Color is a global setting applied to all AI danmaku; it is independent of the subtitle color.</string>
+    <string name="danmu_color_hint">In "Single color" mode all danmu share one color; in random modes each danmu picks its own. Independent from subtitle colors.</string>
     <string name="danmu_status_title">Status</string>
     <string name="danmu_status_not_configured">Not configured yet: fill in endpoint, model name and API key</string>
     <string name="danmu_status_waiting">Ready, waiting for the first frame analysis... (a few seconds)</string>
@@ -899,4 +899,9 @@
     <string name="danmu_opacity">Opacity</string>
     <string name="danmu_font_size">Font Size</string>
     <string name="danmu_privacy_hint">Frames will be compressed and uploaded to the endpoint you configure</string>
+    <string name="danmu_color_mode">Color mode</string>
+    <string name="danmu_color_mode_single">Single color</string>
+    <string name="danmu_color_mode_random">Fully random</string>
+    <string name="danmu_color_mode_mostly_white">80% white + random</string>
+    <string name="danmu_color_random_hint">Each danmu picks a random color from white / lemon / cyan / green / pink / orange (black excluded — unreadable on dark scenes).</string>
 </resources>

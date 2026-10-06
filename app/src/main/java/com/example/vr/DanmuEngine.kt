@@ -1,5 +1,6 @@
 package com.example.vr
 
+import androidx.compose.ui.graphics.Color
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -11,12 +12,16 @@ import kotlin.math.min
  * @param track       轨道下标（0 = 最上一行）
  * @param bornMs      入队时刻（SystemClock.elapsedRealtime）
  * @param widthPx     文本绘制宽度（由渲染层用 TextMeasurer 量出后回填；引擎只用它做轨道避让）
+ * @param color       v2.4.6：本条弹幕的**文字颜色**。
+ *                    在**入队时**按颜色模式一次性掷定并**固定在条目上** ——
+ *                    ⚠️ 不能等到渲染时再随机：每帧都会重算 → 颜色会高频闪烁。
  */
 data class DanmuItem(
     val text: String,
     val track: Int,
     var bornMs: Long,
-    var widthPx: Float = 0f
+    var widthPx: Float = 0f,
+    val color: Color = Color.White
 ) {
     /**
      * 当前水平位置（px，左边缘）。
@@ -100,6 +105,22 @@ class DanmuEngine {
     /** 屏幕宽度（px）。用于计算位置与「是否已离开」。 */
     var screenWidthPx: Float = 1080f
 
+    // ---- v2.4.6：颜色（逐条随机）----
+
+    /** 颜色模式（单一 / 完全随机 / 80%白+随机） */
+    var colorMode: DanmuColorMode = DanmuColorMode.SINGLE
+
+    /** [DanmuColorMode.SINGLE] 下使用的颜色（由调用方从 `DanmuConfig.textColorOption` 同步） */
+    var singleColor: Color = Color.White
+
+    /**
+     * 随机数提供者（返回 0..1）。
+     *
+     * 注入以便**单元测试**用确定性序列验证「80% 白」的分布与「完全随机」的取值，
+     * 否则随机行为无法断言。默认用 `kotlin.random.Random.nextFloat()`。
+     */
+    var randomProvider: () -> Float = { kotlin.random.Random.nextFloat() }
+
     /** 轨道高度（px）。由渲染层按字号算好后同步。 */
     var trackHeightPx: Float = 0f
 
@@ -157,7 +178,10 @@ class DanmuEngine {
             val bornMs = nowMs + added * BATCH_STAGGER_MS
             val track = pickTrack(bornMs, usedTracks) ?: continue
 
-            items.add(DanmuItem(text = text, track = track, bornMs = bornMs))
+            // ④ v2.4.6：逐条掷定颜色（入队时定死，渲染时不重算 —— 否则每帧变色）
+            val color = DanmuConfig.pickColor(colorMode, singleColor, randomProvider)
+
+            items.add(DanmuItem(text = text, track = track, bornMs = bornMs, color = color))
             usedTracks.add(track)
             recentTexts.addLast(text)
             while (recentTexts.size > DEDUP_WINDOW) recentTexts.removeFirst()
@@ -369,5 +393,106 @@ class DanmuEngine {
         private const val MIN_SPEED = 40
         private const val MAX_SPEED = 1200
         private const val MAX_TRACKS_LIMIT = DanmuConfig.MAX_TRACKS_LIMIT
+
+        /**
+         * v2.4.6：行距自适应 —— 轨道高度相对**字号**的系数。
+         *
+         * ## 为什么需要
+         * v2.4.5 及之前轨道高度 = `弹幕区高度 / 轨道数`，于是：
+         * - **字号调大时行距不变** → 大字号下上下行贴在一起；
+         * - **轨道数调多时行距被压小** → 8 轨变 20 轨，行距只剩原来的 40%。
+         * 用户反馈「优化多条弹幕排布」，要的就是**行距跟着字号自适应**。
+         *
+         * ## 取值
+         * 1.9 倍字号 ≈ 行间留出约一个字符高度的空隙；调小会贴紧，调大会很快占满弹幕区。
+         *
+         * ⚠️ 定义在引擎（而非渲染层）的理由：这是**与字号/轨道数相关的布局常量**，
+         *    且需要被单测覆盖；放在 `DanmuOverlay`（Composable 私有作用域）就测不到。
+         */
+        const val TRACK_HEIGHT_FONT_FACTOR = 1.9f
+
+        /**
+         * v2.4.6：弹幕区高度占屏高的**硬上限**比例。
+         *
+         * ## 为什么不能只给「区域高度 = 轨道数 × 行距」
+         * 轨道数上限是 [DanmuConfig.MAX_TRACKS_LIMIT]（20），大字号下
+         * `20 × 32sp × 1.9` 会算出超过整个屏幕的高度，弹幕会一路压到字幕区、
+         * 甚至溢出屏幕下缘。因此必须有一个「无论怎样都不能超过」的比例上限。
+         *
+         * ## 为什么提高到 0.45
+         * v2.4.5 及之前固定 0.30（[DanmuOverlay.DEFAULT_AREA_HEIGHT_RATIO]）。
+         * ⚠️ 实测发现 0.30 在**默认参数**下就已经不够：1080×2400 / 密度 3x / 8 轨时
+         * 区域只有 720px，均分 90px，而字号 18sp(=54px) × 1.9 = 102.6px **已超出** ——
+         * 也就是「行距自适应」在默认配置下会被区域封顶、**完全感受不到变化**。
+         * 这正是本版把区域改为「随内容自适应」而非固定值的原因。
+         * 0.45 给内容留出足够空间，同时仍把字幕区（通常在下半部）让出来。
+         */
+        const val AREA_HEIGHT_RATIO_MAX = 0.45f
+
+        /**
+         * v2.4.6：行距自适应 —— 计算**弹幕区高度**（px）。
+         *
+         * ## 公式
+         * ```
+         * 弹幕区高度 = min(轨道数 × 字号 × 系数, 屏高 × AREA_HEIGHT_RATIO_MAX)
+         * ```
+         *
+         * ## 语义：区域**跟着内容长**，而不是反过来压内容
+         * v2.4.5 是「固定 30% 区域 → 除以轨道数得行距」，行距**永远是被动结果**；
+         * 本版改为「先按字号定行距 → 区域按需撑开」，于是：
+         * - **字号调大** → 区域变高、行距真的变大（用户要的效果）；
+         * - **轨道数变少** → 区域自动变矮，不白占画面；
+         * - **内容太多** → 顶到 [AREA_HEIGHT_RATIO_MAX] 上限后行距才开始被压缩。
+         *
+         * @param fontSizePx 字号折算出的像素高
+         * @param screenHeightPx 整屏高（px）
+         * @param trackCount 轨道数（<1 时按 1 处理）
+         */
+        fun computeAreaHeightPx(
+            fontSizePx: Float,
+            screenHeightPx: Float,
+            trackCount: Int
+        ): Float {
+            val tracks = trackCount.coerceAtLeast(1)
+            val desired = tracks * fontSizePx * TRACK_HEIGHT_FONT_FACTOR
+            if (screenHeightPx <= 0f) return desired
+            val cap = screenHeightPx * AREA_HEIGHT_RATIO_MAX
+            return min(desired, cap)
+        }
+
+        /**
+         * v2.4.6：行距自适应 —— 计算**轨道高度**（px）。
+         *
+         * ```
+         * 轨道高度 = min(字号 × 系数, 弹幕区高度 ÷ 轨道数)
+         * ```
+         *
+         * ## 为什么保留 min（⚠️ 初版写成 max，被单测抓到）
+         * - **字号基准**（`fontSizePx × 系数`）是「理想舒适行距」；
+         * - **区域均分**（`areaHeightPx / trackCount`）是「物理上限」。
+         *
+         * 当区域由 [computeAreaHeightPx] 按内容算出时，两者通常**相等**
+         * （因为区域本来就 = 轨道数 × 理想行距）；只在内容顶到 [AREA_HEIGHT_RATIO_MAX]
+         * 上限时 `fit < natural`，此时才真正压缩行距 —— 这正是我们要的行为。
+         *
+         * 若误写成 `max`：区域一大就永远取均分值，字号从 20 调到 50 行距都不变，
+         * **行距自适应彻底失效**（`DanmuTrackHeightTest` 专门锁死方向性）。
+         *
+         * @param fontSizePx   字号折算出的像素高（渲染层用 LocalDensity 换算后传入）
+         * @param areaHeightPx 弹幕区总高度（px）；<=0 时视为「无上限」只按字号
+         * @param trackCount   轨道数（<1 时按 1 处理）
+         */
+        fun computeTrackHeightPx(
+            fontSizePx: Float,
+            areaHeightPx: Float,
+            trackCount: Int
+        ): Float {
+            val tracks = trackCount.coerceAtLeast(1)
+            val natural = fontSizePx * TRACK_HEIGHT_FONT_FACTOR
+            // 区域高度未知（布局首帧）时不做上限约束，先用理想行距
+            if (areaHeightPx <= 0f) return natural
+            val fit = areaHeightPx / tracks
+            return min(natural, fit)
+        }
     }
 }

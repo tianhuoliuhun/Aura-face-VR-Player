@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.os.SystemClock
+import kotlin.math.max
 
 /**
  * AI 弹幕渲染层（v2.4.0 / P5）
@@ -98,13 +99,20 @@ fun DanmuOverlay(
     val alpha = (config.opacityPercent.coerceIn(0, 100)) / 100f
     val fontSizeSp = config.fontSizeSp.coerceIn(MIN_FONT_SP, MAX_FONT_SP)
 
+    // v2.4.6：把颜色模式与「单一颜色」同步给引擎 —— 逐条颜色在**入队时**决定，
+    // 因此引擎需要知道用哪种模式、以及 SINGLE 模式下的颜色。
+    val colorMode = config.colorMode
+    LaunchedEffect(colorMode, textColor) {
+        engine.colorMode = colorMode
+        engine.singleColor = textColor
+    }
+
     if (isSplitScreenVR) {
         // 分屏：左右眼各一份，各自宽度 = 整屏 / 2
         Row(modifier = modifier.fillMaxSize()) {
             DanmuEye(
                 engine = engine,
                 nowMs = nowMs,
-                textColor = textColor,
                 strokeColor = strokeOption.strokeColor,
                 strokeWidthDp = strokeOption.widthDp,
                 bgColor = bgOption.bgColor,
@@ -119,7 +127,6 @@ fun DanmuOverlay(
             DanmuEye(
                 engine = engine,
                 nowMs = nowMs,
-                textColor = textColor,
                 strokeColor = strokeOption.strokeColor,
                 strokeWidthDp = strokeOption.widthDp,
                 bgColor = bgOption.bgColor,
@@ -136,7 +143,6 @@ fun DanmuOverlay(
         DanmuEye(
             engine = engine,
             nowMs = nowMs,
-            textColor = textColor,
             strokeColor = strokeOption.strokeColor,
             strokeWidthDp = strokeOption.widthDp,
             bgColor = bgOption.bgColor,
@@ -158,7 +164,6 @@ fun DanmuOverlay(
 private fun DanmuEye(
     engine: DanmuEngine,
     nowMs: Long,
-    textColor: Color,
     strokeColor: Color,
     strokeWidthDp: Float,
     bgColor: Color,
@@ -177,27 +182,46 @@ private fun DanmuEye(
         val heightPx = with(density) { maxHeight.toPx() }
         if (widthPx <= 0f || heightPx <= 0f) return@BoxWithConstraints
 
-        val areaHeightPx = heightPx * areaHeightRatio.coerceIn(0.10f, 1.0f)
         val strokeWidthPx = with(density) { strokeWidthDp.dp.toPx() }
+        val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
+        val trackCount = engine.maxTracks.coerceAtLeast(1)
 
-        val textStyle = remember(fontSizeSp, textColor, alpha) {
-            TextStyle(
-                fontSize = fontSizeSp.sp,
-                fontFamily = FontFamily.Default,
-                fontWeight = FontWeight.Medium,
-                color = textColor.copy(alpha = alpha)
-            )
+        // ===== v2.4.6：行距自适应（区域随内容长）=====
+        // 公式抽到 DanmuEngine 的纯函数（可单测）—— 避免「同一份逻辑两处登记」。
+        //
+        // ## 与 v2.4.5 的根本区别
+        // 旧：区域固定 30% 屏高 → 除以轨道数得行距（行距是**被动结果**，字号调大也变不了）
+        // 新：**先按字号定理想行距 → 区域按需撑开**（区域是**主动跟随**）
+        //
+        // ⚠️ 为什么要改区域而不是只改行距公式：
+        //    实测 1080×2400 / 密度 3x / 8 轨 / 18sp 时，固定 30% 区域只有 720px，
+        //    均分 90px，而理想行距 18×3×1.9 = 102.6px **已超出** → 会被上限压回 90px，
+        //    即「行距自适应」在**默认配置下完全感受不到**。区域必须跟着内容长才有效。
+        // ⚠️ `areaHeightRatio` 参数现在只作为**下限基准**（兼容旧行为/外部传入），
+        //    真正的上限由 DanmuEngine.AREA_HEIGHT_RATIO_MAX 控制。
+        // 区域 = max(内容所需, 基准比例)，再用硬上限封顶。
+        // ⚠️ 但若**基准比例本身**就超过硬上限（外部显式传入更大比例时），以基准为准 ——
+        //    调用方显式指定的意图优先于内部上限，否则会出现「传了 0.6 却被压到 0.45」的意外。
+        val contentAreaPx = trackCount * fontSizePx * DanmuEngine.TRACK_HEIGHT_FONT_FACTOR
+        val baseAreaPx = heightPx * areaHeightRatio.coerceIn(0.10f, 1.0f)
+        val capAreaPx = heightPx * DanmuEngine.AREA_HEIGHT_RATIO_MAX
+        val areaHeightPx = if (baseAreaPx >= capAreaPx) {
+            max(contentAreaPx, baseAreaPx)
+        } else {
+            max(contentAreaPx, baseAreaPx).coerceAtMost(capAreaPx)
         }
+        val trackHeightPx = DanmuEngine.computeTrackHeightPx(
+            fontSizePx = fontSizePx,
+            areaHeightPx = areaHeightPx,
+            trackCount = trackCount
+        )
 
         // ⚠️ 同步给引擎：分屏时这里拿到的就是**单眼宽**，天然正确。
         //    轨道高度也在此同步（引擎的间距判据会用到）。
-        LaunchedEffect(widthPx, areaHeightPx, engine.maxTracks) {
+        LaunchedEffect(widthPx, areaHeightPx, engine.maxTracks, trackHeightPx) {
             engine.screenWidthPx = widthPx
-            val tracks = engine.maxTracks.coerceAtLeast(1)
-            engine.trackHeightPx = areaHeightPx / tracks
+            engine.trackHeightPx = trackHeightPx
         }
-
-        val trackHeightPx = areaHeightPx / engine.maxTracks.coerceAtLeast(1)
 
         Canvas(
             modifier = Modifier
@@ -214,11 +238,20 @@ private fun DanmuEye(
 
                     val top = item.track * trackHeightPx
 
+                    // ===== v2.4.6：文字颜色逐条取 `item.color` =====
+                    // 入队时已按颜色模式掷定并固定在条目上（见 DanmuItem.color），
+                    // 这里只是把「本条的颜色 + 全局不透明度」组成实际绘制样式。
+                    // ⚠️ 不透明度仍是**全局**的（opacityPercent），随机只作用于色相。
+                    val itemStyle = textColorStyleFor(item.color, fontSizeSp, alpha)
+
                     // 每条只测量一次；宽度回填给引擎用于轨道避让
+                    // ⚠️ 缓存 key 必须含颜色 —— 同一句话在不同颜色下是不同 layout，
+                    //    否则先来的颜色会「传染」给后来的同文本条目（随机色会失效）。
                     val layout = layoutCache.measure(
                         textMeasurer = textMeasurer,
                         text = item.text,
-                        style = textStyle
+                        style = itemStyle,
+                        colorKey = item.color
                     )
                     if (item.widthPx <= 0f && layout.size.width > 0) {
                         item.widthPx = layout.size.width.toFloat()
@@ -266,6 +299,11 @@ private fun DanmuEye(
  * ⚠️ 缓存是**每个绘制实例独立**的（由 `remember` 持有），不是全局单例 ——
  *    全局单例会在页面重进后残留旧字号/旧颜色的条目，也会在左右眼之间
  *    因 style 不同而反复互相淘汰。
+ *
+ * ⚠️ v2.4.6：key **必须包含本条的颜色**（[colorKey]）。
+ *    随机模式下一句话可能以不同颜色多次出现（如「哈哈」出现两次、颜色不同），
+ *    若 key 只含文本+字号，后一条会命中前一条的 layout（里面记着**前一条的颜色**），
+ *    表现为「随机色时有时无 / 颜色串台」。
  */
 private class DanmuLayoutCache {
     private val map = object : LinkedHashMap<String, TextLayoutResult>(
@@ -276,9 +314,14 @@ private class DanmuLayoutCache {
         ): Boolean = size > LAYOUT_CACHE_SIZE
     }
 
-    fun measure(textMeasurer: TextMeasurer, text: String, style: TextStyle): TextLayoutResult {
+    fun measure(
+        textMeasurer: TextMeasurer,
+        text: String,
+        style: TextStyle,
+        colorKey: Color
+    ): TextLayoutResult {
         // key 里带上字号与颜色，避免设置变更后拿到旧样式
-        val key = "$text|${style.fontSize}|${style.color}"
+        val key = "$text|${style.fontSize}|$colorKey"
         map[key]?.let { return it }
         val result = textMeasurer.measure(
             text = text,
@@ -289,6 +332,20 @@ private class DanmuLayoutCache {
         return result
     }
 }
+
+/**
+ * v2.4.6：按「本条颜色 + 全局不透明度」构造绘制样式。
+ *
+ * ⚠️ 全局不透明度（[alpha]）与颜色是**两个正交维度**：随机只作用于色相，
+ *    透明度始终由设置里的 opacityPercent 统一控制。
+ */
+private fun textColorStyleFor(color: Color, fontSizeSp: Int, alpha: Float): TextStyle =
+    TextStyle(
+        fontSize = fontSizeSp.sp,
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        color = color.copy(alpha = alpha)
+    )
 
 /** 默认弹幕区高度占比（顶部 30%） */
 const val DEFAULT_AREA_HEIGHT_RATIO = 0.30f

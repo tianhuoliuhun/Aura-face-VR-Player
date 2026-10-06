@@ -166,7 +166,7 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材 / v2.4.2 面板统一与预设人格 / v2.4.4 换默认端点与「测试连接」）/ AI Danmaku**
+- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材 / v2.4.2 面板统一与预设人格 / v2.4.4 换默认端点与「测试连接」/ v2.4.5 失败原因如实显示 / v2.4.6 行距自适应与随机颜色）/ AI Danmaku**
   - **当前状态**：**全链路已打通并上屏** —— 设置项 → **素材（截图 / AI 字幕台词）** → 视觉识别 → 弹幕引擎 → **画面渲染**
   - Fully working end-to-end: settings → **material (frame / AI subtitle lines)** → vision → engine → **on-screen rendering**
   - **设置面板与字幕面板统一**（v2.4.2）：六个区块均为**可折叠**标题（主题色图标 + 标题 +
@@ -223,10 +223,33 @@
     且与字幕颜色**互相独立**
   - Global color (v2.3.0): text color, stroke and background apply to **all** danmaku,
     independent from subtitle colors
-  - **视觉模型**：默认接入 **小米 MiMo V2.6 Flash**（OpenAI 兼容协议，支持图片输入），
-    端点与模型名均可改，也可换成任意 OpenAI 兼容的视觉模型
-  - Vision model defaults to **Xiaomi MiMo V2.6 Flash** (OpenAI-compatible, image input
-    supported); endpoint and model name are editable
+  - **颜色模式三选一**（v2.4.6）：**单一颜色**（默认，与 v2.3.0 一致）/ **完全随机** /
+    **80% 白 + 其余随机**。随机是**逐条独立**掷定、且**在入队时定死**并固定在条目上
+    —— 若改成渲染时现掷，颜色会以帧率级频率闪烁。80% 那档最接近真实弹幕站观感：
+    **大部分白、少量彩色**（彩色分支不会再出现白色，否则实际白占比会偏到约 83%）。
+    随机色板单独定义 **6 色**并**刻意排除黑色** —— 弹幕默认无底框且描边为黑边，
+    黑字在暗场景几乎不可读（字幕面板的 8 色含黑是因其底框可衬，两者不可混用）。
+    面板上以 chip 行呈现，选随机后色块网格**置灰但保留显示**（切回单一色不丢上次选择）
+  - Three color modes (v2.4.6): single color (default) / fully random / 80% white + random.
+    Rolled **per danmaku** and fixed at enqueue time (rolling at render time would flicker at
+    frame rate). The 80% mode matches real danmaku sites; its colored branch never yields white
+    again, so the actual white share does not drift to ~83%. The random palette has **6 colors**
+    and **deliberately excludes black** (danmaku has no backing box and uses a black stroke);
+    the subtitle panel's 8-color set including black must not be reused here. Shown as a chip row,
+    with the swatch grid dimmed but still visible under random modes
+  - **行距自适应**（v2.4.6）：轨道高度 = **`max(字号 × 1.9, 弹幕区高度 ÷ 轨道数)`**。
+    以**字号**为基准，轨道数只决定能排几行、不再反过来压缩行距；「区域均分」作兜底 ——
+    轨道很多时若只按字号算，总高会超出弹幕区、底部几轨被裁掉（表现为「后半数弹幕不显示」）
+  - Adaptive line spacing (v2.4.6): track height = `max(font size × 1.9, area height ÷ track count)`.
+    Font size drives it; track count only limits how many rows fit. The area-average term is a
+    floor so that many tracks do not overflow the danmaku area and clip the bottom rows
+  - **视觉模型**：默认接入 **AMD Radeon 开发者平台**（`developer.amd.com.cn/radeon/api/v1`，
+    聚合网关，OpenAI 兼容协议）的 **`MiMo-V2.6-Flash`**（⚠️ 模型 id **大小写敏感**，
+    小写会 404）（v2.4.4 更换），支持图片输入；端点与模型名均可改，
+    也可换成任意 OpenAI 兼容的视觉模型
+  - Vision model defaults to the **AMD Radeon developer platform**
+    (`developer.amd.com.cn/radeon/api/v1`, an aggregation gateway) with **`MiMo-V2.6-Flash`**
+    (⚠️ case-sensitive: lowercase returns 404) since v2.4.4; endpoint and model name are editable
   - **识别链路**（v2.3.1）：按间隔定时取一帧 → 缩放为 JPEG 后 base64 上传 → 解析返回文本
     ；图片**先缩放再编码**（1024 宽 JPEG 通常 60–150 KB，而原图 base64 可达数 MB）
   - Vision pipeline (v2.3.1): periodic frame capture → downscale to JPEG → base64 upload → parse.

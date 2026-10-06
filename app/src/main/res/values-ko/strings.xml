@@ -226,7 +226,7 @@
     <string name="danmu_text_color">텍스트 색상</string>
     <string name="danmu_stroke">외곽선</string>
     <string name="danmu_bg">배경</string>
-    <string name="danmu_color_hint">색상은 전체 설정으로 모든 AI 댓글에 적용되며, 자막 색상과 별도로 설정됩니다.</string>
+    <string name="danmu_color_hint">"단일 색상" 모드에서는 모든 탄막이 같은 색이고, 랜덤 모드에서는 탄막마다 색이 달라집니다. 자막 색상과 별도로 설정됩니다.</string>
     <string name="danmu_status_title">실행 상태</string>
     <string name="danmu_status_not_configured">설정이 필요합니다: 엔드포인트, 모델 이름, API 키를 입력하세요</string>
     <string name="danmu_status_waiting">준비 완료. 첫 화면 인식을 기다리는 중… (수 초)</string>
@@ -859,4 +859,9 @@
     <string name="danmu_opacity">불투명도</string>
     <string name="danmu_font_size">글자 크기</string>
     <string name="danmu_privacy_hint">활성화하면 화면이 압축되어 설정한 서비스로 전송됩니다</string>
+    <string name="danmu_color_mode">색상 모드</string>
+    <string name="danmu_color_mode_single">단일 색상</string>
+    <string name="danmu_color_mode_random">완전 랜덤</string>
+    <string name="danmu_color_mode_mostly_white">80% 흰색 + 랜덤</string>
+    <string name="danmu_color_random_hint">각 탄막은 흰색 / 레몬 / 시안 / 그린 / 핑크 / 오렌지 중에서 무작위로 색이 지정됩니다(검정은 어두운 장면에서 안 보여 제외).</string>
 </resources>

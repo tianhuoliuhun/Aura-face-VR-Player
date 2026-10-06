@@ -252,7 +252,7 @@
     <string name="danmu_text_color">文字顏色</string>
     <string name="danmu_stroke">描邊</string>
     <string name="danmu_bg">背景底</string>
-    <string name="danmu_color_hint">顏色為全域設定，對所有 AI 彈幕統一生效；可與影片內的字幕顏色分開設定。</string>
+    <string name="danmu_color_hint">「單一顏色」模式下所有彈幕同色；選隨機模式後每條彈幕各自取色，可與影片內的字幕顏色分開配置。</string>
     <string name="danmu_status_title">執行狀態</string>
     <string name="danmu_status_not_configured">尚未設定完成：請填寫服務端點、模型名稱與 API Key</string>
     <string name="danmu_status_waiting">已就緒，正在等待首次畫面辨識…（約需數秒）</string>
@@ -901,4 +901,9 @@
     <string name="danmu_opacity">不透明度</string>
     <string name="danmu_font_size">字號</string>
     <string name="danmu_privacy_hint">開啟後畫面會壓縮上傳至所填服務，請自行確認其隱私政策</string>
+    <string name="danmu_color_mode">顏色模式</string>
+    <string name="danmu_color_mode_single">單一顏色</string>
+    <string name="danmu_color_mode_random">完全隨機</string>
+    <string name="danmu_color_mode_mostly_white">80% 白 + 隨機</string>
+    <string name="danmu_color_random_hint">每條彈幕從「白 / 檸檬黃 / 青藍 / 螢光綠 / 櫻花粉 / 暖陽橙」中隨機取色（不含黑色，避免暗場景看不清）。</string>
 </resources>

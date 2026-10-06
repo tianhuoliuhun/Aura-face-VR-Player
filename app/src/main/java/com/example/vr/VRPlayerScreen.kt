@@ -778,6 +778,10 @@ fun VRPlayerScreen(
                 textColorId = prefs.getInt("danmu_text_color", DanmuConfig.DEFAULT_TEXT_COLOR_ID),
                 strokeId = prefs.getInt("danmu_stroke", DanmuConfig.DEFAULT_STROKE_ID),
                 bgId = prefs.getInt("danmu_bg", DanmuConfig.DEFAULT_BG_ID),
+                // v2.4.6：颜色模式（存 id，不存 ordinal）
+                colorModeId = prefs.getInt(
+                    "danmu_color_mode", DanmuConfig.DEFAULT_COLOR_MODE_ID
+                ),
                 // v2.4.1：素材来源（存枚举 id，不存 ordinal）
                 sourceModeId = prefs.getInt(
                     "danmu_source_mode", DanmuConfig.DEFAULT_SOURCE_MODE_ID
@@ -809,6 +813,7 @@ fun VRPlayerScreen(
                 putInt("danmu_text_color", danmuConfig.textColorId)
                 putInt("danmu_stroke", danmuConfig.strokeId)
                 putInt("danmu_bg", danmuConfig.bgId)
+                putInt("danmu_color_mode", danmuConfig.colorModeId)
                 putInt("danmu_source_mode", danmuConfig.sourceModeId)
             } else {
                 remove("danmu_enabled")
@@ -825,6 +830,7 @@ fun VRPlayerScreen(
                 remove("danmu_text_color")
                 remove("danmu_stroke")
                 remove("danmu_bg")
+                remove("danmu_color_mode")
                 remove("danmu_source_mode")
             }
             apply()
