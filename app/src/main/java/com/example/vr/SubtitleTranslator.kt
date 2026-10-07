@@ -190,6 +190,11 @@ class SubtitleTranslator(private val context: Context) {
         /**
          * 缓存**内容**版本：译文口径发生不兼容变化时递增，旧缓存整体作废。
          * 用途：修正了系统性误译、或换了质量明显不同的模型后，不让旧译文继续被命中。
+         *
+         * ⚠️ v2.4.8 的「缓存 key 归一化扩展」（[normalizeCacheText] 增加全角半角统一与标点
+         *    形式统一）**不递增此值** —— 它不改变任何一条已有译文，只是让更多原文能命中
+         *    它们；旧缓存会在加载时经 [normalizeCacheKey] 自动归一化并去重。
+         *    递增反而会让用户白白丢掉整份有价值的缓存，属破坏性操作。
          */
         private const val CACHE_CONTENT_VERSION = 1
 
@@ -223,6 +228,122 @@ class SubtitleTranslator(private val context: Context) {
         private const val MYMEMORY_MAX_QUERY_BYTES = 500
         /** 触发配额/限流后的冷却时长 */
         private const val MYMEMORY_COOLDOWN_MS = 10 * 60 * 1000L
+
+        // ===== v2.4.8：缓存 key 归一化（纯函数，放 companion 便于单测）=====
+
+        /**
+         * 对**已拼好的 key**（形如 `zh:文本`）归一化。
+         *
+         * 单独抽出是因为加载旧磁盘缓存时也要走一遍：老文件里的 key 未归一化，
+         * 直接入库会导致升级后全部命中不到；归一化后入库即可**自动迁移并去重**。
+         */
+        fun normalizeCacheKey(key: String): String {
+            val sep = key.indexOf(':')
+            if (sep <= 0) return key
+            return key.substring(0, sep + 1) + normalizeCacheText(key.substring(sep + 1))
+        }
+
+        /**
+         * 原文归一化 —— **缓存命中率的总入口**（v2.4.8 扩展）。
+         *
+         * 依次做三层，全部只做「保语义」的合并：
+         *
+         * | # | 层 | 例 | 依据 |
+         * |---|---|---|---|
+         * | ① | 空白折叠 | `"Hello  world"` → `"Hello world"` | 换行/多空格是排版差异 |
+         * | ② | 全角半角统一 | `"ＡＢＣ１２３"` → `"ABC123"`、`"你好！"` → `"你好!"` | **同字符的两种宽度写法** |
+         * | ③ | 标点形式统一 | `’`→`'`、`“”`→`"`、`—–`→`-`、`…`→`...` | **同一符号的排版变体** |
+         *
+         * ⚠️ **绝不做标点去除**：`12:30`/`1230`、`3.14`/`314`、`A.B`/`AB`、`真的？`/`真的`
+         * 语义不同，塌缩到同一 key 会返回错误译文。本函数只回答「**这两个字符是不是同一个字符
+         * 的两种写法**」——是则合并，否则一律保留。
+         *
+         * ⚠️ **改这里会同时影响磁盘缓存的读与写**（`parseCacheLine` / 迁移 / `appendDiskCache`
+         *     都经 [normalizeCacheKey]）→ 旧缓存加载时会自动归一化并去重，**无需用户清缓存**。
+         *     新增/修改映射时必须保证**幂等**（归一化结果再次归一化不变），否则会反复产生新 key。
+         */
+        fun normalizeCacheText(text: String): String {
+            val sb = StringBuilder(text.length)
+            var pendingSpace = false
+            for (c in text) {
+                // ② 全角空格并入空白处理
+                if (c.isWhitespace() || c == '\u3000') {
+                    if (sb.isNotEmpty()) pendingSpace = true
+                    continue
+                }
+                if (pendingSpace) {
+                    sb.append(' ')
+                    pendingSpace = false
+                }
+                sb.append(normalizeCacheChar(c))
+            }
+            return sb.toString()
+        }
+
+        /**
+         * 单字符归一化：全角 → 半角，标点变体 → 规范形式。**幂等**（`f(f(x)) == f(x)`）。
+         *
+         * 返回 [String] 而非 [Char]：因为 `…`（U+2026，单个码位的省略号）在语义上等价于
+         * **三个点** `...`，必须**展开**才能与半角写法合并。若只映射成单个 `.`，
+         * `"……"` 会变成 `".."` 而 `"..."` 保持 `"..."` → 两者永不相等，白做。
+         *
+         * ⚠️ 映射表刻意保持**保守**：只收录「业界公认为同一字符的等价写法」。
+         *    模糊的（如中文顿号 `、`、句号 `。`、书名号 `《》`）一律**不收录** ——
+         *    它们在中文里是有独立语义的标点，与任何半角符号都不构成「等价写法」。
+         */
+        fun normalizeCacheChar(c: Char): String = when (c) {
+            // ── ② 全角字母/数字（U+FF01..U+FF5E）→ 半角（U+0021..U+007E），偏移量固定 0xFEE0
+            in '\uFF10'..'\uFF19',   // ０-９
+            in '\uFF21'..'\uFF3A',   // Ａ-Ｚ
+            in '\uFF41'..'\uFF5A'    // ａ-ｚ
+            -> (c.code - 0xFEE0).toChar().toString()
+
+            // ── ② 全角标点（不在上段连续区间内，需逐个列出）
+            '！' -> "!"
+            '＂' -> "\""
+            '＃' -> "#"
+            '＄' -> "$"
+            '％' -> "%"
+            '＆' -> "&"
+            '＇' -> "'"
+            '（' -> "("
+            '）' -> ")"
+            '＊' -> "*"
+            '＋' -> "+"
+            '，' -> ","
+            '－' -> "-"
+            '．' -> "."
+            '／' -> "/"
+            '：' -> ":"
+            '；' -> ";"
+            '＜' -> "<"
+            '＝' -> "="
+            '＞' -> ">"
+            '？' -> "?"
+            '＠' -> "@"
+            '［' -> "["
+            '＼' -> "\\"
+            '］' -> "]"
+            '＾' -> "^"
+            '＿' -> "_"
+            '｀' -> "`"
+            '｛' -> "{"
+            '｜' -> "|"
+            '｝' -> "}"
+            '～' -> "~"
+
+            // ── ③ 标点形式统一：同一符号的排版变体（不是不同符号）
+            '\u2018', '\u2019', '\u2032' -> "'"    // ‘ ’ ′（弯单引号 / 角分）→ 直单引号
+            '\u201C', '\u201D', '\u2033' -> "\""   // “ ” ″（弯双引号 / 角秒）→ 直双引号
+            '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212' -> "-"
+            //                ‐    ‑     ‒     –     —     ―     −  → 半角连字符/减号
+
+            // ⚠️ 省略号必须**展开为三点**：`…`（单码位）与 `...`（三点）才是同一符号的两种写法。
+            //    只映射成单个 '.' 会让 "……" → ".." 而 "..." → "..." → 永不相等，等于白做。
+            '\u2026', '\u22EF' -> "..."           // … ⋯ → ...
+
+            else -> c.toString()
+        }
     }
 
     var config by mutableStateOf(TranslationConfig())
@@ -667,11 +788,18 @@ class SubtitleTranslator(private val context: Context) {
     /**
      * 生成缓存 key：`目标语言 + 归一化后的原文`。
      *
-     * 归一化只做「折叠空白 + 去首尾空白」。字幕里同一句话常因换行/多空格差异被当成两条
-     * （`"Hello  world"` vs `"Hello world"`），折叠后命中同一条缓存 —— **等效扩大词库、提升命中率**。
+     * 归一化做三件事（v2.4.8 起扩展，见 [normalizeCacheText]）：**空白折叠 + 全角半角统一 +
+     * 标点形式统一**。字幕里同一句话常因换行/多空格/全角半角/标点变体差异被当成两条
+     * （`"Hello  world"` vs `"Hello world"`、`"你好！"` vs `"你好!"`），归一后命中同一条缓存
+     * —— **等效扩大词库、提升命中率**，直接降低 MyMemory 等云端引擎的额度消耗。
      *
-     * ⚠️ **刻意不做**大小写折叠与标点归一：那会把语义不同的句子混到同一个 key
-     * （例如问句/陈述句、`12:30` 与 `1230`），返回不合适译文的代价比多翻一次更大。
+     * ⚠️ **仍然刻意不做**两件事：
+     * 1. **大小写折叠**：`"US"`（美国）与 `"us"`（我们）语义完全不同。
+     * 2. **标点去除**（而非形式统一）：`"12:30"` 与 `"1230"`、`"3.14"` 与 `"314"`、
+     *    `"A.B"` 与 `"AB"`、`"真的？"` 与 `"真的"` 都会被错误合并 ——
+     *    返回不合适译文的代价，远大于多翻一次的代价。
+     *
+     * 判据很简单：**只合并「同一字符的两种写法」，绝不合并「两个不同字符」**。
      */
     private fun makeCacheKey(targetLang: String, text: String): String =
         normalizeCacheKey(targetLang + ":" + text)
@@ -679,32 +807,20 @@ class SubtitleTranslator(private val context: Context) {
     /**
      * 对**已拼好的 key** 归一化（形如 `zh:文本`）。
      *
-     * 单独抽出是因为加载旧磁盘缓存时也要走一遍：老文件里的 key 未归一化，
-     * 直接入库会导致升级后全部命中不到；归一化后入库即可**自动迁移并去重**。
+     * v2.4.8 起实现已移到 `companion object`（纯函数，便于单测直接调用），
+     * 这里保留 thin wrapper 是为了不动全项目 10 余处既有调用点。
      */
-    private fun normalizeCacheKey(key: String): String {
-        val sep = key.indexOf(':')
-        if (sep <= 0) return key
-        return key.substring(0, sep + 1) + normalizeCacheText(key.substring(sep + 1))
-    }
+    private fun normalizeCacheKey(key: String): String = Companion.normalizeCacheKey(key)
 
-    /** 折叠连续空白（含全角空格 U+3000）为单个半角空格，并去掉首尾空白 */
-    private fun normalizeCacheText(text: String): String {
-        val sb = StringBuilder(text.length)
-        var pendingSpace = false
-        for (c in text) {
-            if (c.isWhitespace() || c == '\u3000') {
-                if (sb.isNotEmpty()) pendingSpace = true
-            } else {
-                if (pendingSpace) {
-                    sb.append(' ')
-                    pendingSpace = false
-                }
-                sb.append(c)
-            }
-        }
-        return sb.toString()
-    }
+    /**
+     * 原文归一化（v2.4.8 扩展：空白折叠 + 全角半角统一 + 标点形式统一）。
+     *
+     * ⚠️ 实现与完整说明见 `companion object` 中的同名函数。
+     */
+    private fun normalizeCacheText(text: String): String = Companion.normalizeCacheText(text)
+
+    private fun normalizeCacheChar(c: Char): String = Companion.normalizeCacheChar(c)
+
 
     private fun escapeCache(s: String) = s.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
 

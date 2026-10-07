@@ -346,7 +346,11 @@
   - Engine, target language, API key, base URL, model and display mode are all persisted
 - **本地翻译词库（缓存）**：内存 + 磁盘双层，**按目标语言分文件**（`translation/cache_<语言>.tsv`，启动只加载当前语言），单语言上限 **32MB（约 20 万条）**，跨视频、跨重启都命中，因此同一句话只翻一次
 - **缓存失效策略**：条目带「最近使用时间 + 命中次数」→ 压缩时按 **LRU** 淘汰（低频且久未用优先，替代原先的随机淘汰）+ **TTL 180 天**过期；文件头带**版本号**，译文口径变更时可整份作废（旧文件改名 `.stale` 留档）
-- 缓存键做**空白归一化**（多余空格/换行差异视为同一句）；设置里可看**缓存统计**（各语言条目数/体积、命中率、会话用量）并**按语言清空**
+- 缓存键做**三层归一化**（v2.4.8 扩展）：**① 空白折叠**（多余空格/换行差异视为同一句）+ **② 全角半角统一**（`"ＡＢＣ１２３"` = `"ABC123"`、`"你好！"` = `"你好!"`）+ **③ 标点形式统一**（弯引号 `‘’“”` → 直引号、各类破折号 → 半角连字符、省略号 `…` 展开为三点）。**刻意不去除标点** —— `12:30`/`1230`、`3.14`/`314`、`真的？`/`真的` 语义不同，合并会返回错误译文；中文顿号 `、`、句号 `。`、书名号 `《》` 也刻意不收录（独立语义标点）。判据：**只合并「同一字符的两种写法」，绝不合并「两个不同字符」**
+  - 设置里可看**缓存统计**（各语言条目数/体积、命中率、会话用量）并**按语言清空**
+- 本地翻译词库（缓存）：内存 + 磁盘双层，**按目标语言分文件**（`translation/cache_<语言>.tsv`，启动只加载当前语言），单语言上限 **32MB（约 20 万条）**，跨视频、跨重启都命中，因此同一句话只翻一次
+  - 缓存键是三层归一化（v2.4.8）：whitespace folding + full/half-width unification + punctuation form unification. Punctuation is **never removed** (`12:30` ≠ `1230`), and Chinese `、`/`。`/`《》` are deliberately excluded. Rule: merge "two spellings of the same character", never "two different characters"
+  - Settings shows **cache stats** (per-language entries/size, hit rate, session usage) with per-language clearing
   - Local translation memory: in-memory + on-disk, **one file per target language** (`translation/cache_<lang>.tsv`; only the current language is loaded at startup), 32MB / ~200k entries per language, survives restarts
   - Invalidation: each entry stores last-used time + hit count → **LRU eviction** (least-used & least-recent first, replacing the old random drop) + **180-day TTL**; the file header carries a **version tag** so a change in translation convention can invalidate the cache wholesale (renamed `.stale`, kept for reference)
   - Cache keys are whitespace-normalized; Settings shows **cache stats** (per-language entries/size, hit rate, session usage) with per-language clearing
