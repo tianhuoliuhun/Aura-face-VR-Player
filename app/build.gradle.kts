@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 258
-    versionName = "2.4.6"
+    versionCode = 259
+    versionName = "2.4.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -475,6 +475,12 @@ dependencies {
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  // v2.4.7：B 站 XML 弹幕解析用 `org.xmlpull.v1.XmlPullParserFactory`。
+  // Android 运行时由系统提供该实现；但**纯 JVM 单测**没有它，会抛
+  // `Method newInstance in org.xmlpull.v1.XmlPullParserFactory not mocked`，
+  // 导致 9 条 XML 解析单测全挂（且异常在 catch 里被吞，表现为"静默返回 0 条"）。
+  // 这里补一个纯 Java 实现，仅用于测试运行时，不进 APK。
+  testImplementation("net.sf.kxml:kxml2:2.3.0")
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)

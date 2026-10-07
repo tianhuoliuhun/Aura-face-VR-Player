@@ -124,6 +124,15 @@ class DanmuEngine {
     /** 轨道高度（px）。由渲染层按字号算好后同步。 */
     var trackHeightPx: Float = 0f
 
+    // ---- v2.4.7：批次时间戳（正态分布抖动）----
+
+    /**
+     * 同批弹幕的时间抖动标准差（ms）。0 = 关闭抖动（整批同一时刻，行为同 v2.4.5 之前的"同刻"）。
+     *
+     * 由调用方从 `DanmuConfig.timeJitterMs` 同步。详见 [spreadBornTimes] 的说明。
+     */
+    var timeJitterMs: Float = DEFAULT_TIME_JITTER_MS
+
     /** 队列上限：防止模型高频返回时无限堆积（参考 DanmuAI 的 300） */
     var maxPending: Int = MAX_PENDING_DEFAULT
 
@@ -155,35 +164,132 @@ class DanmuEngine {
      * `pickTrack` 的间距判据恒为「太近」→ 只有第一条能进。
      * 但若只靠错开时间让它们先后挤进同一轨道，轨道上限的防护就形同虚设。
      * 因此**两者都要**：
-     * - 用 [BATCH_STAGGER_MS] 错开出生时间（保证位置判据有意义）
+     * - 用**时间抖动**错开出生时间（保证位置判据有意义）
      * - 用 `usedTracks` **禁止本批内共用轨道**（保证一批 N 条占 N 条轨道，视觉上是"同时飘出"）
      *
+     * ## v2.4.7：线性错开 → 正态分布抖动
+     * v2.4.6 及之前每条固定延后 `120ms × index`（见 [BATCH_STAGGER_MS]），节奏机械且整批被抻长。
+     * 本版改为以 [nowMs] 为均值的正态抖动（见 [spreadBornTimes]），
+     * 并**保证顺序不变**（抖动值升序后按原下标取用）。
+     *
+     * @param texts       待入队文本（**顺序即排布顺序**，会被保留）
+     * @param nowMs       本批的名义时刻（抖动中心）
+     * @param baseTimesMs 可选：每条**指定的出生时刻**（长度不足时余下走抖动）。
+     *
+     *   给「外部导入弹幕」用 —— 导入的弹幕带自己的时间戳，不该再被随机抖动打散。
+     *   传入时该条**直接采用该时刻**，并跳过正态抖动。
      * @return 实际入队条数
      */
-    fun enqueue(texts: List<String>, nowMs: Long): Int {
-        var added = 0
-        val usedTracks = HashSet<Int>()
+    fun enqueue(texts: List<String>, nowMs: Long, baseTimesMs: LongArray? = null): Int {
+        if (texts.isEmpty()) return 0
 
-        for (raw in texts) {
+        // ① 先算好「本次要通过的文本+出生时刻」，再做轨道分配。
+        //
+        //   ⚠️ v2.4.7 起必须**先定时间、再排轨道**，且按**出生时刻升序**分配轨道 ——
+        //      抖动的意义就是让它们先后错开，若仍按原下标顺序分配轨道，
+        //      会出现「时间上更晚的条目先占了轨道、更早的反而被判为太近而丢弃」。
+        //      （v2.4.6 的线性错开天然递增，所以当时不存在这个问题。）
+        val candidates = mutableListOf<Candidate>()
+
+        // 需要抖动的条目下标（baseTimesMs 里没有给定时时刻的那些）
+        val jitterIndices = mutableListOf<Int>()
+
+        for ((index, raw) in texts.withIndex()) {
             val text = raw.trim()
             if (text.isEmpty()) continue
+            if (items.size + candidates.size >= maxPending) break
 
-            // ① 队列上限
-            if (items.size >= maxPending) break
+            val explicit = baseTimesMs?.getOrNull(index)
+            if (explicit != null) {
+                candidates.add(Candidate(text = text, bornMs = explicit))
+            } else {
+                jitterIndices.add(candidates.size)
+                candidates.add(Candidate(text = text, bornMs = nowMs))
+            }
+        }
+        if (candidates.isEmpty()) return 0
 
-            // ② 相似度去重
-            if (isDuplicate(text)) continue
+        // ② 给需要抖动的条目统一掷一组正态抖动（升序 → 保持原顺序）
+        if (jitterIndices.isNotEmpty()) {
+            val spread = spreadBornTimes(jitterIndices.size, nowMs, timeJitterMs, randomProvider)
+            for ((k, ci) in jitterIndices.withIndex()) {
+                // ⚠️ 非负钳位放在**这里**而不是 spreadBornTimes 内部：
+                //    spreadBornTimes 是纯数学函数，钳位会破坏分布形态（见其注释）；
+                //    而 bornMs 参与位置公式 `x = W - (now-born)*speed`，负值会让弹幕瞬移。
+                //    真实调用方传的是 elapsedRealtime（远大于抖动上限），此处只是兜底。
+                candidates[ci].bornMs = spread[k].coerceAtLeast(0L)
+            }
+        }
 
-            // ③ 错开出生时间后分配轨道（本批不共用轨道，见上方说明）
-            val bornMs = nowMs + added * BATCH_STAGGER_MS
-            val track = pickTrack(bornMs, usedTracks) ?: continue
+        // ③ 交给共用的插入流程（去重 + 轨道分配 + 上色）
+        return insertCandidates(candidates) { null }  // null → 按 colorMode 掷色（AI 弹幕的行为）
+    }
 
-            // ④ v2.4.6：逐条掷定颜色（入队时定死，渲染时不重算 —— 否则每帧变色）
-            val color = DanmuConfig.pickColor(colorMode, singleColor, randomProvider)
+    /** [enqueue] 的内部候选（文本 + 已定出生时刻） */
+    private class Candidate(val text: String, var bornMs: Long)
 
-            items.add(DanmuItem(text = text, track = track, bornMs = bornMs, color = color))
+    /**
+     * v2.4.7：带**指定颜色**的入队（供外部导入弹幕使用）。
+     *
+     * ## 为什么不复用 [enqueue]
+     * [enqueue] 按 [colorMode] 给每条掷色 —— 这是 AI 弹幕想要的（用户选了随机模式）。
+     * 但**导入的弹幕自带颜色**（B 站 XML 第 3 项 / JSON 的 `color` 字段），
+     * 再走一遍随机就把文件里的颜色意图覆盖掉了。
+     *
+     * ## 实现要点
+     * 轨道分配、去重、上限等逻辑与 [enqueue] **完全共用**（抽到 [insertCandidates]），
+     * 唯一差别是颜色来源：这里用调用方给的 [colors]（允许元素为 null → 回落 [singleColor]）。
+     *
+     * @param entries 每条 = (文本, 出生时刻, 指定颜色 or null)
+     * @return 实际入队条数
+     */
+    fun enqueueTimed(
+        entries: List<Triple<String, Long, Color?>>
+    ): Int {
+        if (entries.isEmpty()) return 0
+        val candidates = mutableListOf<Candidate>()
+        val colors = mutableListOf<Color?>()
+        for ((text, bornMs, color) in entries) {
+            val t = text.trim()
+            if (t.isEmpty()) continue
+            if (items.size + candidates.size >= maxPending) break
+            candidates.add(Candidate(text = t, bornMs = bornMs))
+            colors.add(color)
+        }
+        if (candidates.isEmpty()) return 0
+        return insertCandidates(candidates) { idx -> colors[idx] }
+    }
+
+    /**
+     * 把候选按**出生时刻升序**做去重 + 轨道分配 + 入库（[enqueue] / [enqueueTimed] 共用）。
+     *
+     * ⚠️ 抽出共用的理由：这条流程里有几处容易写错的约束
+     * （按时间排序分配、本批禁复用轨道、去重窗口维护、颜色来源可替换），
+     * 复制成两份必然改一处漏一处 —— 本项目「同一份逻辑两处登记」是头号事故源。
+     *
+     * @param colorOf 按下标提供颜色；返回 null 表示回落 [singleColor]
+     */
+    private fun insertCandidates(
+        candidates: List<Candidate>,
+        colorOf: (Int) -> Color?
+    ): Int {
+        // 按出生时刻升序分配轨道（同时刻保持原下标序 —— sortedBy 是稳定排序）
+        val order = candidates.indices.sortedBy { candidates[it].bornMs }
+
+        var added = 0
+        val usedTracks = HashSet<Int>()
+        for (ci in order) {
+            val c = candidates[ci]
+            if (isDuplicate(c.text)) continue
+            val track = pickTrack(c.bornMs, usedTracks) ?: continue
+
+            // 指定色优先；未指定才按颜色模式掷（保证外部导入不会被随机覆盖）
+            val specified = colorOf(ci)
+            val color = specified ?: DanmuConfig.pickColor(colorMode, singleColor, randomProvider)
+
+            items.add(DanmuItem(text = c.text, track = track, bornMs = c.bornMs, color = color))
             usedTracks.add(track)
-            recentTexts.addLast(text)
+            recentTexts.addLast(c.text)
             while (recentTexts.size > DEDUP_WINDOW) recentTexts.removeFirst()
             added++
         }
@@ -383,12 +489,14 @@ class DanmuEngine {
         private const val TRACK_GAP_SECONDS = 0.35f
 
         /**
-         * 同批弹幕的出生时间错开量（ms）。
+         * 同批弹幕的出生时间错开量（ms）。—— **v2.4.7 起已被正态抖动取代**，
+         * 保留常量仅用于说明抖动强度的量级参照（见 [DEFAULT_TIME_JITTER_MS]）。
          *
-         * 见 [enqueue] 的说明：不错开则同批位置完全重合，轨道分配失效。
-         * 120ms 在视觉上仍是"同一批"，但足够让 [pickTrack] 区分先后。
+         * ⚠️ 不要再在新代码里使用它。历史上见 [enqueue] 的说明：
+         * 当时若不错开则同批位置完全重合、轨道分配失效；120ms 是那个年代的经验值。
          */
-        private const val BATCH_STAGGER_MS = 120L
+        @Deprecated("v2.4.7 起改用正态抖动，见 DEFAULT_TIME_JITTER_MS / spreadBornTimes")
+        const val BATCH_STAGGER_MS = 120L
 
         private const val MIN_SPEED = 40
         private const val MAX_SPEED = 1200
@@ -493,6 +601,145 @@ class DanmuEngine {
             if (areaHeightPx <= 0f) return natural
             val fit = areaHeightPx / tracks
             return min(natural, fit)
+        }
+
+        // ================================================================
+        // v2.4.7：批次时间戳 —— 正态分布抖动
+        // ================================================================
+
+        /**
+         * 同批弹幕的时间抖动标准差（ms）—— **默认值**，可被 [DanmuConfig.timeJitterMs] 覆盖。
+         *
+         * ## 为什么是「抖动」而不是「线性错开」
+         * v2.4.6 及之前用固定步长 [BATCH_STAGGER_MS]（120ms）线性错开：
+         * 第 k 条固定延后 `k × 120ms`，一批 8 条就抻成 `7 × 120 = 840ms`。
+         * 问题有两个：
+         * - **节奏机械**：看上去像"点名报到"，一眼能看出是程序排的；
+         * - **前后差过大**：8 条要 0.84s 才铺完，而一条弹幕穿过屏幕约 5s ——
+         *   整批在时间轴上明显「拉长」，与真人弹幕那种"一簇涌出"的观感不符。
+         *
+         * 改成以批次时刻为均值、**两侧对称抖动**的正态分布后：
+         * - 绝大多数弹幕紧贴均值（一簇涌出，像真人）；
+         * - 少数自然落到 ±1σ / ±2σ 之外（错落感来自统计，而不是硬排）。
+         *
+         * ## 为什么 400ms
+         * 与 [BATCH_STAGGER_MS] 的「总量级」对齐（8 条线性错开总跨度 840ms，
+         * 而 ±1σ=400ms 覆盖 68%、±2σ 覆盖 95%，跨度相当但**中间密、两头疏**）。
+         * 另外 400ms 相对一条弹幕约 5s 的存活期很短，不会让整批显得断续。
+         *
+         * ⚠️ σ 是「抖动强度」不是「总跨度」：取 400ms 时理论极值可达 ±1.2s 以上
+         *    （3σ），因此实现里另有 [SPREAD_MAX_ABS_MS] 做硬截断。
+         */
+        const val DEFAULT_TIME_JITTER_MS = 400f
+
+        /**
+         * 单条抖动量的**绝对值上限**（ms）。
+         *
+         * 正态分布理论上无穷远，必须截断 —— 否则极小概率会摇出一个 ±3s 开外的值，
+         * 让某条弹幕「凭空迟到几秒」才出现，观感上像卡顿。
+         * 取 2.5σ（σ=400 时为 1000ms）：保留 98.8% 的分布形态，又封死长尾。
+         */
+        const val SPREAD_MAX_ABS_MS = 1000L
+
+        /**
+         * 从均匀随机数生成**标准正态**随机数（Box–Muller 变换）。
+         *
+         * ## 为什么自己实现而不用现成的
+         * 1. `kotlin.random.Random` 只提供均匀分布，取正态要么自己写、要么引入
+         *    `java.util.Random.nextGaussian()` —— 但后者**无法注入**，
+         *    会让「时间分布」变成不可单测的行为（本项目单测全部是纯 JVM，不碰真随机）。
+         * 2. 这里需要的是**可注入**：调用方传 `roll()`，测试即可给出确定序列。
+         *
+         * ## 公式
+         * ```
+         * Z = sqrt(-2·ln(u1)) · cos(2π·u2)      // u1,u2 ~ U(0,1]
+         * ```
+         * 取 `cos` 分支、**丢弃 `sin` 那一路**：对「逐条独立掷」的用途完全够用，
+         * 少写一个缓存变量也少一处出错点（省一半随机数消耗，代价可忽略）。
+         *
+         * ⚠️ `u1` 必须 **> 0**（`ln(0) = -∞`）→ 用 `coerceAtLeast` 兜住 `roll()` 返回 0 的情形。
+         *
+         * @param roll 0..1 的随机数提供者（注入以便单测）
+         */
+        fun standardNormal(roll: () -> Float): Float {
+            val u1 = roll().coerceAtLeast(MIN_LOG_EPSILON)
+            val u2 = roll()
+            return (kotlin.math.sqrt(-2.0 * kotlin.math.ln(u1.toDouble())) *
+                    kotlin.math.cos(2.0 * Math.PI * u2)).toFloat()
+        }
+
+        /** `ln()` 的输入下限，避免 `u1 == 0` 时得到 `-Infinity` */
+        private const val MIN_LOG_EPSILON = 1e-6f
+
+        /**
+         * v2.4.7：为**一批**弹幕计算各自的出生时刻（正态分布抖动）。
+         *
+         * ## 语义
+         * 以 [centerMs]（本批的「名义时刻」）为均值 `μ`、[sigmaMs] 为标准差 `σ`，
+         * 为 `count` 条弹幕各掷一个抖动 `d ~ N(0, σ)`，得到 `centerMs + d`。
+         *
+         * ## ⚠️「按顺序」的含义 —— 必须单调不减
+         * 用户要求「按顺序正态分布」，即**抖动后仍要保持 AI 返回的先后顺序**。
+         * 若各自独立掷完就用，可能出现第 3 条落在第 2 条之前 → 渲染时后一条反而先出现，
+         * 视觉上就是「顺序错乱」（用户明确要求保持顺序）。
+         *
+         * 因此实现分两步：
+         * 1. **掷出一组抖动并升序排序**（[sortedJitters]）；
+         * 2. **按原下标依次取用**（第 i 条拿第 i 小的抖动）。
+         *
+         * 这样得到的序列**严格单调不减**，同时整体仍服从正态分布
+         * （排序只是改变了「哪个下标拿到哪个分位」，不改变边缘分布 ——
+         *  因为所有抖动都来自同一个 N(0,σ)，是可交换的）。
+         *
+         * 这相当于把「同一批同时到达的弹幕」重新摊成**有序但疏密不均**的一组时刻，
+         * 正是「按顺序 + 正态分布」想要的效果。
+         *
+         * ## 为什么中心化到批次时刻而不是从批次时刻起算
+         * 「两侧对称」才有正态的形态（中间密两头疏）。
+         * 若只往后抖（`centerMs + |d|`）就变成半正态，前几条会挤在 0 附近、
+         * 整批整体后移，相当于凭空延迟。
+         *
+         * ## ⚠️ 不要在这里对结果做「非负保护」（踩过的坑）
+         * 曾写过 `(centerMs + jitter).coerceAtLeast(0L)`，结果是**左半边分布被压平**：
+         * 当 `centerMs` 接近 0 时（如测试传 0，或极早启动），所有负抖动全部被截成同一个 0 →
+         * `first20` 打出来是一串 0、标准差从 400 掉到 228、`|d|<1σ` 占比从 0.68 涨到 0.84。
+         * 即**看似"更安全"的钳位反而破坏了分布形态**，而"非负"并不是本函数的职责 ——
+         * 真实调用方传的是 `SystemClock.elapsedRealtime()`（开机毫秒数，恒远大于
+         * [SPREAD_MAX_ABS_MS]），本就不可能靠抖动摇到负数。
+         *
+         * 教训：**在纯数学函数里加"业务保护"，很容易把数学性质改坏**。
+         * 该做的是让函数保持纯粹语义，把约束交给调用方（此处已无约束需要）。
+         *
+         * @param count    条数（<=0 返回空数组）
+         * @param centerMs 批次名义时刻（通常 = 入队时的 now）
+         * @param sigmaMs  标准差（ms）；<=0 时等价于「不抖动」，全部返回 [centerMs]
+         * @param roll     0..1 随机数提供者（每条消耗 2 个）
+         * @return 长度 = [count] 的数组，**单调不减**
+         */
+        fun spreadBornTimes(
+            count: Int,
+            centerMs: Long,
+            sigmaMs: Float,
+            roll: () -> Float
+        ): LongArray {
+            if (count <= 0) return LongArray(0)
+            // σ 无效 → 不抖动（保持旧式「全部同一时刻」，由调用方决定是否需要）
+            if (sigmaMs <= 0f || !sigmaMs.isFinite()) return LongArray(count) { centerMs }
+
+            // ① 掷 count 个抖动（截断到 ±SPREAD_MAX_ABS_MS，防止正态长尾）
+            val jitters = LongArray(count)
+            for (i in 0 until count) {
+                val z = standardNormal(roll)
+                val jitter = (z * sigmaMs).toLong().coerceIn(-SPREAD_MAX_ABS_MS, SPREAD_MAX_ABS_MS)
+                jitters[i] = jitter
+            }
+            // ② 升序 → 按原下标依次取用，保证单调不减
+            jitters.sort()
+            val out = LongArray(count)
+            for (i in 0 until count) {
+                out[i] = centerMs + jitters[i]
+            }
+            return out
         }
     }
 }

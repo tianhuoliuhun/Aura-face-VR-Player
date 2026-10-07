@@ -864,4 +864,25 @@
     <string name="danmu_color_mode_random">完全ランダム</string>
     <string name="danmu_color_mode_mostly_white">80% 白 + ランダム</string>
     <string name="danmu_color_random_hint">各弾幕は「白／レモン／シアン／グリーン／ピンク／オレンジ」からランダムに着色されます（黒は暗い場面で見えないため除外）。</string>
+    <string name="danmu_source_type">弾幕のソース</string>
+    <string name="danmu_source_type_ai">AI 生成</string>
+    <string name="danmu_source_type_import">ファイル読込</string>
+    <string name="danmu_source_type_hint">「AI 生成」は現在の映像からリアルタイムに生成します。「ファイル読込」は用意した弾幕ファイル（Bilibili XML／JSON）を読み込みます。どちらか一方を選びます。</string>
+    <string name="danmu_import_pick">弾幕ファイルを選択</string>
+    <string name="danmu_import_none">ファイル未選択</string>
+    <string name="danmu_import_loaded">全 {count} 件</string>
+    <string name="danmu_import_clear">読み込みを解除</string>
+    <string name="danmu_import_hint">Bilibili 弾幕 XML（&lt;d p="時間,モード,サイズ,色,..."&gt;）と JSON 配列（time / text / color）に対応。スクロール弾幕のみ使用し、他はスキップします。</string>
+    <string name="danmu_import_loading">ファイルを読み込み中…</string>
+    <string name="danmu_import_ok">{count} 件を取り込みました</string>
+    <string name="danmu_import_fail_unreadable">ファイルを読み込めません。選び直してください</string>
+    <string name="danmu_import_fail_format">形式を判別できません（Bilibili XML または JSON が必要です）</string>
+    <string name="danmu_import_fail_empty">使用できるスクロール弾幕がありません</string>
+    <string name="danmu_err_import_no_file">読込モード：先に弾幕ファイルを選んでください</string>
+    <string name="danmu_err_import_empty">読み込んだ弾幕が空です。ファイルを確認してください</string>
+    <string name="danmu_status_imported">{count} 件取り込み済み</string>
+    <string name="danmu_status_import_source">ソース：ファイル読込</string>
+    <string name="danmu_time_jitter">時間のばらつき</string>
+    <string name="danmu_time_jitter_hint">同じバッチの弾幕は本来同時に出ます。ここではバッチ時刻を中心に正規分布でばらけさせ、自然な粗密を作ります。0 で無効（同時）。</string>
+    <string name="danmu_time_jitter_off">オフ</string>
 </resources>

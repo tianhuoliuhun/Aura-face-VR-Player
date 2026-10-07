@@ -166,7 +166,7 @@
   - Charset auto-detection (BOM / UTF-8 / GBK / GB18030 / Big5) fixes garbled legacy Chinese
     subtitles that were previously force-decoded as UTF-8
   - 解析不出内容时会**明确提示**，不再静默无反应
-- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材 / v2.4.2 面板统一与预设人格 / v2.4.4 换默认端点与「测试连接」/ v2.4.5 失败原因如实显示 / v2.4.6 行距自适应与随机颜色）/ AI Danmaku**
+- ✅ **AI 弹幕（v2.2.0 取帧 / v2.3.0 独立分组与颜色 / v2.3.1 视觉识别与引擎 / v2.4.0 上屏 / v2.4.1 台词素材 / v2.4.2 面板统一与预设人格 / v2.4.4 换默认端点与「测试连接」/ v2.4.5 失败原因如实显示 / v2.4.6 行距自适应与随机颜色 / v2.4.7 时间戳正态抖动与外部导入）/ AI Danmaku**
   - **当前状态**：**全链路已打通并上屏** —— 设置项 → **素材（截图 / AI 字幕台词）** → 视觉识别 → 弹幕引擎 → **画面渲染**
   - Fully working end-to-end: settings → **material (frame / AI subtitle lines)** → vision → engine → **on-screen rendering**
   - **设置面板与字幕面板统一**（v2.4.2）：六个区块均为**可折叠**标题（主题色图标 + 标题 +
@@ -195,8 +195,7 @@
     returns HTTP 404
   - **素材来源**（v2.4.1）：三选一 —— **画面+台词**（默认）/ **仅画面** / **仅台词**。
     「台词」取自**当前播放位置附近**的 AI 字幕（前 15 秒 / 后 5 秒，超长时优先保留更近的台词），
-    让模型能对台词本身做出反应（弹幕的灵魂），而不只是对画面构图泛泛而谈
-  - Source material (v2.4.1): frame+lines (default) / frame only / lines only. "Lines" come from AI
+    让模型能对台词本身做出反应（弹幕的灵魂），而不只是对画面构图泛泛而谈  - Source material (v2.4.1): frame+lines (default) / frame only / lines only. "Lines" come from AI
     subtitles near the current position (15s before / 5s after, nearest lines kept when long)
   - **仅台词模式**（v2.4.1）：**完全不请求截图** —— 省掉 JPEG 编码与 base64（耗时大头），
     更快更省流量，且不占用 GL 线程；代价是看不到画面
@@ -243,11 +242,57 @@
   - Adaptive line spacing (v2.4.6): track height = `max(font size × 1.9, area height ÷ track count)`.
     Font size drives it; track count only limits how many rows fit. The area-average term is a
     floor so that many tracks do not overflow the danmaku area and clip the bottom rows
+  - **时间戳正态抖动**（v2.4.7）：同批弹幕此前**出生时间完全相同**，观感是「一坨同时冒出来」。
+    现在每条以该批基准时刻为**均值**做**正态（高斯）抖动**，自然错开 —— 抖动值用
+    **Box-Muller 变换**生成（纯实现，零依赖），并做 **±2.5σ 截断**（默认 σ = 400ms、
+    上限 1000ms）防止偶发极值把弹幕甩到很远处。**「按顺序」的保证**：把整批抖动值
+    **排序后按原下标取用** —— 正态分布可交换，排序不改变边缘分布，但让抖动序列
+    **单调不减**，于是「AI 返回第 1 条」永远不晚于「第 2 条」，顺序与模型输出严格一致。
+    强度面板可调（0 = 关闭，退回旧行为）
+  - Normal-distributed timestamps (v2.4.7): a batch's danmaku used to share one birth instant and
+    appeared as a single clump. Each now gets a **Gaussian jitter** around that batch's base instant.
+    Samples come from a **Box-Muller transform** (own code, no dependency) with **±2.5σ clipping**
+    (default σ = 400ms, cap 1000ms). **Ordering** is preserved by **sorting the jitters and consuming
+    them by original index** — a normal distribution is exchangeable, so sorting leaves the marginal
+    distribution unchanged while making the jitter sequence **monotonically non-decreasing**;
+    danmaku #1 therefore never appears later than #2, matching the model's output order exactly.
+    Strength is an adjustable slider (0 = off)
+  - **外部弹幕导入**（v2.4.7）：新增「内容来源」区块 —— **AI 生成 / 本地导入** 二选一手动切换
+    （与「素材来源」是**两个正交维度**，导入档下「素材来源」整块隐藏，因为根本不请求模型）
+  - External danmaku import (v2.4.7): a new "Content source" section switches between
+    **AI generated / local import** by hand. It is **orthogonal** to "Source material"; in import
+    mode the source-material block is hidden entirely since no model is called
+  - 支持两种格式：**B 站 XML**（`<d p="出现时间,模式,字号,颜色,发送时间戳,弹幕池,用户hash,行id">`
+    ，用 Android 内置 `XmlPullParser` 解析，**零新增依赖**）与 **JSON 数组**
+    （**手写解析器**，不引 Gson/Moshi，守住 minSdk 24 零依赖；顶层对象按**括号配平**切分
+    而非 `split("},")`，因为弹幕文本本身可能含 `}` 和 `,`）
+  - Two formats are supported: **Bilibili XML** (parsed with Android's built-in `XmlPullParser`,
+    **zero new dependencies**) and a **JSON array** (**hand-written parser**, no Gson/Moshi to keep
+    minSdk 24 dependency-free; top-level objects split by **brace balancing** rather than
+    `split("},")`, since danmaku text may itself contain `}` and `,`)
+  - **逐条容错**：单条数据坏掉只跳过它自己并计入 skipped，绝不整份失败。
+    **⚠️ 只接受滚动类弹幕（模式 1/2/3）** —— 底部/顶部/逆向的定位逻辑不同，混进滚动轨道会乱飘，
+    宁可丢弃。**颜色坑已修**：B 站颜色是 **24 位 RGB888** 而非 ARGB，直接 `Color(值)`
+    会被当成 ARGB 让 alpha = 0（白弹幕直接隐形），现已显式屏蔽 alpha 位
+  - Per-item fault tolerance: one bad record skips only itself and counts into `skipped`, never
+    failing the whole file. **⚠️ Only scrolling danmaku (modes 1/2/3) are accepted** — bottom/top/
+    reverse use different positioning and would drift; dropping them is preferable to drawing them
+    wrong. **Color pitfall fixed**: Bilibili colors are **24-bit RGB888**, not ARGB; passing the
+    value to `Color()` made `alpha = 0` and turned white danmaku invisible, so alpha bits are masked
+  - **播放调度**：导入内容**只驻留内存不存 prefs**（文件可达数 MB，塞进 prefs 会让每次读写变慢），
+    prefs 只存 URI 与文件名，并用 `takePersistableUriPermission` 保证重启后仍可读。
+    播放时按**下标游标** O(1) 推进（单次上限 10 条，超出的不丢、下拍继续补放）；
+    **seek 必须重置游标**（二分定位），否则向前跳会瞬间补投几千条、向后跳则弹幕永久不再出现
+  - Playback scheduling: imported content **stays in memory and is never written to prefs** (files
+    can be several MB and would slow every prefs operation); prefs keep only the URI and name, with
+    `takePersistableUriPermission` keeping it readable across restarts. An **index cursor** advances
+    in O(1) (max 10 per tick, remainder deferred rather than dropped); **seek resets the cursor**
+    (binary search), otherwise a forward jump dumps thousands at once and a backward jump makes
+    danmaku never appear again
   - **视觉模型**：默认接入 **AMD Radeon 开发者平台**（`developer.amd.com.cn/radeon/api/v1`，
     聚合网关，OpenAI 兼容协议）的 **`MiMo-V2.6-Flash`**（⚠️ 模型 id **大小写敏感**，
     小写会 404）（v2.4.4 更换），支持图片输入；端点与模型名均可改，
-    也可换成任意 OpenAI 兼容的视觉模型
-  - Vision model defaults to the **AMD Radeon developer platform**
+    也可换成任意 OpenAI 兼容的视觉模型  - Vision model defaults to the **AMD Radeon developer platform**
     (`developer.amd.com.cn/radeon/api/v1`, an aggregation gateway) with **`MiMo-V2.6-Flash`**
     (⚠️ case-sensitive: lowercase returns 404) since v2.4.4; endpoint and model name are editable
   - **识别链路**（v2.3.1）：按间隔定时取一帧 → 缩放为 JPEG 后 base64 上传 → 解析返回文本

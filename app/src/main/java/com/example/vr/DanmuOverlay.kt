@@ -102,9 +102,15 @@ fun DanmuOverlay(
     // v2.4.6：把颜色模式与「单一颜色」同步给引擎 —— 逐条颜色在**入队时**决定，
     // 因此引擎需要知道用哪种模式、以及 SINGLE 模式下的颜色。
     val colorMode = config.colorMode
-    LaunchedEffect(colorMode, textColor) {
+    // v2.4.7：批次时间抖动标准差（0 = 关闭抖动）。
+    // ⚠️ 也必须同步给引擎 —— 它在 `enqueue` 时决定各条出生时刻，
+    //    渲染层只是在每帧按 bornMs 算位置，改这里就等于改了"出来的节奏"。
+    //    用 `timeJitterMsF` 做上下限收敛，避免脏 prefs 值把节奏搞乱。
+    val timeJitterMs = config.timeJitterMsF
+    LaunchedEffect(colorMode, textColor, timeJitterMs) {
         engine.colorMode = colorMode
         engine.singleColor = textColor
+        engine.timeJitterMs = timeJitterMs
     }
 
     if (isSplitScreenVR) {

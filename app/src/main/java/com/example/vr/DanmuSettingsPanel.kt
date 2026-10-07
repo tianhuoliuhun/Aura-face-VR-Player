@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Input
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Psychology
@@ -79,6 +80,24 @@ fun DanmuSettingsPanel(
     generatedCount: Int = 0,
     /** v2.3.1：最近一次失败原因（空串 = 无错误） */
     lastError: String = "",
+    /**
+     * v2.4.7：已导入的弹幕条数（0 = 尚未导入）。
+     *
+     * 由调用方从 [DanmuImportStore] 读出后传入 —— 面板**不持有**导入内容，
+     * 与它「不持有 SharedPreferences」的既有约定一致（数据源单一）。
+     */
+    importedCount: Int = 0,
+    /** v2.4.7：导入文件的显示名（空串 = 未选择） */
+    importedName: String = "",
+    /** v2.4.7：导入加载结果（null = 无文件或正在读取） */
+    importStatus: DanmuImportStore.LoadResult? = null,
+    /**
+     * v2.4.7：点「选择弹幕文件」的回调。
+     *
+     * ⚠️ 文件选择必须由调用方发起（`rememberLauncherForActivityResult` 只能在
+     *    有 Activity 的环境里注册），面板只负责"画按钮 + 回调"。
+     */
+    onPickImportFile: () -> Unit = {},
     /**
      * v2.4.2：主题强调色（与字幕面板同一入口，由调用方传 `AccentColor`）。
      * 默认值仅在预览/测试下生效。
@@ -148,6 +167,11 @@ fun DanmuSettingsPanel(
         var secColorExpanded by remember {
             mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_color", false))
         }
+        // v2.4.7：内容来源（AI / 导入）。**默认展开** —— 它是"弹幕从哪来"的入口，
+        // 与"视觉模型/人格"同级，属于用户进面板最可能要找的开关之一。
+        var secContentSrcExpanded by remember {
+            mutableStateOf(sectionPrefs.getBoolean("danmu_section_expanded_contentSrc", true))
+        }
         fun setSectionExpanded(id: String, value: Boolean) {
             when (id) {
                 "model" -> secModelExpanded = value
@@ -156,6 +180,7 @@ fun DanmuSettingsPanel(
                 "runtime" -> secRuntimeExpanded = value
                 "display" -> secDisplayExpanded = value
                 "color" -> secColorExpanded = value
+                "contentSrc" -> secContentSrcExpanded = value
             }
             sectionPrefs.edit().putBoolean("danmu_section_expanded_$id", value).apply()
         }
@@ -298,10 +323,149 @@ fun DanmuSettingsPanel(
         }
 
         // ===== v2.4.1：素材来源（画面 / 台词 / 两者）=====
-        val sourceSummary = DanmuSourceMode.values()
-            .firstOrNull { it.id == config.sourceModeId }
-            ?.let { stringResource(it.labelRes) }
+        // ===== v2.4.7：内容来源（AI 生成 / 本地导入）=====
+        //
+        // ⚠️ 本区块与下面的「素材来源」是**两个正交维度**，不要合并：
+        //    · 内容来源 = 弹幕从哪来（AI 现场生成 / 读文件）
+        //    · 素材来源 = AI 生成时喂什么给模型（截图 / 台词 / 两者）
+        //    「素材来源」只在 AI 档下有意义，因此导入档时把它整块隐藏 ——
+        //    留着会让用户以为导入模式也要选截图/台词（明明用不到）。
+        val importSummary = if (config.isImportMode) {
+            if (importedCount > 0) {
+                stringResource(R.string.danmu_status_imported, importedCount)
+            } else {
+                stringResource(R.string.danmu_import_none)
+            }
+        } else {
+            stringResource(R.string.danmu_source_type_ai)
+        }
+        SubtitleSection(
+            id = "contentSrc",
+            title = stringResource(R.string.danmu_source_type),
+            icon = Icons.Default.Input,
+            accentColor = accentColor,
+            expanded = secContentSrcExpanded,
+            onToggle = { setSectionExpanded("contentSrc", !secContentSrcExpanded) },
+            summary = importSummary,
+            tagPrefix = "danmu"
+        ) {
+            DanmuTextChipRow(
+                title = stringResource(R.string.danmu_source_type),
+                options = DanmuSourceType.values().toList(),
+                selectedId = config.sourceTypeId,
+                labelOf = { stringResource(it.labelRes) },
+                onPick = { onConfigChange(config.copy(sourceTypeId = it)) }
+            )
+            Text(
+                text = stringResource(R.string.danmu_source_type_hint),
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            // ---- 导入档：文件选择 + 状态 ----
+            if (config.isImportMode) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 当前文件名 / 尚未选择
+                val nameText = when {
+                    importedName.isNotBlank() -> importedName
+                    config.importedName.isNotBlank() -> config.importedName
+                    else -> stringResource(R.string.danmu_import_none)
+                }
+                Text(
+                    text = nameText,
+                    color = Color.White.copy(alpha = if (config.importedUri.isNotBlank()) 0.85f else 0.4f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // 加载状态：null = 正在读取；Success 显示条数；Failure 显示原因
+                when (val st = importStatus) {
+                    null -> if (config.importedUri.isNotBlank()) {
+                        Text(
+                            text = stringResource(R.string.danmu_import_loading),
+                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    is DanmuImportStore.LoadResult.Success -> Text(
+                        text = stringResource(R.string.danmu_import_ok, st.count),
+                        color = Color(0xFF7BD88F),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                    is DanmuImportStore.LoadResult.Failure -> Text(
+                        text = when (st.error) {
+                            DanmuImportStore.Error.UNREADABLE ->
+                                stringResource(R.string.danmu_import_fail_unreadable)
+                            DanmuImportStore.Error.BAD_FORMAT ->
+                                stringResource(R.string.danmu_import_fail_format)
+                            DanmuImportStore.Error.EMPTY ->
+                                stringResource(R.string.danmu_import_fail_empty)
+                        },
+                        color = Color(0xFFFF8A80),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(accentColor.copy(alpha = 0.22f))
+                            .clickable { onPickImportFile() }
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.danmu_import_pick),
+                            color = Color.White,
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (config.importedUri.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .clickable {
+                                    onConfigChange(
+                                        config.copy(importedUri = "", importedName = "")
+                                    )
+                                }
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.danmu_import_clear),
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = stringResource(R.string.danmu_import_hint),
+                    color = Color.White.copy(alpha = 0.35f),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        }
+
+        // ===== 素材来源（仅 AI 档有效）=====
+        val sourceSummary = when (config.sourceMode) {
+            DanmuSourceMode.IMAGE_AND_SUBTITLE -> stringResource(R.string.danmu_source_both)
+            DanmuSourceMode.IMAGE_ONLY -> stringResource(R.string.danmu_source_image)
+            DanmuSourceMode.SUBTITLE_ONLY -> stringResource(R.string.danmu_source_subtitle)
+        }
             ?: stringResource(R.string.danmu_section_source)
+        if (!config.isImportMode) {
         SubtitleSection(
             id = "source",
             title = stringResource(R.string.danmu_section_source),
@@ -325,6 +489,7 @@ fun DanmuSettingsPanel(
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 4.dp)
         )
+        }
         }
 
         // ===== 运行参数 =====
@@ -356,6 +521,36 @@ fun DanmuSettingsPanel(
             accentColor = accentColor,
             onChange = { onConfigChange(config.copy(batchSize = it.toInt())) }
         )
+        // v2.4.7：时间抖动强度。
+        // ⚠️ 仅在 AI 档显示 —— 导入的弹幕自带时间戳，抖动选项对它**无效**
+        //    （显示出来会让用户以为能调，实际点了没反应，是很差的体验）。
+        if (!config.isImportMode) {
+            DanmuSliderRow(
+                title = stringResource(R.string.danmu_time_jitter),
+                valueText = if (config.timeJitterMs <= 0) {
+                    stringResource(R.string.danmu_time_jitter_off)
+                } else {
+                    "${config.timeJitterMs} ms"
+                },
+                value = config.timeJitterMs.toFloat(),
+                range = DanmuConfig.MIN_TIME_JITTER_MS.toFloat()..
+                        DanmuConfig.MAX_TIME_JITTER_MS.toFloat(),
+                // 每档 100ms，便于精确选到 0 / 400 / 800 这类常用值
+                steps = (DanmuConfig.MAX_TIME_JITTER_MS - DanmuConfig.MIN_TIME_JITTER_MS) / 100 - 1,
+                accentColor = accentColor,
+                onChange = {
+                    // 归到最近的 100ms 档，避免出现 413 这种"看起来很怪"的值
+                    val snapped = (it.toInt() / 100) * 100
+                    onConfigChange(config.copy(timeJitterMs = snapped))
+                }
+            )
+            Text(
+                text = stringResource(R.string.danmu_time_jitter_hint),
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
+            )
+        }
         }
 
         // ===== 显示参数 =====
@@ -910,5 +1105,7 @@ private fun colorOptionId(opt: Any?): Int = when (opt) {
     is DanmuPersonaPreset -> opt.id
     // v2.4.6：颜色模式 chip 行
     is DanmuColorMode -> opt.id
+    // v2.4.7：内容来源 chip 行（AI 生成 / 本地导入）
+    is DanmuSourceType -> opt.id
     else -> 0
 }

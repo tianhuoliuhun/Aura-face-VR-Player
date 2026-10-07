@@ -904,4 +904,25 @@
     <string name="danmu_color_mode_random">Fully random</string>
     <string name="danmu_color_mode_mostly_white">80% white + random</string>
     <string name="danmu_color_random_hint">Each danmu picks a random color from white / lemon / cyan / green / pink / orange (black excluded — unreadable on dark scenes).</string>
+    <string name="danmu_source_type">Danmaku source</string>
+    <string name="danmu_source_type_ai">AI generated</string>
+    <string name="danmu_source_type_import">Import file</string>
+    <string name="danmu_source_type_hint">“AI generated” creates danmaku live from the current frame; “Import file” reads your own danmaku file (Bilibili XML or JSON). Choose one.</string>
+    <string name="danmu_import_pick">Choose danmaku file</string>
+    <string name="danmu_import_none">No file selected</string>
+    <string name="danmu_import_loaded">{count} danmaku loaded</string>
+    <string name="danmu_import_clear">Clear import</string>
+    <string name="danmu_import_hint">Supports Bilibili danmaku XML (&lt;d p="time,mode,size,color,..."&gt;) and JSON arrays (time / text / color). Only scrolling danmaku are used; other types are skipped.</string>
+    <string name="danmu_import_loading">Reading file…</string>
+    <string name="danmu_import_ok">Imported {count} danmaku</string>
+    <string name="danmu_import_fail_unreadable">File could not be read, please choose again</string>
+    <string name="danmu_import_fail_format">Unrecognized format (needs Bilibili XML or JSON)</string>
+    <string name="danmu_import_fail_empty">No usable scrolling danmaku in this file</string>
+    <string name="danmu_err_import_no_file">Import mode: choose a danmaku file first</string>
+    <string name="danmu_err_import_empty">Imported danmaku is empty, check the file</string>
+    <string name="danmu_status_imported">{count} imported</string>
+    <string name="danmu_status_import_source">Source: imported file</string>
+    <string name="danmu_time_jitter">Time jitter</string>
+    <string name="danmu_time_jitter_hint">A batch would appear all at once; this spreads their timestamps with a normal distribution around the batch time. 0 = off (all at once).</string>
+    <string name="danmu_time_jitter_off">Off</string>
 </resources>

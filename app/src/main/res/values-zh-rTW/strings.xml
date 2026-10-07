@@ -906,4 +906,25 @@
     <string name="danmu_color_mode_random">完全隨機</string>
     <string name="danmu_color_mode_mostly_white">80% 白 + 隨機</string>
     <string name="danmu_color_random_hint">每條彈幕從「白 / 檸檬黃 / 青藍 / 螢光綠 / 櫻花粉 / 暖陽橙」中隨機取色（不含黑色，避免暗場景看不清）。</string>
+    <string name="danmu_source_type">彈幕來源</string>
+    <string name="danmu_source_type_ai">AI 產生</string>
+    <string name="danmu_source_type_import">本機匯入</string>
+    <string name="danmu_source_type_hint">「AI 產生」由視覺模型依目前畫面即時創作；「本機匯入」讀取你準備的彈幕檔案（B 站 XML 或 JSON），兩者二選一。</string>
+    <string name="danmu_import_pick">選擇彈幕檔案</string>
+    <string name="danmu_import_none">尚未選擇檔案</string>
+    <string name="danmu_import_loaded">共 {count} 條彈幕</string>
+    <string name="danmu_import_clear">清除匯入</string>
+    <string name="danmu_import_hint">支援 B 站彈幕 XML（&lt;d p="時間,模式,字級,顏色,..."&gt;）與 JSON 陣列（time / text / color）。僅使用捲動類彈幕，其餘類型會被跳過。</string>
+    <string name="danmu_import_loading">正在讀取檔案…</string>
+    <string name="danmu_import_ok">匯入成功，共 {count} 條</string>
+    <string name="danmu_import_fail_unreadable">檔案無法讀取，請重新選擇</string>
+    <string name="danmu_import_fail_format">無法辨識該檔案格式（需要 B 站 XML 或 JSON）</string>
+    <string name="danmu_import_fail_empty">檔案裡沒有可用的捲動彈幕</string>
+    <string name="danmu_err_import_no_file">匯入模式：請先選擇一個彈幕檔案</string>
+    <string name="danmu_err_import_empty">匯入的彈幕為空，請檢查檔案</string>
+    <string name="danmu_status_imported">已匯入 {count} 條</string>
+    <string name="danmu_status_import_source">來源：本機匯入</string>
+    <string name="danmu_time_jitter">時間抖動</string>
+    <string name="danmu_time_jitter_hint">同一批彈幕原本同時出現，這裡以批次時刻為中心做常態分布抖動，讓它們疏密自然地錯開。0 = 關閉（同時出場）。</string>
+    <string name="danmu_time_jitter_off">關閉</string>
 </resources>

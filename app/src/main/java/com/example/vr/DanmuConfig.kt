@@ -30,6 +30,35 @@ enum class DanmuSourceMode(@StringRes val labelRes: Int, val id: Int) {
 }
 
 /**
+ * 弹幕**内容来源**类型（v2.4.7）
+ *
+ * ## 与 [DanmuSourceMode] 的区别（⚠️ 极易混淆，务必分清）
+ * 这是**两个完全正交的维度**，不要合并：
+ * - [DanmuSourceMode]（v2.4.1）= **AI 生成时「喂什么素材给模型」**：
+ *   截图 / 台词 / 两者。它只在「由 AI 生成」这条路里起作用。
+ * - [DanmuSourceType]（本枚举）= **弹幕内容从哪来**：AI 现场生成 / 用户导入文件。
+ *   若选了「导入」，[DanmuSourceMode] 就完全不参与（不给模型发任何请求）。
+ *
+ * 之所以用新枚举而不是往 [DanmuSourceMode] 里加两个档位：那会让「喂素材」与「内容来源」
+ * 两个维度纠缠在一个枚举里，之后想加「AI 也导入文件同时显示」就无法表达了。
+ *
+ * 用户 2026-10-06 定案：**二选一、手动切换**（不做叠加、不做导入优先兜底）——
+ * 叠加会让同屏条数失控，兜底会让"为什么我导入的没出现"变得难排查。
+ */
+enum class DanmuSourceType(@StringRes val labelRes: Int, val id: Int) {
+    /** AI 现场生成（默认，与 v2.4.6 行为一致） */
+    AI(R.string.danmu_source_type_ai, 0),
+
+    /** 本地导入文件（B 站 XML / JSON） */
+    IMPORT(R.string.danmu_source_type_import, 1);
+
+    companion object {
+        /** id 失配时安全回落（防旧 prefs 脏 id） */
+        fun fromId(id: Int): DanmuSourceType = values().find { it.id == id } ?: AI
+    }
+}
+
+/**
  * 弹幕颜色模式（v2.4.6）
  *
  * 背景：v2.3.0 起弹幕只有「全局单一颜色」——所有弹幕同一个色，视觉上比较单调，
@@ -138,7 +167,39 @@ data class DanmuConfig(
 
     // ===== v2.4.1：素材来源 =====
     /** 素材来源模式（画面 / 台词 / 两者） */
-    val sourceModeId: Int = DanmuSourceMode.IMAGE_AND_SUBTITLE.id
+    val sourceModeId: Int = DanmuSourceMode.IMAGE_AND_SUBTITLE.id,
+
+    // ===== v2.4.7：内容来源（AI 生成 / 本地导入）=====
+    /**
+     * 弹幕内容来源。
+     *
+     * ⚠️ 与 [sourceModeId] 是两个正交维度：
+     * [sourceModeId] 决定「AI 生成时喂什么素材」，本字段决定「内容从哪来」。
+     * 选 [DanmuSourceType.IMPORT] 时 [sourceModeId] 不参与。
+     */
+    val sourceTypeId: Int = DanmuSourceType.AI.id,
+
+    /**
+     * 导入的弹幕文件 URI（持久化字符串）。
+     *
+     * 只存 URI 字符串而**不存内容**：弹幕文件可达数 MB（几万条），
+     * 存进 prefs 会显著拖慢每次读写（prefs 是全量加载的 XML）。
+     * 内容在运行时按需读取并缓存在内存里的 [DanmuImportStore]。
+     */
+    val importedUri: String = "",
+
+    /** 导入文件的显示名（仅用于 UI 展示「已导入 xxx.xml」） */
+    val importedName: String = "",
+
+    /**
+     * 批次时间抖动标准差（ms）—— **v2.4.7 正态分布抖动的强度**。
+     *
+     * - `0` = 关闭抖动（同批弹幕同一时刻出场；⚠️ 此时受轨道避让限制，一批通常只能进 1~2 条）
+     * - 默认 [DEFAULT_TIME_JITTER_MS] = 400ms，见 `DanmuEngine.spreadBornTimes`
+     *
+     * ⚠️ 对**导入的弹幕无效**：导入弹幕自带时间戳，必须原样采用（否则会打乱原文件的时间轴）。
+     */
+    val timeJitterMs: Int = DEFAULT_TIME_JITTER_MS_INT
 ) {
     /** 解析后的素材来源（id 找不到时回落到「画面+台词」） */
     val sourceMode: DanmuSourceMode
@@ -167,6 +228,28 @@ data class DanmuConfig(
     /** v2.4.6：解析后的颜色模式（id 找不到时回落到单一颜色） */
     val colorMode: DanmuColorMode
         get() = DanmuColorMode.fromId(colorModeId)
+
+    /** v2.4.7：解析后的内容来源（id 找不到时回落到 AI 生成） */
+    val sourceType: DanmuSourceType
+        get() = DanmuSourceType.fromId(sourceTypeId)
+
+    /** v2.4.7：是否走本地导入（此时**完全不请求模型**） */
+    val isImportMode: Boolean
+        get() = sourceType == DanmuSourceType.IMPORT
+
+    /** v2.4.7：抖动强度（浮点，供引擎使用） */
+    val timeJitterMsF: Float
+        get() = timeJitterMs.coerceIn(0, MAX_TIME_JITTER_MS).toFloat()
+
+    /**
+     * v2.4.7：是否真的能进入主循环。
+     *
+     * ⚠️ 与 [isReadyToRequest] 的区别：导入模式**不需要 API Key / URL / 模型名**，
+     *    只需要有一个已选的导入文件。若沿用 [isReadyToRequest] 判断，
+     *    用户在导入模式下会被要求填 Key（明明用不到），是明显的体验错误。
+     */
+    fun isReadyToRun(hasImportedContent: Boolean): Boolean =
+        if (isImportMode) hasImportedContent else isReadyToRequest()
 
     /**
      * 拼接后的完整 chat/completions 端点（幂等：已带后缀则不重复拼）。
@@ -402,6 +485,25 @@ data class DanmuConfig(
 
         // v2.4.1：素材来源默认值
         const val DEFAULT_SOURCE_MODE_ID = 0  // DanmuSourceMode.IMAGE_AND_SUBTITLE
+
+        // ===== v2.4.7：内容来源（AI / 导入）=====
+
+        /** 默认内容来源（AI 现场生成，与 v2.4.6 行为一致） */
+        const val DEFAULT_SOURCE_TYPE_ID = 0  // DanmuSourceType.AI
+
+        /** 抖动强度下限（ms）：0 = 关闭抖动 */
+        const val MIN_TIME_JITTER_MS = 0
+
+        /**
+         * 抖动强度上限（ms）。
+         *
+         * 取 1500：再大就会出现「整批中最晚的几条要等 2~3 秒才出来」，
+         * 而一条弹幕穿过屏幕约 5 秒 —— 会明显感到"上一批还没走完、下一批已经来了"的错乱。
+         */
+        const val MAX_TIME_JITTER_MS = 1500
+
+        /** 抖动强度默认值（ms）= `DanmuEngine.DEFAULT_TIME_JITTER_MS` 的整数形式 */
+        const val DEFAULT_TIME_JITTER_MS_INT = 400
 
         /**
          * v2.4.2：允许的 URL scheme。

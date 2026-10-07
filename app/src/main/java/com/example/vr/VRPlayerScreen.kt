@@ -785,6 +785,17 @@ fun VRPlayerScreen(
                 // v2.4.1：素材来源（存枚举 id，不存 ordinal）
                 sourceModeId = prefs.getInt(
                     "danmu_source_mode", DanmuConfig.DEFAULT_SOURCE_MODE_ID
+                ),
+                // v2.4.7：内容来源（AI / 导入）
+                sourceTypeId = prefs.getInt(
+                    "danmu_source_type", DanmuConfig.DEFAULT_SOURCE_TYPE_ID
+                ),
+                // v2.4.7：导入文件（只存 URI 与显示名，**不存内容** —— 文件可达数 MB）
+                importedUri = prefs.getString("danmu_import_uri", "").orEmpty(),
+                importedName = prefs.getString("danmu_import_name", "").orEmpty(),
+                // v2.4.7：批次时间抖动强度（ms）
+                timeJitterMs = prefs.getInt(
+                    "danmu_time_jitter", DanmuConfig.DEFAULT_TIME_JITTER_MS_INT
                 )
             )
         }
@@ -815,6 +826,11 @@ fun VRPlayerScreen(
                 putInt("danmu_bg", danmuConfig.bgId)
                 putInt("danmu_color_mode", danmuConfig.colorModeId)
                 putInt("danmu_source_mode", danmuConfig.sourceModeId)
+                // v2.4.7：内容来源 + 导入文件 + 抖动强度
+                putInt("danmu_source_type", danmuConfig.sourceTypeId)
+                putString("danmu_import_uri", danmuConfig.importedUri)
+                putString("danmu_import_name", danmuConfig.importedName)
+                putInt("danmu_time_jitter", danmuConfig.timeJitterMs)
             } else {
                 remove("danmu_enabled")
                 remove("danmu_api_key")
@@ -832,6 +848,11 @@ fun VRPlayerScreen(
                 remove("danmu_bg")
                 remove("danmu_color_mode")
                 remove("danmu_source_mode")
+                // v2.4.7
+                remove("danmu_source_type")
+                remove("danmu_import_uri")
+                remove("danmu_import_name")
+                remove("danmu_time_jitter")
             }
             apply()
         }
@@ -1816,15 +1837,91 @@ fun VRPlayerScreen(
     // - 帧异常/请求失败一律静默跳过，绝不影响播放
     val danmuVisionClient = remember { DanmuVisionClient() }
     val danmuEngine = remember { DanmuEngine() }
+    // v2.4.7：导入弹幕的内容缓存（解析结果驻留内存，播放期间只做游标推进）
+    val danmuImportStore = remember { DanmuImportStore() }
     // 供 UI 显示「已生成」条数（渲染层未接前，用于确认链路已通）
     var danmuGeneratedCount by remember { mutableIntStateOf(0) }
     var danmuLastError by remember { mutableStateOf("") }
+    // v2.4.7：导入弹幕的加载状态（供 UI 显示"正在读取/导入成功 N 条/失败原因"）
+    var danmuImportStatus by remember { mutableStateOf<DanmuImportStore.LoadResult?>(null) }
+    var danmuImportCount by remember { mutableIntStateOf(0) }
+    var danmuImportName by remember { mutableStateOf("") }
+
+    // v2.4.7：接上日志钩子（解析器与导入器刻意不直接依赖 android.util.Log，
+    // 否则它们的 catch 容错分支会在纯 JVM 单测里因 Log 未 mock 而崩溃）。
+    // 挂在 remember 里只执行一次；用 SideEffect 而非 LaunchedEffect 是因为它需要
+    // 在**首次组合完成前**就生效（加载可能立刻发生）。
+    remember { DanmuImporter.enableAndroidLog(); DanmuImportStore.enableAndroidLog(); true }
+
+    // v2.4.7：导入弹幕的文件选择器（B 站 XML / JSON）。
+    //
+    // ⚠️ 这里**必须**走 `OpenDocument` 而不是 `GetContent`：导入的弹幕文件 URI 会被
+    //    持久化进 prefs（`danmu_import_uri`），下次启动还要能读。`GetContent` 返回的
+    //    是**一次性临时授权**，重启后必然 `SecurityException`；`OpenDocument` 配合
+    //    `takePersistableUriPermission` 才能跨进程重启继续读。
+    //
+    // MIME 用 `*/*`：各文件管理器对 `.xml` / `.json` 的 MIME 上报并不统一
+    //    （`application/xml`、`text/xml`、`application/json`、`text/plain` 都有），
+    //    写死单一 MIME 会出现「文件明明在却选不到」。格式正确性交给解析器判。
+    val danmuImportPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            keepUiAlight()
+            // 申请持久读权限；个别 provider（如下载管理器）不支持持久化会抛异常，
+            // 此时降级为「本次进程内有效」，不影响当前会话使用。
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            val name = danmuImportStore.displayNameOf(context.contentResolver, uri)
+            danmuConfig = danmuConfig.copy(importedUri = uri.toString(), importedName = name)
+        }
+    }
 
     // 运行参数跟随配置变化
     LaunchedEffect(danmuConfig.speedPxPerSec, danmuConfig.maxTracks, danmuConfig.dedupThresholdPercent) {
         danmuEngine.speedPxPerSec = danmuConfig.speedPxPerSec
         danmuEngine.maxTracks = danmuConfig.maxTracks
         danmuEngine.dedupThresholdPercent = danmuConfig.dedupThresholdPercent
+    }
+
+    // v2.4.7：预置的导入 URI → 启动时读一次（只读 URI，内容不存 prefs）
+    //
+    // ⚠️ key 用 `importedUri`：用户在面板里换了文件就重新读。
+    //    清空 URI（点「清除导入」）时同步清掉内存缓存与 UI 计数。
+    LaunchedEffect(danmuConfig.importedUri) {
+        val u = danmuConfig.importedUri
+        if (u.isBlank()) {
+            danmuImportStore.clear()
+            danmuImportStatus = null
+            danmuImportCount = 0
+            danmuImportName = ""
+            return@LaunchedEffect
+        }
+        // 已经是同一个文件且已加载成功 → 不重复读（避免每次重组都做 IO）
+        if (danmuImportStore.uri == u && danmuImportStore.hasContent) {
+            danmuImportCount = danmuImportStore.items.size
+            danmuImportName = danmuImportStore.fileName
+            return@LaunchedEffect
+        }
+        danmuImportStatus = null  // 进入"读取中"（UI 用 null + 计数 0 表示 loading）
+        val uri = android.net.Uri.parse(u)
+        val name = danmuConfig.importedName.ifBlank { uri.lastPathSegment.orEmpty() }
+        val result = danmuImportStore.load(context.contentResolver, uri, name)
+        danmuImportStatus = result
+        danmuImportCount = danmuImportStore.items.size
+        danmuImportName = danmuImportStore.fileName
+        // 读取失败时把错误同时显示到状态卡（用户一眼能看到原因）
+        danmuLastError = when (result) {
+            is DanmuImportStore.LoadResult.Failure -> when (result.error) {
+                DanmuImportStore.Error.UNREADABLE -> context.getString(R.string.danmu_import_fail_unreadable)
+                DanmuImportStore.Error.BAD_FORMAT -> context.getString(R.string.danmu_import_fail_format)
+                DanmuImportStore.Error.EMPTY -> context.getString(R.string.danmu_import_fail_empty)
+            }
+            is DanmuImportStore.LoadResult.Success -> ""
+        }
     }
 
     // 关闭弹幕时清空（避免重新打开后立刻涌出旧弹幕）
@@ -1842,8 +1939,13 @@ fun VRPlayerScreen(
     //   · 需要画面 → 走 GL 取帧（P3）
     //   · 需要台词 → 从当前播放位置附近的 AI 字幕里裁一段（DanmuSubtitleSnippet）
     // 仅台词模式**完全不碰 GL**（不请求、不轮询），因此更快、也不占用渲染线程。
-    LaunchedEffect(danmuConfig.isEnabled, danmuConfig.intervalSec) {
+    //
+    // v2.4.7：本循环**只管 AI 生成**。导入模式走独立的调度循环（见下方
+    //   `danmuConfig.isImportMode` 那个 LaunchedEffect）—— 两者是**二选一**，
+    //   因此这里在导入模式下直接 return（不发任何请求、不读 GL、不读字幕）。
+    LaunchedEffect(danmuConfig.isEnabled, danmuConfig.intervalSec, danmuConfig.sourceTypeId) {
         if (!danmuConfig.isEnabled) return@LaunchedEffect
+        if (danmuConfig.isImportMode) return@LaunchedEffect  // 导入模式：交给下面的调度循环
         if (!danmuConfig.isReadyToRequest()) {
             danmuLastError = context.getString(R.string.danmu_err_not_configured)
             return@LaunchedEffect
@@ -1958,6 +2060,63 @@ fun VRPlayerScreen(
         }
     }
 
+    // ===== v2.4.7：导入模式的调度循环 =====
+    //
+    // 与 AI 循环的**根本区别**：这里不请求模型、不取帧 —— 弹幕**早已在内存里**，
+    // 我们只是按「播放到哪一刻」把它们放出来。
+    //
+    // ## 为什么按位置投递而不是按墙钟
+    // 导入的弹幕自带「视频内出现时间」。用**播放位置**驱动才能与暂停 / 拖动 / 变速
+    // 天然一致（暂停时位置不动 → 弹幕暂停；拖动后位置跳变 → 由 seek 处理重置游标）。
+    // 若用墙钟计时，暂停时弹幕会继续涌出，与画面完全脱节。
+    //
+    // ## 轮询间隔
+    // 用 [DANMU_IMPORT_TICK_MS]（默认 120ms）而不是挂到播放器的位置回调上：
+    // 位置回调的频率由播放内核决定（各内核不同），这里自持一个固定节拍更可控；
+    // 120ms 相对弹幕时间戳（毫秒级）足够精细，肉眼无法察觉延迟。
+    LaunchedEffect(danmuConfig.isEnabled, danmuConfig.sourceTypeId, danmuConfig.importedUri) {
+        if (!danmuConfig.isEnabled) return@LaunchedEffect
+        if (!danmuConfig.isImportMode) return@LaunchedEffect
+        // 等内容就绪（URI 已设置且文件已解析）。这里等待而不是报错：
+        // 用户可能刚切到导入模式、还没选文件，`danmuLastError` 由下面的分支负责提示。
+        while (true) {
+            if (danmuImportStore.hasContent) break
+            if (danmuConfig.importedUri.isBlank()) {
+                danmuLastError = context.getString(R.string.danmu_err_import_no_file)
+                return@LaunchedEffect
+            }
+            // 有 URI 但还没加载完（IO 进行中）→ 稍等
+            delay(DANMU_IMPORT_TICK_MS)
+        }
+        // 进入循环前把游标对齐到**当前播放位置**：
+        // 用户可能在播放到一半时才切到导入模式或选好文件，此时不该把前面积压的弹幕全补投。
+        danmuImportStore.resetCursorTo(currentPositionMs)
+        danmuLastError = ""
+        while (true) {
+            if (isVideoPlaying) {
+                val due = danmuImportStore.drainUntil(currentPositionMs)
+                if (due.isNotEmpty()) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    // ⚠️ 引擎坐标系兜底（与 AI 循环同款；分屏时由渲染层设成单眼宽）
+                    val glW = (currentGlSurfaceView?.width ?: 0).toFloat()
+                    if (glW > 0f && danmuEngine.screenWidthPx <= 0f) {
+                        danmuEngine.screenWidthPx = glW
+                    }
+                    // 颜色：文件里指定的色优先；没写颜色（null）时才由引擎回落到配置色。
+                    // ⚠️ 不走 `DanmuColorMode` 随机 —— 文件已经表达了自己的颜色意图，
+                    //    再随机就把它覆盖了（用户会觉得"导入的颜色没生效"）。
+                    val entries = due.map { d ->
+                        Triple(d.text, now, d.color)
+                    }
+                    val added = danmuEngine.enqueueTimed(entries)
+                    danmuGeneratedCount += added
+                    danmuEngine.prune(now)
+                }
+            }
+            delay(DANMU_IMPORT_TICK_MS)
+        }
+    }
+
     // 退出页面时清理（引擎是纯内存对象，reset 即释放）
     DisposableEffect(Unit) {
         onDispose {
@@ -2014,6 +2173,13 @@ fun VRPlayerScreen(
                 danmuEngine.clear()
                 // 跳转同时重置暂停基准，否则恢复播放时会补一段错误时长
                 danmuPausedAtMs = 0L
+                // v2.4.7：导入模式下还要把**投递游标**对齐到跳转后的位置。
+                // ⚠️ 不重置的话：向前跳会把中间几十分钟的弹幕一次性补投（几千条）；
+                //    向后跳则所有弹幕都判为"已投过"、再也不出现。
+                //    这个坑在"用下标做游标"的方案里必然存在，必须与 seek 联动。
+                if (danmuConfig.isImportMode) {
+                    danmuImportStore.resetCursorTo(pos)
+                }
             }
             kotlinx.coroutines.delay(DANMU_SEEK_POLL_MS)
         }
@@ -6944,7 +7110,16 @@ BatchTranscribeSection(
                                         generatedCount = danmuGeneratedCount,
                                         lastError = danmuLastError,
                                         // v2.4.2：与字幕面板用同一强调色
-                                        accentColor = AccentColor
+                                        accentColor = AccentColor,
+                                        // v2.4.7：导入弹幕（内容来源切换 + 文件选择 + 加载状态）
+                                        importedCount = danmuImportCount,
+                                        importedName = danmuImportName,
+                                        importStatus = danmuImportStatus,
+                                        onPickImportFile = {
+                                            danmuImportPickerLauncher.launch(
+                                                arrayOf("*/*")
+                                            )
+                                        }
                                     )
                                 }
                                 /** 区块 6：美颜设置（Shader 实时磨皮美白 + 预设方案 + 对比原图 + 2D 人像精修） */
@@ -8221,6 +8396,20 @@ private const val FRAME_POLL_INTERVAL_MS = 100L
  * 200ms 足以让跳转后的陈旧弹幕在肉眼反应前被清掉。
  */
 private const val DANMU_SEEK_POLL_MS = 200L
+
+/**
+ * v2.4.7：导入弹幕的投递节拍（ms）。
+ *
+ * ## 为什么是固定节拍而不是跟着播放位置回调
+ * 位置回调的频率由播放内核决定（Exo / IJK / MPV 各不相同），依赖它会让
+ * 投递时机随内核变化；自持一个固定节拍更可控，也让三种内核行为一致。
+ *
+ * ## 为什么 120ms
+ * 弹幕时间戳是毫秒级，但**人眼对 100ms 级的出场延迟无感**；
+ * 再快只是徒增空转（本循环每拍只做一次纯内存比较）。
+ * 取 120 与「同批抖动默认 σ=400ms」相比小一个量级，不会成为出场时机的瓶颈。
+ */
+private const val DANMU_IMPORT_TICK_MS = 120L
 
 /**
  * 把抓到的原始帧缩放到拖动预览尺寸（320×180，16:9）。
