@@ -2258,9 +2258,92 @@ fun VRPlayerScreen(
     //    「不支持拖动定位」，标志位就永久为 true，切到**别的**（本可自动修复的）
     //    视频时也不会再触发重封装校验 —— 表现为「换个视频还是拖不动」。
     //    （必须放在 `seekUnsupported` 声明之后：Kotlin 局部 var 先声明后使用。）
+    //
+    // ======================================================================
+    // v2.4.9：**打开时探测 AVI 是否带 idx1 索引**
+    // ----------------------------------------------------------------------
+    // 要解决的**唯一**症状（用户报告，且只出现在 AVI）：
+    //   > 时间轴能跳过去，但**画面只停在那一帧，不再继续播放**。
+    //
+    // 根因不是 seek 参数 —— 本项目早已设 `SeekParameters`，也早已改成
+    // 「拖动中不 seek、松手只 seek 一次」。真正的原因是**容器缺 `idx1` 索引**：
+    // 无索引时 `AviExtractor` 只能从头线性扫描 chunk，而扫到的位置**未必是关键帧**，
+    // 解码器于是拿不到 I 帧参考 → 那一帧显示出来后没有后续帧可解 → 画面冻结。
+    //
+    // ⚠️ 关键：这不是「seek 没生效」，所以旧的校验（看 `currentPosition` 有没有
+    //    跳到目标）**恰好检测不到** —— 位置其实已经跳到目标了，卡住的是解码推进。
+    // → 必须在打开时就把「有没有索引」探明，让 seek 那一段据此决定是否重封装
+    //   （[VideoRemuxer] 不重编码、只重建索引）。
+    //
+    // ⚠️ 只对 `file:` / `content:` 探测：SMB / HTTP 上读 1MB 有实际代价，
+    //    而那些路径本来就走各自的数据源封装。
+    // ⚠️ 只对 AVI 家族的扩展名探测（见 [MediaFormats.isAviFamily]）。
+    // ======================================================================
+    var aviProbe by remember { mutableStateOf<AviRiffProbe.Probe?>(null) }
     LaunchedEffect(selectedMediaItem.uri) {
         seekUnsupported = false
         isRemuxing = false
+        aviProbe = null
+
+        val uriStr = selectedMediaItem.uri
+        if (uriStr == null || !selectedMediaItem.isVideo) return@LaunchedEffect
+        val parsed = Uri.parse(uriStr)
+        val scheme = parsed.scheme?.lowercase()
+        if (scheme != null && scheme != "file" && scheme != "content") return@LaunchedEffect
+        if (!MediaFormats.isAviFamily(MediaFormats.extensionOf(parsed))) return@LaunchedEffect
+
+        val probed = withContext(Dispatchers.IO) {
+            try {
+                val cr = context.contentResolver
+                // ---- 头部：RIFF 头 + hdrl 一定在最前面，64KB 足够 ----
+                val headBuf = ByteArray(AviRiffProbe.HEAD_BYTES)
+                var headLen = 0
+                cr.openInputStream(parsed)?.use { ins ->
+                    while (headLen < headBuf.size) {
+                        val n = ins.read(headBuf, headLen, headBuf.size - headLen)
+                        if (n <= 0) break
+                        headLen += n
+                    }
+                }
+                if (headLen <= 0) return@withContext null
+                val headProbe = AviRiffProbe.parseHeader(headBuf.copyOf(headLen))
+                if (!headProbe.isAvi) return@withContext headProbe
+
+                // ---- 尾部：idx1 索引在 movi 之后，取末尾一段扫 ----
+                var hasIdx = false
+                cr.openFileDescriptor(parsed, "r")?.use { pfd ->
+                    val size = pfd.statSize
+                    if (size > 0) {
+                        val tailLen = minOf(AviRiffProbe.TAIL_BYTES.toLong(), size).toInt()
+                        val tail = ByteArray(tailLen)
+                        // ⚠️ 不 close 这个流：fd 由 pfd 持有并负责关闭
+                        //    （本项目在 IJK 的 content:// 路径上踩过「提前关 fd」的坑）
+                        val fis = java.io.FileInputStream(pfd.fileDescriptor)
+                        fis.channel.position(size - tailLen)
+                        var off = 0
+                        while (off < tailLen) {
+                            val n = fis.read(tail, off, tailLen - off)
+                            if (n <= 0) break
+                            off += n
+                        }
+                        hasIdx = AviRiffProbe.containsIndexMarker(tail.copyOf(off))
+                    }
+                }
+                headProbe.copy(hasIndexChunk = hasIdx)
+            } catch (e: Exception) {
+                Log.w("VRPlayerScreen", "AVI 容器探测失败（按未知处理）：${e.message}")
+                null
+            }
+        }
+        aviProbe = probed
+        probed?.let {
+            Log.i(
+                "VRPlayerScreen",
+                "AVI 探测：容器=${if (it.isAvi) "AVI" else "非 AVI"}，" +
+                    "idx1 索引=${if (it.hasIndexChunk) "有" else "无"}" +
+                    if (it.needsIndexRebuild) " → seek 会停在目标帧，将按需重建索引" else ""
+            )
+        }
     }
 
     // LAN (SMB) browser state (8/2 功能)
@@ -2514,11 +2597,21 @@ fun VRPlayerScreen(
                     )
                     photoReloadTrigger++
                 } else if (result.videoTrackMissing) {
-                    // ⚠️ v2.1.247：源文件有音频但**系统认不出视频轨** ——
-                    //    典型就是 AVI 容器里的 AV1（EXO 的 AviExtractor 只认 14 个
-                    //    fourcc，不含 `AV01`）。重封装救不了，唯一出路是换 **MPV** 内核
-                    //    （它有完整 FFmpeg，认 `V_AV1`）。这里给**针对性**提示，
-                    //    而不是笼统的「该文件不支持跳转」。
+                    // ⚠️ v2.4.9 起**语义变更：不再引导用户切 MPV**。
+                    //
+                    // 典型场景就是 AVI 容器内的 AV1 —— EXO 的 `AviExtractor` 只认
+                    // 14 个 fourcc（不含 `AV01`）→ 视频轨被整条丢弃，重封装也救不了。
+                    //
+                    // v2.1.247 曾提示「请切 MPV（它有完整 FFmpeg，认 `V_AV1`）」，
+                    // 但那是个**不可靠的承诺**：AVI 里的 AV1 能不能被 libavformat
+                    // 正确识别取决于具体封装写法，并非总能成；用户为此还要切内核，
+                    // 很可能只是从「有声音没画面」变成「连声音都没有」。
+                    //
+                    // → 现在明确判为**不支持**，并给出真正可操作的出路
+                    //   （重新封装为 MKV / MP4），而不是把用户引向一个可能同样失败的开关。
+                    //
+                    // 注：正常路径下打开文件时 `AviRiffProbe` 已提前拦下并提示过，
+                    //     这里只是「没探到 fourcc、却仍然丢轨」的兜底分支。
                     seekUnsupported = true
                     Toast.makeText(
                         context,
@@ -4622,18 +4715,62 @@ fun VRPlayerScreen(
                                                 //   ③ 加长等待到 1.5s：AVI 无索引时线性扫描 1s 内可能还没到位，
                                                 //      过早判定会触发不必要的重封装。
                                                 val seekIssuedFlag = seekIssued
+                                                // ==================================================
+                                                // v2.4.9：AVI「跳到那一帧就不动了」的修复
+                                                // --------------------------------------------------
+                                                // ① **已知该 AVI 没有 idx1 索引** → 这次 seek 必定不完整：
+                                                //    无索引时 AviExtractor 只能线性扫描，扫到的位置未必是
+                                                //    关键帧 → 解码器拿不到 I 帧参考 → 画面冻在目标帧。
+                                                //    这不是「seek 没生效」，所以**旧的判据恰好检测不到**
+                                                //    （位置其实已经跳到目标了）。→ 直接重建索引（治本）。
+                                                //
+                                                // ② 通用兜底：位置到了、但**播放完全停住**。
+                                                //    用「1 秒内位置一毫秒都没推进」而非「推进得慢」，
+                                                //    以免误伤 AVI 慢速软解；并排除 buffering
+                                                //    （缓冲期间不推进是正常的）。
+                                                // ==================================================
+                                                val aviNeedsRebuild = aviProbe?.needsIndexRebuild == true
                                                 scope.launch {
+                                                    if (seekIssuedFlag && aviNeedsRebuild &&
+                                                        !seekUnsupported && !isRemuxing &&
+                                                        selectedMediaItem.isVideo
+                                                    ) {
+                                                        Log.i(
+                                                            "VRPlayerScreen",
+                                                            "该 AVI 无 idx1 索引 → 直接重建索引（不重编码），" +
+                                                                "目标 ${seekTarget / 1000}s"
+                                                        )
+                                                        startRemuxFix()
+                                                        return@launch
+                                                    }
+
                                                     delay(1500L)
-                                                    if (seekIssuedFlag && seekTarget > 3000L) {
-                                                        val pos = playerInstance?.currentPosition ?: -1L
-                                                        val moved = kotlin.math.abs(pos - seekTarget)
-                                                        val stuckAtStart = pos < 2000L && seekTarget > 5000L
-                                                        if ((stuckAtStart || moved > 5000L) &&
-                                                            !seekUnsupported && !isRemuxing &&
-                                                            selectedMediaItem.isVideo
-                                                        ) {
-                                                            startRemuxFix()
-                                                        }
+                                                    if (!seekIssuedFlag || seekTarget <= 3000L) return@launch
+                                                    val inst = playerInstance ?: return@launch
+                                                    val posA = inst.currentPosition
+                                                    val moved = kotlin.math.abs(posA - seekTarget)
+                                                    val stuckAtStart = posA < 2000L && seekTarget > 5000L
+
+                                                    // 位置已到目标 → 再观察 1 秒，看播放是否真的在推进
+                                                    var frozen = false
+                                                    if (moved <= 3000L) {
+                                                        delay(1000L)
+                                                        val posB = inst.currentPosition
+                                                        val buffering =
+                                                            inst.exo?.playbackState == Player.STATE_BUFFERING
+                                                        frozen = !buffering && inst.isPlaying && (posB - posA) <= 0L
+                                                    }
+
+                                                    if ((stuckAtStart || moved > 5000L || frozen) &&
+                                                        !seekUnsupported && !isRemuxing &&
+                                                        selectedMediaItem.isVideo
+                                                    ) {
+                                                        Log.i(
+                                                            "VRPlayerScreen",
+                                                            "seek 异常（stuckAtStart=$stuckAtStart " +
+                                                                "moved=$moved frozen=$frozen）→ 重建索引"
+                                                        )
+                                                        startRemuxFix()
                                                     }
                                                 }
                                                 scope.launch {

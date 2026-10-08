@@ -88,6 +88,23 @@ object MediaFormats {
     // ===================== 容器扩展名白名单 =====================
 
     /**
+     * **AVI / RIFF 家族**的扩展名（v2.4.9 抽出为单一常量）。
+     *
+     * ## 为什么值得单独抽一个常量
+     *
+     * AVI 是本项目**唯一需要额外读文件字节**才能决定 seek 策略的家族：
+     * 老设备导出的 AVI 常常**没有 `idx1` 索引**，此时 seek 会「跳到目标帧却不继续播放」
+     * —— 需要靠 [AviRiffProbe] 提前探明并触发重封装（见 `VRPlayerScreen`）。
+     *
+     * 于是「哪些扩展名要走这一步探测」就成为一个**独立的判定**，
+     * 而它必须与白名单里的 AVI 项**永远一致** —— 若两处各写一份，
+     * 改了白名单忘了改探测判据，就会出现「加了新扩展名但探测不生效」。
+     * 这类「同一份数据两处登记」是本项目反复踩过的坑（见记忆库硬规则），
+     * 所以直接收成一个常量，下面 [COMMON] / [EXO_ONLY] 都引用它。
+     */
+    val AVI_EXTS = setOf("avi", "divx")
+
+    /**
      * **EXO 或 IJK 至少一方能直接吃**的常见容器（全量补齐版）。
      *
      * 分组依据见文件头的能力对照表。这里刻意按「同一底层格式的所有常见扩展名」
@@ -98,13 +115,14 @@ object MediaFormats {
      *   - **仅 EXO 通**（`avi` `divx` `ogv` `ogg` —— IJK 无对应 demuxer，
      *     若被路由到 IJK 会直接失败，见 [requiresIjk] 与 [isExoOnly]）
      */
-    val COMMON = setOf(
+    val COMMON = AVI_EXTS + setOf(
         // —— MPEG-4 家族（IJK: ff_mov_demuxer / EXO: Mp4Extractor）——
         "mp4", "m4v", "mov", "3gp", "3g2", "3gpp", "3gpp2", "ismv", "f4v",
         // —— Matroska 家族（IJK: ff_matroska_demuxer / EXO: MatroskaExtractor）——
         "mkv", "webm",
-        // —— AVI / RIFF（⚠️ 仅 EXO 有 AviExtractor，IJK 无 avi demuxer）——
-        "avi", "divx",
+        // —— ⚠️ AVI / RIFF 由开头的 [AVI_EXTS] 并入，此处不再重复列出 ——
+        //    仅 EXO 有 `AviExtractor`（IJK 实测无 `ff_avi_demuxer`）；
+        //    无 `idx1` 索引的 AVI 需重封装才能正常拖动，见 [AviRiffProbe]。
         // —— FLV（IJK: ff_flv_demuxer / EXO: FlvExtractor）——
         "flv",
         // —— MPEG-TS（IJK: ff_mpegts_demuxer / EXO: TsExtractor）——
@@ -219,10 +237,20 @@ object MediaFormats {
      * 早先用「凡是常见格式就切 IJK」的一刀切会把这些格式**从能播改成不能播**，
      * 这是必须避免的回归。
      */
-    val EXO_ONLY = setOf(
-        "avi", "divx",
+    val EXO_ONLY = AVI_EXTS + setOf(
         "ogv", "ogg", "oga", "ogx", "ogm", "spx"
     )
+
+    /**
+     * 该扩展名是否属于 **AVI / RIFF 家族**（v2.4.9）。
+     *
+     * 用途：只有返回 `true` 才值得去读 RIFF 头做进一步的编码判定
+     * （见 [AviRiffProbe]）—— 对 mp4/mkv 做这套探测纯属浪费 IO。
+     *
+     * ⚠️ 判定必须走这里，**不要在调用点手写 `ext == "avi"`** ——
+     * 那会漏掉 `divx`（同族扩展名），正是本项目「手写白名单」的老毛病。
+     */
+    fun isAviFamily(ext: String): Boolean = ext in AVI_EXTS
 
     /**
      * **本项目无法保证播放**、应当明确告知用户而不是静默失败的容器。

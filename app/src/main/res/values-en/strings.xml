@@ -323,7 +323,7 @@
     <string name="toast_container_fixed_no_audio">Container fixed (audio track incompatible, playback will be silent)</string>
     <string name="suffix_fixed"> (fixed)</string>
     <string name="toast_seek_unsupported">This format doesn\'t support seeking (auto-fix failed)</string>
-    <string name="toast_avi_no_video_track">The video codec inside this AVI (e.g. AV1) is not recognised by the system decoder, so seeking is unavailable. Switch to the <b>MPV</b> engine in Settings &gt; Decoder and try again</string>
+    <string name="toast_avi_no_video_track">This AVI uses a video codec that is not supported, so it cannot be played or seeked. Re-mux it into MKV or MP4 and try again</string>
     <string name="toast_patching_header">Beyond hardware decoder limits - patching headers to try HW decode (experimental)...</string>
     <string name="toast_hw_patch_ok">HW-decode compatible version ready (report chip model if glitches/black screen/no audio)</string>
     <string name="suffix_hw_patched"> (HW patched)</string>

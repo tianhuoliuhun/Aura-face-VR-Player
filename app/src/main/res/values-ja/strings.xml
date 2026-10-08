@@ -297,7 +297,7 @@
     <string name="toast_container_fixed_no_audio">コンテナを修復しました（音声トラック非対応のため無音再生）</string>
     <string name="suffix_fixed"> （修復済み）</string>
     <string name="toast_seek_unsupported">この形式はシークに対応していません（自動修復に失敗）</string>
-    <string name="toast_avi_no_video_track">この AVI 内の映像コーデック（例: AV1）はシステムデコーダが認識できないため、シークできません。「設定 → デコーダ」で <b>MPV</b> に切り替えて再試行してください</string>
+    <string name="toast_avi_no_video_track">この AVI の映像コーデックは非対応のため、再生・シークできません。MKV か MP4 に再マルチプレクスしてお試しください</string>
     <string name="toast_patching_header">ハードウェアデコーダの上限を超えています。ヘッダーを書き換えて試します（実験的）...</string>
     <string name="toast_hw_patch_ok">ハードウェアデコード互換版を生成して再生します（乱れ/黒画面/無音の場合はチップ型番を報告ください）</string>
     <string name="suffix_hw_patched"> （ハードウェア対応）</string>
