@@ -774,6 +774,10 @@ fun VRPlayerScreen(
                 maxTracks = prefs.getInt("danmu_max_tracks", DanmuConfig.DEFAULT_MAX_TRACKS),
                 // v2.4.10：行数自适应（默认开启）
                 autoTracks = prefs.getBoolean("danmu_auto_tracks", DanmuConfig.DEFAULT_AUTO_TRACKS),
+                // v2.4.11：传给模型的图长边（默认 256）
+                imageMaxLongSide = prefs.getInt(
+                    "danmu_image_long_side", DanmuConfig.DEFAULT_IMAGE_LONG_SIDE
+                ),
                 opacityPercent = prefs.getInt("danmu_opacity", DanmuConfig.DEFAULT_OPACITY),
                 fontSizeSp = prefs.getInt("danmu_font_size", DanmuConfig.DEFAULT_FONT_SIZE_SP),
                 // v2.3.0：全局颜色（存 id，不存 ordinal）
@@ -822,6 +826,7 @@ fun VRPlayerScreen(
                 putInt("danmu_speed", danmuConfig.speedPxPerSec)
                 putInt("danmu_max_tracks", danmuConfig.maxTracks)
                 putBoolean("danmu_auto_tracks", danmuConfig.autoTracks)
+                putInt("danmu_image_long_side", danmuConfig.imageMaxLongSide)
                 putInt("danmu_opacity", danmuConfig.opacityPercent)
                 putInt("danmu_font_size", danmuConfig.fontSizeSp)
                 putInt("danmu_text_color", danmuConfig.textColorId)
@@ -845,6 +850,7 @@ fun VRPlayerScreen(
                 remove("danmu_speed")
                 remove("danmu_max_tracks")
                 remove("danmu_auto_tracks")
+                remove("danmu_image_long_side")
                 remove("danmu_opacity")
                 remove("danmu_font_size")
                 remove("danmu_text_color")
@@ -1992,7 +1998,7 @@ fun VRPlayerScreen(
                         continue
                     }
                     // 请求一帧（GL 线程在下一帧末尾回读；false 表示间隔未到/已禁用）
-                    val requested = renderer.requestDanmuFrame(danmuConfig.imageMaxWidth)
+                    val requested = renderer.requestDanmuFrame(danmuConfig.imageMaxLongSide)
                     if (!requested) {
                         // 节流中（距上次太近）—— 等下一周期，不算错误
                         delay(periodMs)

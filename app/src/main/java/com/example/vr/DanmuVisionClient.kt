@@ -435,7 +435,7 @@ class DanmuVisionClient {
      */
     private fun encodeFrameToDataUrl(frame: Bitmap, config: DanmuConfig): String? {
         return try {
-            val scaled = scaleDown(frame, config.imageMaxWidth)
+            val scaled = scaleDown(frame, config.imageMaxLongSide)
             // ⚠️ 缩放产生了新对象就要回收它；若返回的是原图则绝不能回收（生命周期归调用方）
             val needRecycle = scaled !== frame
             try {
@@ -456,17 +456,19 @@ class DanmuVisionClient {
     }
 
     /**
-     * 等比缩放到最大宽度 [maxWidth] 以内。
+     * 按**长边**等比缩放到 [maxLongSide] 以内（v2.4.11，原为「按最大宽度」）。
      *
-     * ⚠️ `Bitmap.createScaledBitmap` 保持长宽比时若高度算成 0 会抛异常 → 用 coerceAtLeast(1)。
-     * ⚠️ 已经足够小则**原样返回**（不产生新对象，调用方据此判断是否需要回收）。
+     * ⚠️ 尺寸计算走 [ImageScale.fitLongSide] —— 与 `VRGLRenderer` 的 GL 回读尺寸
+     *    **共用同一套**。两处各写一份必然不一致（竖屏片源下回读按宽、这里按长边，
+     *    或反之），属本项目「同一份数据两处登记」的老毛病。
+     *
+     * ⚠️ **只缩不放**：已经足够小则**原样返回**（不产生新对象，
+     *    调用方据此判断是否需要回收）。放大不会带来更多信息，只会白涨 token。
      */
-    private fun scaleDown(frame: Bitmap, maxWidth: Int): Bitmap {
-        val limit = maxWidth.coerceIn(64, 4096)
-        if (frame.width <= limit) return frame
-        val ratio = limit.toFloat() / frame.width
-        val h = (frame.height * ratio).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(frame, limit, h, true)
+    private fun scaleDown(frame: Bitmap, maxLongSide: Int): Bitmap {
+        val target = ImageScale.fitLongSide(frame.width, frame.height, maxLongSide)
+        if (target[0] == frame.width && target[1] == frame.height) return frame
+        return Bitmap.createScaledBitmap(frame, target[0], target[1], true)
     }
 
     /** 从 OpenAI 兼容响应里取 `choices[0].message.content`（兼容 content 为字符串） */

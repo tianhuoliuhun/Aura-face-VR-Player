@@ -3232,11 +3232,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /**
      * 在本帧绘制完成后调用（见 [onDrawFrame] 末尾，与 [captureBackdropIfNeeded] 同级）。
      *
-     * 实现要点（三条都是本项目踩过的坑）：
+     * 实现要点（四条都是本项目踩过的坑）：
      *  ① `glReadPixels` **只裁剪、不缩放** → 必须先用 `glBlitFramebuffer` 真缩放到小 FBO
      *     （v2.0.182 判例：误以为减小宽高就是缩略图，实际只拿到左下角 1/4）
      *  ② `glReadPixels` 行序**自下而上** → 填进 Bitmap 前必须翻转，否则画面颠倒
      *  ③ `glGetError()` 要在 `glBindFramebuffer` **之前**取（bind 会改写错误状态）
+     *  ④ 🔴 **颜色通道序**：`GL_RGBA` + `GL_UNSIGNED_BYTE` 写出的是**字节序 `R,G,B,A`**；
+     *     而按 `IntBuffer` 逐元素取出时（小端设备）会组装成 **ABGR**，
+     *     但 `Bitmap.createBitmap(int[], w, h, ARGB_8888)` 期望 **ARGB**
+     *     → **R 与 B 互换 → 红蓝偏色**。
+     *     ⚠️ 这是用户报的「传给模型的图偏色」的**真正根因**，
+     *        且**与压缩无关** —— 在 GL 回读这一刻就已经错了，
+     *        后面的缩放/JPEG 只是把错的颜色原样带给模型。v2.4.11 修。
      */
     private fun captureDanmuFrameIfNeeded() {
         if (danmuDisabled) return
@@ -3256,8 +3263,22 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val srcH = dh
         if (srcW <= 0 || srcH <= 0) return
 
-        val tw = reqW.coerceAtMost(srcW)
-        val th = (tw.toLong() * srcH / srcW).toInt().coerceIn(1, 2048)
+        // ⚠️ v2.4.11：改用**长边**等比缩放（见 ImageScale），且与 DanmuVisionClient 用**同一套**。
+        //    旧代码 `tw = reqW.coerceAtMost(srcW)` 是「按宽」——
+        //    竖屏片源下会得到长边远超设定值的图（设 256 却得到 256×455，白耗 token）。
+        val fitted = ImageScale.fitLongSide(srcW, srcH, reqW)
+        var tw = fitted[0]
+        var th = fitted[1]
+        // ⚠️ 内存保护：回读要分配两份堆数组（每像素 4 字节 × 2），
+        //    长边 4320 的竖屏视频会要 ~84MB 堆 → 必 OOM。
+        //    超限就等比缩到上限以内（仍给出合法图，只是小于所设档位）。
+        val totalPx = tw.toLong() * th
+        if (totalPx > ImageScale.READBACK_MAX_PIXELS) {
+            val k = kotlin.math.sqrt(ImageScale.READBACK_MAX_PIXELS.toDouble() / totalPx)
+            tw = (tw * k).toInt().coerceAtLeast(1)
+            th = (th * k).toInt().coerceAtLeast(1)
+            Log.w(TAG, "danmu 取帧受内存上限约束：$totalPx px → ${tw}x$th")
+        }
 
         try {
             ensureDanmuTarget(tw, th)
@@ -3315,6 +3336,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 System.arraycopy(row, 0, px, b, tw)
                 y++
             }
+
+            // ④ 🔴 v2.4.11：**修正红蓝通道互换** —— 「传给模型的图偏色」的根因
+            //     glReadPixels 写入字节序 R,G,B,A；按 IntBuffer 取出（小端）得到 ABGR；
+            //     而 Bitmap 期望 ARGB → R/B 被交换 → 画面红蓝偏色。
+            //     ⚠️ 必须在**行翻转之后**做（两者互不干扰，但集中在一处便于阅读）。
+            ImageScale.swapRedBlueInPlace(px, tw * th)
 
             danmuFailCount = 0
             danmuLastCaptureMs = System.currentTimeMillis()

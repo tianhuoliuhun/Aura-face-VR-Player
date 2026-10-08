@@ -891,6 +891,7 @@
     <string name="danmu_test_hint_no_content">Server responded but returned no usable content; this model may not support image input</string>
     <string name="danmu_test_hint_generic">Connection failed</string>
     <string name="danmu_section_runtime">Runtime</string>
+    <string name="danmu_image_long_side">Image long side (px)</string>
     <string name="danmu_interval">Interval</string>
     <string name="danmu_batch_size">Per Batch</string>
     <string name="danmu_section_display">Display</string>

@@ -884,6 +884,7 @@
     <string name="danmu_test_hint_no_content">服务端已响应但没有可用内容，该模型可能不支持图片输入</string>
     <string name="danmu_test_hint_generic">连接失败</string>
     <string name="danmu_section_runtime">运行参数</string>
+    <string name="danmu_image_long_side">图片长边（px）</string>
     <string name="danmu_interval">识别间隔</string>
     <string name="danmu_batch_size">每批条数</string>
     <string name="danmu_section_display">显示效果</string>

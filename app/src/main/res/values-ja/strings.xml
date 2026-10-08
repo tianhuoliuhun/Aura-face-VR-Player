@@ -851,6 +851,7 @@
     <string name="danmu_test_hint_no_content">サーバーは応答しましたが有効な内容がありません。このモデルは画像入力に未対応の可能性があります</string>
     <string name="danmu_test_hint_generic">接続に失敗しました</string>
     <string name="danmu_section_runtime">実行パラメータ</string>
+    <string name="danmu_image_long_side">画像の長辺（px）</string>
     <string name="danmu_interval">認識間隔</string>
     <string name="danmu_batch_size">每バッチ件数</string>
     <string name="danmu_section_display">表示効果</string>

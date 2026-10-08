@@ -503,6 +503,17 @@ fun DanmuSettingsPanel(
             summary = "${config.intervalSec}s · ${config.batchSize}",
             tagPrefix = "danmu"
         ) {
+        // ===== v2.4.11：传给模型的图「长边」档位 =====
+        // 用 chip 行而非滑杆：这 9 档是**离散且指定**的，滑杆会产生 257/913
+        // 这类无意义中间值，而且手机上根本拖不准。
+        // ⚠️ 是**长边**（竖屏片源时指高度）；源图长边小于设定值时**不会放大**。
+        DanmuTextChipRow(
+            title = stringResource(R.string.danmu_image_long_side),
+            options = DanmuConfig.IMAGE_LONG_SIDE_CHOICES,
+            selectedId = config.imageMaxLongSide,
+            labelOf = { it.toString() },
+            onPick = { onConfigChange(config.copy(imageMaxLongSide = it)) }
+        )
         DanmuSliderRow(
             title = stringResource(R.string.danmu_interval),
             valueText = "${config.intervalSec}s",

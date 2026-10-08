@@ -112,7 +112,7 @@ enum class DanmuColorMode(@StringRes val labelRes: Int, val id: Int) {
  *    翻译用文本模型、弹幕用视觉模型，复用同一份配置会互相污染。
  *
  * 参考 DanmuAI 的量级（`app/config_defaults.py` 实测）：
- * - `DEFAULT_IMAGE_MAX_WIDTH = 1024`     → 本项目同取 1024
+ * - 长边默认 **256**（v2.4.11 起；原为「最大宽度 1024」，**语义与取值都已改**，见字段注释）
  * - `DEFAULT_DANMU_PENDING_ENTRY_CAP = 300` → 本项目同取 300
  */
 data class DanmuConfig(
@@ -131,7 +131,17 @@ data class DanmuConfig(
     /** 每批期望生成的弹幕条数 */
     val batchSize: Int = DEFAULT_BATCH_SIZE,
     /** 送模型前缩放后的图片最大宽度（px） */
-    val imageMaxWidth: Int = DEFAULT_IMAGE_MAX_WIDTH,
+    /**
+     * v2.4.11：传给模型的图**长边**上限（原为「最大宽度」，语义已改）。
+     *
+     * ⚠️ 是**长边**不是宽 —— 竖屏片源的长边是高。两处缩放（GL 回读 / 最终编码）
+     *    共用 [ImageScale]，不要再各写一份按宽的算法。
+     *
+     * ⚠️ 默认从 1024 降到 **256**（用户指定）：视觉模型判断「画面在讲什么」
+     *    并不需要高分辨率，256 长边足以看懂场景/人物/动作，而 token 与带宽大幅下降。
+     *    需要细节时可上调，档位见 [IMAGE_LONG_SIDE_CHOICES]。
+     */
+    val imageMaxLongSide: Int = DEFAULT_IMAGE_LONG_SIDE,
     /** JPEG 编码质量 */
     val imageQuality: Int = DEFAULT_IMAGE_QUALITY,
     /** 弹幕滚动速度（px/秒） */
@@ -380,7 +390,21 @@ data class DanmuConfig(
 
         const val DEFAULT_INTERVAL_SEC = 5
         const val DEFAULT_BATCH_SIZE = 8
-        const val DEFAULT_IMAGE_MAX_WIDTH = 1024
+        /** v2.4.11：长边默认值（原为「最大宽度 1024」，见字段注释说明为何降到 256）。 */
+        const val DEFAULT_IMAGE_LONG_SIDE = 256
+
+        /**
+         * v2.4.11：长边**可选档位**（用户指定的这 9 档）。
+         *
+         * 面板以 chip 行呈现（`chunked(4)`，与语言/颜色面板同一范式）。
+         *
+         * ⚠️ 含 4320，但 **GL 回读有内存上限**（见 `ImageScale.READBACK_MAX_PIXELS`）——
+         *    超限档位会被自动等比缩到上限以内，实际生效尺寸见日志。
+         *    这不是"设置无效"，而是端侧内存的物理约束。
+         */
+        val IMAGE_LONG_SIDE_CHOICES = listOf(
+            256, 384, 512, 720, 1024, 1440, 1920, 2560, 4320
+        )
         const val DEFAULT_IMAGE_QUALITY = 70
         const val DEFAULT_SPEED_PX_PER_SEC = 220
         const val DEFAULT_MAX_TRACKS = 8
