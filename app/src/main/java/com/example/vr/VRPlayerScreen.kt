@@ -1992,9 +1992,14 @@ fun VRPlayerScreen(
         delay(FIRST_CAPTURE_DELAY_MS)
         while (true) {
             try {
-                // ① 取画面（仅当本模式需要画面时）
+                // ① 取画面
+                // ⚠️ v2.4.13：本地 LLM 模式下 `needsImage` 恒为 false（它不知道运行时
+                //    是否装了 mmproj），但**mmproj 已就绪时本地模型也能看图** →
+                //    这种情况同样要取帧。两条判据任一成立即取。
                 var frame: android.graphics.Bitmap? = null
-                if (danmuConfig.needsImage) {
+                val needFrame = danmuConfig.needsImage ||
+                    (danmuConfig.useLocalLlm && LocalLlmManager.visionAvailable)
+                if (needFrame) {
                     val renderer = currentGlSurfaceView?.renderer
                     if (renderer == null) {
                         danmuLastError = context.getString(R.string.danmu_err_no_renderer)
@@ -2039,7 +2044,9 @@ fun VRPlayerScreen(
                 } else {
                     ""
                 }
-                if (danmuConfig.needsSubtitle && subtitleText.isBlank() && !danmuConfig.needsImage) {
+                // ⚠️ v2.4.13：用 needFrame 而非 needsImage —— 本地视觉模式下前者为 true，
+                //    此时「没台词但有画面」是**合法**的，不该报「没有素材」。
+                if (danmuConfig.needsSubtitle && subtitleText.isBlank() && !needFrame) {
                     danmuLastError = context.getString(R.string.danmu_err_no_subtitle)
                     delay(periodMs)
                     continue
@@ -2060,7 +2067,9 @@ fun VRPlayerScreen(
                         context = context,
                         subtitleText = subtitleText,
                         personaPrompt = danmuConfig.personaPrompt,
-                        batchSize = danmuConfig.batchSize
+                        batchSize = danmuConfig.batchSize,
+                        // v2.4.13：mmproj 就绪时把画面也交给本地模型（否则内部自动退回纯文本）
+                        frame = frame
                     )
                     // ⚠️ 这两个类型**嵌套在 DanmuVisionClient 里**，必须写限定名
                     //    （直接写 DanmuFetchResult 会 Unresolved reference）。

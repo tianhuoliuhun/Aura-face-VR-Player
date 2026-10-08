@@ -902,6 +902,10 @@
     <string name="local_model_ready">已下載 %1$dMB</string>
     <string name="local_model_loaded">已載入</string>
     <string name="local_model_not_downloaded">未下載</string>
+    <string name="local_model_mmproj_title">視覺編碼器（讓本機模型看圖）</string>
+    <string name="local_model_mmproj_desc">下載後本機模型才能「看畫面」；不下載則只依台詞生成</string>
+    <string name="local_model_mmproj_download">下載</string>
+    <string name="local_model_vision_on">視覺已啟用</string>
     <string name="danmu_image_long_side">圖片長邊（px）</string>
     <string name="danmu_use_local_llm">用本機模型生成彈幕</string>
     <string name="danmu_use_local_llm_desc">完全離線、零費用；本機模型看不到畫面，只用台詞生成</string>

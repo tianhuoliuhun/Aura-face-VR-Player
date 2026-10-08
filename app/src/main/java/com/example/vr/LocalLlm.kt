@@ -87,6 +87,15 @@ object LocalLlmManager {
     /** 下载重试次数。 */
     private const val MAX_DOWNLOAD_ATTEMPTS = 3
 
+    /**
+     * 下载用的 User-Agent。
+     *
+     * ⚠️ 必须带：Hugging Face 对**空 UA / 脚本式 UA** 会返回 403，
+     * 而 403 会被 `downloadFileGeneric` 判为「该源不可用」直接换源 ——
+     * 表现为「主源莫名其妙总是失败」。
+     */
+    private const val DOWNLOAD_UA = "Mozilla/5.0 (Android) AuraFaceVRPlayer"
+
     const val MODEL_ID_QWEN35_08B = "qwen35-0.8b-q4km"
 
     /**
@@ -228,92 +237,161 @@ object LocalLlmManager {
         }
     }
 
-    private suspend fun downloadInternal(context: Context, model: LocalLlmModel): Boolean =
-        withContext(Dispatchers.IO) {
-            if (isReady(context, model)) return@withContext true
-            val dir = dir(context)
-            if (!dir.exists() && !dir.mkdirs()) {
-                lastError = "无法创建模型目录：${dir.absolutePath}"
-                Log.e(TAG, lastError!!)
-                return@withContext false
-            }
-            val dest = fileOf(context, model)
-            val tmp = File(dir, model.fileName + ".part")
+    /**
+     * 下载**任意模型文件**（主权重与 mmproj 共用这一份实现）。
+     *
+     * ## 为什么要参数化而不是各写一份
+     * 「多源回退 + Range 续传 + 401 换源 + 进度上报 + 残片校验」这套逻辑有十几处易错点，
+     * 复制成两份必然出现「主模型修了、mmproj 那份没修」——本项目「同一份逻辑两处登记」
+     * 是头号事故源。所以只留这一个实现。
+     *
+     * @param expectBytes 期望体积（仅用于进度上限与日志，**不作为完成判据**）
+     * @param minBytes    完成判据的最小体积（主模型 100MB / mmproj 50MB，两者不同）
+     */
+    private suspend fun downloadFileGeneric(
+        context: Context,
+        fileName: String,
+        urls: List<String>,
+        expectBytes: Long,
+        minBytes: Long,
+        label: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        val dir = dir(context)
+        val dest = File(dir, fileName)
+        // 已经够大 → 视为已完成（避免重复下载）
+        if (dest.isFile && dest.length() >= minBytes) return@withContext true
 
-            withContext(Dispatchers.Main) {
-                isDownloading = true
-                downloadProgress = 0f
-                downloadStatus = "准备下载 ${model.displayName}…"
-            }
+        if (!dir.exists() && !dir.mkdirs()) {
+            lastError = "无法创建模型目录：${dir.absolutePath}"
+            Log.e(TAG, lastError!!)
+            return@withContext false
+        }
+        val tmp = File(dir, fileName + ".part")
 
-            for (url in model.urls) {
-                var attempt = 0
-                while (attempt < MAX_DOWNLOAD_ATTEMPTS) {
-                    attempt++
-                    try {
-                        val existing = if (tmp.exists()) tmp.length() else 0L
-                        val req = Request.Builder().url(url).apply {
-                            if (existing > 0) addHeader("Range", "bytes=$existing-")
-                            addHeader("User-Agent", "Mozilla/5.0")
-                        }.build()
-                        var ok = false
-                        httpClient.newCall(req).execute().use { resp ->
-                            if (resp.code != 200 && resp.code != 206) {
-                                Log.w(TAG, "下载 HTTP ${resp.code}（$url）")
-                                // 401/403 常见于镜像需要鉴权 → 换下一个源，不重试当前源
-                                if (resp.code == 401 || resp.code == 403 || resp.code == 404) {
-                                    attempt = MAX_DOWNLOAD_ATTEMPTS
-                                }
-                                return@use
+        withContext(Dispatchers.Main) {
+            isDownloading = true
+            downloadProgress = 0f
+            downloadStatus = "准备下载 $label…"
+        }
+
+        for (url in urls) {
+            var attempt = 0
+            while (attempt < MAX_DOWNLOAD_ATTEMPTS) {
+                attempt++
+                try {
+                    val existing = if (tmp.exists()) tmp.length() else 0L
+                    val req = Request.Builder().url(url).apply {
+                        if (existing > 0) addHeader("Range", "bytes=$existing-")
+                        addHeader("User-Agent", DOWNLOAD_UA)
+                    }.build()
+                    var ok = false
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.code != 200 && resp.code != 206) {
+                            Log.w(TAG, "$label 下载 HTTP ${resp.code}（$url）")
+                            // 401/403 常见于镜像需要鉴权、404 是路径不对
+                            // → 都是重试同一个源没有意义的错误，直接换源
+                            if (resp.code == 401 || resp.code == 403 || resp.code == 404) {
+                                attempt = MAX_DOWNLOAD_ATTEMPTS
                             }
-                            val body = resp.body ?: return@use
-                            val total = body.contentLength().let { if (it > 0) it + existing else model.sizeBytes }
-                            val append = existing > 0 && resp.code == 206
-                            if (!append) tmp.delete()
-                            body.byteStream().use { input ->
-                                FileOutputStream(tmp, append).use { output ->
-                                    val buf = ByteArray(1 shl 20)
-                                    var written = if (append) existing else 0L
-                                    var lastReport = 0L
-                                    while (true) {
-                                        val n = input.read(buf)
-                                        if (n < 0) break
-                                        output.write(buf, 0, n)
-                                        written += n
-                                        val now = System.currentTimeMillis()
-                                        if (now - lastReport > 400) {
-                                            lastReport = now
-                                            val frac = (written.toFloat() / total).coerceIn(0f, 1f)
-                                            withContext(Dispatchers.Main) {
-                                                downloadProgress = frac
-                                                downloadStatus = "${written / 1048576}MB / ${total / 1048576}MB"
-                                            }
+                            return@use
+                        }
+                        val body = resp.body ?: return@use
+                        val total = body.contentLength().let { if (it > 0) it + existing else expectBytes }
+                        val append = existing > 0 && resp.code == 206
+                        if (!append) tmp.delete()
+                        body.byteStream().use { input ->
+                            FileOutputStream(tmp, append).use { output ->
+                                val buf = ByteArray(1 shl 20)
+                                var written = if (append) existing else 0L
+                                var lastReport = 0L
+                                while (true) {
+                                    val n = input.read(buf)
+                                    if (n < 0) break
+                                    output.write(buf, 0, n)
+                                    written += n
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastReport > 400) {
+                                        lastReport = now
+                                        val frac = (written.toFloat() / total).coerceIn(0f, 1f)
+                                        withContext(Dispatchers.Main) {
+                                            downloadProgress = frac
+                                            downloadStatus = "$label ${written / 1048576}MB / ${total / 1048576}MB"
                                         }
                                     }
                                 }
                             }
-                            ok = true
                         }
-                        if (ok && tmp.length() >= MIN_VALID_BYTES) {
-                            if (dest.exists()) dest.delete()
-                            if (tmp.renameTo(dest)) {
-                                Log.i(TAG, "模型下载完成：${dest.absolutePath}（${dest.length() / 1048576}MB）")
-                                return@withContext true
-                            }
-                        }
-                        Log.w(TAG, "下载不完整（${tmp.length()} 字节，第 $attempt 次）")
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.w(TAG, "下载异常（第 $attempt 次，$url）：${e.message}")
-                        delay(1500L * attempt)
+                        ok = true
                     }
+                    if (ok && tmp.length() >= minBytes) {
+                        if (dest.exists()) dest.delete()
+                        if (tmp.renameTo(dest)) {
+                            Log.i(TAG, "$label 下载完成：${dest.absolutePath}（${dest.length() / 1048576}MB）")
+                            return@withContext true
+                        }
+                    }
+                    Log.w(TAG, "$label 下载不完整（${tmp.length()} 字节，第 $attempt 次）")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "$label 下载异常（第 $attempt 次，$url）：${e.message}")
+                    delay(1500L * attempt)
                 }
-                Log.w(TAG, "该源失败，尝试下一个：$url")
             }
-            lastError = "所有下载源均失败（模型约 ${model.sizeBytes / 1048576}MB，请检查网络）"
-            false
+            Log.w(TAG, "$label 该源失败，尝试下一个：$url")
         }
+        lastError = "$label 所有下载源均失败（约 ${expectBytes / 1048576}MB，请检查网络）"
+        false
+    }
+
+    /** 下载主权重（带最小体积校验，避免把下载中断的残片当成可用）。 */
+    /**
+     * 下载**视觉编码器**（mmproj）—— v2.4.13。
+     *
+     * ⚠️ 与主权重分开下载（116MB vs 574MB）：用户可能只想先试纯文本，
+     *    不该强制他一次下完 690MB。
+     * ⚠️ 下载完成后**需要重新加载模型**才会生效（mmproj 是在 init 时加载的）——
+     *    调用方下完应调 `release()` 让下次 `ensureLoaded` 重新初始化。
+     */
+    fun startMmprojDownload(
+        context: Context,
+        model: LocalLlmModel,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        val fileName = model.mmprojFileName ?: run {
+            Log.w(TAG, "该模型没有配套 mmproj，忽略下载请求")
+            onDone(false)
+            return
+        }
+        if (isDownloading) return
+        downloadJob = CoroutineScope(Dispatchers.IO).launch {
+            val ok = downloadFileGeneric(
+                context = context,
+                fileName = fileName,
+                urls = model.mmprojUrls,
+                expectBytes = model.mmprojSizeBytes,
+                minBytes = MIN_MMPROJ_BYTES,
+                label = "视觉编码器"
+            )
+            withContext(Dispatchers.Main) {
+                isDownloading = false
+                downloadProgress = if (ok) 1f else 0f
+                onDone(ok)
+            }
+        }
+    }
+
+    private suspend fun downloadInternal(context: Context, model: LocalLlmModel): Boolean {
+        if (isReady(context, model)) return true
+        return downloadFileGeneric(
+            context = context,
+            fileName = model.fileName,
+            urls = model.urls,
+            expectBytes = model.sizeBytes,
+            minBytes = MIN_VALID_BYTES,
+            label = model.displayName
+        )
+    }
 
     // ===================== 加载 / 释放 =====================
 

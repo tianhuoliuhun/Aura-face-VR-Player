@@ -60,12 +60,19 @@ object LocalDanmuGenerator {
         context: Context,
         subtitleText: String,
         personaPrompt: String,
-        batchSize: Int
+        batchSize: Int,
+        /** v2.4.13：可选的画面帧（ARGB Bitmap）。仅当 mmproj 已就绪时才会真正被使用。 */
+        frame: android.graphics.Bitmap? = null
     ): List<String> {
-        if (subtitleText.isBlank()) {
-            // ⚠️ 本地模式的唯一素材就是台词 —— 没有台词就没有依据。
-            //    这里**刻意不编造**（否则模型会凭空输出与画面无关的内容）。
-            Log.d(TAG, "无台词可用，本地弹幕跳过本次生成")
+        // v2.4.13：有图 **且** mmproj 已就绪时才启用视觉路径。
+        // ⚠️ 两个条件缺一不可：只判断 frame != null 会在没下 mmproj 时白传一张图
+        //    （native 侧会退回纯文本，白做一次格式转换）。
+        val useVision = frame != null && LocalLlmManager.visionAvailable
+        if (subtitleText.isBlank() && !useVision) {
+            // ⚠️ **纯文本**模式下唯一素材就是台词 —— 没有台词就没有依据，
+            //    这里刻意不编造（否则模型会凭空输出与画面无关的内容）。
+            //    ⚠️ 但**有图时不受此限**：视觉模型可以只看画面。
+            Log.d(TAG, "无台词且无画面可用，本地弹幕跳过本次生成")
             return emptyList()
         }
         val model = LocalLlmManager.readyModel(context) ?: run {
@@ -81,11 +88,37 @@ object LocalDanmuGenerator {
         val persona = personaPrompt.trim().takeIf { it.isNotBlank() }
             ?.let { "\n另外，整体风格要求：$it" }
             .orEmpty()
-        val prompt = "台词：\n$subtitleText\n\n请生成 $n 条弹幕。$persona"
+        // v2.4.13：有画面时改写提示词 —— 让模型知道它可以看图，
+        // 否则它会忽略图片只按台词发挥（白白浪费视觉编码器的算力与那 116MB 存储）。
+        val prompt = if (useVision) {
+            val linesPart = if (subtitleText.isNotBlank()) "\n台词：\n$subtitleText" else ""
+            "根据这张画面${if (subtitleText.isNotBlank()) "和以下台词" else ""}生成 $n 条弹幕。$linesPart$persona"
+        } else {
+            "台词：\n$subtitleText\n\n请生成 $n 条弹幕。$persona"
+        }
+
+        // 转成 mtmd 要的 RGB 3 字节/像素（⚠️ 不是 ARGB）
+        var rgbBytes: ByteArray? = null
+        var rgbW = 0
+        var rgbH = 0
+        if (useVision && frame != null) {
+            val w = frame.width
+            val h = frame.height
+            if (w > 0 && h > 0) {
+                val px = IntArray(w * h)
+                frame.getPixels(px, 0, w, 0, 0, w, h)
+                rgbBytes = ImageScale.argbToRgbBytes(px)
+                rgbW = w
+                rgbH = h
+            }
+        }
 
         val raw = LocalLlmManager.complete(
             prompt = prompt,
             systemPrompt = SYSTEM_PROMPT,
+            rgb = rgbBytes,
+            imgW = rgbW,
+            imgH = rgbH,
             // 弹幕要多样 → 温度比翻译高（翻译用 0.2，追求稳定）
             maxTokens = 512,
             temperature = 0.9f

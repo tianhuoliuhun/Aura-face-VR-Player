@@ -100,6 +100,34 @@ object ImageScale {
     // ===================================================================
 
     /**
+     * **ARGB int 像素 → RGB 字节数组**（每像素 3 字节）—— v2.4.13。
+     *
+     * ## 为什么需要
+     * `libmtmd` 的 `mtmd_bitmap_init` 要求 **RGB、3 字节/像素**；
+     * 而本项目从 GL 回读 / `Bitmap.getPixels` 拿到的都是 **ARGB int**（4 字节/像素）。
+     * 两者**不能直接互传** —— 传错会偏色（把 A 当成 R）甚至越界崩。
+     *
+     * ## 与 [swapRedBlueInPlace] 的关系
+     * 那个函数是在 ARGB 内部**交换 R/B**（修 GL 回读的字节序问题）；
+     * 本函数是**换容器**（int → 3 字节紧凑数组）。两者用途不同，都别省。
+     *
+     * ⚠️ 丢弃 alpha：mtmd 的位图没有 alpha 通道，直接把 A 丢掉即可
+     *    （不是"用 A 去混合"，那样在预乘 alpha 的 Bitmap 上会得到偏暗的结果）。
+     */
+    fun argbToRgbBytes(argb: IntArray, count: Int = argb.size): ByteArray {
+        val n = if (count < argb.size) count else argb.size
+        val out = ByteArray(n * 3)
+        var o = 0
+        for (i in 0 until n) {
+            val v = argb[i]
+            out[o++] = ((v ushr 16) and 0xFF).toByte()   // R
+            out[o++] = ((v ushr 8) and 0xFF).toByte()    // G
+            out[o++] = (v and 0xFF).toByte()             // B
+        }
+        return out
+    }
+
+    /**
      * 把 **ABGR** 布局的像素改成 Android Bitmap 期望的 **ARGB**（交换 R 与 B）。
      *
      * ## 为什么需要这一步（本次偏色 bug 的根因）

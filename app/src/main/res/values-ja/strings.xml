@@ -860,6 +860,10 @@
     <string name="local_model_ready">ダウンロード済み %1$dMB</string>
     <string name="local_model_loaded">読み込み済み</string>
     <string name="local_model_not_downloaded">未ダウンロード</string>
+    <string name="local_model_mmproj_title">視覚エンコーダ（ローカルモデルが画像を見られるように）</string>
+    <string name="local_model_mmproj_desc">ダウンロードするとローカルモデルが映像を見られます。未ダウンロードの場合は字幕のみで生成します</string>
+    <string name="local_model_mmproj_download">ダウンロード</string>
+    <string name="local_model_vision_on">視覚有効</string>
     <string name="danmu_image_long_side">画像の長辺（px）</string>
     <string name="danmu_use_local_llm">ローカルモデルで弾幕を生成</string>
     <string name="danmu_use_local_llm_desc">完全オフライン・無料。ローカルモデルは映像を見られないため、字幕の台詞のみを使用します</string>

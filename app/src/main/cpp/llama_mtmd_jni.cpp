@@ -207,6 +207,15 @@ Java_com_example_vr_LlamaMtmd_nativeComplete(
         std::vector<unsigned char> rgb((size_t) len);
         env->GetByteArrayRegion(jRgb, 0, len, reinterpret_cast<jbyte *>(rgb.data()));
 
+        // ⚠️ prompt 里**必须**包含媒体标记（marker），否则 mtmd_tokenize 返回 1
+        //    （「图片数与 prompt 里的 marker 数不匹配」）。
+        //    这里自动补上，免得 Kotlin 侧硬编码那个字符串 —— 它由 llama.cpp 决定，
+        //    换版本可能变化（见 mtmd_default_marker()）。
+        const char * marker = mtmd_default_marker();
+        if (marker && *marker && prompt.find(marker) == std::string::npos) {
+            prompt = std::string(marker) + "\n" + prompt;
+        }
+
         mtmd_bitmap * bmp = mtmd_bitmap_init((uint32_t) imgW, (uint32_t) imgH, rgb.data());
         if (!bmp) {
             LOGE("mtmd_bitmap_init 失败");

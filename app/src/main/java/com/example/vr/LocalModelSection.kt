@@ -163,6 +163,83 @@ fun LocalModelSection(
             }
         }
 
+        // ===== v2.4.13：**视觉编码器（mmproj）** =====
+        // 与主权重**分开下载**（116MB vs 574MB）：用户可能只想先试纯文本，
+        // 不该强制一次下完 690MB。
+        //
+        // ⚠️ `remember` 必须放在**无条件**位置（Compose 的 slot 表规则）——
+        //    所以这里先算好 mmprojReady，再用 if 只包住 UI。
+        val mmprojReady = remember(refreshKey) { LocalLlmManager.isMmprojReady(context, model) }
+        if (model.mmprojFileName != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.local_model_mmproj_title),
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = stringResource(R.string.local_model_mmproj_desc),
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = 11.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (mmprojReady) {
+                        stringResource(
+                            R.string.local_model_ready,
+                            (LocalLlmManager.mmprojFileOf(context, model)?.length() ?: 0L) / 1048576
+                        )
+                    } else {
+                        stringResource(R.string.local_model_not_downloaded)
+                    },
+                    color = if (mmprojReady) accentColor else Color.White.copy(alpha = 0.55f),
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                if (mmprojReady) {
+                    // ⚠️ 已下载 ≠ 已生效：mmproj 只在 init 时加载，且可能与主模型不匹配
+                    //    （不匹配时加载失败但纯文本仍可用）→ 两个状态必须分开显示
+                    if (LocalLlmManager.visionAvailable) {
+                        Text(
+                            text = stringResource(R.string.local_model_vision_on),
+                            color = accentColor,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    LocalModelButton(
+                        text = stringResource(R.string.local_model_delete),
+                        accentColor = accentColor,
+                        onClick = {
+                            LocalLlmManager.release()
+                            LocalLlmManager.mmprojFileOf(context, model)?.delete()
+                            refreshKey++
+                        }
+                    )
+                } else if (!LocalLlmManager.isDownloading) {
+                    LocalModelButton(
+                        text = stringResource(R.string.local_model_mmproj_download),
+                        accentColor = accentColor,
+                        onClick = {
+                            LocalLlmManager.startMmprojDownload(context, model) { ok ->
+                                // ⚠️ mmproj 是在 init 时加载的 → 下完必须释放模型，
+                                //    下次 ensureLoaded 才会带上它（否则用户会以为"下了没用"）
+                                if (ok) {
+                                    LocalLlmManager.release()
+                                    refreshKey++
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
         // 错误信息：把真实原因显示出来，而不是笼统的"不可用"
         LocalLlmManager.lastError?.let { err ->
             Spacer(modifier = Modifier.height(4.dp))
