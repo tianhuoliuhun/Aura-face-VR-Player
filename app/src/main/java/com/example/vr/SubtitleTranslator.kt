@@ -111,6 +111,28 @@ enum class TranslationEngine(
         defaultBaseUrl = "https://clients5.google.com",
         defaultModel = "",
         requiresApiKey = false
+    ),
+    /**
+     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + Qwen3.5-0.8B）。
+     *
+     * ## 为什么不复用 [QWEN]
+     * [QWEN] 是**阿里云 DashScope 的在线接口**（要 API Key、按量计费）；
+     * 本项是**完全离线**的端侧推理 —— 两者除了模型血缘外没有共同点
+     * （一个走 HTTP、一个走 native 引擎）。混为一谈会让用户以为"填了 Key 就能离线"。
+     *
+     * ## 为什么不需要 API Key
+     * 推理全在设备本地，没有任何网络请求 → [requiresApiKey] = false，
+     * 面板据此**不显示** Key 输入框（见 `SubtitleSettingsPanel`）。
+     *
+     * ⚠️ 需先下载模型（`LocalLlmManager` / `LocalModelSection`）；
+     *    未下载时本引擎返回空串 → 上层回落显示「原文」，不会崩也不会卡。
+     */
+    LOCAL_LLM(
+        id = 10,
+        displayNameResId = R.string.engine_local_llm,
+        defaultBaseUrl = "",
+        defaultModel = "",
+        requiresApiKey = false
     )
 }
 
@@ -1228,6 +1250,10 @@ class SubtitleTranslator(private val context: Context) {
                     TranslationEngine.MYMEMORY -> translateViaMyMemory(text, targetLangCode)
                     TranslationEngine.LIBRETRANSLATE -> translateViaLibreTranslate(text, targetLangCode)
                     TranslationEngine.GOOGLE_FREE -> translateViaGoogleFree(text, targetLangCode)
+                    // v2.4.12：端侧推理（不走 HTTP）—— **必须显式列出**。
+                    // ⚠️ 若漏了这一行，它会落进下面的 `else` 被当成 OpenAI 兼容请求，
+                    //    而本地引擎没有 baseUrl/Key → 必然失败且报错信息完全误导。
+                    TranslationEngine.LOCAL_LLM -> translateViaLocalLlm(text, targetLangCode)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -1616,6 +1642,51 @@ class SubtitleTranslator(private val context: Context) {
      * 所以统一用「取每项里的第一个字符串」解析，两种格式都能吃。
      * （另一常见端点 `translate.googleapis.com/translate_a/single?client=gtx` 在同环境返回 429，故不采用。）
      */
+    /**
+     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + Qwen3.5-0.8B）。
+     *
+     * ## 与其它引擎的差别
+     * 不走 HTTP、不需要 Key，但**需要模型已下载**。
+     * 任一条件不满足即返回空串 —— 上层会回落显示原文，
+     * 与云端引擎失败时的行为**完全一致**（不会崩、不会卡）。
+     *
+     * ## ⚠️ maxTokens 为什么只给 256
+     * 字幕是**单行短句**，256 足够；给太大会让本地 CPU 推理白等
+     * （0.8B 模型在手机 CPU 上约几到十几 tok/s，多吐的 token 都是纯浪费）。
+     *
+     * ## ⚠️ 为什么只取第一行
+     * 小模型偶尔会「先解释再给译文」（如"翻译如下：xxx"）。
+     * 字幕只该显示一行译文，取**首个非空行**比事后正则清洗更稳且更便宜。
+     *
+     * ## ⚠️ 目标语言用中文名而不是语言代码
+     * prompt 里写"翻译成简体中文"比"翻译成 zh"对小模型更明确
+     * （复用 [TranslationTargetLanguage.displayName]，不再硬编码一份映射）。
+     */
+    private suspend fun translateViaLocalLlm(text: String, targetLangCode: String): String {
+        val model = LocalLlmManager.readyModel(context)
+        if (model == null) {
+            Log.w("SubtitleTranslator", "本地翻译：模型未下载，跳过（回落显示原文）")
+            return ""
+        }
+        val engine = LocalLlmManager.ensureLoaded(context, model) ?: run {
+            Log.w("SubtitleTranslator", "本地翻译：模型加载失败（${LocalLlmManager.lastError}）")
+            return ""
+        }
+        val langName = TranslationTargetLanguage.values()
+            .firstOrNull { it.code.equals(targetLangCode, ignoreCase = true) }
+            ?.displayName ?: targetLangCode
+        val system = "你是专业的字幕翻译。只输出译文本身，不要解释、不要引号、不要任何多余文字。"
+        val prompt = "把下面这句字幕翻译成$langName：\n$text"
+        val out = LocalLlmManager.complete(
+            model = engine,
+            prompt = prompt,
+            systemPrompt = system,
+            maxTokens = 256,
+            temperature = 0.2f
+        ) ?: return ""
+        return out.trim().lines().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+    }
+
     private suspend fun translateViaGoogleFree(text: String, targetLangCode: String): String {
         val base = getActiveBaseUrl().trim().trimEnd('/')
         val target = mapGoogleFreeLang(targetLangCode)

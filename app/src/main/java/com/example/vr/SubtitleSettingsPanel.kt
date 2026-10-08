@@ -805,6 +805,15 @@ fun SubtitleSettingsPanel(
                         }
                     }
 
+                    // v2.4.12：**选中本地 LLM 引擎时才显示模型下载区**。
+                    // ⚠️ 刻意不做成常显：其它引擎用不到它，常显会让面板变长，
+                    //    还会让人误以为"必须下载这个模型才能翻译"。
+                    // ⚠️ 组件是**共用的**（弹幕面板调的是同一个 LocalModelSection）——
+                    //    不要在这里另写一份（本项目「同一功能两份 UI」是头号事故源）。
+                    if (translator.config.engine == TranslationEngine.LOCAL_LLM) {
+                        LocalModelSection(accentColor = accentColor)
+                    }
+
                     // API Key & Base URL Inputs for engines that require a key.
                     // 另外 LibreTranslate 允许自托管，因此也展示（用于填私有实例地址 / key）。
                     if (translator.config.engine.requiresApiKey ||
