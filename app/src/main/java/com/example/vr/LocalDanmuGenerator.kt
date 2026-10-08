@@ -72,8 +72,8 @@ object LocalDanmuGenerator {
             Log.w(TAG, "本地弹幕：模型未下载")
             return emptyList()
         }
-        val engine = LocalLlmManager.ensureLoaded(context, model) ?: run {
-            Log.w(TAG, "本地弹幕：模型加载失败（${LocalLlmManager.lastError}）")
+        if (!LocalLlmManager.ensureLoaded(context, model)) {
+            Log.w(TAG, "本地弹幕：模型未就绪（${LocalLlmManager.lastError}）")
             return emptyList()
         }
 
@@ -84,7 +84,6 @@ object LocalDanmuGenerator {
         val prompt = "台词：\n$subtitleText\n\n请生成 $n 条弹幕。$persona"
 
         val raw = LocalLlmManager.complete(
-            model = engine,
             prompt = prompt,
             systemPrompt = SYSTEM_PROMPT,
             // 弹幕要多样 → 温度比翻译高（翻译用 0.2，追求稳定）

@@ -494,7 +494,14 @@ dependencies {
   //     ⚠️ 它自带 `libc++_shared.so`，与本项目已有的同名 →
   //        已在 `packaging.jniLibs.pickFirsts` 处理，**不要删那条**。
   // ==========================================================================
-  implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
+  // ⚠️ v2.4.13：**已移除** `dev.ffmpegkit-maintained:llama-android` ——
+  //    它**不含 libmtmd**、native 接口没有任何接收图像的入口，做不了「本地看画面」。
+  //    现改用**自建**的 llama.cpp + libmtmd：
+  //      · .so 在 `app/src/main/jniLibs/arm64-v8a/`（AGP 自动打包）
+  //      · JNI 在 `cpp/llama_mtmd_jni.cpp`，Kotlin 侧见 `LlamaMtmd.kt`
+  //      · 编译命令见项目记忆（⚠️ 必须在 C 盘编译，D 盘路径下 clang 会崩）
+  //    ⚠️ 上面的选型说明保留作**历史记录** —— 其中「另一个候选 net.ladenthin 是
+  //       minSdk 28 不可用」的结论仍然成立，将来若再评估第三方 AAR 会用到。
 
   // ===== Khronos 标准 OpenXR loader（Android AAR）=====
   // 用途：给 PICO / Meta Quest 提供 OpenXR loader。它们与华为同为 Android OpenXR，

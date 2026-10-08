@@ -1668,8 +1668,9 @@ class SubtitleTranslator(private val context: Context) {
             Log.w("SubtitleTranslator", "本地翻译：模型未下载，跳过（回落显示原文）")
             return ""
         }
-        val engine = LocalLlmManager.ensureLoaded(context, model) ?: run {
-            Log.w("SubtitleTranslator", "本地翻译：模型加载失败（${LocalLlmManager.lastError}）")
+        // v2.4.13：ensureLoaded 改为返回 Boolean（引擎内部是全局单例，不再传句柄）
+        if (!LocalLlmManager.ensureLoaded(context, model)) {
+            Log.w("SubtitleTranslator", "本地翻译：模型未就绪（${LocalLlmManager.lastError}）")
             return ""
         }
         val langName = TranslationTargetLanguage.values()
@@ -1678,7 +1679,6 @@ class SubtitleTranslator(private val context: Context) {
         val system = "你是专业的字幕翻译。只输出译文本身，不要解释、不要引号、不要任何多余文字。"
         val prompt = "把下面这句字幕翻译成$langName：\n$text"
         val out = LocalLlmManager.complete(
-            model = engine,
             prompt = prompt,
             systemPrompt = system,
             maxTokens = 256,

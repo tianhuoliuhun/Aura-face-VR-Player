@@ -6,9 +6,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import dev.ffmpegkit.llama.Llama
-import dev.ffmpegkit.llama.LlamaConfig
-import dev.ffmpegkit.llama.LlamaModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,7 +35,18 @@ data class LocalLlmModel(
     val urls: List<String>,
     /** 推理上下文长度。 */
     val contextSize: Int,
-    val description: String
+    val description: String,
+
+    // ===== v2.4.13：可选的**视觉编码器**（mmproj）=====
+    // ⚠️ 只有**自建**的 libmtmd 才能用它（旧的 AAR 不含该库、无图像入口）。
+    // 下载后本地模型才能「看画面」；不下载则只有纯文本能力。
+
+    /** mmproj 落盘文件名；null = 该模型没有配套视觉编码器。 */
+    val mmprojFileName: String? = null,
+    /** mmproj 期望体积（用于 UI 显示与完整性校验）。 */
+    val mmprojSizeBytes: Long = 0L,
+    /** mmproj 下载源（按顺序尝试）。 */
+    val mmprojUrls: List<String> = emptyList()
 )
 
 /**
@@ -67,6 +75,15 @@ object LocalLlmManager {
     /** 最小有效体积（防止下载中断留下的残缺文件被当成「已就绪」）。 */
     private const val MIN_VALID_BYTES = 100L * 1024 * 1024
 
+    /**
+     * mmproj 的最小有效体积。
+     *
+     * 取 50MB：q8_0 档约 116MB、f16 档约 207MB，都远大于它；
+     * 而下载中断的残片通常只有几 MB。⚠️ 不能沿用主模型的 100MB 阈值
+     * （那会把 116MB 的 q8_0 档误判为"未下载"，见 isMmprojReady 的说明）。
+     */
+    private const val MIN_MMPROJ_BYTES = 50L * 1024 * 1024
+
     /** 下载重试次数。 */
     private const val MAX_DOWNLOAD_ATTEMPTS = 3
 
@@ -92,7 +109,18 @@ object LocalLlmManager {
             ),
             contextSize = 4096,
             description = "阿里 Qwen3.5 最轻量档（Apache 2.0）。中英双语翻译与短文本生成，" +
-                "约 0.57GB，纯 CPU 推理"
+                "约 0.57GB，纯 CPU 推理",
+            // v2.4.13：**可选的视觉编码器**。
+            // ⚠️ 主权重是纯文本的 —— 不下这个文件，本地模型就「看不到画面」，
+            //    只能靠台词生成弹幕；下载后才有视觉能力（需自建 libmtmd，已具备）。
+            // 选 q8_0 档（116MB）：f16 档 207MB 质量略好，但视觉编码器对量化不那么敏感，
+            // 而 116MB 对手机存储友好得多。
+            mmprojFileName = "Qwen3.5-0.8B.mmproj-q8_0.gguf",
+            mmprojSizeBytes = 116_000_000L,
+            mmprojUrls = listOf(
+                "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B.mmproj-q8_0.gguf",
+                "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B.mmproj-q8_0.gguf"
+            )
         )
     )
 
@@ -109,11 +137,19 @@ object LocalLlmManager {
     var loadedModelId by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * v2.4.13：当前已加载模型是否具备**视觉能力**（mmproj 已加载且模型支持 vision）。
+     *
+     * ⚠️ 与「mmproj 文件已下载」是两件事：文件在 ≠ 加载成功
+     *    （mmproj 与主模型不匹配时会加载失败，而纯文本仍可用）。
+     */
+    var visionAvailable by mutableStateOf(false)
+        private set
+
     /** 最近一次错误（供 UI 显示真实原因，而不是笼统的"不可用"）。 */
     var lastError: String? = null
         private set
 
-    private var loadedModel: LlamaModel? = null
     private var downloadJob: Job? = null
 
     /**
@@ -132,6 +168,21 @@ object LocalLlmManager {
     fun dir(context: Context): File = File(context.filesDir, DIR_NAME)
 
     fun fileOf(context: Context, model: LocalLlmModel): File = File(dir(context), model.fileName)
+
+    /** v2.4.13：mmproj（视觉编码器）文件；模型没有配套 mmproj 时返回 null。 */
+    fun mmprojFileOf(context: Context, model: LocalLlmModel): File? =
+        model.mmprojFileName?.let { File(dir(context), it) }
+
+    /**
+     * mmproj 是否已就绪。
+     *
+     * ⚠️ 用**独立的**最小体积阈值（[MIN_MMPROJ_BYTES]）：mmproj 比主模型小得多
+     *    （116~207MB vs 574MB），沿用主模型的 100MB 阈值会把 q8_0 那个档位误判。
+     */
+    fun isMmprojReady(context: Context, model: LocalLlmModel): Boolean {
+        val f = mmprojFileOf(context, model) ?: return false
+        return f.isFile && f.length() >= MIN_MMPROJ_BYTES
+    }
 
     /** 模型是否已就绪（带最小体积校验，避免把下载中断的残片当成可用）。 */
     fun isReady(context: Context, model: LocalLlmModel): Boolean {
@@ -269,87 +320,110 @@ object LocalLlmManager {
     /**
      * 确保模型已加载（同一个 id 已加载则直接复用）。
      *
-     * ⚠️ **单例约束**：llama 的 `LlamaModel` 持有数百 MB native 资源，
-     *    重复 `loadModel` 会成倍占用内存 → 这里做 id 级复用，
-     *    并保证加载新模型前先释放旧的。
+     * v2.4.13：改用**自建**的 [LlamaMtmd]（含 libmtmd → 支持图像输入）。
+     *
+     * ⚠️ 与旧的 `dev.ffmpegkit.llama.Llama` **不可并存**：两者各自持有独立的
+     *    native 模型实例，同时加载会让 0.6GB 的权重占两份内存。
+     *
+     * ## mmproj 的处理
+     * 已下载就一起加载（拿到视觉能力）；没下载则传空串走纯文本。
+     * ⚠️ mmproj 加载失败**不会**让整体失败 —— 纯文本仍可用（见 native 侧实现）。
+     *
+     * @return 是否就绪（false 时调用方应回落云端引擎）
      */
-    suspend fun ensureLoaded(context: Context, model: LocalLlmModel): LlamaModel? {
-        loadedModel?.let { if (loadedModelId == model.id) return it }
+    suspend fun ensureLoaded(context: Context, model: LocalLlmModel): Boolean {
+        if (!LlamaMtmd.available) {
+            lastError = "本地推理库未加载（libauravr.so 缺失？）"
+            return false
+        }
+        if (loadedModelId == model.id) return true
         if (!isReady(context, model)) {
             lastError = "模型未下载"
-            return null
+            return false
         }
         release()
         return withContext(Dispatchers.IO) {
-            try {
-                val m = Llama.loadModel(
-                    modelPath = fileOf(context, model).absolutePath,
-                    config = LlamaConfig(
-                        contextSize = model.contextSize,
-                        threads = Runtime.getRuntime().availableProcessors()
-                            .coerceIn(2, 6),
-                        gpuLayers = 0   // 纯 CPU：本 AAR 是 CPU/NEON 版，无 Vulkan
-                    )
-                )
-                loadedModel = m
-                loadedModelId = model.id
-                lastError = null
-                Log.i(TAG, "模型已加载：${model.displayName}（ctx=${model.contextSize}）")
-                m
-            } catch (t: Throwable) {
-                lastError = "模型加载失败：${t.message}"
-                Log.e(TAG, "模型加载失败", t)
-                null
+            val mmprojPath = if (isMmprojReady(context, model)) {
+                mmprojFileOf(context, model)?.absolutePath.orEmpty()
+            } else {
+                ""
             }
+            val ok = LlamaMtmd.nativeInit(
+                modelPath = fileOf(context, model).absolutePath,
+                mmprojPath = mmprojPath,
+                nCtx = model.contextSize,
+                nThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+            )
+            if (ok) {
+                loadedModelId = model.id
+                visionAvailable = LlamaMtmd.nativeHasVision()
+                lastError = null
+                Log.i(TAG, "模型已加载：${model.displayName}（ctx=${model.contextSize}，" +
+                    "vision=$visionAvailable，mmproj=${mmprojPath.ifEmpty { "无" }}）")
+            } else {
+                lastError = "模型加载失败（文件损坏或内存不足）"
+                Log.e(TAG, "模型加载失败：${model.displayName}")
+            }
+            ok
         }
     }
 
-    /** 释放模型（切换功能/退出时调用）。 */
+    /**
+     * 释放模型（切换功能 / 退出时调用）。
+     *
+     * v2.4.13：改为释放**自建引擎**的全局实例（模型 + mtmd 上下文一起释放）。
+     */
     fun release() {
-        loadedModel?.let {
-            try {
-                Llama.releaseModel(it)
-            } catch (t: Throwable) {
-                Log.w(TAG, "释放模型异常：${t.message}")
-            }
+        try {
+            if (LlamaMtmd.available) LlamaMtmd.nativeFree()
+        } catch (t: Throwable) {
+            Log.w(TAG, "释放模型异常：${t.message}")
         }
-        loadedModel = null
         loadedModelId = null
+        visionAvailable = false
     }
 
     // ===================== 推理 =====================
 
     /**
-     * 单轮文本补全（**无对话历史** —— 翻译与弹幕都是一次性任务，不需要多轮）。
+     * 单轮补全（**无对话历史** —— 翻译与弹幕都是一次性任务，不需要多轮）。
      *
-     * @return 生成文本；未加载/失败返回 null（由调用方回落云端引擎）
+     * v2.4.13：新增**可选图像输入**（走自建 libmtmd）。
+     *
+     * @param rgb **RGB，3 字节/像素**（mtmd 的格式要求 —— **不是** ARGB）；
+     *            传 null 或尺寸非法时自动走纯文本路径
+     * @return 生成文本；未加载 / 失败返回 null（由调用方回落云端引擎）
      */
     suspend fun complete(
-        model: LlamaModel,
         prompt: String,
         systemPrompt: String? = null,
+        rgb: ByteArray? = null,
+        imgW: Int = 0,
+        imgH: Int = 0,
         maxTokens: Int = 256,
         temperature: Float = 0.3f
     ): String? = withContext(Dispatchers.IO) {
-        try {
-            val r = Llama.complete(
-                model = model,
-                prompt = prompt,
-                systemPrompt = systemPrompt ?: "",
-                maxTokens = maxTokens
-            )
-            Log.d(
-                TAG,
-                "推理完成：${r.tokensGenerated} tok, ${"%.1f".format(r.tokensPerSecond)} tok/s, " +
-                    "prompt ${r.promptEvalTimeMs}ms, gen ${r.generateTimeMs}ms"
-            )
-            r.text
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (t: Throwable) {
-            lastError = "推理失败：${t.message}"
-            Log.e(TAG, "推理失败", t)
+        if (loadedModelId == null) {
+            Log.w(TAG, "complete 被调用但模型未加载")
+            return@withContext null
+        }
+        val t0 = System.currentTimeMillis()
+        val text = LlamaMtmd.completeSafe(
+            prompt = prompt,
+            system = systemPrompt ?: "",
+            rgb = rgb,
+            imgW = imgW,
+            imgH = imgH,
+            maxTokens = maxTokens,
+            temperature = temperature
+        )
+        val ms = System.currentTimeMillis() - t0
+        if (text.isBlank()) {
+            Log.w(TAG, "推理返回空（${ms}ms，图=${rgb?.size ?: 0}B）")
             null
+        } else {
+            Log.d(TAG, "推理完成 ${ms}ms / ${text.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
+            text
         }
     }
 }
