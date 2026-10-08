@@ -30,6 +30,23 @@ android {
       useLegacyPackaging = true
 
       // ======================================================================
+      // v2.4.12：本地 LLM（llama.cpp）引入后的 **libc++_shared.so 冲突**
+      // ----------------------------------------------------------------------
+      // llama-android AAR 自带一份 `libc++_shared.so`，而本项目**早就有一份**
+      // （随 ijkplayer / mpv 的 native 库进包）—— 同名同路径会让 Gradle 报重复，
+      // 必须显式决定留哪个。
+      //
+      // 用 pickFirsts 而不是 excludes：
+      //   · excludes 会把**所有**来源的 libc++_shared 一起排掉（含 ijk/mpv 需要的）→ 必崩；
+      //   · pickFirsts 只影响「重复时留哪一份」，保证最终包里**有且只有一份**。
+      //
+      // ⚠️ 两份都是 NDK 的 libc++_shared（同一实现的不同构建），通常向后兼容。
+      //    若真机出现 C++ 符号缺失类崩溃，再改成
+      //    「下载 AAR → 删掉它内部的 libc++_shared → 放 libs/ 当本地 AAR」。
+      // ======================================================================
+      pickFirsts += listOf("**/libc++_shared.so")
+
+      // ======================================================================
       // v2.1.243：**MPV 的 native 库改回"内置模式"**（不再后下载）
       // ----------------------------------------------------------------------
       // 历史：v2.1.235 曾把 MPV 的 so 从 APK 移除、改成用户首次选 MPV 时下载
@@ -460,6 +477,24 @@ dependencies {
   //    （libmpv.so：arm64 ≈ 13.9 MB，另带 libass 等依赖）。
   // ==========================================================================
   implementation("io.github.marlboro-advance:mpv-android:1.0.0")
+
+  // ==========================================================================
+  // v2.4.12：**本地 LLM 运行时（llama.cpp）**
+  // 用途：本地 AI 字幕翻译 + 本地 AI 弹幕生成（二者共用同一个模型与引擎）
+  // --------------------------------------------------------------------------
+  // 选库理由（逐项实测核对过）：
+  //   · `dev.ffmpegkit-maintained:llama-android:0.1.1`
+  //     - **minSdk 24** —— 与本项目一致
+  //       （另一候选 `net.ladenthin:llama-android:5.1.0` 是 **minSdk 28**，
+  //        会触发 manifest 合并失败，**不可用**）
+  //     - **只有 arm64-v8a** —— 与 v2.4.10 起的单 ABI 完全吻合，不引入多余架构
+  //     - 体积小：libllama(2.7MB) + ggml-base/cpu + jni ≈ **5.4MB**
+  //     - 内置 llama.cpp **build b9878**（已支持 Qwen3.5 的 `qwen35` 架构）
+  //     - API：`Llama.loadModel / complete / embed / releaseModel`（Kotlin 挂起函数）
+  //     ⚠️ 它自带 `libc++_shared.so`，与本项目已有的同名 →
+  //        已在 `packaging.jniLibs.pickFirsts` 处理，**不要删那条**。
+  // ==========================================================================
+  implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
 
   // ===== Khronos 标准 OpenXR loader（Android AAR）=====
   // 用途：给 PICO / Meta Quest 提供 OpenXR loader。它们与华为同为 Android OpenXR，
