@@ -861,6 +861,8 @@
     <string name="local_model_loaded">読み込み済み</string>
     <string name="local_model_not_downloaded">未ダウンロード</string>
     <string name="danmu_image_long_side">画像の長辺（px）</string>
+    <string name="danmu_use_local_llm">ローカルモデルで弾幕を生成</string>
+    <string name="danmu_use_local_llm_desc">完全オフライン・無料。ローカルモデルは映像を見られないため、字幕の台詞のみを使用します</string>
     <string name="danmu_interval">認識間隔</string>
     <string name="danmu_batch_size">每バッチ件数</string>
     <string name="danmu_section_display">表示効果</string>

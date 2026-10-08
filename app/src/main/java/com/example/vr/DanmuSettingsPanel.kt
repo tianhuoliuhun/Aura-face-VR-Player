@@ -518,6 +518,30 @@ fun DanmuSettingsPanel(
         // ⚠️ 组件抽在 LocalModelSection.kt —— 字幕面板也会调同一份，
         //    不要在这里再写一遍（本项目「同一功能两份 UI」是头号事故源）。
         LocalModelSection(accentColor = accentColor)
+        // 用本地模型生成弹幕（与云端视觉模型二选一）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.danmu_use_local_llm),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = stringResource(R.string.danmu_use_local_llm_desc),
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 11.sp
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(
+                checked = config.useLocalLlm,
+                onCheckedChange = { onConfigChange(config.copy(useLocalLlm = it)) }
+            )
+        }
         DanmuSliderRow(
             title = stringResource(R.string.danmu_interval),
             valueText = "${config.intervalSec}s",

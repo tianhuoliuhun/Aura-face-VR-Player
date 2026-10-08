@@ -197,6 +197,25 @@ data class DanmuConfig(
     val sourceTypeId: Int = DanmuSourceType.AI.id,
 
     /**
+     * v2.4.12：**用本地 LLM 生成弹幕**（端侧 llama.cpp + Qwen3.5-0.8B）。
+     *
+     * ## ⚠️ 与云端视觉模型的本质差别：**本地模型看不到画面**
+     * 我们下载的是 GGUF **主权重**（纯文本）。视觉编码器（`mmproj`，另有 116~207MB）
+     * 是**独立文件**、当前未下载 → 本地生成**只能用台词**。
+     *
+     * 因此开启后：
+     * - [sourceModeId] 里的「画面」部分被**忽略**（[needsImage] 恒为 false），
+     *   也不会去请求截图（省掉 GL 回读与 JPEG 编码，本就更快）；
+     * - 若当前时刻附近没有台词 → **不产出**（而不是让模型编造画面内容）。
+     *   UI 有对应提示，避免用户把"没弹幕"当成 bug。
+     *
+     * ## 为什么值得有这个开关
+     * 完全离线、零 API 费用、不依赖第三方平台可用性 —— 代价是质量与「看懂画面」
+     * 不如云端视觉模型。两种模式各有取舍，交给用户按场景选。
+     */
+    val useLocalLlm: Boolean = false,
+
+    /**
      * 导入的弹幕文件 URI（持久化字符串）。
      *
      * 只存 URI 字符串而**不存内容**：弹幕文件可达数 MB（几万条），
@@ -222,13 +241,25 @@ data class DanmuConfig(
     val sourceMode: DanmuSourceMode
         get() = DanmuSourceMode.fromId(sourceModeId)
 
-    /** 是否需要把截图发给模型 */
+    /**
+     * 是否需要把截图发给模型。
+     *
+     * ⚠️ v2.4.12：**本地 LLM 模式下恒为 false** —— 本地模型是**纯文本**的
+     *    （视觉编码器 `mmproj` 未下载），发图它也用不上，反而白做一次
+     *    GL 回读 + JPEG 编码。`renderer.requestDanmuFrame` 因此不会被调用。
+     */
     val needsImage: Boolean
-        get() = sourceMode != DanmuSourceMode.SUBTITLE_ONLY
+        get() = !useLocalLlm && sourceMode != DanmuSourceMode.SUBTITLE_ONLY
 
-    /** 是否需要把台词文本发给模型 */
+    /**
+     * 是否需要把台词文本发给模型。
+     *
+     * ⚠️ v2.4.12：本地模式下**恒为 true** —— 台词是本地生成**唯一**可用的素材。
+     *    用户可能设了「仅画面」（那是给云端视觉模型的口味），但本地拿不到图，
+     *    若还按 `IMAGE_ONLY` 返回 false，本地就**没有任何输入**可依据了。
+     */
     val needsSubtitle: Boolean
-        get() = sourceMode != DanmuSourceMode.IMAGE_ONLY
+        get() = useLocalLlm || sourceMode != DanmuSourceMode.IMAGE_ONLY
 
     /** 解析后的文字颜色（id 找不到时回落到白色，不抛异常） */
     val textColorOption: SubtitleColorOption

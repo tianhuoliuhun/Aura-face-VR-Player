@@ -894,6 +894,8 @@
     <string name="local_model_loaded">已加载</string>
     <string name="local_model_not_downloaded">未下载</string>
     <string name="danmu_image_long_side">图片长边（px）</string>
+    <string name="danmu_use_local_llm">用本地模型生成弹幕</string>
+    <string name="danmu_use_local_llm_desc">完全离线、零费用；本地模型看不到画面，只用台词生成</string>
     <string name="danmu_interval">识别间隔</string>
     <string name="danmu_batch_size">每批条数</string>
     <string name="danmu_section_display">显示效果</string>

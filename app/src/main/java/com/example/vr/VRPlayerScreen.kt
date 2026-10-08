@@ -778,6 +778,8 @@ fun VRPlayerScreen(
                 imageMaxLongSide = prefs.getInt(
                     "danmu_image_long_side", DanmuConfig.DEFAULT_IMAGE_LONG_SIDE
                 ),
+                // v2.4.12：本地 LLM 生成弹幕
+                useLocalLlm = prefs.getBoolean("danmu_use_local_llm", false),
                 opacityPercent = prefs.getInt("danmu_opacity", DanmuConfig.DEFAULT_OPACITY),
                 fontSizeSp = prefs.getInt("danmu_font_size", DanmuConfig.DEFAULT_FONT_SIZE_SP),
                 // v2.3.0：全局颜色（存 id，不存 ordinal）
@@ -827,6 +829,7 @@ fun VRPlayerScreen(
                 putInt("danmu_max_tracks", danmuConfig.maxTracks)
                 putBoolean("danmu_auto_tracks", danmuConfig.autoTracks)
                 putInt("danmu_image_long_side", danmuConfig.imageMaxLongSide)
+                putBoolean("danmu_use_local_llm", danmuConfig.useLocalLlm)
                 putInt("danmu_opacity", danmuConfig.opacityPercent)
                 putInt("danmu_font_size", danmuConfig.fontSizeSp)
                 putInt("danmu_text_color", danmuConfig.textColorId)
@@ -851,6 +854,7 @@ fun VRPlayerScreen(
                 remove("danmu_max_tracks")
                 remove("danmu_auto_tracks")
                 remove("danmu_image_long_side")
+                remove("danmu_use_local_llm")
                 remove("danmu_opacity")
                 remove("danmu_font_size")
                 remove("danmu_text_color")
@@ -2046,7 +2050,33 @@ fun VRPlayerScreen(
                 //       此前失败一律塌缩成空列表 → 无论真实原因是 401 还是 404，
                 //       UI 都只显示「模型未返回可用弹幕」，把用户引向错误方向
                 //       （实测事故：日志是 `HTTP 401 Invalid bearer token`）。
-                val fetched = danmuVisionClient.fetchDanmu(frame, danmuConfig, subtitleText)
+                // v2.4.12：**本地 LLM / 云端视觉模型的分岔**
+                // ⚠️ 本地模式不请求截图（`needsImage` 恒 false）→ 此处 frame 必为 null，
+                //    所以本地只用台词。见 LocalDanmuGenerator 的说明。
+                // ⚠️ 返回值统一成 DanmuFetchResult，好让下面的错误展示逻辑**完全复用** ——
+                //    否则「本地失败」要走一条独立的提示路径，很容易漏掉或写得不一致。
+                val fetched = if (danmuConfig.useLocalLlm) {
+                    val lines = LocalDanmuGenerator.generate(
+                        context = context,
+                        subtitleText = subtitleText,
+                        personaPrompt = danmuConfig.personaPrompt,
+                        batchSize = danmuConfig.batchSize
+                    )
+                    // ⚠️ 这两个类型**嵌套在 DanmuVisionClient 里**，必须写限定名
+                    //    （直接写 DanmuFetchResult 会 Unresolved reference）。
+                    DanmuVisionClient.DanmuFetchResult(
+                        lines = lines,
+                        kind = if (lines.isEmpty()) {
+                            DanmuVisionClient.ChatErrorKind.NO_CONTENT
+                        } else {
+                            DanmuVisionClient.ChatErrorKind.NONE
+                        },
+                        // ⚠️ 该字段是**非空 String**（不是 String?）→ 成功时传空串而非 null
+                        detail = if (lines.isEmpty()) "local-llm" else ""
+                    )
+                } else {
+                    danmuVisionClient.fetchDanmu(frame, danmuConfig, subtitleText)
+                }
                 // ⚠️ 用完立刻回收：1024×576 ARGB ≈ 2.3 MB，long-running 页面不能泄漏
                 if (frame != null && !frame.isRecycled) frame.recycle()
 

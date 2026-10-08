@@ -901,6 +901,8 @@
     <string name="local_model_loaded">Loaded</string>
     <string name="local_model_not_downloaded">Not downloaded</string>
     <string name="danmu_image_long_side">Image long side (px)</string>
+    <string name="danmu_use_local_llm">Generate danmaku on-device</string>
+    <string name="danmu_use_local_llm_desc">Fully offline, no cost. The local model cannot see the video — it uses subtitle lines only</string>
     <string name="danmu_interval">Interval</string>
     <string name="danmu_batch_size">Per Batch</string>
     <string name="danmu_section_display">Display</string>
