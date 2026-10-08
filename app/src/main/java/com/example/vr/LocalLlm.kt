@@ -108,13 +108,13 @@ object LocalLlmManager {
         LocalLlmModel(
             id = MODEL_ID_QWEN35_08B,
             displayName = "Qwen3.5 0.8B（Q4_K_M）",
-            fileName = "Qwen3.5-0.8B-Q4_K_M.gguf",
+            fileName = "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
             sizeBytes = 574_000_000L,
             urls = listOf(
                 // 主源：Hugging Face 官方
-                "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+                "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
                 // 兜底：镜像（⚠️ 历史上「按文件下载」在真机曾返回 401，故放最后且允许失败）
-                "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf"
+                "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"
             ),
             contextSize = 4096,
             description = "阿里 Qwen3.5 最轻量档（Apache 2.0）。中英双语翻译与短文本生成，" +
@@ -122,13 +122,15 @@ object LocalLlmManager {
             // v2.4.13：**可选的视觉编码器**。
             // ⚠️ 主权重是纯文本的 —— 不下这个文件，本地模型就「看不到画面」，
             //    只能靠台词生成弹幕；下载后才有视觉能力（需自建 libmtmd，已具备）。
-            // 选 q8_0 档（116MB）：f16 档 207MB 质量略好，但视觉编码器对量化不那么敏感，
-            // 而 116MB 对手机存储友好得多。
-            mmprojFileName = "Qwen3.5-0.8B.mmproj-q8_0.gguf",
-            mmprojSizeBytes = 116_000_000L,
+            // ⚠️ 该仓库**只提供 f16 / bf16 两档 mmproj**（没有 q8_0）——
+            //    所以取 f16（207MB）。文件名与主权重一样带 `Qwen_` 前缀，
+            //    且**前缀顺序不同**（主权重是 `Qwen_Qwen3.5-...`，mmproj 是 `mmproj-Qwen_Qwen3.5-...`），
+            //    手写 URL 时极易搞错 —— 本次就是因为漏了 `Qwen_` 而全部 404。
+            mmprojFileName = "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
+            mmprojSizeBytes = 207_000_000L,
             mmprojUrls = listOf(
-                "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B.mmproj-q8_0.gguf",
-                "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B.mmproj-q8_0.gguf"
+                "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
+                "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf"
             )
         )
     )
