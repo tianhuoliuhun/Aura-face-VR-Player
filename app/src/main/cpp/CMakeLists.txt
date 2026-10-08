@@ -114,11 +114,25 @@ set(AURAVR_SOURCES
     aura_vr_ui.cpp
 )
 
+# ==============================================================================
+# v2.4.13：**自建 llama.cpp + libmtmd** 的 JNI 封装
+#   （用途：本地 AI 字幕翻译 + 本地 AI 弹幕生成，含「本地看画面」）
+# ------------------------------------------------------------------------------
+# ⚠️ 只在 **arm64-v8a** 编译 —— 自建时只编了该 ABI（与 v2.4.10 起的单 ABI 一致）；
+#    其它 ABI 上会因为找不到 libllama.so / libmtmd.so 而**链接失败**，
+#    所以必须放在条件里，而不是直接写进 AURAVR_SOURCES。
+# ==============================================================================
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    list(APPEND AURAVR_SOURCES llama_mtmd_jni.cpp)
+endif()
+
 add_library(auravr SHARED ${AURAVR_SOURCES})
 
 target_include_directories(auravr PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${HUAWEI_VR_INCLUDE_DIR}
+    # v2.4.13：llama.cpp / mtmd 头文件（随源码置于 cpp/llama/include，无需外部依赖）
+    ${CMAKE_CURRENT_SOURCE_DIR}/llama/include
 )
 
 # 链接：Android 系统库 + EGL/GLES
@@ -127,12 +141,39 @@ target_include_directories(auravr PRIVATE
 #    某一个 loader 上，而一份 APK 要同时支持华为 / PICO 新老固件 / Quest。
 #    华为的 libxr_loader.so 仍会被**拷贝进 APK**（见本文件末尾的 POST_BUILD），
 #    因为 dlopen 需要它在 libs/<abi>/ 下存在；dl 库本身来自 Android 系统，无需链接。
+# ==============================================================================
+# v2.4.13：**自建 llama.cpp + libmtmd** 的编译期链接
+# ------------------------------------------------------------------------------
+# .so 由 `app/src/main/jniLibs/<abi>/` 提供（AGP 会**自动**打进 APK，
+# 且该目录**不受 huawei.vr.enable 开关影响** —— 这是刻意的，
+# 见 app/build.gradle.kts 里对该目录的说明）。
+# 这里只负责**编译期链接**，让 libauravr.so 的 DT_NEEDED 指向它们。
+#
+# ⚠️ 不链接也不会立刻报错（因为 JNI 是运行时解析符号），但**运行时会 dlopen 失败**。
+# ==============================================================================
+set(AURA_LLAMA_LIBS "")
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    add_library(llama SHARED IMPORTED)
+    set_target_properties(llama PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libllama.so")
+
+    add_library(mtmd SHARED IMPORTED)
+    set_target_properties(mtmd PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libmtmd.so")
+
+    set(AURA_LLAMA_LIBS llama mtmd)
+    message(STATUS "已启用自建 llama.cpp + libmtmd（${ANDROID_ABI}）")
+else()
+    message(STATUS "ABI ${ANDROID_ABI} 无自建 llama 库 → 本地 LLM 功能在该 ABI 上不可用")
+endif()
+
 target_link_libraries(auravr
     android
     log
     EGL
     GLESv3      # ⚠️ 华为要求 GLES 3.2，用 GLESv3（提供 ES 3.x 符号）
     dl          # v2.0.195：dlopen/dlsym
+    ${AURA_LLAMA_LIBS}
 )
 
 # 华为 SDK 用 XR_USE_PLATFORM_ANDROID / XR_USE_GRAPHICS_API_OPENGL_ES 开关，
