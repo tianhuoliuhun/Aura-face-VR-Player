@@ -893,6 +893,14 @@
     <string name="danmu_test_hint_no_content">伺服器已回應但沒有可用內容，該模型可能不支援圖片輸入</string>
     <string name="danmu_test_hint_generic">連線失敗</string>
     <string name="danmu_section_runtime">執行參數</string>
+    <string name="local_model_title">本機模型</string>
+    <string name="local_model_desc">下載後可用於本機 AI 翻譯與本機彈幕生成，全程不連網</string>
+    <string name="local_model_download">下載</string>
+    <string name="local_model_cancel">取消</string>
+    <string name="local_model_delete">刪除</string>
+    <string name="local_model_ready">已下載 %1$dMB</string>
+    <string name="local_model_loaded">已載入</string>
+    <string name="local_model_not_downloaded">未下載</string>
     <string name="danmu_image_long_side">圖片長邊（px）</string>
     <string name="danmu_interval">辨識間隔</string>
     <string name="danmu_batch_size">每批條數</string>

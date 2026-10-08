@@ -851,6 +851,14 @@
     <string name="danmu_test_hint_no_content">サーバーは応答しましたが有効な内容がありません。このモデルは画像入力に未対応の可能性があります</string>
     <string name="danmu_test_hint_generic">接続に失敗しました</string>
     <string name="danmu_section_runtime">実行パラメータ</string>
+    <string name="local_model_title">ローカルモデル</string>
+    <string name="local_model_desc">ダウンロードすると、オフラインで AI 翻訳と弾幕生成に使えます</string>
+    <string name="local_model_download">ダウンロード</string>
+    <string name="local_model_cancel">キャンセル</string>
+    <string name="local_model_delete">削除</string>
+    <string name="local_model_ready">ダウンロード済み %1$dMB</string>
+    <string name="local_model_loaded">読み込み済み</string>
+    <string name="local_model_not_downloaded">未ダウンロード</string>
     <string name="danmu_image_long_side">画像の長辺（px）</string>
     <string name="danmu_interval">認識間隔</string>
     <string name="danmu_batch_size">每バッチ件数</string>

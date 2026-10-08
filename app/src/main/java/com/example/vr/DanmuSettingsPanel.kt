@@ -514,6 +514,10 @@ fun DanmuSettingsPanel(
             labelOf = { it.toString() },
             onPick = { onConfigChange(config.copy(imageMaxLongSide = it)) }
         )
+        // ===== v2.4.12：本地模型（供本地 AI 翻译 / 本地弹幕生成共用）=====
+        // ⚠️ 组件抽在 LocalModelSection.kt —— 字幕面板也会调同一份，
+        //    不要在这里再写一遍（本项目「同一功能两份 UI」是头号事故源）。
+        LocalModelSection(accentColor = accentColor)
         DanmuSliderRow(
             title = stringResource(R.string.danmu_interval),
             valueText = "${config.intervalSec}s",

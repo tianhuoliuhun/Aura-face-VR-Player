@@ -851,6 +851,14 @@
     <string name="danmu_test_hint_no_content">서버가 응답했지만 사용할 내용이 없습니다. 이 모델은 이미지 입력을 지원하지 않을 수 있습니다</string>
     <string name="danmu_test_hint_generic">연결 실패</string>
     <string name="danmu_section_runtime">실행 파라미터</string>
+    <string name="local_model_title">로컬 모델</string>
+    <string name="local_model_desc">다운로드하면 오프라인으로 AI 번역과 탄막 생성에 사용할 수 있습니다</string>
+    <string name="local_model_download">다운로드</string>
+    <string name="local_model_cancel">취소</string>
+    <string name="local_model_delete">삭제</string>
+    <string name="local_model_ready">다운로드됨 %1$dMB</string>
+    <string name="local_model_loaded">로드됨</string>
+    <string name="local_model_not_downloaded">다운로드되지 않음</string>
     <string name="danmu_image_long_side">이미지 긴 변(px)</string>
     <string name="danmu_interval">인식 간격</string>
     <string name="danmu_batch_size">배치당 개수</string>
