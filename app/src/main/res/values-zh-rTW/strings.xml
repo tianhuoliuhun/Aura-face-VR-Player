@@ -898,6 +898,8 @@
     <string name="danmu_section_display">顯示效果</string>
     <string name="danmu_speed">捲動速度</string>
     <string name="danmu_max_tracks">軌道數</string>
+    <string name="danmu_auto_tracks">行數自適應</string>
+    <string name="danmu_auto_tracks_desc">軌道數依字號與可用區域自動計算；下方的「最大軌道數」隨之變為上限</string>
     <string name="danmu_opacity">不透明度</string>
     <string name="danmu_font_size">字號</string>
     <string name="danmu_privacy_hint">開啟後畫面會壓縮上傳至所填服務，請自行確認其隱私政策</string>

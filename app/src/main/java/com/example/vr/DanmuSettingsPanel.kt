@@ -535,12 +535,14 @@ fun DanmuSettingsPanel(
                 value = config.timeJitterMs.toFloat(),
                 range = DanmuConfig.MIN_TIME_JITTER_MS.toFloat()..
                         DanmuConfig.MAX_TIME_JITTER_MS.toFloat(),
-                // 每档 100ms，便于精确选到 0 / 400 / 800 这类常用值
-                steps = (DanmuConfig.MAX_TIME_JITTER_MS - DanmuConfig.MIN_TIME_JITTER_MS) / 100 - 1,
+                // v2.4.10：范围扩到 10 秒后，档位从 100ms 改为 **200ms** ——
+                // 100ms 会产生 99 档，手机上每档不到 4px，根本拖不准。
+                // 200ms 共 49 档，仍能选到 0 / 400（默认）/ 1000 / 5000 / 10000 等常用值。
+                steps = (DanmuConfig.MAX_TIME_JITTER_MS - DanmuConfig.MIN_TIME_JITTER_MS) / 200 - 1,
                 accentColor = accentColor,
                 onChange = {
-                    // 归到最近的 100ms 档，避免出现 413 这种"看起来很怪"的值
-                    val snapped = (it.toInt() / 100) * 100
+                    // 归到最近的 200ms 档，避免出现 413 这种"看起来很怪"的值
+                    val snapped = (it.toInt() / 200) * 200
                     onConfigChange(config.copy(timeJitterMs = snapped))
                 }
             )
@@ -573,6 +575,32 @@ fun DanmuSettingsPanel(
             accentColor = accentColor,
             onChange = { onConfigChange(config.copy(speedPxPerSec = it.toInt())) }
         )
+        // ===== v2.4.10：行数自适应开关 =====
+        // 放在「轨道数」滑杆**之前** —— 因为开启后那个滑杆的语义从
+        // 「实际轨道数」变成「上限」，顺序反过来会让人以为下面那个才是主控。
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.danmu_auto_tracks),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = stringResource(R.string.danmu_auto_tracks_desc),
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 11.sp
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(
+                checked = config.autoTracks,
+                onCheckedChange = { onConfigChange(config.copy(autoTracks = it)) }
+            )
+        }
         DanmuSliderRow(
             title = stringResource(R.string.danmu_max_tracks),
             valueText = config.maxTracks.toString(),

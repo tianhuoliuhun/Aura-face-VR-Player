@@ -155,6 +155,77 @@ class DanmuTimeSpreadTest {
         }
     }
 
+    // ---------------------------------------------------------------
+    // v2.4.10：抖动范围扩展到 10 秒（截断改为随 σ 缩放）
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `sigma 为 400 时截断仍是 1000ms（与旧版逐值一致）`() {
+        // ⚠️ 这是「改动不破坏老行为」的护栏：截断虽然改成了 2.5σ，
+        //    但 σ=400（默认）时 min(1000, 25000) = 1000 —— 与 v2.4.7 完全相同。
+        val r = Lcg(11L).asRoll()
+        val center = 500_000L
+        val sigma = 400f
+        val out = DanmuEngine.spreadBornTimes(4000, center, sigma, r)
+        val expected = (sigma * DanmuEngine.SPREAD_SIGMA_LIMIT).toLong()  // 1000
+        val maxAbs = out.maxOf { abs(it - center) }
+        assertTrue("最大抖动量 $maxAbs 不应超过 $expected", maxAbs <= expected)
+        assertTrue("样本足够大时应触及上限附近（实际 $maxAbs）", maxAbs > expected * 0.95)
+    }
+
+    @Test
+    fun `支持 10 秒 sigma 且不被旧的 1000ms 天花板压平`() {
+        // 本次扩展的核心验证：σ=10000 时抖动必须真能到秒级。
+        // 若截断仍是固定 1000ms，分布会被压成「±1s 内近似均匀」，正态形态消失
+        // —— 那正是「把上限调到 10 秒却毫无效果」的原因。
+        val r = Lcg(13L).asRoll()
+        val center = 10_000_000L
+        val sigma = 10_000f
+        val n = 5000
+        val out = DanmuEngine.spreadBornTimes(n, center, sigma, r)
+
+        // ① 必须出现远超 1 秒的抖动（证明上限真放开了）
+        val maxAbs = out.maxOf { abs(it - center) }
+        assertTrue("σ=10s 应出现数秒级抖动（实际最大 $maxAbs ms）", maxAbs > 5_000L)
+
+        // ② 仍受 2.5σ = 25000ms 截断
+        assertTrue("不应超出 2.5σ=25000ms（实际 $maxAbs）", maxAbs <= 25_000L)
+
+        // ③ 正态形态仍在：|d|<1σ 占比应接近 68%
+        val within1 = out.count { abs(it - center) < sigma }.toFloat() / n
+        assertTrue("|d|<1σ 占比 $within1 异常（分布被压平了）", within1 > 0.62f && within1 < 0.74f)
+    }
+
+    @Test
+    fun `抖动上限常量与 sigma 上限配套`() {
+        // SPREAD_MAX_ABS_MS 必须 >= σ_max × 2.5，否则最大 σ 会被天花板压平
+        val needed = (DanmuConfig.MAX_TIME_JITTER_MS * DanmuEngine.SPREAD_SIGMA_LIMIT).toLong()
+        assertTrue(
+            "SPREAD_MAX_ABS_MS(${DanmuEngine.SPREAD_MAX_ABS_MS}) 应 >= $needed",
+            DanmuEngine.SPREAD_MAX_ABS_MS >= needed
+        )
+        assertEquals("σ 上限应为 10 秒", 10_000, DanmuConfig.MAX_TIME_JITTER_MS)
+    }
+
+    @Test
+    fun `sigma 为 0 或非法时全部同一时刻`() {
+        val r = Lcg(3L).asRoll()
+        listOf(0f, -1f, Float.NaN).forEach { s ->
+            val out = DanmuEngine.spreadBornTimes(10, 12345L, s, r)
+            assertTrue("σ=$s 应全部等于 center", out.all { it == 12345L })
+        }
+    }
+
+    @Test
+    fun `截断随 sigma 单调放宽`() {
+        // 大 σ 的极值必须严格大于小 σ 的极值 —— 否则说明截断还是固定值
+        val r1 = Lcg(21L).asRoll()
+        val r2 = Lcg(21L).asRoll()
+        val small = DanmuEngine.spreadBornTimes(3000, 0L, 400f, r1).maxOf { abs(it) }
+        val large = DanmuEngine.spreadBornTimes(3000, 0L, 10_000f, r2).maxOf { abs(it) }
+        assertTrue("σ 放大 25 倍后极值应显著变大（$small → $large）", large > small * 5)
+    }
+
     @Test
     fun `spreadBornTimes 是纯数学函数不做非负钳位（分布形态优先）`() {
         // center 为 0 时负抖动应当**保留为负数**，否则左半边分布被压平

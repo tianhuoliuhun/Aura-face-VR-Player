@@ -772,6 +772,8 @@ fun VRPlayerScreen(
                 batchSize = prefs.getInt("danmu_batch_size", DanmuConfig.DEFAULT_BATCH_SIZE),
                 speedPxPerSec = prefs.getInt("danmu_speed", DanmuConfig.DEFAULT_SPEED_PX_PER_SEC),
                 maxTracks = prefs.getInt("danmu_max_tracks", DanmuConfig.DEFAULT_MAX_TRACKS),
+                // v2.4.10：行数自适应（默认开启）
+                autoTracks = prefs.getBoolean("danmu_auto_tracks", DanmuConfig.DEFAULT_AUTO_TRACKS),
                 opacityPercent = prefs.getInt("danmu_opacity", DanmuConfig.DEFAULT_OPACITY),
                 fontSizeSp = prefs.getInt("danmu_font_size", DanmuConfig.DEFAULT_FONT_SIZE_SP),
                 // v2.3.0：全局颜色（存 id，不存 ordinal）
@@ -819,6 +821,7 @@ fun VRPlayerScreen(
                 putInt("danmu_batch_size", danmuConfig.batchSize)
                 putInt("danmu_speed", danmuConfig.speedPxPerSec)
                 putInt("danmu_max_tracks", danmuConfig.maxTracks)
+                putBoolean("danmu_auto_tracks", danmuConfig.autoTracks)
                 putInt("danmu_opacity", danmuConfig.opacityPercent)
                 putInt("danmu_font_size", danmuConfig.fontSizeSp)
                 putInt("danmu_text_color", danmuConfig.textColorId)
@@ -841,6 +844,7 @@ fun VRPlayerScreen(
                 remove("danmu_batch_size")
                 remove("danmu_speed")
                 remove("danmu_max_tracks")
+                remove("danmu_auto_tracks")
                 remove("danmu_opacity")
                 remove("danmu_font_size")
                 remove("danmu_text_color")
@@ -1881,9 +1885,17 @@ fun VRPlayerScreen(
     }
 
     // 运行参数跟随配置变化
-    LaunchedEffect(danmuConfig.speedPxPerSec, danmuConfig.maxTracks, danmuConfig.dedupThresholdPercent) {
+    // ⚠️ v2.4.10：autoTracks 也必须进 key 列表 —— 漏了会导致「开关切换后引擎侧不更新」
+    //    （本项目「设置持久化三处同步」的同型坑，见 MEMORY.md）。
+    LaunchedEffect(
+        danmuConfig.speedPxPerSec,
+        danmuConfig.maxTracks,
+        danmuConfig.autoTracks,
+        danmuConfig.dedupThresholdPercent
+    ) {
         danmuEngine.speedPxPerSec = danmuConfig.speedPxPerSec
         danmuEngine.maxTracks = danmuConfig.maxTracks
+        danmuEngine.autoTracks = danmuConfig.autoTracks
         danmuEngine.dedupThresholdPercent = danmuConfig.dedupThresholdPercent
     }
 

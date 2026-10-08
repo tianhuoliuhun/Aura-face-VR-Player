@@ -856,6 +856,8 @@
     <string name="danmu_section_display">표시 효과</string>
     <string name="danmu_speed">스크롤 속도</string>
     <string name="danmu_max_tracks">트랙 수</string>
+    <string name="danmu_auto_tracks">행 수 자동 조정</string>
+    <string name="danmu_auto_tracks_desc">글꼴 크기와 사용 가능 영역으로 행 수를 자동 계산합니다. 아래 값은 상한이 됩니다</string>
     <string name="danmu_opacity">불투명도</string>
     <string name="danmu_font_size">글자 크기</string>
     <string name="danmu_privacy_hint">활성화하면 화면이 압축되어 설정한 서비스로 전송됩니다</string>

@@ -136,8 +136,15 @@ data class DanmuConfig(
     val imageQuality: Int = DEFAULT_IMAGE_QUALITY,
     /** 弹幕滚动速度（px/秒） */
     val speedPxPerSec: Int = DEFAULT_SPEED_PX_PER_SEC,
-    /** 最大轨道数 */
+    /** 最大轨道数（开启 [autoTracks] 时它是**上限**，而非直接使用的值） */
     val maxTracks: Int = DEFAULT_MAX_TRACKS,
+    /**
+     * v2.4.10：**行数自适应** —— 轨道数按「字号 + 可用区域」自动计算。
+     *
+     * 开启时 [maxTracks] 退化为上限（限制最多几行）；关闭时完全沿用 [maxTracks]（旧行为）。
+     * 计算逻辑见 `DanmuEngine.autoTrackCount`。
+     */
+    val autoTracks: Boolean = DEFAULT_AUTO_TRACKS,
     /** 弹幕不透明度 0-100 */
     val opacityPercent: Int = DEFAULT_OPACITY,
     /** 弹幕字号（sp） */
@@ -377,6 +384,14 @@ data class DanmuConfig(
         const val DEFAULT_IMAGE_QUALITY = 70
         const val DEFAULT_SPEED_PX_PER_SEC = 220
         const val DEFAULT_MAX_TRACKS = 8
+        /**
+         * v2.4.10：行数自适应**默认开启**（用户明确要求「行数自适应」）。
+         *
+         * ⚠️ 默认开启意味着**升级后轨道数会变**（例如 1080×2400 / 18sp 下约 10 行，
+         *    比默认的 8 行多）。这是刻意的：自适应的目的就是让行数跟着字号走，
+         *    而旧的固定 8 行在大字号下会把行距压扁。用户仍可关掉它回到手填模式。
+         */
+        const val DEFAULT_AUTO_TRACKS = true
         const val DEFAULT_OPACITY = 90
         const val DEFAULT_FONT_SIZE_SP = 18
         const val DEFAULT_DEDUP_PERCENT = 80
@@ -497,10 +512,19 @@ data class DanmuConfig(
         /**
          * 抖动强度上限（ms）。
          *
-         * 取 1500：再大就会出现「整批中最晚的几条要等 2~3 秒才出来」，
-         * 而一条弹幕穿过屏幕约 5 秒 —— 会明显感到"上一批还没走完、下一批已经来了"的错乱。
+         * ## v2.4.10：1500 → **10000（10 秒）**
+         * 用户明确要求「把正态分布的时间范围扩展到 10 秒」。上限即**标准差**的
+         * 可调最大值，10 秒意味着允许整批弹幕在约 ±10 秒（1σ）内铺开 ——
+         * 用于「一批弹幕当作一小段高潮慢慢放出」的场景。
+         *
+         * ⚠️ 旧值 1500 的理由是「再大会出现上一批没走完下一批又来了的错乱」——
+         *    那仍成立，所以**默认值保持 400ms 不变**，10 秒只是把**上限**放开，
+         *    由用户按需要的节奏自行调（0 = 关闭）。
+         *
+         * ⚠️ 与 [DanmuEngine.SPREAD_MAX_ABS_MS] 配套：截断上限会随 σ 缩放，
+         *    详见那里的说明。
          */
-        const val MAX_TIME_JITTER_MS = 1500
+        const val MAX_TIME_JITTER_MS = 10_000
 
         /** 抖动强度默认值（ms）= `DanmuEngine.DEFAULT_TIME_JITTER_MS` 的整数形式 */
         const val DEFAULT_TIME_JITTER_MS_INT = 400

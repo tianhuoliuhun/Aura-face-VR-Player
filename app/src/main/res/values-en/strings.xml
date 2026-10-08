@@ -896,6 +896,8 @@
     <string name="danmu_section_display">Display</string>
     <string name="danmu_speed">Speed</string>
     <string name="danmu_max_tracks">Tracks</string>
+    <string name="danmu_auto_tracks">Auto line count</string>
+    <string name="danmu_auto_tracks_desc">Track count is derived from the font size and available area; the value below becomes an upper limit</string>
     <string name="danmu_opacity">Opacity</string>
     <string name="danmu_font_size">Font Size</string>
     <string name="danmu_privacy_hint">Frames will be compressed and uploaded to the endpoint you configure</string>

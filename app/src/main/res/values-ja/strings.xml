@@ -856,6 +856,8 @@
     <string name="danmu_section_display">表示効果</string>
     <string name="danmu_speed">スクロール速度</string>
     <string name="danmu_max_tracks">レーン数</string>
+    <string name="danmu_auto_tracks">行数の自動調整</string>
+    <string name="danmu_auto_tracks_desc">フォントサイズと使用可能な領域から行数を自動計算します。下の「最大トラック数」は上限になります</string>
     <string name="danmu_opacity">不透明度</string>
     <string name="danmu_font_size">文字サイズ</string>
     <string name="danmu_privacy_hint">有効にすると画面が圧縮され、設定したサービスへ送信されます</string>

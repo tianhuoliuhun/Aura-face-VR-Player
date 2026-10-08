@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 261
-    versionName = "2.4.9"
+    versionCode = 262
+    versionName = "2.4.10"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -42,7 +42,7 @@ android {
       //      多一条失败路径；内置后 `dlopen` 直接走 APK 的 nativeLibraryDir
       //      （Android 白名单路径），最稳。
       //
-      // 代价：APK 体积增大（两个 ABI 的 MPV so 展开约 36MB / 31MB）。
+      // 代价：APK 体积增大（arm64 的 MPV so 展开约 36MB）。
       // 这是明确的取舍：**用体积换"任何格式开箱即播"**。
       //
       // ⚠️ 现在的依赖来源是 `io.github.marlboro-advance:mpv-android:1.0.0`
@@ -103,9 +103,14 @@ android {
     //    这里显式指定本机实际版本；若你的环境不同，改这个字符串即可。
     ndkVersion = "30.0.16248370"
     // ==========================================================================
-  // v2.1.234：ABI 从「仅 arm64-v8a」扩到 **arm64-v8a + armeabi-v7a**
+  // v2.4.10：ABI **只保留 arm64-v8a**（需求：「仅编译 arm64-v8a，去除多余兼容内容」）
   // --------------------------------------------------------------------------
-  // ⚠️ 为什么**不能**加 x86 / x86_64（这两个 ABI 是物理上做不到，不是没做）：
+  // 历史：v2.1.234 曾扩到 `arm64-v8a + armeabi-v7a`。现按需求收敛回**单 ABI**。
+  //
+  // 收益：APK 里的 native 库体积**近乎减半**（v7a 那一整套 .so 不再打包）；
+  //      且新增的 arm64-only 依赖（如本地 LLM 运行时）不再需要为 v7a 找替代。
+  //
+  // ⚠️ ⚠️ 为什么**从来不能**加 x86 / x86_64 —— 这是物理上做不到，不是没做：
   //
   //   1. **libmars-face-kit.so（旷视 Megvii 闭源预编译二进制）只有两个 ABI**：
   //      third_party/gpupixel/third_party/mars-face-kit/libs/android/
@@ -124,27 +129,24 @@ android {
   //   3. 华为 SDK 的 libxr_loader.so 也只有 arm64-v8a / armeabi-v7a
   //      （D:/HuaweiVrSdk/sdkDemo/openXRsdk/jni/），CMake 对每个 ABI 都会硬校验。
   //
-  //   结论：**arm64-v8a + armeabi-v7a 是唯一能做到「每个 ABI 的 native 库都完整」
-  //   的组合**。硬塞 x86/x86_64 的后果不是"多支持两个架构"，而是
-  //   「构建直接失败」，或者绕过校验后「装上能开、一点美颜就 UnsatisfiedLinkError 崩」。
-  //
   //   ⚠️ 另外提醒：**不要**为了让模拟器用 x86 原生库而加 x86_64 ——
   //      一旦 APK 里存在 x86_64 目录，x86_64 设备会优先选它（原生 ABI 优先于转译），
   //      于是从"能用 arm64 转译正常跑"退化成"缺 gpupixel/mars/mediapipe 直接崩"。
   //
-  //   abiFilters 的两个 ABI 各来源覆盖（已逐个核对）：
-  //     libauravr.so        —— 自建 CMake（按 abiFilters 自动出两份）
-  //     libgpupixel.so      —— 源码集成 third_party/gpupixel（同上）
-  //     libmars-face-kit.so —— 预编译，两个 ABI 都有
-  //     libijkplayer.so     —— libs/ijkplayer-k0.8.9-release.aar，四个 ABI 齐
-  //     libsherpa-onnx-*.so / libonnxruntime.so —— sherpa aar，四个 ABI 齐
-  //     libmediapipe_*.so   —— tasks-vision aar，含这两个 ABI
-  //     libopenxr_loader*.so—— openxr_loader aar + 华为 SDK，两个 ABI 齐
-  //     libxr_loader.so     —— 华为 SDK，两个 ABI 齐
+  //   ✅ 收敛到 arm64 后**对模拟器毫无影响** —— 本机 MuMu 正是走 arm64 转译运行的。
+  //
+  //   唯一 ABI 的 native 库来源覆盖（已逐个核对）：
+  //     libauravr.so        —— 自建 CMake
+  //     libgpupixel.so      —— 源码集成 third_party/gpupixel
+  //     libmars-face-kit.so —— 预编译，arm64-v8a 有
+  //     libijkplayer.so     —— libs/ijkplayer-k0.8.9-release.aar
+  //     libsherpa-onnx-*.so / libonnxruntime.so —— sherpa aar
+  //     libmediapipe_*.so   —— tasks-vision aar
+  //     libopenxr_loader*.so / libxr_loader.so —— openxr_loader aar + 华为 SDK
   // ==========================================================================
     defaultConfig {
       ndk {
-        abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        abiFilters += listOf("arm64-v8a")
       }
     }
     externalNativeBuild {
@@ -454,8 +456,8 @@ dependencies {
   // ⚠️ 它是**全局单例**（Kotlin object）：同一时刻只能有一个 mpv 播放器。
   //    本项目同时只播一个片，够用；但要清楚这个限制（见 MpvPlayerBackend.kt 注释）。
   //
-  // ⚠️ 体积：AAR 65.4 MB；实际进包的是 abiFilters 允许的两个 ABI
-  //    （libmpv.so：arm64 ≈ 13.9 MB + armv7a ≈ 12 MB，另带 libass 等依赖）。
+  // ⚠️ 体积：AAR 65.4 MB；实际进包的是 abiFilters 允许的 **arm64-v8a 这一个 ABI**
+  //    （libmpv.so：arm64 ≈ 13.9 MB，另带 libass 等依赖）。
   // ==========================================================================
   implementation("io.github.marlboro-advance:mpv-android:1.0.0")
 

@@ -234,4 +234,112 @@ class DanmuTrackHeightTest {
         assertEquals(54f, trackH, 0.01f)
         assertTrue("总高不应超出区域", trackH * 20 <= area + 0.01f)
     }
+
+    // ===============================================================
+    // v2.4.10：**行数自适应**
+    // ===============================================================
+
+    @Test
+    fun `行数自适应用满可用区域`() {
+        // 1080×2400 / 18sp@3x(=54px)：
+        //   可用 = 2400 × 0.45 = 1080，单行 = 54 × 1.9 = 102.6 → floor = 10 行
+        val n = DanmuEngine.autoTrackCount(screenHeightPx = 2400f, fontSizePx = 54f, limit = 20)
+        assertEquals(10, n)
+    }
+
+    @Test
+    fun `字号变大时行数自动减少`() {
+        // 这是行数自适应的核心价值：大字号下不再硬塞固定行数
+        val small = DanmuEngine.autoTrackCount(2400f, 54f, 20)
+        val large = DanmuEngine.autoTrackCount(2400f, 96f, 20)
+        assertTrue("字号变大应减少行数（$small → $large）", large < small)
+    }
+
+    @Test
+    fun `自适应算出的行数恰好使行距等于理想值`() {
+        // ⚠️ 这是「行数自适应与行距自适应配套」的**核心不变量**：
+        //    若不成立，说明两个公式不自洽 —— 行距又会重新被区域上限压缩，
+        //    等于 v2.4.6 那个「改了却看不出效果」的问题换了个地方复现。
+        val screenH = 2400f
+        val font = 54f
+        val tracks = DanmuEngine.autoTrackCount(screenH, font, 20)
+        val area = DanmuEngine.computeAreaHeightPx(font, screenH, tracks)
+        val trackH = DanmuEngine.computeTrackHeightPx(font, area, tracks)
+        assertEquals(
+            "行距应等于理想值",
+            font * DanmuEngine.TRACK_HEIGHT_FONT_FACTOR,
+            trackH,
+            0.5f
+        )
+    }
+
+    @Test
+    fun `各种字号下这个不变量都成立`() {
+        val screenH = 2400f
+        listOf(30f, 42f, 54f, 66f, 78f, 90f).forEach { font ->
+            val tracks = DanmuEngine.autoTrackCount(screenH, font, 20)
+            val area = DanmuEngine.computeAreaHeightPx(font, screenH, tracks)
+            val trackH = DanmuEngine.computeTrackHeightPx(font, area, tracks)
+            val ideal = font * DanmuEngine.TRACK_HEIGHT_FONT_FACTOR
+            assertTrue(
+                "字号 $font 下行距 $trackH 偏离理想值 $ideal 过多",
+                kotlin.math.abs(trackH - ideal) <= 0.5f
+            )
+        }
+    }
+
+    @Test
+    fun `行数受用户上限封顶`() {
+        // 屏幕很大也不应无限排：受 limit 约束
+        assertEquals(4, DanmuEngine.autoTrackCount(screenHeightPx = 100_000f, fontSizePx = 10f, limit = 4))
+    }
+
+    @Test
+    fun `行数至少为 1`() {
+        // 字号极大（一行都放不下）时也不能返回 0 —— 否则弹幕无处可排
+        assertEquals(1, DanmuEngine.autoTrackCount(2400f, 100_000f, 20))
+    }
+
+    @Test
+    fun `屏高或字号非法时返回 1 且不崩`() {
+        listOf(
+            0f to 54f, -100f to 54f,
+            2400f to 0f, 2400f to -5f,
+            Float.NaN to 54f, 2400f to Float.NaN,
+            Float.POSITIVE_INFINITY to 54f, 2400f to Float.POSITIVE_INFINITY
+        ).forEach { (h, f) ->
+            assertEquals("h=$h f=$f 应返回 1", 1, DanmuEngine.autoTrackCount(h, f, 20))
+        }
+    }
+
+    @Test
+    fun `limit 越界时被夹到合法区间`() {
+        assertEquals(1, DanmuEngine.autoTrackCount(2400f, 54f, limit = 0))
+        assertEquals(1, DanmuEngine.autoTrackCount(2400f, 54f, limit = -3))
+        assertEquals(
+            DanmuConfig.MAX_TRACKS_LIMIT,
+            DanmuEngine.autoTrackCount(100_000f, 10f, limit = 999)
+        )
+    }
+
+    @Test
+    fun `行数随屏高单调不减`() {
+        var prev = 0
+        listOf(600f, 1200f, 2400f, 4800f).forEach { h ->
+            val n = DanmuEngine.autoTrackCount(h, 54f, 20)
+            assertTrue("屏高变大行数不应减少（$prev → $n）", n >= prev)
+            prev = n
+        }
+    }
+
+    @Test
+    fun `默认配置下自适应给出的行数不少于旧的固定 8 行`() {
+        // 默认屏 1080×2400 / 18sp@3x / 默认 maxTracks=8：
+        // 自适应算出 10 行 > 8 —— 说明它确实在**更充分地利用**区域，
+        // 而不是把行数压得更少（后者会让弹幕显得稀疏，与需求相反）。
+        val n = DanmuEngine.autoTrackCount(defaultScreenH, defaultFontPx, DanmuConfig.DEFAULT_MAX_TRACKS)
+        assertEquals(DanmuConfig.DEFAULT_MAX_TRACKS, n)  // 被默认上限 8 封顶
+        val unclamped = DanmuEngine.autoTrackCount(defaultScreenH, defaultFontPx, DanmuConfig.MAX_TRACKS_LIMIT)
+        assertTrue("放开上限后应多于 8 行（实际 $unclamped）", unclamped > DanmuConfig.DEFAULT_MAX_TRACKS)
+    }
 }

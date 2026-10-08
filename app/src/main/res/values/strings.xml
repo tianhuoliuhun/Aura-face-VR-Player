@@ -889,6 +889,8 @@
     <string name="danmu_section_display">显示效果</string>
     <string name="danmu_speed">滚动速度</string>
     <string name="danmu_max_tracks">轨道数</string>
+    <string name="danmu_auto_tracks">行数自适应</string>
+    <string name="danmu_auto_tracks_desc">轨道数按字号与可用区域自动计算；下方的「最大轨道数」随之变为上限</string>
     <string name="danmu_opacity">不透明度</string>
     <string name="danmu_font_size">字号</string>
     <string name="danmu_privacy_hint">开启后画面会压缩上传至所填服务，请自行确认其隐私政策</string>

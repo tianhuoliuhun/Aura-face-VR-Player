@@ -2,6 +2,7 @@ package com.example.vr
 
 import androidx.compose.ui.graphics.Color
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
@@ -96,8 +97,19 @@ class DanmuEngine {
             }
         }
 
-    /** 最大轨道数 */
+    /** 最大轨道数（**上限**；开启 [autoTracks] 时它是自动值的封顶，而非直接使用的值） */
     var maxTracks: Int = DanmuConfig.DEFAULT_MAX_TRACKS
+
+    /**
+     * v2.4.10：**行数自适应**开关。
+     *
+     * 开启后轨道数由 [DanmuEngine.autoTrackCount] 按「字号 + 可用区域」自动算出，
+     * [maxTracks] 退化为**上限**（用户仍可限制最多几行）；关闭后完全沿用用户手填值。
+     *
+     * ⚠️ 这里只持有开关、不自己算 —— 算它需要**屏幕高度与字号像素**，
+     *    那是渲染层（`DanmuOverlay` 的 BoxWithConstraints）才有的知识。
+     */
+    var autoTracks: Boolean = DanmuConfig.DEFAULT_AUTO_TRACKS
 
     /** 相似度去重阈值 0–100（越大越严格，越不容易被判为重复） */
     var dedupThresholdPercent: Int = DanmuConfig.DEFAULT_DEDUP_PERCENT
@@ -603,6 +615,45 @@ class DanmuEngine {
             return min(natural, fit)
         }
 
+        /**
+         * v2.4.10：**行数自适应** —— 按可用区域高度与字号，算出最多能排几行。
+         *
+         * ## 解决什么问题
+         * 轨道数原先完全由用户手填（默认 8、上限 20）。但「能排几行」本质上是
+         * **由字号和可用区域决定的物理结果**，不该让用户去猜：
+         * - **字号调大后仍保留 8 行** → 内容超出 [AREA_HEIGHT_RATIO_MAX] 上限 →
+         *   **行距被压缩**、弹幕上下贴在一起（正是 v2.4.6 要治的观感的另一面）；
+         * - **字号小、屏幕大** → 8 行只占区域的一小块，**上面空一大片**。
+         *
+         * ## 公式
+         * ```
+         * 行数 = floor(屏高 × AREA_HEIGHT_RATIO_MAX ÷ (字号 × TRACK_HEIGHT_FONT_FACTOR))
+         * ```
+         * 即「可用区域里能塞下几个理想行距」。
+         *
+         * ## ⚠️ 为什么这样就能**彻底消除**「行距被压缩」
+         * 算出的行数恰好填满可用区域：
+         * `行数 × 字号 × 系数 ≈ 屏高 × AREA_HEIGHT_RATIO_MAX`
+         * → 代入 [computeAreaHeightPx]：区域 ≈ 内容所需 → 不会被上限压缩
+         * → 代入 [computeTrackHeightPx]：行距 = `字号 × 系数`（**正好是理想值**）。
+         * 三者自洽 —— 行距自适应才真正可见（否则会像 v2.4.6 那样"改了但看不出来"）。
+         *
+         * @param screenHeightPx 整屏高（px）；<=0 或非法值 → 返回 1
+         * @param fontSizePx     字号折算出的像素高（渲染层用 LocalDensity 换算）
+         * @param limit          用户设定的**轨道数上限**（保留人工封顶能力）
+         */
+        fun autoTrackCount(
+            screenHeightPx: Float,
+            fontSizePx: Float,
+            limit: Int = DanmuConfig.MAX_TRACKS_LIMIT
+        ): Int {
+            val capPx = screenHeightPx * AREA_HEIGHT_RATIO_MAX
+            val unitPx = fontSizePx * TRACK_HEIGHT_FONT_FACTOR
+            if (capPx <= 0f || unitPx <= 0f || !capPx.isFinite() || !unitPx.isFinite()) return 1
+            val ceiling = limit.coerceIn(1, DanmuConfig.MAX_TRACKS_LIMIT)
+            return floor(capPx / unitPx).toInt().coerceIn(1, ceiling)
+        }
+
         // ================================================================
         // v2.4.7：批次时间戳 —— 正态分布抖动
         // ================================================================
@@ -633,13 +684,34 @@ class DanmuEngine {
         const val DEFAULT_TIME_JITTER_MS = 400f
 
         /**
-         * 单条抖动量的**绝对值上限**（ms）。
+         * 单条抖动量的**绝对天花板**（ms）。v2.4.10：1000 → **25000**。
          *
-         * 正态分布理论上无穷远，必须截断 —— 否则极小概率会摇出一个 ±3s 开外的值，
-         * 让某条弹幕「凭空迟到几秒」才出现，观感上像卡顿。
-         * 取 2.5σ（σ=400 时为 1000ms）：保留 98.8% 的分布形态，又封死长尾。
+         * ## 为什么必须随 σ 上限一起放大
+         * 用户要求抖动范围支持到 10 秒（σ_max = 10000，见 [DanmuConfig.MAX_TIME_JITTER_MS]）。
+         * 若天花板仍是 1000，σ 一超过 400 就会**几乎全部被截断**在 ±1000 ——
+         * 分布退化成「±1s 内近似均匀」，正态形态彻底消失（σ 调到 10 秒也毫无效果）。
+         * 25000 = 10 秒 × 2.5σ，正好容纳最大的 σ。
+         *
+         * ⚠️ 它只是**防御性天花板**（防极端长尾），**不是**实际截断值 ——
+         *    实际截断 = min([SPREAD_SIGMA_LIMIT] × σ, 本值)，见 [spreadBornTimes]。
          */
-        const val SPREAD_MAX_ABS_MS = 1000L
+        const val SPREAD_MAX_ABS_MS = 25_000L
+
+        /**
+         * 截断倍率：单条抖动不超过 **±2.5σ**。
+         *
+         * ## 为什么做成「随 σ 缩放」而不是固定值（v2.4.10 修正）
+         * 旧实现是固定 `±1000ms`。那在 σ=400（默认）时恰好等于 2.5σ，没问题；
+         * 但 σ 一旦可调大到 10 秒，固定截断就会把分布压成矩形（见上）。
+         *
+         * 改成「截断 = k×σ」后两边都对：
+         * - **σ=400 → 截断 ±1000ms（与旧行为完全一致，老用户无感）**；
+         * - σ=10000 → 截断 ±25000ms（正态形态完整保留）。
+         *
+         * 取 2.5 的意义：保留 98.8% 的分布形态，又封死长尾
+         * （正态落在 ±2.5σ 之外的占比仅 1.24%）。
+         */
+        const val SPREAD_SIGMA_LIMIT = 2.5f
 
         /**
          * 从均匀随机数生成**标准正态**随机数（Box–Muller 变换）。
@@ -726,11 +798,16 @@ class DanmuEngine {
             // σ 无效 → 不抖动（保持旧式「全部同一时刻」，由调用方决定是否需要）
             if (sigmaMs <= 0f || !sigmaMs.isFinite()) return LongArray(count) { centerMs }
 
-            // ① 掷 count 个抖动（截断到 ±SPREAD_MAX_ABS_MS，防止正态长尾）
+            // ① 掷 count 个抖动
+            //    截断上限 = min(2.5σ, SPREAD_MAX_ABS_MS)：
+            //      · 「2.5σ」那一项随 σ 缩放，保证 σ 调大时正态形态不被压平；
+            //      · 绝对天花板那一项防极端长尾。
+            //    σ=400（默认）时 min(1000, 25000) = 1000 —— 与 v2.4.7 行为**逐值一致**。
+            val limit = minOf((sigmaMs * SPREAD_SIGMA_LIMIT).toLong(), SPREAD_MAX_ABS_MS)
             val jitters = LongArray(count)
             for (i in 0 until count) {
                 val z = standardNormal(roll)
-                val jitter = (z * sigmaMs).toLong().coerceIn(-SPREAD_MAX_ABS_MS, SPREAD_MAX_ABS_MS)
+                val jitter = (z * sigmaMs).toLong().coerceIn(-limit, limit)
                 jitters[i] = jitter
             }
             // ② 升序 → 按原下标依次取用，保证单调不减

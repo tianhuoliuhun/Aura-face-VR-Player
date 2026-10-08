@@ -190,7 +190,25 @@ private fun DanmuEye(
 
         val strokeWidthPx = with(density) { strokeWidthDp.dp.toPx() }
         val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
-        val trackCount = engine.maxTracks.coerceAtLeast(1)
+        // ===== v2.4.10：**行数自适应** =====
+        // 轨道数不再固定，而是「可用区域能塞下几个理想行距」。
+        //
+        // ⚠️ 为什么必须与行距自适应**配套**：只做行距自适应（v2.4.6）时，
+        //    轨道数仍是用户手填的固定值 —— 字号调大后内容会超出 AREA_HEIGHT_RATIO_MAX
+        //    上限，行距**照样被压缩**，等于治标不治本。
+        //    改成自动行数后：`行数 × 字号 × 系数 ≈ 可用区域` → 区域不再被上限压缩
+        //    → 行距恒等于「字号 × 系数」这个理想值。三者自洽（推导见 autoTrackCount）。
+        //
+        // 关闭自适应时退回用户手填的 maxTracks（旧行为，保证可回退）。
+        val trackCount = if (engine.autoTracks) {
+            DanmuEngine.autoTrackCount(
+                screenHeightPx = heightPx,
+                fontSizePx = fontSizePx,
+                limit = engine.maxTracks
+            )
+        } else {
+            engine.maxTracks.coerceAtLeast(1)
+        }
 
         // ===== v2.4.6：行距自适应（区域随内容长）=====
         // 公式抽到 DanmuEngine 的纯函数（可单测）—— 避免「同一份逻辑两处登记」。
@@ -224,7 +242,9 @@ private fun DanmuEye(
 
         // ⚠️ 同步给引擎：分屏时这里拿到的就是**单眼宽**，天然正确。
         //    轨道高度也在此同步（引擎的间距判据会用到）。
-        LaunchedEffect(widthPx, areaHeightPx, engine.maxTracks, trackHeightPx) {
+        // ⚠️ key 用 trackCount（实际生效值）而不是 engine.maxTracks ——
+        //    开自适应时后者只是上限，用它做 key 会在「上限没变但算出的行数变了」时漏更新。
+        LaunchedEffect(widthPx, areaHeightPx, trackCount, trackHeightPx) {
             engine.screenWidthPx = widthPx
             engine.trackHeightPx = trackHeightPx
         }
