@@ -312,7 +312,13 @@ data class DanmuConfig(
 
     /** 是否已具备可请求的最少信息 */
     fun isReadyToRequest(): Boolean =
-        apiKey.isNotBlank() && baseUrl.isNotBlank() && modelName.isNotBlank()
+        // ⚠️ v2.4.13：**本地 LLM 模式不需要 API 配置** —— 端侧推理不联网，
+        //    根本没有 apiKey / baseUrl / modelName 这三个东西。
+        //    若不在这里短接，编排循环开头的 `if (!isReadyToRequest()) return`
+        //    会**直接退出**，表现为「开了本地模式却一条弹幕都不出」。
+        //    （模型是否真的就绪由编排循环里的 LocalLlmManager 另行判断。）
+        if (useLocalLlm) true
+        else apiKey.isNotBlank() && baseUrl.isNotBlank() && modelName.isNotBlank()
 
     /**
      * v2.4.2：Base URL 本身的问题（`null` = 没问题）。
@@ -334,6 +340,9 @@ data class DanmuConfig(
      * @return 错误码，供 UI 映射到本地化文案；`null` 表示语法上没问题
      */
     fun baseUrlProblem(): BaseUrlProblem? {
+        // ⚠️ v2.4.13：本地模式**没有** baseUrl，不该报「接口地址为空」——
+        //    编排循环里紧跟 isReadyToRequest 之后就会调它，漏了这句同样会直接退出。
+        if (useLocalLlm) return null
         val base = baseUrl.trim()
         if (base.isEmpty()) return BaseUrlProblem.EMPTY
         // 取出 scheme（第一个 ':' 之前）
