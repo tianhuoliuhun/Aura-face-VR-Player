@@ -1,38 +1,47 @@
 package com.example.vr
 
 /**
- * AVI（RIFF）**索引表探测** —— 判断一个 AVI 是否带 `idx1` 索引（v2.4.9）。
+ * AVI（RIFF）**索引充分性探测** —— 判断一个 AVI 的索引能否覆盖**全片**（v2.4.9 引入，v2.4.19 增强）。
  *
- * ## 只回答一个问题：有没有索引？
+ * ## 它回答的问题（v2.4.19 起不再只是「有没有索引」）
  *
- * ⚠️ 本类**刻意不判断视频编码**。历史上这里曾用于识别「AVI 内的 AV1」，
- * 该逻辑已整体移除（用户明确要求：不为 AV1 单独折腾）。
- * 想识别编码应走别处，**不要往这里加判据** ——
- * 本类的唯一用途是给 seek 修复提供依据，而编码种类对它没有影响：
- * 无论 XVID 还是别的，只要没有 `idx1`，seek 症状完全一样。
+ * 1. **有没有 `idx1`**？（原来唯一的问题）
+ * 2. **有没有 OpenDML 索引**（`indx` / `ix00` …）？—— 有它时 Media3Avi 会**优先用它**
+ *    （`AviExtractor`：`if (riffType == AVIX || getIndexBoxList().size() > 0)` → 跳过 `idx1`），
+ *    即使 `idx1` 只覆盖第一段也能 seek 全片。
+ * 3. **是否存在多个 `movi` 段**（`LIST … AVIX`）？—— 这是「`idx1` 只覆盖第一段」的**前提条件**。
  *
- * ## 为什么「有没有 idx1」决定了 seek 能不能用
+ * ## 🔴 为什么第 3 条才是关键（v2.4.19 新增的判据）
  *
- * AVI 的关键帧位置记录在文件尾部的 `idx1` chunk 里（`AviSeekMap` 读它）。
+ * `idx1` 的 offset 字段是 **32 位**（相对第一个 `movi` 起点），所以**文件大到需要分段时**
+ * （>1~2GB，老工具常见），文件会变成 **多个 `movi` + `AVIX` 容器**，
+ * 而 `idx1`（只有一个）**通常只索引第一段**。
  *
- * - **有 `idx1`** → seek 能直接查到目标点附近的关键帧 → 定位快且准。
- * - **没有 `idx1`**（老设备导出的 AVI 很常见）→ 只能**从头线性扫描 chunk**。
- *   这不只是「慢」，更关键的是**扫到的位置未必落在真正的关键帧上** ——
- *   解码器从非关键帧开始**解不出后续画面**（缺 I 帧参考），
- *   表现就是用户报的那个症状：
- *   > **「能跳过去、画面停在那一帧、但不再继续播放」**
+ * Media3Avi 的 `parseIdx1()` 只要 `idx1` ≥16 字节就**无条件接受**并 `buildSeekMap()` ——
+ * **它不核对 `idx1` 覆盖到哪里**。于是第二段的 chunk **没有索引条目** →
+ * 拖到后半段时会落到「最后一个已知位置」（第一段末尾）→ 表现为
+ * **「拖到后半段，画面停在前面不动」**。
  *
- * 该症状**不是** seek 参数能修的（本项目已经设了 `SeekParameters`、也早已
- * 改成「拖动中不 seek、松手只 seek 一次」）—— 根因在**容器缺索引**，
- * 唯一解法是用 [VideoRemuxer] 不重编码地重新封装为 MP4（重建索引）。
+ * ⚠️ **实测校正（v2.4.19）**：拿 3 个真实样本（含上游命名为 `odml` 的那个）测过，
+ * **它们的 `idx1` 都完整覆盖到文件尾（98.7%~99.9%）、且都没有 `AVIX`/`indx`**。
+ * 也就是说「`idx1` 只覆盖第一段」**不是常态**，必须满足
+ * **「多段 `movi`（`AVIX`）**且**无 `indx`」**这两个条件才成立 ——
+ * 所以判据必须**同时**看这两件事：不能一见到「有 idx1」就放过，也不能一见到 `idx1` 就重建。
  *
- * → 本类提前把「有没有索引」探明，让调用方**在第一次 seek 时就知道该不该重封装**，
- *   而不是等用户被卡一次之后才反应。
+ * ## 判据汇总（[Probe.needsIndexRebuild]）
+ * | 情形 | 判定 |
+ * |---|---|
+ * | 无 `idx1` | **重建**（原有判据；没有索引就没有 seek 能力） |
+ * | 有 `idx1` + **多段 `AVIX`** + **无 `indx`** | **重建**（新增：idx1 只覆盖第一段） |
+ * | 有 `idx1` + 多段 `AVIX` + **有 `indx`** | 不必重建（Media3Avi 会优先用 `indx`） |
+ * | 有 `idx1` + 单段 `movi` | 不必重建（实测 idx1 覆盖到文件尾） |
  *
  * ## 设计约束
  * - **纯逻辑、零 Android 依赖**（只吃 `ByteArray`）→ 可在纯 JVM 单测里跑。
  *   文件 IO 由调用方负责（`VRPlayerScreen` 读头 + 读尾）。
  * - **不信任 chunk 长度**：`size` 字段来自文件内容，所有偏移都做边界检查。
+ * - ⚠️ 本类**仍然不判断视频编码**（历史上用于识别「AVI 内的 AV1」的逻辑已按用户要求整体移除）。
+ *   编码种类与 seek 修复无关 —— 无论 XVID 还是别的，只要索引不足以覆盖全片，症状完全一样。
  */
 object AviRiffProbe {
 
@@ -41,21 +50,46 @@ object AviRiffProbe {
         /** 是否确实是 RIFF/AVI 容器（前 12 字节判定）。 */
         val isAvi: Boolean,
         /** 文件里是否存在 `idx1` 索引 chunk。 */
-        val hasIndexChunk: Boolean
+        val hasIndexChunk: Boolean,
+        /**
+         * 头部（`hdrl` 内）是否存在 **OpenDML 索引**（`indx` / `ix00` / …）。
+         *
+         * 有它时 Media3Avi **优先用它**，`idx1` 不完整也不影响 seek。
+         */
+        val hasOpenDmlIndex: Boolean = false,
+        /**
+         * 是否存在**多个 `movi` 段**（`LIST … AVIX`）。
+         *
+         * 这是「`idx1` 只覆盖第一段」的**前提**；单段 `movi` 的 AVI 里 `idx1` 必然覆盖全片。
+         */
+        val hasMultiSegment: Boolean = false
     ) {
         /**
-         * 是 AVI 但**没有索引表** → seek 会「跳到却不继续播」，应重封装。
+         * 索引**不足以覆盖全片** → seek 会「跳到却不继续播 / 停在前段」→ 应重封装。
          *
          * ⚠️ 非 AVI 恒为 false：别的容器（mp4/mkv）有自己的索引机制，
-         * 不能用「没有 idx1」去推断它们不能 seek。
+         * 不能用「AVI 的索引够不够」去推断它们。
          */
-        val needsIndexRebuild: Boolean get() = isAvi && !hasIndexChunk
+        val needsIndexRebuild: Boolean
+            get() = isAvi && (
+                // ① 完全没有索引 —— 连第一段都 seek 不了
+                !hasIndexChunk
+                    // ② 多段 movi（idx1 只可能覆盖第一段）**且**没有 OpenDML 索引可替代
+                    || (hasMultiSegment && !hasOpenDmlIndex)
+                )
     }
 
-    /** 判定「是不是 AVI」只需 12 字节；留一点余量便于将来扩展。 */
-    const val HEAD_BYTES = 1024
+    /**
+     * 判定「是不是 AVI」+ 找 OpenDML 索引所需的头部字节数。
+     *
+     * ⚠️ v2.4.19：**1KB → 64KB**。`indx` 是 `strl` 的子块、位于 `hdrl` 里，
+     * 而 `hdrl`（含 avih + 各 strl/strf）**经常超过 1KB** ——
+     * 只读 1KB 会漏掉 `indx` → 把「有 OpenDML 索引」误判成「没有」→
+     * 多段 AVI 会被无谓地重封装（白等几十秒）。
+     */
+    const val HEAD_BYTES = 64 * 1024
 
-    /** 扫描 `idx1` 时读取的文件尾部长度。索引 chunk 位于 `movi` 之后，即文件末尾。 */
+    /** 扫描 `idx1` / `AVIX` 时读取的文件尾部长度。索引与多段容器都位于 `movi` 之后，即文件末尾附近。 */
     const val TAIL_BYTES = 1024 * 1024
 
     /** 单个 `idx1` 条目固定 16 字节 → chunk 大小必须是它的整数倍（强判据，防误命中）。 */
@@ -64,12 +98,15 @@ object AviRiffProbe {
     /** `idx1` 大小上限（512MB），超过视为误命中。 */
     private const val IDX1_MAX_BYTES = 512L * 1024 * 1024
 
+    /** `indx` 头最短长度（wLongsPerEntry 起算的固定字段）。 */
+    private const val INDX_MIN_BYTES = 24
+
     // ===================================================================
-    // 一、容器判定
+    // 一、容器判定 + OpenDML 索引（头部）
     // ===================================================================
 
     /**
-     * 头部字节是否像 AVI：`RIFF` + 4 字节长度 + `AVI `。
+     * 头部字节是否像 AVI：`RIFF` + 4 字节长度 + `AVI `；同时探 `indx`。
      *
      * ⚠️ 即使调用方已按扩展名筛过仍需要它：扩展名会撒谎，
      * 一个名为 `.avi` 的文件完全可能是别的容器 —— 那样就不该按 AVI 的逻辑去重封装。
@@ -78,11 +115,52 @@ object AviRiffProbe {
         if (head.size < 12) return Probe(isAvi = false, hasIndexChunk = false)
         if (ascii(head, 0, 4) != "RIFF") return Probe(false, false)
         if (ascii(head, 8, 4) != "AVI ") return Probe(false, false)
-        return Probe(isAvi = true, hasIndexChunk = false)
+        return Probe(isAvi = true, hasIndexChunk = false, hasOpenDmlIndex = containsOpenDmlIndex(head))
+    }
+
+    /**
+     * 头部缓冲里是否存在 **OpenDML 索引**（`indx` / `ix00` / `ix01` …）。
+     *
+     * ⚠️ 必须做**内容校验**，不能只搜 4 字节字面量 —— 与 `idx1` 同理，
+     * 那 4 个字符完全可能偶然出现在别的数据里。
+     * `indx` 的结构（AVI 规范 / `IndexBox`）：
+     * ```
+     *   'indx' | size(4) | wLongsPerEntry(2) | bIndexSubType(1) | bIndexType(1)
+     *          | nEntriesInUse(4) | dwChunkId(4) | …
+     * ```
+     * 校验：`size >= 24`、`wLongsPerEntry ∈ {2,4,8,16}`、`bIndexType ∈ {0,1}`（标准索引类型）。
+     */
+    fun containsOpenDmlIndex(buffer: ByteArray): Boolean {
+        // 只需能读到 id(4)+size(4)+wLongsPerEntry(2)+subType(1)+indexType(1) = 12 字节即可校验；
+        // 不要求整个 `indx` 都在缓冲内（它可能被缓冲边界截断）。
+        if (buffer.size < 12) return false
+        var i = 0
+        var nearMiss = 0
+        while (i + 12 <= buffer.size) {
+            val isIndx = buffer[i] == 'i'.code.toByte() && buffer[i + 1] == 'n'.code.toByte() &&
+                buffer[i + 2] == 'd'.code.toByte() && buffer[i + 3] == 'x'.code.toByte()
+            val isIx = buffer[i] == 'i'.code.toByte() && buffer[i + 1] == 'x'.code.toByte() &&
+                buffer[i + 2] == '0'.code.toByte()
+            if (isIndx || isIx) {
+                val sz = le32(buffer, i + 4)
+                val wLongs = le16(buffer, i + 8)
+                val indexType = buffer[i + 11].toInt() and 0xFF
+                if (sz >= INDX_MIN_BYTES && sz <= IDX1_MAX_BYTES &&
+                    (wLongs == 2 || wLongs == 4 || wLongs == 8 || wLongs == 16) &&
+                    (indexType == 0 || indexType == 1)
+                ) {
+                    return true
+                }
+                nearMiss++
+                if (nearMiss > 16) return false
+            }
+            i++
+        }
+        return false
     }
 
     // ===================================================================
-    // 二、idx1 索引存在性
+    // 二、idx1 索引存在性（尾部）
     // ===================================================================
 
     /**
@@ -123,7 +201,43 @@ object AviRiffProbe {
     }
 
     // ===================================================================
-    // 三、字节小工具（全部带边界检查，绝不抛 IndexOutOfBounds）
+    // 三、多段 movi（AVIX）存在性 —— v2.4.19 新增
+    // ===================================================================
+
+    /**
+     * 尾部缓冲里是否存在**多段 `movi` 容器**（`LIST … AVIX`）。
+     *
+     * ## 为什么这是「idx1 只覆盖第一段」的判据
+     * `idx1` 的 offset 是 32 位、**相对第一个 `movi` 起点**；文件大到需要分段时，
+     * 后续内容被放进额外的 `LIST AVIX` 里，而**唯一的 `idx1` 只描述第一段**。
+     * 所以「存在 `AVIX`」⇔「`idx1` 很可能不完整」。
+     *
+     * ⚠️ 同样要做**结构性校验**：`AVIX` 必须出现在 `LIST` 的 **type 位置**
+     * （即 `'LIST' | size(4) | 'AVIX'`），而不是随便 4 个字节。
+     * 单独出现的 `AVIX` 字面量（在压缩数据里）不算数。
+     */
+    fun containsMultiSegmentMarker(buffer: ByteArray): Boolean {
+        if (buffer.size < 12) return false
+        var i = 4  // 保证 i-8 >= 0
+        while (i + 4 <= buffer.size) {
+            if (buffer[i] == 'A'.code.toByte() && buffer[i + 1] == 'V'.code.toByte() &&
+                buffer[i + 2] == 'I'.code.toByte() && buffer[i + 3] == 'X'.code.toByte()
+            ) {
+                // 前 8 字节应是 LIST + 合理的 size
+                if (i >= 8 &&
+                    ascii(buffer, i - 8, 4) == "LIST" &&
+                    le32(buffer, i - 4) in 4..(512L * 1024 * 1024)
+                ) {
+                    return true
+                }
+            }
+            i++
+        }
+        return false
+    }
+
+    // ===================================================================
+    // 四、字节小工具（全部带边界检查，绝不抛 IndexOutOfBounds）
     // ===================================================================
 
     /** 读 4 字节 ASCII；越界返回空串（调用方按「没读到」处理）。 */
@@ -139,5 +253,11 @@ object AviRiffProbe {
             ((b[off + 1].toLong() and 0xFFL) shl 8) or
             ((b[off + 2].toLong() and 0xFFL) shl 16) or
             ((b[off + 3].toLong() and 0xFFL) shl 24)
+    }
+
+    /** 读 2 字节小端无符号整数；越界返回 -1。 */
+    private fun le16(b: ByteArray, off: Int): Int {
+        if (off < 0 || off + 2 > b.size) return -1
+        return (b[off].toInt() and 0xFF) or ((b[off + 1].toInt() and 0xFF) shl 8)
     }
 }

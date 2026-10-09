@@ -152,5 +152,15 @@ data class MediaItem(
     val isVideo: Boolean,
     val isDemo: Boolean = false,
     val demoAssetPath: String? = null,
-    val description: String = ""
+    val description: String = "",
+    /**
+     * 容器 MIME（v2.4.19，**可选**）。
+     *
+     * ⚠️ 为什么需要它：相册返回的 `content://media/...` URI 里**没有扩展名**，
+     * 而内核路由（[MediaFormats.shouldRouteToMpv] 等）全靠扩展名判 —— 取不到就意味着
+     * 「AVI/WMV 从相册打开时不走 MPV」。故把选择器已知的 MIME 存下来，
+     * 在 [MediaFormats.extensionOf] 返回空串时用 [MediaFormats.extFromMime] 兜底。
+     * 默认 null → 所有既有构造点不受影响。
+     */
+    val mimeType: String? = null
 )

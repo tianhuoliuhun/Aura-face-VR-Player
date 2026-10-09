@@ -285,6 +285,33 @@ object MediaFormats {
         return ext.lowercase().takeIf { it.isNotEmpty() && it.length <= 5 } ?: ""
     }
 
+    /**
+     * **按 MIME 反推扩展名**（v2.4.19）—— 供「扩展名取不到」时兜底。
+     *
+     * ## 为什么必须有
+     * 相册（photo picker）返回的是 `content://media/external/video/media/<id>`，
+     * 这种 URI 的 `path` 里**没有任何扩展名** → [extensionOf] 返回空串 →
+     * [shouldRouteToMpv] / [prefersMpvGpuVo] 全部判 false →
+     * **AVI / WMV 从相册打开时不走 MPV，用户会以为「改了设置没生效」**。
+     *
+     * ⚠️ 这些容器的 MIME 本身**不统一**（业内历史遗留），所以要逐条列出而非猜前缀：
+     * `video/x-ms-wmv` / `video/x-ms-asf` / `application/vnd.ms-asf` 都可能出现。
+     * 只收录**需要参与内核路由**的那几类（AVI/WMV/RM/IVF），其余返回空串。
+     */
+    fun extFromMime(mime: String?): String {
+        val m = mime?.lowercase()?.substringBefore(';')?.trim() ?: return ""
+        return when (m) {
+            "video/x-msvideo", "video/avi", "video/msvideo",
+            "video/vnd.avi", "application/x-troff-msvideo" -> "avi"
+            "video/x-ms-wmv", "video/x-ms-asf", "application/vnd.ms-asf",
+            "application/x-mplayer2" -> "wmv"
+            "video/vnd.rn-realvideo", "application/vnd.rn-realmedia",
+            "application/vnd.rn-realmedia-vbr" -> "rm"
+            "video/x-ivf" -> "ivf"
+            else -> ""
+        }
+    }
+
     // ===================== 能力判定 =====================
 
     /**
@@ -347,14 +374,40 @@ object MediaFormats {
     /**
      * 该容器是否值得「自动切换到 MPV」。
      *
-     * 与 [shouldAutoRouteToIjk] 互斥（前者管「只有 MPV 能解」、后者管「只有 IJK 能解」），
-     * 调用方按顺序判：先 [requiresMpv] 再 [shouldAutoRouteToIjk]。
+     * ## v2.4.19：AVI / RIFF 家族**也默认走 MPV**
+     * 用户要求「AVI 默认走 MPV」。理由充分：
+     * - MPV 有**完整 libavformat 的 AVI 解容器**（`AVI (Audio Video Interleaved)` 实测在
+     *   `libavformat.so` 里），**没有 `idx1` 索引也能正常 seek**；
+     * - 而 EXO 那条路必须靠「[AviRiffProbe] 探索引 + [VideoRemuxer] 重封装成 MP4」才能
+     *   让 seek 可用 —— 属于**补救**，且要等用户先被卡一次（见 `AVI_LOCAL_SUBTITLE_DIAGNOSIS`）；
+     * - 重封装还有损（时间戳倒退的样本被丢、音轨不被 muxer 支持则静音）。
      *
-     * 之所以单独提供一个 `should...` 名字而不是直接暴露 [requiresMpv]：
-     * 与 [shouldAutoRouteToIjk] 保持同名风格，将来若 MPV 侧要加例外（如某格式
-     * EXO 也能凑合）只需改这一处，调用点不动。
+     * ⚠️ 与 [shouldAutoRouteToIjk] 互斥（前者管「该走 MPV」、后者管「只有 IJK 能解」），
+     * 调用方按顺序判：**先 [shouldRouteToMpv] 再 [shouldAutoRouteToIjk]**。
+     *
+     * ⚠️ 自动路由**不写回 prefs**（同 v2.1.241 的理由）——否则「打开一次 AVI 就永久
+     * 走 MPV」，下次播普通 MP4 白掉零拷贝硬解性能，用户会当成 bug。
      */
-    fun shouldRouteToMpv(ext: String): Boolean = requiresMpv(ext)
+    fun shouldRouteToMpv(ext: String): Boolean = requiresMpv(ext) || isAviFamily(ext)
+
+    /**
+     * MPV 播该容器时是否**必须用 `vo=gpu`**（v2.4.19）。
+     *
+     * ## 🔴 为什么不能沿用「需 MPV 的容器」这一个判据
+     * `mediacodec_embed` 的 `query_format()` **只返回 `format == IMGFMT_MEDIACODEC`**
+     * → **只吃硬件解码帧**，软解输出的 `yuv420p` 一律拒收
+     * （实测报错 `Failed to create HW uploader for format yuv420p`）。
+     * 所以凡是「**片源编码可能没有硬解器**」的容器都必须走 `vo=gpu`（软硬解都能出画）：
+     * - `WMV1/WMV2`、`RealVideo` → 现代 Android 无硬解器（[requiresMpv] 已覆盖）；
+     * - **AVI 里最常见的 `Xvid/DivX`（MPEG-4 Part 2）** → 多数新机**已移除该硬解器**，
+     *   而无硬解时 EMBED 必然黑屏 —— 这正是「AVI 交给 MPV 却播不出来」的技术根因。
+     *
+     * 代价：有硬解时多一次 GPU 拷贝（这些容器本来多半走软解，实际损失很小）。
+     *
+     * ⚠️ 判据与 [shouldRouteToMpv] **当前恰好相同，但语义不同**，故保留两个名字：
+     *    前者管「派给谁」，本方法管「怎么出画」，将来分化时只改一处。
+     */
+    fun prefersMpvGpuVo(ext: String): Boolean = requiresMpv(ext) || isAviFamily(ext)
 
     /**
      * 该 URI 是否需要「特殊处理提示」（ISO 镜像）。

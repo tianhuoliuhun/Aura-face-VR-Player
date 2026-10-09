@@ -1721,7 +1721,9 @@ fun VRPlayerScreen(
             uri = uri.toString(),
             isVideo = isVideo,
             isDemo = false,
-            description = context.getString(R.string.media_imported_desc, uri.lastPathSegment)
+            description = context.getString(R.string.media_imported_desc, uri.lastPathSegment),
+            // v2.4.19：存下 MIME —— 相册的 content:// 无扩展名，内核路由要靠它兜底
+            mimeType = mimeType
         )
 
         if (isVideo) {
@@ -2366,8 +2368,9 @@ fun VRPlayerScreen(
                 val headProbe = AviRiffProbe.parseHeader(headBuf.copyOf(headLen))
                 if (!headProbe.isAvi) return@withContext headProbe
 
-                // ---- 尾部：idx1 索引在 movi 之后，取末尾一段扫 ----
+                // ---- 尾部：idx1 索引与 AVIX 多段容器都在 movi 之后，取末尾一段扫 ----
                 var hasIdx = false
+                var hasMulti = false
                 cr.openFileDescriptor(parsed, "r")?.use { pfd ->
                     val size = pfd.statSize
                     if (size > 0) {
@@ -2383,10 +2386,14 @@ fun VRPlayerScreen(
                             if (n <= 0) break
                             off += n
                         }
-                        hasIdx = AviRiffProbe.containsIndexMarker(tail.copyOf(off))
+                        // ⚠️ v2.4.19：同一份 tail 缓冲同时判两件事（idx1 存在性 + 多段 AVIX），
+                        //    不重复读文件。
+                        val view = tail.copyOf(off)
+                        hasIdx = AviRiffProbe.containsIndexMarker(view)
+                        hasMulti = AviRiffProbe.containsMultiSegmentMarker(view)
                     }
                 }
-                headProbe.copy(hasIndexChunk = hasIdx)
+                headProbe.copy(hasIndexChunk = hasIdx, hasMultiSegment = hasMulti)
             } catch (e: Exception) {
                 Log.w("VRPlayerScreen", "AVI 容器探测失败（按未知处理）：${e.message}")
                 null
@@ -2397,8 +2404,10 @@ fun VRPlayerScreen(
             Log.i(
                 "VRPlayerScreen",
                 "AVI 探测：容器=${if (it.isAvi) "AVI" else "非 AVI"}，" +
-                    "idx1 索引=${if (it.hasIndexChunk) "有" else "无"}" +
-                    if (it.needsIndexRebuild) " → seek 会停在目标帧，将按需重建索引" else ""
+                    "idx1=${if (it.hasIndexChunk) "有" else "无"}" +
+                    "，OpenDML索引=${if (it.hasOpenDmlIndex) "有" else "无"}" +
+                    "，多段movi=${if (it.hasMultiSegment) "是" else "否"}" +
+                    if (it.needsIndexRebuild) " → 索引不足以覆盖全片，将按需重建" else ""
             )
         }
     }
@@ -3062,7 +3071,11 @@ fun VRPlayerScreen(
         //    用户的「解码器」设置保持原样 —— 否则打开一个 WMV 就永久改成 IJK，
         //    下次播普通 MP4 也走 FFmpeg 软解，白掉性能（用户会以为是 bug）。
         // ======================================================================
+        // ⚠️ v2.4.19：相册返回的 `content://media/...` URI **没有扩展名** → 下面的内核
+        //    路由（AVI/WMV→MPV）会整体失效（用户表现为「改了路由没生效」）。
+        //    用选择时记下的 MIME 兜底；两条都没有才返回空串。
         val containerExt = MediaFormats.extensionOf(decodedUri)
+            .ifEmpty { MediaFormats.extFromMime(selectedMediaItem.mimeType) }
         var effectiveEngine = decoderEngine
         // ======================================================================
         // v2.1.244：**预判式选 vo** —— MPV 的视频输出模式
@@ -3079,9 +3092,13 @@ fun VRPlayerScreen(
         //   → **SIGABRT 直接崩在 libmpv.so**（实测 tombstone 已确认）。
         //   因此本方案**只改一次、不重建**。
         // ======================================================================
-        // 判据：需 MPV 的容器 → 直接给 GPU 模式（软硬解都能出画）。
+        // 判据：**可能没有硬解器**的容器 → 直接给 GPU 模式（软硬解都能出画）。
+        //   ⚠️ v2.4.19：改用 `prefersMpvGpuVo` 而**不是** `shouldRouteToMpv` —— 后者
+        //   现在含 AVI（路由判据），而这里是 **vo 判据**：AVI 里常见的 Xvid/DivX
+        //   （MPEG-4 Part 2）在多数新机已无硬解器，用 `mediacodec_embed` 会因
+        //   「只吃硬件帧」而拒收软解帧 → 黑屏。两个概念必须分开，见方法注释。
         //   代价：硬解路径多一次 GPU 拷贝；但这些容器本来就走软解，没有损失。
-        if (MediaFormats.shouldRouteToMpv(containerExt)) {
+        if (MediaFormats.prefersMpvGpuVo(containerExt)) {
             if (mpvVoMode != MpvVoMode.GPU) mpvVoMode = MpvVoMode.GPU
             Log.i("VRPlayerScreen", "容器 .$containerExt 可能无硬解器，MPV 采用 vo=gpu（软硬解均可出画）")
         } else if (mpvVoMode != MpvVoMode.EMBED) {
@@ -3100,8 +3117,16 @@ fun VRPlayerScreen(
                 Log.w("VRPlayerScreen", "SMB 上的 $containerExt 无内核可稳定解（MPV 的 smb 未验证），按原内核尝试")
             } else if (MpvPlayerFactory.isAvailable(context)) {
                 effectiveEngine = DecoderEngine.MPV
-                Log.i("VRPlayerScreen", "容器 .$containerExt 需完整 FFmpeg，本次自动改用 MPV 内核")
-                postToast(context.getString(R.string.toast_auto_switch_mpv, containerExt.uppercase()))
+                // ⚠️ v2.4.19：**只有「严格需 MPV」的容器才 Toast 告知**
+                //    （WMV/ASF/RM/RMVB/ivf —— EXO/IJK 根本解不了，用户需要知道换了核）。
+                //    AVI 属于「默认走 MPV」而非「必须」：EXO 也能开，只是无 `idx1` 时 seek
+                //    要靠重封装补救。每次都弹「需完整 FFmpeg」既不准确又烦人 → **静默切换**。
+                if (MediaFormats.requiresMpv(containerExt)) {
+                    Log.i("VRPlayerScreen", "容器 .$containerExt 需完整 FFmpeg，本次自动改用 MPV 内核")
+                    postToast(context.getString(R.string.toast_auto_switch_mpv, containerExt.uppercase()))
+                } else {
+                    Log.i("VRPlayerScreen", "容器 .$containerExt 默认走 MPV（无索引亦可 seek），本次自动切换（静默）")
+                }
             } else {
                 // MPV 未装（native 库需按需下载）→ 明确提示去哪装，而不是静默走 EXO（必然也失败）
                 Log.w("VRPlayerScreen", "容器 .$containerExt 需 MPV 但 native 库未安装，提示用户")

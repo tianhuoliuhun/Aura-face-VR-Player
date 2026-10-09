@@ -184,7 +184,9 @@ class AviRiffProbeTest {
 
     @Test
     fun `常量值与测试预期一致`() {
-        assertEquals(1024, AviRiffProbe.HEAD_BYTES)
+        // ⚠️ v2.4.19：HEAD 1KB → 64KB —— `indx` 在 hdrl 里，hdrl 常超过 1KB，
+        //    只读 1KB 会把「有 OpenDML 索引」误判成「没有」→ 多段 AVI 被无谓重封装。
+        assertEquals(64 * 1024, AviRiffProbe.HEAD_BYTES)
         assertEquals(1024 * 1024, AviRiffProbe.TAIL_BYTES)
     }
 
@@ -194,5 +196,111 @@ class AviRiffProbeTest {
         val bad = ascii("RIFF") + le32(1024 * 1024) + ascii("AVI ") + ByteArray(16)
         val p = AviRiffProbe.parseHeader(bad)
         assertTrue(p.isAvi)   // 容器头合法
+    }
+
+    // ===================================================================
+    // 四、OpenDML 索引 / 多段 movi —— v2.4.19 新增判据
+    // ===================================================================
+
+    /**
+     * 构造合法的 `indx` chunk。载荷按 AVI 规范的最短结构（24 字节）：
+     * `wLongsPerEntry(2) | bIndexSubType(1) | bIndexType(1) | nEntriesInUse(4) | dwChunkId(4) | reserved(12)`
+     */
+    private fun indxChunk(wLongsPerEntry: Int = 2, indexType: Int = 1): ByteArray {
+        val payload = ByteArray(24)
+        payload[0] = (wLongsPerEntry and 0xFF).toByte()
+        payload[1] = ((wLongsPerEntry shr 8) and 0xFF).toByte()
+        payload[2] = 0                 // bIndexSubType
+        payload[3] = indexType.toByte() // bIndexType
+        return ascii("indx") + le32(payload.size.toLong()) + payload
+    }
+
+    @Test
+    fun `识别出头部合法的 OpenDML indx`() {
+        assertTrue(AviRiffProbe.containsOpenDmlIndex(indxChunk()))
+    }
+
+    @Test
+    fun `indx 字面量但结构不合法时不认`() {
+        // 声明大小 8（< 24 的最短结构）→ 视为数据里的巧合
+        assertFalse(AviRiffProbe.containsOpenDmlIndex(ascii("indx") + le32(8) + ByteArray(64)))
+    }
+
+    @Test
+    fun `wLongsPerEntry 非法时不认 indx`() {
+        assertFalse(AviRiffProbe.containsOpenDmlIndex(indxChunk(wLongsPerEntry = 3)))
+    }
+
+    @Test
+    fun `识别出 LIST AVIX 多段容器`() {
+        val buf = ascii("LIST") + le32(1024) + ascii("AVIX") + ByteArray(32)
+        assertTrue(AviRiffProbe.containsMultiSegmentMarker(buf))
+    }
+
+    @Test
+    fun `裸 AVIX 字面量（前面不是 LIST）不被误判`() {
+        // 压缩数据里完全可能偶然出现 AVIX 四个字节 —— 与 idx1 同理，必须结构性校验
+        val data = ByteArray(512)
+        ascii("AVIX").copyInto(data, 200)
+        assertFalse(AviRiffProbe.containsMultiSegmentMarker(data))
+    }
+
+    @Test
+    fun `多段且无 OpenDML 索引时需要重建`() {
+        // 这正是「idx1 只覆盖第一段」的场景（唯一 `idx1` 只描述第一个 movi）
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = true,
+            hasOpenDmlIndex = false, hasMultiSegment = true
+        )
+        assertTrue("多段 AVIX 且无 indx → idx1 覆盖不到第二段", p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `多段但有 OpenDML 索引时不需要重建`() {
+        // Media3Avi 会优先用 indx（AviExtractor：riffType == AVIX || indexBoxList.size() > 0）
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = true,
+            hasOpenDmlIndex = true, hasMultiSegment = true
+        )
+        assertFalse("有 indx 时 idx1 不完整无妨，别白等一次重封装", p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `单段 movi 且 idx1 完整时不需要重建`() {
+        // 实测校正（v2.4.19）：3 个真实样本（含上游命名为 odml 的那个）都是这种形态，
+        // idx1 覆盖 98.7%~99.9% —— 「idx1 只覆盖第一段」不是常态。
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = true,
+            hasOpenDmlIndex = false, hasMultiSegment = false
+        )
+        assertFalse(p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `非 AVI 即使多段也不触发重建`() {
+        val p = AviRiffProbe.Probe(
+            isAvi = false, hasIndexChunk = false,
+            hasOpenDmlIndex = false, hasMultiSegment = true
+        )
+        assertFalse(p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `头部解析能识别真实 hdrl 里的 indx`() {
+        val head = riff(
+            "AVI ",
+            list("hdrl", list("strl", chunk("strh", ByteArray(48)) + indxChunk()))
+        )
+        val probe = AviRiffProbe.parseHeader(head)
+        assertTrue(probe.isAvi)
+        assertTrue("hdrl 里的 indx 必须被识别（否则多段 AVI 会被无谓重封装）", probe.hasOpenDmlIndex)
+    }
+
+    @Test
+    fun `超短缓冲与空缓冲不崩（新增判据）`() {
+        listOf(ByteArray(0), ByteArray(3), ByteArray(11)).forEach { b ->
+            assertFalse(AviRiffProbe.containsOpenDmlIndex(b))
+            assertFalse(AviRiffProbe.containsMultiSegmentMarker(b))
+        }
     }
 }
