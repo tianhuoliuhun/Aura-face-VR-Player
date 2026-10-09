@@ -516,14 +516,14 @@ object LocalLlmManager {
                 } else {
                     ""
                 }
-                // ⚠️ nThreads 传**原始核数**：真正的上限钳位在 native 侧（那才是消费者），
-                //    避免「同一份约束两处登记」—— 本项目头号事故源。
-                val cores = Runtime.getRuntime().availableProcessors()
+                // ⚠️ nThreads 传 **0 = 自动**：真正的核数探测与钳位在 native 侧完成
+                //    （折叠超线程、钳到 [1,8]），避免「同一份约束两处登记」+ 模拟器误报宿主机核数。
+                //    >0 仅作调试覆盖用。
                 val ok = LlamaMtmd.nativeInit(
                     modelPath = fileOf(context, model).absolutePath,
                     mmprojPath = mmprojPath,
                     nCtx = model.contextSize,
-                    nThreads = cores
+                    nThreads = 0
                 )
                 if (ok) {
                     loadedModelId = model.id
@@ -532,7 +532,7 @@ object LocalLlmManager {
                     Log.i(
                         TAG,
                         "模型已加载：${model.displayName}（ctx=${model.contextSize}，" +
-                            "cores=$cores，vision=$visionAvailable，" +
+                            "nThreads=0(自动探测物理核)，vision=$visionAvailable，" +
                             "mmproj=${mmprojPath.ifEmpty { "无" }}）"
                     )
                 } else {

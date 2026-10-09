@@ -31,6 +31,12 @@
 #include <string>
 #include <vector>
 
+#include <cctype>
+#include <dirent.h>
+#include <fstream>
+#include <set>
+#include <thread>
+
 #include "llama.h"
 #include "mtmd.h"
 #include "mtmd-helper.h"
@@ -101,6 +107,47 @@ std::string jstr(JNIEnv * env, jstring s) {
     std::string r = (c != nullptr) ? c : "";
     if (c) env->ReleaseStringUTFChars(s, c);
     return r;
+}
+
+/**
+ * 探测**物理核数**（折叠超线程 / SMT）。
+ *
+ * ## 为什么不能信 `availableProcessors()`
+ * 在安卓模拟器里它常返回**宿主机逻辑核数**（例如 16 / 32），而其中一半是超线程。
+ * 若直接把它当 `n_threads` 传给 llama.cpp → 矩阵乘被**过度订阅**，
+ * 上下文切换开销盖过并行收益 → 解码反而更慢甚至卡死。
+ * 真机 ARM 大多无 SMT，物理核 == 逻辑核；x86 宿主有超线程，必须折叠。
+ *
+ * ## 做法
+ * 扫 `/sys/devices/system/cpu/cpuN/topology/core_id`，统计**去重后的 core_id 数**
+ * （同一物理核上的超线程共享一个 core_id）。读不到则退化到
+ * `std::thread::hardware_concurrency()`（逻辑核数）。
+ */
+int getPhysicalCoreCount() {
+    std::set<int> phys;
+    DIR * d = opendir("/sys/devices/system/cpu");
+    if (d) {
+        struct dirent * e;
+        while ((e = readdir(d)) != nullptr) {
+            std::string name = e->d_name;
+            if (name.rfind("cpu", 0) != 0) continue;
+            bool allDigit = true;
+            for (size_t i = 3; i < name.size(); ++i) {
+                if (!std::isdigit(static_cast<unsigned char>(name[i]))) {
+                    allDigit = false; break;
+                }
+            }
+            if (!allDigit) continue;                     // 跳过 cpuidle / cpufreq 等
+            std::string path = "/sys/devices/system/cpu/" + name + "/topology/core_id";
+            std::ifstream f(path);
+            int cid = -1;
+            if (f >> cid) phys.insert(cid);
+        }
+        closedir(d);
+    }
+    if (!phys.empty()) return static_cast<int>(phys.size());
+    unsigned n = std::thread::hardware_concurrency();    // 逻辑核（可能被超线程放大）
+    return n > 0 ? static_cast<int>(n) : 1;
 }
 
 /**
@@ -262,11 +309,16 @@ Java_com_example_vr_LlamaMtmd_nativeInit(
     std::lock_guard<std::mutex> lock(g_mutex);
 
     // 线程数收敛（⚠️ **只在这里**钳位，避免「同一份约束两处登记」）：
-    //   llama.cpp 的 n_threads 超过物理核会过度订阅，解码反而更慢甚至卡死。
-    //   移动端（含模拟器）实测 4 线程最优；且模拟器上报的核数常是**宿主机**核数，不可信。
+    //   nThreads<=0 → 自动探测**物理核数**（折叠超线程，见 getPhysicalCoreCount）；
+    //   >0 → 显式覆盖（调试用）。
+    //   关键：模拟器里 `availableProcessors()` 常返回**宿主机逻辑核数**（16/32），
+    //   直接拿来用会**过度订阅** → 解码更慢甚至卡死；ARM 真机无 SMT 则物理==逻辑。
+    //   最终钳到 [1, 8]：8 已覆盖绝大多数手机（含 8 核旗舰），
+    //   又能防止模拟器把 16~32 核当真。v2.4.16 之前硬编码 4 → 8 核机白白浪费一半核。
     int threads = (int) nThreads;
-    if (threads < 1) threads = 4;
-    if (threads > 4) threads = 4;
+    if (threads <= 0) threads = getPhysicalCoreCount();
+    if (threads < 1) threads = 1;
+    if (threads > 8) threads = 8;
 
     int ctxSize = (int) nCtx;
     if (ctxSize < 512)   ctxSize = 512;
@@ -292,6 +344,12 @@ Java_com_example_vr_LlamaMtmd_nativeInit(
     cparams.n_batch         = N_BATCH;
     cparams.n_threads       = threads;
     cparams.n_threads_batch = threads;
+
+    // 🔴 v2.4.17：开 Flash Attention。对 CPU 后端它是**等价**的注意力实现，
+    //   但走分块计算 → 注意力阶段更快、且**峰值显存更低**（不影响已分配的 KV cache 总量，
+    //   但本项目 KV 与 n_ctx 成正比、内存本就紧张，低峰值更稳）。
+    //   小模型短文本收益有限，但零行为风险、纯增益，故默认开启。
+    cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
 
     g_ctx = llama_init_from_model(g_model, cparams);
     if (!g_ctx) {
