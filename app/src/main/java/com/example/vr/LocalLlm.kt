@@ -1,5 +1,6 @@
 package com.example.vr
 
+import android.app.ActivityManager
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -9,13 +10,17 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -84,6 +89,14 @@ object LocalLlmManager {
      */
     private const val MIN_MMPROJ_BYTES = 50L * 1024 * 1024
 
+    /**
+     * KV cache 的经验系数：**每 1024 个上下文 token 约需 96MB**（Qwen3.5-0.8B 量级）。
+     *
+     * 用于加载前的内存预检。系数刻意保守 —— 宁可高估也不能低估，
+     * 否则预检形同虚设（低估 → 放过 → native 分配失败 → abort → 闪退）。
+     */
+    private const val KV_MB_PER_1K_CTX = 96L
+
     /** 下载重试次数。 */
     private const val MAX_DOWNLOAD_ATTEMPTS = 3
 
@@ -116,7 +129,13 @@ object LocalLlmManager {
                 // 兜底：镜像（⚠️ 历史上「按文件下载」在真机曾返回 401，故放最后且允许失败）
                 "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"
             ),
-            contextSize = 4096,
+            // ⚠️ v2.4.14：4096 → **2048**。
+            //    翻译与弹幕都是**短文本**任务，4096 纯属浪费 —— 而 KV cache 大小
+            //    与 n_ctx 成正比（每 1024 约 96MB），4096 要多吃约 190MB。
+            //    在「VR 播放器本身已占大量内存」的前提下，这 190MB 往往就是
+            //    「加载成功」与「native 分配失败 → abort → 闪退」的分界线。
+            //    视觉路径靠 native 侧的 image_max_tokens=768 保证单张图不撑爆它。
+            contextSize = 2048,
             description = "阿里 Qwen3.5 最轻量档（Apache 2.0）。中英双语翻译与短文本生成，" +
                 "约 0.57GB，纯 CPU 推理",
             // v2.4.13：**可选的视觉编码器**。
@@ -134,6 +153,37 @@ object LocalLlmManager {
             )
         )
     )
+
+    // ===================== 线程模型（v2.4.14） =====================
+
+    /**
+     * **推理专用单线程调度器**。
+     *
+     * ⚠️ 原先推理直接跑在 `Dispatchers.IO` 上 —— 它默认 **64 并发**。
+     *    而底层是**同一份 native 全局状态**（一个 ctx）：并发调用要么崩
+     *    （v2.4.13 的 native 实现完全无锁），要么全部堆在锁上白占几十个线程。
+     *    用单线程把排队**提前到 Kotlin 侧**：资源占用可控，也有明确的先来后到。
+     *
+     * ⚠️ 用 `Executors.newSingleThreadExecutor` 而不是 `limitedParallelism(1)`：
+     *    后者在协程版本的实验/稳定边界上变过，前者永远稳定。
+     * ⚠️ 线程带名字 —— 便于在 logcat / tombstone 里一眼认出是哪条线程崩的。
+     */
+    private val inferenceExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "local-llm-inference")
+    }
+    private val inferenceDispatcher = inferenceExecutor.asCoroutineDispatcher()
+
+    /**
+     * 引擎**生命周期锁**：串行化 [ensureLoaded] 与 [release]。
+     *
+     * ⚠️ native 侧那把锁只保证**单次调用**的原子性；
+     *    「先 release 再 nativeInit」这种**跨调用组合**必须在这里串行化，
+     *    否则两个协程同时加载 → 白占两份 ~1GB 内存（必然 OOM）。
+     *
+     * ⚠️ 加锁顺序固定为 `engineLock → inferenceDispatcher`，
+     *    故 [release] **不能**跑在 inferenceDispatcher 上（会反向等待 → 死锁）。
+     */
+    private val engineLock = Mutex()
 
     // ===================== 共享状态（供 UI 订阅） =====================
 
@@ -397,20 +447,6 @@ object LocalLlmManager {
 
     // ===================== 加载 / 释放 =====================
 
-    /**
-     * 确保模型已加载（同一个 id 已加载则直接复用）。
-     *
-     * v2.4.13：改用**自建**的 [LlamaMtmd]（含 libmtmd → 支持图像输入）。
-     *
-     * ⚠️ 与旧的 `dev.ffmpegkit.llama.Llama` **不可并存**：两者各自持有独立的
-     *    native 模型实例，同时加载会让 0.6GB 的权重占两份内存。
-     *
-     * ## mmproj 的处理
-     * 已下载就一起加载（拿到视觉能力）；没下载则传空串走纯文本。
-     * ⚠️ mmproj 加载失败**不会**让整体失败 —— 纯文本仍可用（见 native 侧实现）。
-     *
-     * @return 是否就绪（false 时调用方应回落云端引擎）
-     */
     suspend fun ensureLoaded(context: Context, model: LocalLlmModel): Boolean {
         if (!LlamaMtmd.available) {
             lastError = "本地推理库未加载（libauravr.so 缺失？）"
@@ -421,30 +457,67 @@ object LocalLlmManager {
             lastError = "模型未下载"
             return false
         }
-        release()
-        return withContext(Dispatchers.IO) {
-            val mmprojPath = if (isMmprojReady(context, model)) {
-                mmprojFileOf(context, model)?.absolutePath.orEmpty()
-            } else {
-                ""
-            }
-            val ok = LlamaMtmd.nativeInit(
-                modelPath = fileOf(context, model).absolutePath,
-                mmprojPath = mmprojPath,
-                nCtx = model.contextSize,
-                nThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+        // ⚠️ v2.4.14：用**生命周期锁**串行化整个「释放 + 加载」组合。
+        //    两个协程同时进来会各自加载一份 ~1GB 的引擎（必然 OOM）。
+        return engineLock.withLock {
+            // 双重检查：等锁期间可能已被别的协程加载好了
+            if (loadedModelId == model.id) return@withLock true
+
+            // 🔴 加载前**内存预检**（v2.4.14）
+            //    为什么必须做：llama.cpp 在权重 / KV cache 分配失败时会调 abort()
+            //    → **SIGABRT**。那是 native 崩溃，Java 的 catch (Throwable)
+            //    **完全抓不到** —— 用户看到的就是「点一下本地模型就闪退」，
+            //    既没有堆栈也没有提示。所以宁可在这里明确报「内存不足」。
+            val needMb = estimateNeedMb(context, model)
+            val availMb = availableMemMb(context)
+            Log.i(
+                TAG,
+                "内存预检：需约 ${needMb}MB，系统可用约 " +
+                    (if (availMb > 0) "${availMb}MB" else "未知")
             )
-            if (ok) {
-                loadedModelId = model.id
-                visionAvailable = LlamaMtmd.nativeHasVision()
-                lastError = null
-                Log.i(TAG, "模型已加载：${model.displayName}（ctx=${model.contextSize}，" +
-                    "vision=$visionAvailable，mmproj=${mmprojPath.ifEmpty { "无" }}）")
-            } else {
-                lastError = "模型加载失败（文件损坏或内存不足）"
-                Log.e(TAG, "模型加载失败：${model.displayName}")
+            if (availMb > 0 && availMb < needMb * 5 / 4) {
+                lastError = "可用内存不足（需约 ${needMb}MB，当前可用约 ${availMb}MB）—— " +
+                    "请先关闭其它应用再试，或改回云端引擎"
+                Log.e(TAG, lastError!!)
+                return@withLock false
             }
-            ok
+
+            // ⚠️ 用内部版而不是 release()：后者会另起协程，在持锁状态下调它会绕开本锁
+            releaseInternal()
+
+            // ⚠️ 加载放到**单线程推理调度器**上：与后续推理排同一队，
+            //    保证「加载完成之后才可能开始推理」，也避免加载期间被别处插进 native 调用。
+            withContext(inferenceDispatcher) {
+                val mmprojPath = if (isMmprojReady(context, model)) {
+                    mmprojFileOf(context, model)?.absolutePath.orEmpty()
+                } else {
+                    ""
+                }
+                // ⚠️ nThreads 传**原始核数**：真正的上限钳位在 native 侧（那才是消费者），
+                //    避免「同一份约束两处登记」—— 本项目头号事故源。
+                val cores = Runtime.getRuntime().availableProcessors()
+                val ok = LlamaMtmd.nativeInit(
+                    modelPath = fileOf(context, model).absolutePath,
+                    mmprojPath = mmprojPath,
+                    nCtx = model.contextSize,
+                    nThreads = cores
+                )
+                if (ok) {
+                    loadedModelId = model.id
+                    visionAvailable = LlamaMtmd.nativeHasVision()
+                    lastError = null
+                    Log.i(
+                        TAG,
+                        "模型已加载：${model.displayName}（ctx=${model.contextSize}，" +
+                            "cores=$cores，vision=$visionAvailable，" +
+                            "mmproj=${mmprojPath.ifEmpty { "无" }}）"
+                    )
+                } else {
+                    lastError = "模型加载失败（文件损坏或内存不足）"
+                    Log.e(TAG, "模型加载失败：${model.displayName}")
+                }
+                ok
+            }
         }
     }
 
@@ -454,6 +527,24 @@ object LocalLlmManager {
      * v2.4.13：改为释放**自建引擎**的全局实例（模型 + mtmd 上下文一起释放）。
      */
     fun release() {
+        // ⚠️ v2.4.14：改为**后台执行** —— 释放 574MB 权重 + KV cache 要几百毫秒，
+        //    而 UI 的三个「删除 / 重下 mmproj」按钮都在主线程直接调它，
+        //    同步执行会阻塞主线程（VR 里表现为掉帧，严重时 ANR）。
+        //
+        // ⚠️ 跑在 `Dispatchers.IO` 而**不是** inferenceDispatcher：
+        //    加锁顺序固定为 engineLock → inferenceDispatcher；
+        //    这里若反过来先占 inferenceDispatcher 再要 engineLock，
+        //    而此刻 ensureLoaded 正持 engineLock 在等 inferenceDispatcher → **死锁**。
+        //
+        // ⚠️ 与「删除模型文件」并发是安全的：llama.cpp 用 mmap 加载，
+        //    Linux 下 unlink 会保留 inode 直到最后一个引用释放。
+        CoroutineScope(Dispatchers.IO).launch {
+            engineLock.withLock { releaseInternal() }
+        }
+    }
+
+    /** ⚠️ **内部**释放：不做排队，供已持有 [engineLock] 的调用方使用。 */
+    private fun releaseInternal() {
         try {
             if (LlamaMtmd.available) LlamaMtmd.nativeFree()
         } catch (t: Throwable) {
@@ -482,7 +573,9 @@ object LocalLlmManager {
         imgH: Int = 0,
         maxTokens: Int = 256,
         temperature: Float = 0.3f
-    ): String? = withContext(Dispatchers.IO) {
+        // ⚠️ 跑在**单线程推理调度器**上（不是 Dispatchers.IO）：
+        //    多个并发请求（字幕预读 + 弹幕生成）在此排队，而不是堆到 64 个线程上。
+    ): String? = withContext(inferenceDispatcher) {
         if (loadedModelId == null) {
             Log.w(TAG, "complete 被调用但模型未加载")
             return@withContext null
@@ -505,5 +598,44 @@ object LocalLlmManager {
             Log.d(TAG, "推理完成 ${ms}ms / ${text.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
             text
         }
+    }
+
+    // ===================== 内存预检（v2.4.14） =====================
+
+    /**
+     * 估算加载该模型需要多少内存（MB）。
+     *
+     * ## 为什么必须预检
+     * llama.cpp 在权重 / KV cache 分配失败时会调 abort() → **SIGABRT**。
+     * 那是 native 崩溃，Java 的 catch (Throwable) **抓不到**，
+     * 用户看到的就是「点一下本地模型就闪退」—— 没有堆栈、没有提示。
+     * 所以在进 native 之前先算清楚。
+     *
+     * ## 口径（刻意保守：宁可高估）
+     * - **权重**：文件体积 × 1.15（加载期还需一份临时缓冲）
+     * - **KV cache**：[KV_MB_PER_1K_CTX] × (contextSize / 1024)
+     * - **mmproj**：已下载则一并算上，另加 64MB 余量（它自身的激活 / 缓冲）
+     */
+    private fun estimateNeedMb(context: Context, model: LocalLlmModel): Long {
+        val weights = model.sizeBytes / 1048576 * 115 / 100
+        val kv = model.contextSize.toLong() / 1024L * KV_MB_PER_1K_CTX
+        val mmproj = if (isMmprojReady(context, model)) model.mmprojSizeBytes / 1048576 + 64 else 0L
+        return weights + kv + mmproj
+    }
+
+    /**
+     * 系统当前可用内存（MB）；读不到时返回 **-1 表示「未知」**。
+     *
+     * ⚠️ 返回 -1 时调用方必须**跳过**判断 —— 不能因为读不到内存信息就拒绝加载。
+     *    注意别用 0 表示未知：0 < need 恒成立 → 会变成「永远拒绝加载」。
+     */
+    private fun availableMemMb(context: Context): Long = try {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(info)
+        info.availMem / 1048576
+    } catch (t: Throwable) {
+        Log.w(TAG, "读取可用内存失败：${t.message}")
+        -1L
     }
 }

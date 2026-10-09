@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 263
-    versionName = "2.4.11"
+    versionCode = 265
+    versionName = "2.4.14"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -245,7 +245,22 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // ⚠️ v2.4.14：debug 包**改用 release 签名**（不再用 `debugConfig`）。
+      //
+      // 原因：Android 不允许「同包名、不同签名」的覆盖安装
+      //   （会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。此前模拟器/真机上装的是
+      //   release 签名包，一旦要换成 debug 包就**必须先卸载**，而卸载会
+      //   **连应用数据一起删除** —— 本地 LLM 的模型权重（574MB + 可选 207MB）
+      //   就在 `filesDir/llm/` 里，代价是本可避免的重复下载。
+      //
+      // 改为同一签名后：debug ↔ release 可**互相直接升级安装**，应用数据始终保留。
+      //
+      // 仍然保留全部 debug 特性（`debuggable=true`、`run-as` 可访问私有目录、
+      // 可附加调试器、`BuildConfig.DEBUG=true`），只是换了把签名钥匙。
+      //
+      // ⚠️ `debugConfig`（debug.keystore）的定义**刻意保留** —— 需要真·debug 签名的
+      //    场合（例如给第三方 SDK 注册调试指纹）可显式改回 `getByName("debugConfig")`。
+      signingConfig = signingConfigs.getByName("release")
     }
   }
   compileOptions {
