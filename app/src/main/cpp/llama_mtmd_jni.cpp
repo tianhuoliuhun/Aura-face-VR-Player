@@ -104,18 +104,101 @@ std::string jstr(JNIEnv * env, jstring s) {
 }
 
 /**
- * 构造 jstring 并兜底。
+ * 把**标准 UTF-8** 安全地转成 jstring。
  *
- * ⚠️ `NewStringUTF` 遇到非法 UTF-8 会抛异常并返回 nullptr，
- *    而 Kotlin 侧声明的是**非空 `String`** → 会在 JNI 边界抛 NPE。
- *    模型输出的字节序列不保证是合法 UTF-8（token piece 拼接可能截断多字节字符），
- *    所以这里必须兜底：清掉异常、降级成空串（上层会回落云端引擎）。
+ * ## 🔴 为什么不能用 `env->NewStringUTF`
+ * ART 的 `NewStringUTF` 要求 **Modified UTF-8**。遇到非法序列（或标准 UTF-8 的
+ * **4 字节序列**，如 emoji）时它会**直接 abort()**，而不是返回 nullptr：
+ * ```
+ * JNI DETECTED ERROR IN APPLICATION: input is not valid Modified UTF-8: illegal continuation byte 0
+ * Fatal signal 6 (SIGABRT) ... libauravr.so (Java_com_example_vr_LlamaMtmd_nativeComplete+...)
+ * ```
+ * → 所以「先看返回值、再兜底」的写法**根本救不了**（v2.4.14 就是这么写的，实测无效，
+ *   v2.4.16 实测崩溃即为此）。
+ *
+ * ## 做法
+ * 自己把 UTF-8 解码成 UTF-16，再走 `env->NewString`：
+ *   · 1/2/3 字节序列 → 对应码点；⚠️ 若落在**代理区**（U+D800~U+DFFF）→ 换成 U+FFFD
+ *   · 4 字节序列 → 拆成 **UTF-16 代理对**
+ *   · 任何非法 / 截断 / 超范围序列 → U+FFFD（替换字符），**绝不 abort**
+ *
+ * ## 为什么模型会产出非法 UTF-8
+ * llama.cpp 是**按 token** 逐个 decode 的，而某些 token 的 piece 是**不完整的
+ * 多字节序列**，逐个拼接就可能拼出非法串。
+ * 📌 实测（v2.4.16）：本地翻译输出退化成「一长串重复文字」直到吃满 maxTokens 时，
+ *    正好踩到这个 abort —— 也就是说**输出失控**与**崩溃**是同一个场景里一起出现的。
+ */
+jstring utf8ToJString(JNIEnv * env, const std::string & s) {
+    std::vector<jchar> u16;
+    u16.reserve(s.size() + 8);
+
+    const unsigned char * p = reinterpret_cast<const unsigned char *>(s.data());
+    const size_t n = s.size();
+    size_t i = 0;
+
+    while (i < n) {
+        const unsigned char c = p[i];
+        uint32_t cp = 0;
+        size_t extra = 0;
+
+        if (c < 0x80) {
+            cp = c;                       extra = 0;   // 1 字节
+        } else if ((c & 0xE0) == 0xC0) {
+            cp = c & 0x1Fu;               extra = 1;   // 2 字节
+        } else if ((c & 0xF0) == 0xE0) {
+            cp = c & 0x0Fu;               extra = 2;   // 3 字节
+        } else if ((c & 0xF8) == 0xF0) {
+            cp = c & 0x07u;               extra = 3;   // 4 字节
+        } else {
+            u16.push_back(0xFFFD); ++i; continue;      // 非法起始字节
+        }
+
+        if (i + extra >= n) {                          // 被截断（这也是最常见的一种）
+            u16.push_back(0xFFFD);
+            break;
+        }
+
+        bool contOk = true;
+        for (size_t k = 1; k <= extra; ++k) {
+            const unsigned char cc = p[i + k];
+            if ((cc & 0xC0) != 0x80) { contOk = false; break; }
+            cp = (cp << 6) | (cc & 0x3Fu);
+        }
+        if (!contOk) {                                 // 续字节非法
+            u16.push_back(0xFFFD); ++i; continue;
+        }
+        i += extra + 1;
+
+        if (cp > 0x10FFFF) { u16.push_back(0xFFFD); continue; }   // 超出 Unicode
+
+        if (cp <= 0xFFFF) {
+            if (cp >= 0xD800 && cp <= 0xDFFF) u16.push_back(0xFFFD);  // 裸代理码点非法
+            else                              u16.push_back(static_cast<jchar>(cp));
+        } else {
+            const uint32_t v = cp - 0x10000u;          // 4 字节 → 代理对
+            u16.push_back(static_cast<jchar>(0xD800u + (v >> 10)));
+            u16.push_back(static_cast<jchar>(0xDC00u + (v & 0x3FFu)));
+        }
+    }
+
+    // ⚠️ 空串时 data() 可能是 nullptr，别直接传给 NewString
+    static const jchar kEmpty = 0;
+    return env->NewString(u16.empty() ? &kEmpty : u16.data(),
+                          static_cast<jsize>(u16.size()));
+}
+
+/**
+ * 安全的 jstring 构造（**永远不 abort**）。
+ *
+ * ⚠️ Kotlin 侧声明的是**非空 `String`**，所以这里也保证不返回 nullptr。
+ * ⚠️ 具体解码交给 [utf8ToJString] —— 那里解释了为什么**不能**用 `NewStringUTF`。
  */
 jstring newStringSafe(JNIEnv * env, const std::string & s) {
-    jstring r = env->NewStringUTF(s.c_str());
+    jstring r = utf8ToJString(env, s);
     if (r == nullptr) {
+        // 理论上到不了这里（NewString 只在 OOM 时失败），但兜一层保险
         env->ExceptionClear();
-        LOGW("输出不是合法 UTF-8（%zu 字节），已降级为空串", s.size());
+        LOGW("jstring 构造失败（%zu 字节），降级为空串", s.size());
         r = env->NewStringUTF("");
     }
     return r;
@@ -320,6 +403,21 @@ Java_com_example_vr_LlamaMtmd_nativeComplete(
     if (greedy) {
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
     } else {
+        // 🔴 v2.4.16：补上 **重复惩罚 + top_k / top_p**。
+        //    此前采样链只有 temp + dist → 小模型极易退化成「一句话无限重复」——
+        //    实测本地翻译输出成一长串**重复的韩文**，直到**吃满 maxTokens** 才停
+        //    （日志：`推理完成 115058ms / 512 字`，512 就是上限），
+        //    而且那串重复文本正好触发了 NewStringUTF 的 abort（见 utf8ToJString 的说明）。
+        //
+        //    顺序遵循 llama.cpp 官方示例：penalties → top_k → top_p → temp → dist。
+        llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
+                llama_vocab_n_tokens(g_vocab),
+                /*penalty_last_n  */ 64,      // 只惩罚最近 64 个 token（0 = 关闭）
+                /*penalty_repeat  */ 1.15f,   // > 1.0 才生效；1.0 = 关闭
+                /*penalty_freq    */ 0.0f,    // 频率惩罚，0 = 关闭
+                /*penalty_present */ 0.0f));  // 存在惩罚，0 = 关闭
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.95f, /*min_keep=*/1));
         llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
         llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     }

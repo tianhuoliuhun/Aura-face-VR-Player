@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
@@ -209,6 +210,28 @@ object LocalLlmManager {
 
     /** 最近一次错误（供 UI 显示真实原因，而不是笼统的"不可用"）。 */
     var lastError: String? = null
+        private set
+
+    // ===================== 推理状态（v2.4.16） =====================
+
+    /**
+     * 是否**正在推理**。
+     *
+     * ⚠️ 为什么必须暴露这个状态：本地推理跑在 **CPU** 上（0.8B 模型），
+     *    单条实测要**几十秒**（模拟器转译下更慢）。而 UI 此前**没有任何反馈** ——
+     *    用户点开本地翻译后只看到「一直没译文」，很容易判定成「功能坏了 / 无法执行」。
+     *    （实测日志：单次推理 57~115 秒。）
+     */
+    var isInferencing by mutableStateOf(false)
+        private set
+
+    /**
+     * 最近一次推理耗时（毫秒）。
+     *
+     * 供 UI 显示「上次 12.3s」这类信息 —— 让用户能判断"慢"是正常的还是异常了。
+     * 0 表示还没跑过。
+     */
+    var lastInferenceMs by mutableLongStateOf(0L)
         private set
 
     private var downloadJob: Job? = null
@@ -575,28 +598,45 @@ object LocalLlmManager {
         temperature: Float = 0.3f
         // ⚠️ 跑在**单线程推理调度器**上（不是 Dispatchers.IO）：
         //    多个并发请求（字幕预读 + 弹幕生成）在此排队，而不是堆到 64 个线程上。
-    ): String? = withContext(inferenceDispatcher) {
+    ): String? {
         if (loadedModelId == null) {
             Log.w(TAG, "complete 被调用但模型未加载")
-            return@withContext null
+            return null
         }
-        val t0 = System.currentTimeMillis()
-        val text = LlamaMtmd.completeSafe(
-            prompt = prompt,
-            system = systemPrompt ?: "",
-            rgb = rgb,
-            imgW = imgW,
-            imgH = imgH,
-            maxTokens = maxTokens,
-            temperature = temperature
-        )
-        val ms = System.currentTimeMillis() - t0
-        if (text.isBlank()) {
-            Log.w(TAG, "推理返回空（${ms}ms，图=${rgb?.size ?: 0}B）")
-            null
-        } else {
-            Log.d(TAG, "推理完成 ${ms}ms / ${text.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
-            text
+        // ⚠️ v2.4.16：本地推理在 CPU 上要**几十秒**，必须让 UI 能显示「推理中…」——
+        //    否则用户只看到「点了没反应 / 译文一直不出现」，很容易判定成「功能坏了」。
+        //
+        // ⚠️ 这里**直接赋值**而不切 `Dispatchers.Main`：
+        //    Compose 的 snapshot state 写入本身是线程安全的；
+        //    而在 finally 里 `withContext(Main)` 一旦碰上协程取消会**再抛**
+        //    CancellationException，反而掩盖真实错误。
+        isInferencing = true
+        try {
+            // ⚠️ 跑在**单线程推理调度器**上（不是 Dispatchers.IO）：
+            //    多个并发请求（字幕预读 + 弹幕生成）在此排队，而不是堆到 64 个线程上。
+            return withContext(inferenceDispatcher) {
+                val t0 = System.currentTimeMillis()
+                val text = LlamaMtmd.completeSafe(
+                    prompt = prompt,
+                    system = systemPrompt ?: "",
+                    rgb = rgb,
+                    imgW = imgW,
+                    imgH = imgH,
+                    maxTokens = maxTokens,
+                    temperature = temperature
+                )
+                val ms = System.currentTimeMillis() - t0
+                lastInferenceMs = ms
+                if (text.isBlank()) {
+                    Log.w(TAG, "推理返回空（${ms}ms，图=${rgb?.size ?: 0}B）")
+                    null
+                } else {
+                    Log.d(TAG, "推理完成 ${ms}ms / ${text.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
+                    text
+                }
+            }
+        } finally {
+            isInferencing = false
         }
     }
 

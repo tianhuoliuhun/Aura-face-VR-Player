@@ -977,12 +977,17 @@ class SubtitleTranslator(private val context: Context) {
         // Trigger asynchronous translation with automatic retries on failure.
         // The pending entry stays registered during the retries so concurrent calls
         // for the same text keep sharing this single attempt.
+        // 🔴 v2.4.16：**本地引擎不重试**。
+        //    单次推理几十秒，重试 3 次就是几分钟；而且本地失败的原因通常是
+        //    「模型未下载 / 内存不足 / 推理库缺失」这类**重试也不会变好**的情况，
+        //    徒增等待却拿不到结果。云端引擎保持 3 次重试（网络抖动确实值得重试）。
+        val maxAttempts = if (config.engine == TranslationEngine.LOCAL_LLM) 1 else 3
         scope.launch {
             var translatedText = ""
-            for (attempt in 1..3) {
+            for (attempt in 1..maxAttempts) {
                 translatedText = fetchTranslation(text, targetLang)
                 if (translatedText.isNotBlank()) break
-                if (attempt < 3) {
+                if (attempt < maxAttempts) {
                     delay(1200L * attempt) // backoff: 1.2s, 3.6s
                 }
             }
@@ -1128,7 +1133,20 @@ class SubtitleTranslator(private val context: Context) {
 
         if (todo.isEmpty()) return
 
-        prefetchTranslationJob?.cancel()
+        // 🔴 v2.4.16：**本地引擎不能按轮取消**。
+        //    本函数被播放进度轮询**频繁**调用，而每次都会 cancel 上一轮 —— 对云端引擎
+        //    没问题（单次几百毫秒），但**本地引擎单条推理要几十秒**（CPU 0.8B），
+        //    结果就是「每次都在跑到一半时被取消」→ 用户看到的现象是
+        //    **「本地 AI 翻译一直不出现」**（实测日志里成片的
+        //     `JobCancellationException: StandaloneCoroutine was cancelled` 就是这个）。
+        //    改为：上一轮还在跑就**直接返回**，让它安心跑完 ——
+        //    结果会进 translationCache，不会白费；新一轮只处理未缓存的条目（上面的 filter 已保证）。
+        val isLocalEngine = config.engine == TranslationEngine.LOCAL_LLM
+        if (isLocalEngine) {
+            if (prefetchTranslationJob?.isActive == true) return
+        } else {
+            prefetchTranslationJob?.cancel()
+        }
         prefetchTranslationJob = scope.launch {
             for (text in todo) {
                 val key = makeCacheKey(targetLang, text)

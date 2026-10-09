@@ -904,6 +904,8 @@
     <string name="local_model_mmproj_desc">Download to let the local model actually see the video; without it, danmaku come from subtitles only</string>
     <string name="local_model_mmproj_download">Download</string>
     <string name="local_model_vision_on">Vision on</string>
+    <string name="local_model_inferencing">On-device AI is thinking… (CPU inference is slow, please wait)</string>
+    <string name="local_model_last_inference">Last inference took %1$.1f s</string>
     <string name="danmu_image_long_side">Image long side (px)</string>
     <string name="danmu_use_local_llm">Generate danmaku on-device</string>
     <string name="danmu_use_local_llm_desc">Fully offline, no cost. The local model cannot see the video — it uses subtitle lines only</string>

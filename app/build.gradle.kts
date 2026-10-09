@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 266
-    versionName = "2.4.15"
+    versionCode = 267
+    versionName = "2.4.16"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -203,8 +203,11 @@ android {
   //    现在只挂到 huawei / all（pico/quest 的 loader 来自 Khronos AAR，见 dependencies）。
   // ==========================================================================
   sourceSets {
-    getByName("huawei") { jniLibs.srcDir("src/main/cpp/libs") }
-    getByName("all") { jniLibs.srcDir("src/main/cpp/libs") }
+    // ⚠️ 用 `directories` 而不是 `srcDir(...)` —— 后者已废弃
+    //    （`'fun srcDir(srcDir: Any)' is deprecated. Use directories mutable set instead`），
+    //    沿用项目原有写法（`sourceSets["main"].jniLibs.directories.add(...)`）。
+    getByName("huawei") { jniLibs.directories.add("src/main/cpp/libs") }
+    getByName("all") { jniLibs.directories.add("src/main/cpp/libs") }
   }
 
   logger.lifecycle(

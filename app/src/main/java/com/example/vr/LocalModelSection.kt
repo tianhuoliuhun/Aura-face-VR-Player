@@ -81,6 +81,30 @@ fun LocalModelSection(
             fontSize = 12.sp
         )
 
+        // ===== v2.4.16：**推理状态反馈** =====
+        // ⚠️ 本地推理跑在 CPU 上（0.8B），单条实测要**几十秒**（模拟器转译下更慢）。
+        //    此前 UI 在这里**毫无反馈** —— 用户只看到「译文一直不出现」，
+        //    很自然会判定成「本地 AI 无法执行 / 功能坏了」。
+        //    所以这里显式给出「进行中」与「上次耗时」，让"慢"变得可预期。
+        if (LocalLlmManager.isInferencing) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.local_model_inferencing),
+                color = accentColor,
+                fontSize = 11.sp
+            )
+        } else if (LocalLlmManager.lastInferenceMs > 0L) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.local_model_last_inference,
+                    LocalLlmManager.lastInferenceMs / 1000f
+                ),
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = 11.sp
+            )
+        }
+
         Spacer(modifier = Modifier.height(6.dp))
 
         if (LocalLlmManager.isDownloading) {
