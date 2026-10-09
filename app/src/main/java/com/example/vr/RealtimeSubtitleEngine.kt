@@ -907,9 +907,22 @@ class RealtimeSubtitleEngine(private val context: Context) {
                         pfd.close()
                         val tmp = copyToTemp(uri) ?: return false
                         val ex2 = MediaExtractor()
-                        ex2.setDataSource(tmp.absolutePath)
-                        extractor = ex2
-                        return openCodec(ex2)
+                        // v2.4.21：临时文件也解不开时（实测：多段 OpenDML AVI —— 框架
+                        // `Failed to instantiate extractor`，复制 1.19GB 纯属白费）不再
+                        // 把异常抛给外层（那样只会得到一句 `open failed`），而是转入
+                        // FFmpeg 转封装兜底。
+                        val ok2 = try {
+                            ex2.setDataSource(tmp.absolutePath); true
+                        } catch (e2: Exception) {
+                            Log.w(TAG, "AudioTee 临时文件也解不了（${e2.message}）→ 走 FFmpeg 转封装兜底")
+                            false
+                        }
+                        if (ok2) {
+                            extractor = ex2
+                            return openCodec(ex2)
+                        }
+                        tmp.delete()   // 既然解不开，1.19GB 的副本没有留下的意义
+                        return openViaFfmpegRemux()
                     }
                     pfd.close()
                 } else {
@@ -964,6 +977,43 @@ class RealtimeSubtitleEngine(private val context: Context) {
             tmp
         } catch (e: Exception) {
             null
+        }
+
+        /**
+         * v2.4.21：**FFmpeg 转封装兜底** —— 框架 MediaExtractor 彻底解不开的容器
+         * （实测：多段 OpenDML AVI，连复制成临时文件也一样），
+         * 先用 libavformat 把它转封装成 MKV（**不解码**、纯容器转换，1.19GB 约 30~60s），
+         * 再由框架 extractor 解 MKV 抽音频。
+         *
+         * 产物按 URI 缓存（`asr_remuxed_<hash>.mkv`）—— 同一媒体不重复转。
+         * ⚠️ 同步、耗时 —— 调用方（open 的协程）本就在后台线程，可接受。
+         */
+        private fun openViaFfmpegRemux(): Boolean {
+            val outFile = java.io.File(context.cacheDir, "asr_remuxed_${uri.hashCode()}.mkv")
+            if (!outFile.exists() || outFile.length() < 1024L) {
+                Log.i(TAG, "AudioTee 走 FFmpeg 转封装兜底（框架解不开该容器）→ ${outFile.name}")
+                val r = FfmpegRemuxer.remuxToMkv(context, uri, outFile)
+                if (!r.success) {
+                    Log.w(TAG, "FFmpeg 转封装失败 code=${r.code}: ${r.message}")
+                    outFile.delete()
+                    return false
+                }
+            } else {
+                Log.i(TAG, "AudioTee 复用已有转封装产物：${outFile.name}")
+            }
+            val ex3 = MediaExtractor()
+            val ok = try {
+                ex3.setDataSource(outFile.absolutePath); true
+            } catch (e: Exception) {
+                Log.w(TAG, "AudioTee 转封装产物仍解不开：${e.message}")
+                false
+            }
+            if (!ok) {
+                outFile.delete()
+                return false
+            }
+            extractor = ex3
+            return openCodec(ex3)
         }
 
         /** v2.0.140：http(s) 直连失败时的兜底——经回环代理整文件下载到缓存再打开 */

@@ -176,6 +176,23 @@ endif()
 # ==============================================================================
 if(ANDROID_ABI STREQUAL "arm64-v8a")
     list(APPEND AURAVR_SOURCES llama_mtmd_jni.cpp)
+    # ------------------------------------------------------------------------------
+    # v2.4.21：**FFmpeg 转封装**（字幕链路的 AVI 兜底）
+    # ------------------------------------------------------------------------------
+    # 用途：多段 OpenDML AVI 这类「框架 MediaExtractor 解不开」的容器，
+    #   字幕链路（AudioTee）先用 libavformat 把它转封装成 MKV（**不解码**，纯容器转换），
+    #   再由框架 extractor 解 MKV 抽音频。动机与实测证据见
+    #   `docs/AVI_LOCAL_SUBTITLE_DIAGNOSIS_2026-10-09.md`（AudioTee 对该类 AVI 直接
+    #   `Failed to instantiate extractor`，且回退复制 1.19GB 临时文件也无济于事）。
+    #
+    # .so 来源：**MPV 的 AAR 自带**（io.github.marlboro-advance:mpv-android，FFmpeg 7.1 /
+    #   Lavf63.7.100），提取到 cpp/fflibs/ 只做**编译期链接**；
+    #   **运行时与 APK 里 MPV 的那份是同一组 .so**（MPV AAR 自动打进 APK），不增加体积。
+    # 头文件：third_party/ffmpeg-libs/include/（从 FFmpeg n7.1 源码提取，与 .so 同版本）。
+    # ⚠️ 仅 arm64 —— .so 只提取了该 ABI（与单 ABI 策略一致）。
+    # ==============================================================================
+    list(APPEND AURAVR_SOURCES ffremux_jni.cpp)
+    message(STATUS "已启用 FFmpeg 转封装（字幕链路 AVI 兜底）")
 endif()
 
 add_library(auravr SHARED ${AURAVR_SOURCES})
@@ -219,6 +236,24 @@ if(ANDROID_ABI STREQUAL "arm64-v8a")
 
     set(AURA_LLAMA_LIBS llama mtmd)
     message(STATUS "已启用自建 llama.cpp + libmtmd（${ANDROID_ABI}）")
+
+    # ------------------------------------------------------------------------------
+    # v2.4.21：FFmpeg prebuilt（编译期链接；运行时与 APK 里 MPV AAR 的 .so 是同一组）
+    # ------------------------------------------------------------------------------
+    set(AURA_FFMPEG_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/ffmpeg-libs/include")
+    set(AURA_FFMPEG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/fflibs/${ANDROID_ABI}")
+    foreach(_ff avformat avcodec avutil)
+        add_library(${_ff} SHARED IMPORTED)
+        set_target_properties(${_ff} PROPERTIES
+            IMPORTED_LOCATION "${AURA_FFMPEG_LIB}/lib${_ff}.so")
+    endforeach()
+    target_include_directories(auravr PRIVATE ${AURA_FFMPEG_INCLUDE})
+    set(AURA_FFMPEG_LIBS avformat avcodec avutil)
+    # ⚠️ MPV 的 FFmpeg .so 用了 GNU 符号版本（avformat_open_input@@LIBAVFORMAT_63），
+    #    NDK 的 lld 链接它时会报 undefined symbol —— 需要 --undefined-version
+    #    （lld 16+ 支持，NDK 30 的 lld 满足）。实测不加就链接失败。
+    target_link_options(auravr PRIVATE -Wl,--undefined-version)
+    message(STATUS "已链接 FFmpeg prebuilt（${ANDROID_ABI}，Lavf63 = FFmpeg 7.1）")
 else()
     message(STATUS "ABI ${ANDROID_ABI} 无自建 llama 库 → 本地 LLM 功能在该 ABI 上不可用")
 endif()
@@ -230,6 +265,7 @@ target_link_libraries(auravr
     GLESv3      # ⚠️ 华为要求 GLES 3.2，用 GLESv3（提供 ES 3.x 符号）
     dl          # v2.0.195：dlopen/dlsym
     ${AURA_LLAMA_LIBS}
+    ${AURA_FFMPEG_LIBS}
 )
 
 # 华为 SDK 用 XR_USE_PLATFORM_ANDROID / XR_USE_GRAPHICS_API_OPENGL_ES 开关，
