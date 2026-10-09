@@ -417,4 +417,80 @@ class AviRiffProbeTest {
         // Probe 的默认值必须保证「没做覆盖探测」的老调用点行为不变
         assertTrue(AviRiffProbe.Probe(isAvi = true, hasIndexChunk = true).indexCoversToEnd)
     }
+
+    // ===================================================================
+    // 六、OpenDML indx 豁免 —— v2.4.21（用户 1.19GB 真实样本暴露的漏洞）
+    // ===================================================================
+
+    @Test
+    fun `有 indx 且无 idx1 时不需要重建`() {
+        // 🔴 用户真实样本：1.19GB，有多段 AVIX + **2 个 indx** + **完全没有 idx1**
+        //    旧逻辑 `!hasIndexChunk` 会判「需重建」→ 白重封装 1.19GB
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = false,
+            hasOpenDmlIndex = true, hasMultiSegment = false
+        )
+        assertFalse("有 OpenDML 索引就够了，不该重封装", p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `有 indx 时即使 idx1 覆盖不足也不重建`() {
+        // indx 优先于 idx1（AviExtractor: riffType == AVIX || getIndexBoxList().size() > 0）
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = true,
+            hasOpenDmlIndex = true, hasMultiSegment = true, indexCoversToEnd = false
+        )
+        assertFalse("有 indx 时其余判据一律免检", p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `无 indx 且无 idx1 时仍需重建`() {
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = false,
+            hasOpenDmlIndex = false, hasMultiSegment = false
+        )
+        assertTrue("完全没有可用索引 → 连第一段都 seek 不了", p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `无 indx 但多段 movi 时重建`() {
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = true,
+            hasOpenDmlIndex = false, hasMultiSegment = true, indexCoversToEnd = true
+        )
+        assertTrue("多段且无 indx → idx1 只可能覆盖第一段", p.needsIndexRebuild)
+    }
+
+    // ===================================================================
+    // 七、GB 级 chunk 长度 —— v2.4.21（真实样本实测暴露）
+    // ===================================================================
+
+    @Test
+    fun `findMoviStart 能跨过 GB 级块并定位 movi`() {
+        // 🔴 用户 1.19GB 样本实测：movi 的 size = 1,064,676,266（1.06GB，数据量）
+        //    旧实现用 IDX1_MAX_BYTES(512MB) 当上限 → 判成畸形 → return -1（真机日志 movi起点=-1）
+        val bigMovi = 1_064_676_266L
+        val head = ascii("RIFF") + le32(0L) + ascii("AVI ") +
+            ascii("LIST") + le32(534L) + ascii("hdrl") + ByteArray(534 - 4) +
+            ascii("JUNK") + le32(3480L) + ByteArray(3480) +
+            ascii("LIST") + le32(bigMovi) + ascii("movi")
+        val mv = AviRiffProbe.findMoviStart(head)
+        assertTrue("必须能定位 GB 级 movi（否则覆盖判据的相对基准失效）", mv > 0L)
+        assertEquals("movi 数据起点 = LIST 偏移 + 8", 4050L, mv)
+    }
+
+    @Test
+    fun `小文件里 findMoviStart 仍正常`() {
+        val hdrl = list("hdrl", list("strl", chunk("strh", ByteArray(48))))
+        val head = riff("AVI ", hdrl + list("movi", ByteArray(32)))
+        assertEquals((12 + hdrl.size + 8).toLong(), AviRiffProbe.findMoviStart(head))
+    }
+
+    @Test
+    fun `AVIX 的 LIST size 超过 512MB 时也能识别`() {
+        // 多段容器的 LIST size 同样是数据量（第一段就 1.06GB）——
+        // 旧实现用 512MB 上限会把它判成「不是 LIST」
+        val buf = ascii("LIST") + le32(1_060_000_000L) + ascii("AVIX") + ByteArray(32)
+        assertTrue(AviRiffProbe.containsMultiSegmentMarker(buf))
+    }
 }

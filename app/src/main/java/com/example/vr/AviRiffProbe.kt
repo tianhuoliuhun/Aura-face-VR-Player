@@ -33,6 +33,11 @@ package com.example.vr
  *   用「`idx1` 最后一条目的 offset + size」换算成**绝对文件位置**，与**文件大小**比较。
  *   这是**事实判据**，不依赖任何结构标记，无论文件怎么写都能抓到。
  *   `AVIX`/`indx` 判据**保留**为辅助（`indx` 可让「多段」情形免于无谓重封装）。
+ * - **v4（当前，v2.4.21）**：**有 `indx` 就一律豁免** —— v3 仍有漏洞：
+ *   它把「没有 `idx1`」直接判成「需重建」，**忽略了 `indx` 本身就能提供 seek**。
+ *   🔴 用户给的 **1.19GB 真实样本**正好命中：**有多段 `AVIX` + 有 2 个 `indx` + 完全没有 `idx1`**
+ *   （`AVIX` 在 **1.07GB** 处 → 旧判据的「尾部 1MB 找 AVIX」**必然漏检**）。
+ *   按 v3 会**白重封装 1.19GB**。→ 现在 `!hasOpenDmlIndex` 提到最外层。
  *
  * ⚠️ 实测参考（上游 3 个真实样本）：`idx1` 覆盖 98.7%~99.9%、无 `AVIX`/`indx` ——
  * 即**正常单段 AVI 的覆盖率接近 100%**，所以「覆盖率 < 90%」是个**很安全的判据**
@@ -85,16 +90,35 @@ object AviRiffProbe {
          *
          * ⚠️ 非 AVI 恒为 false：别的容器（mp4/mkv）有自己的索引机制，
          * 不能用「AVI 的索引够不够」去推断它们。
+         *
+         * ## 🔴 v2.4.21 修正：**有 OpenDML 索引 ⇒ 一律不必重建**
+         *
+         * 起因是用户给的真实样本（**1.19GB**，多段 OpenDML）实测：
+         * - **有 2 个 `indx`**（两个流各一，`size=56 / wLongsPerEntry=4`）；
+         * - **完全没有 `idx1`**（全文件扫描只命中 2 处「字面量巧合」，周围都是随机字节）；
+         * - **有 `AVIX` 多段**，位置在 **1.07GB** 处 —— 而旧判据只在**尾部 1MB** 找它，**必然漏检**。
+         *
+         * 旧写法 `!hasIndexChunk` 会把这种文件判成「完全没有索引 → 需重建」，
+         * **但它的 `indx` 足以让 Media3Avi 正常 seek** → 会**白白重封装 1.19GB**（几分钟）。
+         *
+         * → 现在把 `!hasOpenDmlIndex` 提到最外层：**只要检测到 OpenDML 索引就不重建**
+         *   （Media3Avi 明确优先用 `indx`：`if (riffType == AVIX || getIndexBoxList().size() > 0)`）。
          */
         val needsIndexRebuild: Boolean
-            get() = isAvi && (
-                // ① 完全没有索引 —— 连第一段都 seek 不了
-                !hasIndexChunk
-                    // ② **事实判据**：idx1 实测覆盖不到文件尾（只覆盖第一段）
-                    || !indexCoversToEnd
-                    // ③ 结构性旁证：多段 movi 且没有 OpenDML 索引可替代
-                    || (hasMultiSegment && !hasOpenDmlIndex)
-                )
+            get() = isAvi
+                // 🔴 有 OpenDML 索引 ⇒ 免检（它覆盖全片，Media3Avi 会优先用它）
+                && !hasOpenDmlIndex
+                && (
+                    // ① 没有任何索引 —— 连第一段都 seek 不了
+                    !hasIndexChunk
+                        // ② 事实判据：idx1 实测覆盖不到文件尾（只覆盖第一段）
+                        || !indexCoversToEnd
+                        // ③ 结构性旁证：多段 movi
+                        //    ⚠️ 它依赖「尾部窗口里能看到 AVIX」，而 AVIX 的位置随分段点而定
+                        //    （实测样本在 1.07GB 处 → 尾部 1MB 抓不到）→ **只是旁证**，
+                        //    真正的兜底是 ① 和 ②。
+                        || hasMultiSegment
+                    )
     }
 
     /**
@@ -115,6 +139,21 @@ object AviRiffProbe {
 
     /** `idx1` / `indx` 大小上限（512MB），超过视为误命中。 */
     private const val IDX1_MAX_BYTES = 512L * 1024 * 1024
+
+    /**
+     * **RIFF chunk 长度**的合理上限（4GB）—— 即 32 位长度的自然上限。
+     *
+     * ## 🔴 为什么必须与 [IDX1_MAX_BYTES] 分开（v2.4.21 实测踩坑）
+     * 用户那个 **1.19GB** 样本的 `LIST movi` 其 size = **1,064,676,266（1.06GB）**——
+     * 那是**视频数据量**，GB 级完全正常。
+     * 而 `findMoviStart()` 原先复用了 [IDX1_MAX_BYTES]（512MB）做上限检查 →
+     * **把合法的 movi 判成「畸形长度」直接 return -1** →
+     * 真机日志实测：`movi起点=-1`（本该是 4104）。
+     *
+     * 📌 **教训**：同一个「看起来差不多」的数值上限，
+     * **不能跨语义复用**（索引大小 vs 数据块长度是两回事）。
+     */
+    private const val MAX_RIFF_CHUNK_BYTES = 4L * 1024 * 1024 * 1024
 
     /** `indx` 头最短长度（wLongsPerEntry 起算的固定字段）。 */
     private const val INDX_MIN_BYTES = 24
@@ -160,18 +199,23 @@ object AviRiffProbe {
      */
     fun findMoviStart(head: ByteArray): Long {
         if (head.size < 12) return -1L
-        var i = 12
+        // ⚠️ 用 Long 累加：单个 chunk 可达 GB 级，Int 会溢出
+        var i = 12L
         var guard = 0
         while (i + 12 <= head.size && guard++ < 4096) {
-            val id = ascii(head, i, 4)
-            val sz = le32(head, i + 4)
-            if (sz < 0 || sz > IDX1_MAX_BYTES) return -1L          // 畸形长度 → 放弃
-            if (id == "LIST" && ascii(head, i + 8, 4) == "movi") {
-                return (i + 8).toLong()                            // type 之后即数据起点
+            val off = i.toInt()
+            val id = ascii(head, off, 4)
+            val sz = le32(head, off + 4)
+            // ⚠️ 只判「越界/畸形」（le32 越界返回 -1）；
+            //    **不能**用 IDX1_MAX_BYTES 当上限 —— movi 的 size 是数据量，GB 级正常
+            //    （v2.4.21 实测：1.06GB 的 movi 被误判成畸形 → movi起点=-1）。
+            if (sz < 0L || sz > MAX_RIFF_CHUNK_BYTES) return -1L
+            if (id == "LIST" && ascii(head, off + 8, 4) == "movi") {
+                return i + 8                                       // type 之后即数据起点
             }
             val step = 8L + sz + (sz and 1L)                       // chunk 按偶数对齐
-            if (step <= 0) return -1L
-            i += step.toInt()
+            if (step <= 0L) return -1L
+            i += step
         }
         return -1L
     }
@@ -354,9 +398,12 @@ object AviRiffProbe {
                 buffer[i + 2] == 'I'.code.toByte() && buffer[i + 3] == 'X'.code.toByte()
             ) {
                 // 前 8 字节应是 LIST + 合理的 size
+                // ⚠️ v2.4.21：上限用 MAX_RIFF_CHUNK_BYTES（4GB）而不是 IDX1_MAX_BYTES ——
+                //    `AVIX` 那个 LIST 的 size 同样是**数据量**（用户样本第一段就 1.06GB），
+                //    用 512MB 会把真实的多段容器判成「不是 LIST」（实测正是如此）。
                 if (i >= 8 &&
                     ascii(buffer, i - 8, 4) == "LIST" &&
-                    le32(buffer, i - 4) in 4..(512L * 1024 * 1024)
+                    le32(buffer, i - 4) in 4..MAX_RIFF_CHUNK_BYTES
                 ) {
                     return true
                 }
