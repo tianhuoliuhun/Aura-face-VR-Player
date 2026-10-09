@@ -303,4 +303,118 @@ class AviRiffProbeTest {
             assertFalse(AviRiffProbe.containsMultiSegmentMarker(b))
         }
     }
+
+    // ===================================================================
+    // 五、idx1 实际覆盖范围 —— v2.4.19 二轮的**核心事实判据**
+    //    （用户确认「idx1 只覆盖第一段」真实存在，故不能只靠 AVIX 结构旁证）
+    // ===================================================================
+
+    /** 构造 idx1：每个条目 16 字节（chunkId / flags / offset / size）。 */
+    private fun idx1Entries(vararg pairs: Pair<Long, Long>): ByteArray {
+        var body = ByteArray(0)
+        for ((off, sz) in pairs) {
+            body += le32(0x30306463L) + le32(0x10L) + le32(off) + le32(sz)
+        }
+        return ascii("idx1") + le32(body.size.toLong()) + body
+    }
+
+    @Test
+    fun `findMoviStart 能定位 movi 数据起点`() {
+        val hdrl = list("hdrl", list("strl", chunk("strh", ByteArray(48))))
+        val head = riff("AVI ", hdrl + list("movi", ByteArray(32)))
+        val expected = 12 + hdrl.size   // RIFF 头(12) + hdrl 之后即 LIST movi 的起点；其数据起点再 +8
+        assertEquals(expected.toLong() + 8L, AviRiffProbe.findMoviStart(head))
+    }
+
+    @Test
+    fun `findMoviStart 没有 movi 时返回 -1`() {
+        val head = riff("AVI ", list("hdrl", list("strl", chunk("strh", ByteArray(48)))))
+        assertEquals(-1L, AviRiffProbe.findMoviStart(head))
+    }
+
+    @Test
+    fun `idx1 覆盖到文件尾时判定为完整`() {
+        val fileSize = 100_000_000L
+        val moviStart = 1000L
+        // 末条目 offset 接近数据区末尾（相对 movi 起点）
+        val tail = idx1Entries(0L to 1000L, (fileSize - moviStart - 2000L) to 1000L)
+        assertTrue(
+            AviRiffProbe.idx1CoversToEnd(tail, fileSize - tail.size, moviStart, fileSize)
+        )
+    }
+
+    @Test
+    fun `idx1 只覆盖第一段时判定为不完整`() {
+        // 🔴 本用例就是用户确认的真实场景：文件 100MB，但索引只指到 10MB
+        val fileSize = 100_000_000L
+        val moviStart = 1000L
+        val tail = idx1Entries(0L to 1000L, 10_000_000L to 1000L)
+        assertFalse(
+            "只覆盖第一段必须被认出（这是 seek 停在半路的根因）",
+            AviRiffProbe.idx1CoversToEnd(tail, fileSize - tail.size, moviStart, fileSize)
+        )
+    }
+
+    @Test
+    fun `offset 写成绝对基准时也能正确判定`() {
+        // 部分 muxer 直接写绝对文件偏移（Media3Avi 也为此做了兼容）
+        val fileSize = 50_000_000L
+        val moviStart = 2000L
+        // 绝对偏移 → 直接指到文件尾附近
+        val tail = idx1Entries(0L to 1000L, (fileSize - 1000L) to 1000L)
+        assertTrue(
+            AviRiffProbe.idx1CoversToEnd(tail, fileSize - tail.size, moviStart, fileSize)
+        )
+    }
+
+    @Test
+    fun `尾部没有 idx1 时保守判定为完整（不误触发重封装）`() {
+        val tail = ByteArray(4096)
+        assertTrue(AviRiffProbe.idx1CoversToEnd(tail, 100L, 1000L, 100_000_000L))
+    }
+
+    @Test
+    fun `末条目超出缓冲时保守判定为完整`() {
+        // 声明 1000 条（16000 字节）但缓冲里只有 1 条 → 判不出来 → true
+        val bogus = ascii("idx1") + le32(16L * 1000) + le32(0x30306463L) + le32(0x10L) +
+            le32(0L) + le32(1000L)
+        assertTrue(AviRiffProbe.idx1CoversToEnd(bogus, 0L, 1000L, 100_000_000L))
+    }
+
+    @Test
+    fun `moviStart 未知时退回按文件大小判定`() {
+        val fileSize = 10_000_000L
+        // moviStart = -1 → 分母用 fileSize
+        val complete = idx1Entries(0L to 1000L, (fileSize - 2000L) to 1000L)
+        assertTrue(AviRiffProbe.idx1CoversToEnd(complete, 0L, -1L, fileSize))
+        val half = idx1Entries(0L to 1000L, (fileSize / 4) to 1000L)
+        assertFalse(AviRiffProbe.idx1CoversToEnd(half, 0L, -1L, fileSize))
+    }
+
+    @Test
+    fun `有 idx1 但覆盖不足时即使单段也要重建`() {
+        // 🔴 新增分支：不依赖 AVIX 结构旁证 —— 这正是「结构旁证会漏判」的场景
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = true,
+            hasOpenDmlIndex = false, hasMultiSegment = false,
+            indexCoversToEnd = false
+        )
+        assertTrue("单段 + 覆盖不足 = 只覆盖第一段，必须重建", p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `覆盖完整且单段时不需要重建`() {
+        val p = AviRiffProbe.Probe(
+            isAvi = true, hasIndexChunk = true,
+            hasOpenDmlIndex = false, hasMultiSegment = false,
+            indexCoversToEnd = true
+        )
+        assertFalse(p.needsIndexRebuild)
+    }
+
+    @Test
+    fun `judgeCoversToEnd 默认值为 true（保守）`() {
+        // Probe 的默认值必须保证「没做覆盖探测」的老调用点行为不变
+        assertTrue(AviRiffProbe.Probe(isAvi = true, hasIndexChunk = true).indexCoversToEnd)
+    }
 }

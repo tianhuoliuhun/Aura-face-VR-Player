@@ -2371,6 +2371,8 @@ fun VRPlayerScreen(
                 // ---- 尾部：idx1 索引与 AVIX 多段容器都在 movi 之后，取末尾一段扫 ----
                 var hasIdx = false
                 var hasMulti = false
+                // ⚠️ v2.4.19 二轮：默认 true = 「判不出来就当没问题」，绝不因此误触发重封装
+                var coversToEnd = true
                 cr.openFileDescriptor(parsed, "r")?.use { pfd ->
                     val size = pfd.statSize
                     if (size > 0) {
@@ -2386,14 +2388,26 @@ fun VRPlayerScreen(
                             if (n <= 0) break
                             off += n
                         }
-                        // ⚠️ v2.4.19：同一份 tail 缓冲同时判两件事（idx1 存在性 + 多段 AVIX），
-                        //    不重复读文件。
+                        // ⚠️ v2.4.19：同一份 tail 缓冲同时判三件事（idx1 存在性 / 多段 AVIX /
+                        //    **idx1 实际覆盖范围**），不重复读文件。
                         val view = tail.copyOf(off)
                         hasIdx = AviRiffProbe.containsIndexMarker(view)
                         hasMulti = AviRiffProbe.containsMultiSegmentMarker(view)
+                        // 🔴 事实判据：直接把「idx1 最后一条目指到的位置」与文件大小比 ——
+                        //    这是唯一不依赖结构标记、能抓到「idx1 只覆盖第一段」的办法。
+                        coversToEnd = AviRiffProbe.idx1CoversToEnd(
+                            tail = view,
+                            tailFileOffset = size - off.toLong(),
+                            moviStart = headProbe.moviStart,
+                            fileSize = size
+                        )
                     }
                 }
-                headProbe.copy(hasIndexChunk = hasIdx, hasMultiSegment = hasMulti)
+                headProbe.copy(
+                    hasIndexChunk = hasIdx,
+                    hasMultiSegment = hasMulti,
+                    indexCoversToEnd = coversToEnd
+                )
             } catch (e: Exception) {
                 Log.w("VRPlayerScreen", "AVI 容器探测失败（按未知处理）：${e.message}")
                 null
@@ -2405,8 +2419,10 @@ fun VRPlayerScreen(
                 "VRPlayerScreen",
                 "AVI 探测：容器=${if (it.isAvi) "AVI" else "非 AVI"}，" +
                     "idx1=${if (it.hasIndexChunk) "有" else "无"}" +
+                    "，索引覆盖全片=${if (it.indexCoversToEnd) "是" else "否"}" +
                     "，OpenDML索引=${if (it.hasOpenDmlIndex) "有" else "无"}" +
                     "，多段movi=${if (it.hasMultiSegment) "是" else "否"}" +
+                    "，movi起点=${it.moviStart}" +
                     if (it.needsIndexRebuild) " → 索引不足以覆盖全片，将按需重建" else ""
             )
         }

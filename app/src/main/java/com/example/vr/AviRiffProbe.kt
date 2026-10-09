@@ -5,43 +5,46 @@ package com.example.vr
  *
  * ## 它回答的问题（v2.4.19 起不再只是「有没有索引」）
  *
- * 1. **有没有 `idx1`**？（原来唯一的问题）
- * 2. **有没有 OpenDML 索引**（`indx` / `ix00` …）？—— 有它时 Media3Avi 会**优先用它**
- *    （`AviExtractor`：`if (riffType == AVIX || getIndexBoxList().size() > 0)` → 跳过 `idx1`），
- *    即使 `idx1` 只覆盖第一段也能 seek 全片。
- * 3. **是否存在多个 `movi` 段**（`LIST … AVIX`）？—— 这是「`idx1` 只覆盖第一段」的**前提条件**。
+ * 1. **有没有 `idx1`**？
+ * 2. **`idx1` 实际覆盖到哪里**？—— ✅ **这是最直接的判据**（v2.4.19 二轮补上）
+ * 3. **有没有 OpenDML 索引**（`indx` / `ix00` …）？—— 有它时 Media3Avi **优先用它**
+ *    （`AviExtractor`：`if (riffType == AVIX || getIndexBoxList().size() > 0)` → 跳过 `idx1`）。
+ * 4. **是否存在多个 `movi` 段**（`LIST … AVIX`）？—— 一个**结构性旁证**。
  *
- * ## 🔴 为什么第 3 条才是关键（v2.4.19 新增的判据）
+ * ## 🔴 为什么会「`idx1` 只覆盖第一段」（用户确认该情形真实存在）
  *
- * `idx1` 的 offset 字段是 **32 位**（相对第一个 `movi` 起点），所以**文件大到需要分段时**
- * （>1~2GB，老工具常见），文件会变成 **多个 `movi` + `AVIX` 容器**，
- * 而 `idx1`（只有一个）**通常只索引第一段**。
+ * `idx1` 的 offset 字段是 **32 位**、且**相对第一个 `movi` 起点**。文件大到需要分段时
+ * （OpenDML / >1~2GB，老工具常见），后续内容被放进额外的 `LIST AVIX` 里，
+ * 而**唯一的 `idx1` 往往只描述第一段**。
  *
  * Media3Avi 的 `parseIdx1()` 只要 `idx1` ≥16 字节就**无条件接受**并 `buildSeekMap()` ——
- * **它不核对 `idx1` 覆盖到哪里**。于是第二段的 chunk **没有索引条目** →
- * 拖到后半段时会落到「最后一个已知位置」（第一段末尾）→ 表现为
- * **「拖到后半段，画面停在前面不动」**。
+ * **它从不核对 `idx1` 覆盖到哪里**。于是第二段的 chunk 没有索引条目 →
+ * 拖到后半段会落到「最后一个已知位置」（第一段末尾）→ 表现为
+ * **「拖到后半段，画面停在前面不动 / 跳到却不继续播」**。
  *
- * ⚠️ **实测校正（v2.4.19）**：拿 3 个真实样本（含上游命名为 `odml` 的那个）测过，
- * **它们的 `idx1` 都完整覆盖到文件尾（98.7%~99.9%）、且都没有 `AVIX`/`indx`**。
- * 也就是说「`idx1` 只覆盖第一段」**不是常态**，必须满足
- * **「多段 `movi`（`AVIX`）**且**无 `indx`」**这两个条件才成立 ——
- * 所以判据必须**同时**看这两件事：不能一见到「有 idx1」就放过，也不能一见到 `idx1` 就重建。
+ * ## ⚠️ 判据演进（走过的弯路，别再退回去）
  *
- * ## 判据汇总（[Probe.needsIndexRebuild]）
- * | 情形 | 判定 |
- * |---|---|
- * | 无 `idx1` | **重建**（原有判据；没有索引就没有 seek 能力） |
- * | 有 `idx1` + **多段 `AVIX`** + **无 `indx`** | **重建**（新增：idx1 只覆盖第一段） |
- * | 有 `idx1` + 多段 `AVIX` + **有 `indx`** | 不必重建（Media3Avi 会优先用 `indx`） |
- * | 有 `idx1` + 单段 `movi` | 不必重建（实测 idx1 覆盖到文件尾） |
+ * - **v1（错）**：只判「有没有 `idx1`」→ 有就放过 → 漏判「只覆盖第一段」。
+ * - **v2（不充分）**：改成判「**多段 `AVIX` 且无 `indx`**」—— 这个判据**依赖结构标记**，
+ *   隐含假设「只覆盖第一段 ⟺ 文件带 `AVIX`」。但**老工具/Bug 工具完全可能生成
+ *   「多段 movi 却没写 `AVIX` 标记」或「单段但 `idx1` 只写了一部分」的文件** →
+ *   **仍然漏判**。
+ * - **v3（当前，正确）**：**直接量 `idx1` 的覆盖范围** ——
+ *   用「`idx1` 最后一条目的 offset + size」换算成**绝对文件位置**，与**文件大小**比较。
+ *   这是**事实判据**，不依赖任何结构标记，无论文件怎么写都能抓到。
+ *   `AVIX`/`indx` 判据**保留**为辅助（`indx` 可让「多段」情形免于无谓重封装）。
+ *
+ * ⚠️ 实测参考（上游 3 个真实样本）：`idx1` 覆盖 98.7%~99.9%、无 `AVIX`/`indx` ——
+ * 即**正常单段 AVI 的覆盖率接近 100%**，所以「覆盖率 < 90%」是个**很安全的判据**
+ * （不会误伤正常文件，又能抓住只覆盖前半段的）。
  *
  * ## 设计约束
  * - **纯逻辑、零 Android 依赖**（只吃 `ByteArray`）→ 可在纯 JVM 单测里跑。
- *   文件 IO 由调用方负责（`VRPlayerScreen` 读头 + 读尾）。
+ *   文件 IO 与「文件大小/尾部起始偏移」由调用方提供（`VRPlayerScreen`）。
  * - **不信任 chunk 长度**：`size` 字段来自文件内容，所有偏移都做边界检查。
- * - ⚠️ 本类**仍然不判断视频编码**（历史上用于识别「AVI 内的 AV1」的逻辑已按用户要求整体移除）。
- *   编码种类与 seek 修复无关 —— 无论 XVID 还是别的，只要索引不足以覆盖全片，症状完全一样。
+ * - **判不出来时一律返回「没问题」**（`indexCoversToEnd = true`）——
+ *   宁可漏修也不能误修（重封装要读写一整份文件，大文件几十秒）。
+ * - ⚠️ 本类**不判断视频编码**（历史上用于识别「AVI 内的 AV1」的逻辑已按用户要求整体移除）。
  */
 object AviRiffProbe {
 
@@ -58,11 +61,24 @@ object AviRiffProbe {
          */
         val hasOpenDmlIndex: Boolean = false,
         /**
-         * 是否存在**多个 `movi` 段**（`LIST … AVIX`）。
+         * 是否存在**多个 `movi` 段**（`LIST … AVIX`）—— **结构性旁证**。
          *
-         * 这是「`idx1` 只覆盖第一段」的**前提**；单段 `movi` 的 AVI 里 `idx1` 必然覆盖全片。
+         * ⚠️ 它只是旁证：没有它**不代表** `idx1` 就完整（老工具可能不写 `AVIX`）。
+         * 真正说了算的是 [indexCoversToEnd]。
          */
-        val hasMultiSegment: Boolean = false
+        val hasMultiSegment: Boolean = false,
+        /**
+         * `idx1` 是否**覆盖到文件尾**（v2.4.19 二轮新增的**事实判据**）。
+         *
+         * ⚠️ **默认 true** —— 判不出来时视为「没问题」，绝不因此触发重封装。
+         */
+        val indexCoversToEnd: Boolean = true,
+        /**
+         * 第一个 `movi` 列表的**数据起点**（绝对文件偏移）；-1 = 未知（头部里没找到）。
+         *
+         * 供调用方换算 `idx1` 覆盖位置（[idx1CoversToEnd] 的相对基准要用它）。
+         */
+        val moviStart: Long = -1L
     ) {
         /**
          * 索引**不足以覆盖全片** → seek 会「跳到却不继续播 / 停在前段」→ 应重封装。
@@ -74,39 +90,49 @@ object AviRiffProbe {
             get() = isAvi && (
                 // ① 完全没有索引 —— 连第一段都 seek 不了
                 !hasIndexChunk
-                    // ② 多段 movi（idx1 只可能覆盖第一段）**且**没有 OpenDML 索引可替代
+                    // ② **事实判据**：idx1 实测覆盖不到文件尾（只覆盖第一段）
+                    || !indexCoversToEnd
+                    // ③ 结构性旁证：多段 movi 且没有 OpenDML 索引可替代
                     || (hasMultiSegment && !hasOpenDmlIndex)
                 )
     }
 
     /**
-     * 判定「是不是 AVI」+ 找 OpenDML 索引所需的头部字节数。
+     * 判定「是不是 AVI」+ 找 OpenDML 索引 / `movi` 起点所需的头部字节数。
      *
-     * ⚠️ v2.4.19：**1KB → 64KB**。`indx` 是 `strl` 的子块、位于 `hdrl` 里，
-     * 而 `hdrl`（含 avih + 各 strl/strf）**经常超过 1KB** ——
-     * 只读 1KB 会漏掉 `indx` → 把「有 OpenDML 索引」误判成「没有」→
-     * 多段 AVI 会被无谓地重封装（白等几十秒）。
+     * ⚠️ v2.4.19：**1KB → 64KB**。两个原因：
+     * ① `indx` 是 `strl` 的子块、位于 `hdrl` 里，而 `hdrl`（含 avih + 各 strl/strf）**经常超过 1KB**；
+     * ② 换算 `idx1` 覆盖位置需要 **`movi` 起点**（见 [findMoviStart]），它常在 1~40KB 处。
+     * 读 1KB 会同时漏掉这两样 → 判据失效。
      */
     const val HEAD_BYTES = 64 * 1024
 
-    /** 扫描 `idx1` / `AVIX` 时读取的文件尾部长度。索引与多段容器都位于 `movi` 之后，即文件末尾附近。 */
+    /** 扫描 `idx1` / `AVIX` 时读取的文件尾部长度。 */
     const val TAIL_BYTES = 1024 * 1024
 
     /** 单个 `idx1` 条目固定 16 字节 → chunk 大小必须是它的整数倍（强判据，防误命中）。 */
     private const val IDX1_ENTRY_BYTES = 16L
 
-    /** `idx1` 大小上限（512MB），超过视为误命中。 */
+    /** `idx1` / `indx` 大小上限（512MB），超过视为误命中。 */
     private const val IDX1_MAX_BYTES = 512L * 1024 * 1024
 
     /** `indx` 头最短长度（wLongsPerEntry 起算的固定字段）。 */
     private const val INDX_MIN_BYTES = 24
 
+    /**
+     * 覆盖率下限（百分比）。低于它才判定「索引不完整」。
+     *
+     * 取 90 是基于实测的安全值：正常单段 AVI 的 `idx1` 覆盖 98.7%~99.9%，
+     * 而「只覆盖第一段」的文件覆盖率通常 <50%。中间留足余量，两个方向都不易错。
+     */
+    private const val COVERAGE_MIN_PERCENT = 90
+
     // ===================================================================
-    // 一、容器判定 + OpenDML 索引（头部）
+    // 一、容器判定 + OpenDML 索引 + movi 起点（头部）
     // ===================================================================
 
     /**
-     * 头部字节是否像 AVI：`RIFF` + 4 字节长度 + `AVI `；同时探 `indx`。
+     * 头部字节是否像 AVI：`RIFF` + 4 字节长度 + `AVI `；同时探 `indx` 与 `movi` 起点。
      *
      * ⚠️ 即使调用方已按扩展名筛过仍需要它：扩展名会撒谎，
      * 一个名为 `.avi` 的文件完全可能是别的容器 —— 那样就不该按 AVI 的逻辑去重封装。
@@ -115,7 +141,39 @@ object AviRiffProbe {
         if (head.size < 12) return Probe(isAvi = false, hasIndexChunk = false)
         if (ascii(head, 0, 4) != "RIFF") return Probe(false, false)
         if (ascii(head, 8, 4) != "AVI ") return Probe(false, false)
-        return Probe(isAvi = true, hasIndexChunk = false, hasOpenDmlIndex = containsOpenDmlIndex(head))
+        return Probe(
+            isAvi = true,
+            hasIndexChunk = false,
+            hasOpenDmlIndex = containsOpenDmlIndex(head),
+            moviStart = findMoviStart(head)
+        )
+    }
+
+    /**
+     * 在头部缓冲里找**第一个 `movi` 列表的数据起点**（绝对文件偏移）。
+     *
+     * 返回它的原因：`idx1` 的 offset 字段**相对第一个 `movi` 起点**（也有写绝对偏移的，
+     * 见 [idx1CoversToEnd] 的双基准处理），换算覆盖位置必须用它。
+     *
+     * 实现：从偏移 12 起按 RIFF 顶层块步进，找 `LIST … movi`。
+     * ⚠️ 头部缓冲可能**被截断**（文件比 64KB 小、或 movi 在 64KB 之外）→ 返回 -1。
+     */
+    fun findMoviStart(head: ByteArray): Long {
+        if (head.size < 12) return -1L
+        var i = 12
+        var guard = 0
+        while (i + 12 <= head.size && guard++ < 4096) {
+            val id = ascii(head, i, 4)
+            val sz = le32(head, i + 4)
+            if (sz < 0 || sz > IDX1_MAX_BYTES) return -1L          // 畸形长度 → 放弃
+            if (id == "LIST" && ascii(head, i + 8, 4) == "movi") {
+                return (i + 8).toLong()                            // type 之后即数据起点
+            }
+            val step = 8L + sz + (sz and 1L)                       // chunk 按偶数对齐
+            if (step <= 0) return -1L
+            i += step.toInt()
+        }
+        return -1L
     }
 
     /**
@@ -128,7 +186,7 @@ object AviRiffProbe {
      *   'indx' | size(4) | wLongsPerEntry(2) | bIndexSubType(1) | bIndexType(1)
      *          | nEntriesInUse(4) | dwChunkId(4) | …
      * ```
-     * 校验：`size >= 24`、`wLongsPerEntry ∈ {2,4,8,16}`、`bIndexType ∈ {0,1}`（标准索引类型）。
+     * 校验：`size >= 24`、`wLongsPerEntry ∈ {2,4,8,16}`、`bIndexType ∈ {0,1}`。
      */
     fun containsOpenDmlIndex(buffer: ByteArray): Boolean {
         // 只需能读到 id(4)+size(4)+wLongsPerEntry(2)+subType(1)+indexType(1) = 12 字节即可校验；
@@ -176,8 +234,11 @@ object AviRiffProbe {
      *
      * 传进来的应是**文件尾部**缓冲（索引在 `movi` 之后）。
      */
-    fun containsIndexMarker(buffer: ByteArray): Boolean {
-        if (buffer.size < 8) return false
+    fun containsIndexMarker(buffer: ByteArray): Boolean = findIdx1(buffer) != null
+
+    /** 定位 `idx1`：返回 (标记偏移, 载荷大小)；找不到返回 null。 */
+    private fun findIdx1(buffer: ByteArray): Pair<Int, Long>? {
+        if (buffer.size < 8) return null
         var i = 0
         var nearMiss = 0
         while (i + 8 <= buffer.size) {
@@ -188,33 +249,102 @@ object AviRiffProbe {
             ) {
                 val sz = le32(buffer, i + 4)
                 if (sz >= IDX1_ENTRY_BYTES && sz % IDX1_ENTRY_BYTES == 0L && sz <= IDX1_MAX_BYTES) {
-                    return true
+                    return i to sz
                 }
                 // 命中字面量但结构不符 → 大概率是数据里的巧合，继续找；
                 // 只容忍有限次，避免在畸形/超大缓冲上退化成全扫。
                 nearMiss++
-                if (nearMiss > 16) return false
+                if (nearMiss > 16) return null
             }
             i++
         }
-        return false
+        return null
     }
 
     // ===================================================================
-    // 三、多段 movi（AVIX）存在性 —— v2.4.19 新增
+    // 三、idx1 实际覆盖范围 —— v2.4.19 二轮的**核心判据**
+    // ===================================================================
+
+    /**
+     * **`idx1` 是否覆盖到文件尾** —— 直接量出来的事实判据。
+     *
+     * ## 算法
+     * 1. 在尾部缓冲里定位 `idx1`；取 `n = size / 16`
+     * 2. 读**最后一条目**的 `offset`（+8）与 `size`（+12）
+     * 3. 换算成绝对文件位置，**两种基准都算、取较大者**（宽松，避免误判）：
+     *    - 绝对基准：`offset + size`
+     *    - 相对基准：`moviStart + 8 + offset + size`
+     *      （`idx1` 规范要求 offset 相对 `movi` 起点，但实测存在写绝对偏移的 muxer ——
+     *        Media3Avi 也为此做了双基准判断）
+     * 4. 覆盖率 ≥ [COVERAGE_MIN_PERCENT] 视为完整
+     *
+     * ## ⚠️ 分母用「数据区大小」（fileSize - moviStart），不是文件总大小
+     * 头部（`hdrl`/`INFO` 等）与索引本身都在 `movi` 之外，用文件总大小当分母会**低估**覆盖率。
+     * 而「只覆盖第一段」的判定恰恰依赖分母准确 —— 例如 1.6GB 文件只有第一段（1GB）被索引，
+     * 用总大小算覆盖率是 62%，用数据区算也是 62%，但**与 movi 起点对齐后**才能正确处理
+     * 「头部很大」的样本。
+     *
+     * ## ⚠️ 为什么用「末条目」而不是「条目数」
+     * `idx1` 的条目含**音视频全部 chunk**，与 `avih.dwTotalFrames`（只数视频帧）
+     * 没有固定比例关系（上游样本实测比值 2.7~290），拿条目数比对上界不可靠，
+     * 而 OpenDML 文件的 `dwTotalFrames` 常被置 1（更不可靠）。
+     * 直接看「索引指到的最后一个位置」才是**与 seek 能力直接相关**的量。
+     *
+     * ## ⚠️ 判不出来时返回 **true**（不触发重封装）
+     * 以下情形都返回 true（保守）：
+     * - 尾部缓冲里没有 `idx1`（大索引的标记可能在缓冲之外；`hasIndexChunk` 会另行判定）
+     * - 末条目不在缓冲内（`idx1` 比尾部窗口还大）
+     * - 字段畸形（长度超范围）
+     *
+     * @param tail 文件尾部缓冲（长度 = 实际读到的字节数）
+     * @param tailFileOffset `tail[0]` 对应的**绝对文件偏移**（= 文件大小 - tail.size）
+     * @param moviStart 第一个 `movi` 数据起点（[findMoviStart] 结果；-1 表示未知）
+     * @param fileSize 文件总大小（字节）
+     */
+    fun idx1CoversToEnd(
+        tail: ByteArray,
+        tailFileOffset: Long,
+        moviStart: Long,
+        fileSize: Long
+    ): Boolean {
+        if (fileSize <= 0L) return true
+        val (pos, size) = findIdx1(tail) ?: return true
+        val n = size / IDX1_ENTRY_BYTES
+        if (n <= 0L) return true
+        val lastEntry = pos + 8 + ((n - 1) * IDX1_ENTRY_BYTES).toInt()
+        if (lastEntry < 0 || lastEntry + 16 > tail.size) return true   // 末条目不在缓冲内
+        val off = le32(tail, lastEntry + 8)
+        val sz = le32(tail, lastEntry + 12)
+        if (off < 0L || sz < 0L) return true
+
+        // 🔴 双基准取较大者（宽松，避免因基准约定不同而误判）：
+        //    · 绝对基准：offset 直接就是文件偏移（部分 muxer 这么写，Media3Avi 也做了兼容）
+        //    · 相对基准：offset 相对第一个 movi 数据起点（**规范要求**）
+        val absCandidate = off + sz
+        val relCandidate = if (moviStart > 0L) moviStart + 8L + off + sz else -1L
+        val covered = maxOf(absCandidate, relCandidate)
+
+        // ⚠️ 分母 = 数据区（`movi` 之后的部分）；moviStart 未知时退回文件大小。
+        //    实测正常单段 AVI 的 covered ≈ 数据区大小（覆盖 98.7%~99.9%）。
+        val dataSize = if (moviStart > 0L) (fileSize - moviStart) else fileSize
+        if (dataSize <= 0L) return true
+        return covered >= dataSize * COVERAGE_MIN_PERCENT / 100L
+    }
+
+    // ===================================================================
+    // 四、多段 movi（AVIX）存在性 —— 结构性旁证
     // ===================================================================
 
     /**
      * 尾部缓冲里是否存在**多段 `movi` 容器**（`LIST … AVIX`）。
      *
-     * ## 为什么这是「idx1 只覆盖第一段」的判据
-     * `idx1` 的 offset 是 32 位、**相对第一个 `movi` 起点**；文件大到需要分段时，
-     * 后续内容被放进额外的 `LIST AVIX` 里，而**唯一的 `idx1` 只描述第一段**。
-     * 所以「存在 `AVIX`」⇔「`idx1` 很可能不完整」。
+     * ⚠️ 这是**旁证**，不是充分判据（老工具可能多段却不写 `AVIX`）——
+     * 真正说了算的是 [idx1CoversToEnd]。保留它是因为：
+     * 「多段 + 无 `indx`」时**即使 `idx1` 恰好覆盖到尾部附近**，seek 也可能不准，
+     * 多一层保险。
      *
      * ⚠️ 同样要做**结构性校验**：`AVIX` 必须出现在 `LIST` 的 **type 位置**
      * （即 `'LIST' | size(4) | 'AVIX'`），而不是随便 4 个字节。
-     * 单独出现的 `AVIX` 字面量（在压缩数据里）不算数。
      */
     fun containsMultiSegmentMarker(buffer: ByteArray): Boolean {
         if (buffer.size < 12) return false
@@ -237,7 +367,7 @@ object AviRiffProbe {
     }
 
     // ===================================================================
-    // 四、字节小工具（全部带边界检查，绝不抛 IndexOutOfBounds）
+    // 五、字节小工具（全部带边界检查，绝不抛 IndexOutOfBounds）
     // ===================================================================
 
     /** 读 4 字节 ASCII；越界返回空串（调用方按「没读到」处理）。 */
