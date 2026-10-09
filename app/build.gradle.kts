@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 270
-    versionName = "2.4.19"
+    versionCode = 271
+    versionName = "2.4.20"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -45,6 +45,20 @@ android {
       //    「下载 AAR → 删掉它内部的 libc++_shared → 放 libs/ 当本地 AAR」。
       // ======================================================================
       pickFirsts += listOf("**/libc++_shared.so")
+
+      // ======================================================================
+      // v2.4.20：**排除 libggml-vulkan.so**（GPU 卸载已停用）
+      // ----------------------------------------------------------------------
+      // v2.4.18 引入 GPU 卸载时编入该库（35.6MB，压缩后约 11MB）。但实测
+      // 「GGML_BACKEND_DL + JNI 手动 ggml_backend_load 注册」的组合下，Vulkan 的
+      // buffer_type 接口无效 → 分配上下文张量时 `pc=0` SIGSEGV
+      // （**真机小米平板 5 Pro / Adreno 650 与 MuMu 模拟器均复现**）。
+      // 功能已停用（见 llama_mtmd_jni.cpp 的说明），库就没有必要留在包里。
+      //
+      // ⚠️ 安全性依据（已实测）：DL 模式下 `libggml.so` 的 DT_NEEDED 只有
+      //    `libggml-base.so`（不含 vulkan / cpu），故排除它不会导致任何库加载失败。
+      // ⚠️ 将来若修好 GPU 卸载，**删掉这一行**即可（JNI 侧探测代码保留着）。
+      excludes += listOf("**/libggml-vulkan.so")
 
       // ======================================================================
       // v2.1.243：**MPV 的 native 库改回"内置模式"**（不再后下载）

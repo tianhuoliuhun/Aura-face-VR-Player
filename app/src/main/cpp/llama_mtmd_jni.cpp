@@ -422,12 +422,30 @@ Java_com_example_vr_LlamaMtmd_nativeInit(
     //    ⚠️ CPU 缺席 = 本地推理完全不可用，故 fatalIfMissing=true 打 ERROR。
     ensureBackendRegistered("libggml-cpu.so", "ggml_backend_cpu_reg", "CPU", true);
 
-    // 🔴 GPU 卸载（v2.4.18）：构建带 Vulkan 后端且设备有 GPU 时把全部层卸到 GPU；
-    //    无 GPU（模拟器 / 老设备 / 纯 CPU 构建）则保持 0 走 CPU —— 与 v2.4.16 前行为一致。
-    //    ⚠️ 探测必须**先于**模型加载，且只在有设备时才设 >0：
-    //       无 Vulkan 却设 n_gpu_layers>0 会让模型加载失败（把功能搞挂）。
+    // 🔴🔴 v2.4.20：**GPU 卸载已停用**（v2.4.18 引入的回归，实际不可用）
+    //
+    // 实测证据（真机小米平板 5 Pro / Adreno 650 与 MuMu 模拟器**均复现**）：
+    //   在 `nativeInit` 里分配上下文张量时崩溃，`SIGSEGV / fault addr 0x0`：
+    //     #00 pc 0 <unknown>                              ← 空函数指针
+    //     #01~#03 libggml-vulkan.so
+    //     #04 libggml-base.so  ggml_backend_buft_alloc_buffer_n
+    //     #05 libggml-base.so  ggml_backend_alloc_ctx_tensors_from_buft
+    //
+    // 根因：`ggml_backend_buft_alloc_buffer_n` 会调用 `buft->iface.alloc_buffer`，
+    //   而在**「GGML_BACKEND_DL + 本 JNI 手动 dlopen/ggml_backend_load 注册」**的组合下，
+    //   Vulkan 后端的 buffer_type **没有拿到有效接口**（函数指针为 NULL）→ 跳 pc=0 崩溃。
+    //   属**结构性不可用**，不是「设备不支持/配置不对」——真机有完整 Vulkan 驱动也一样崩。
+    //
+    // 因此本版**强制走 CPU**（= v2.4.17 的已验证行为）。
+    //   探测仍然执行，但**结果只作日志留档**，便于将来修好该注册路径后再启用。
+    //   ⚠️ 不要只因为「探测到设备数 > 0」就重新打开 —— 那正是这次的坑
+    //      （「枚举成功 ≠ 能力可用」，本项目第三次踩同型问题）。
     const int gpuDevices = detectVulkanDevices();
-    const int gpuLayers  = (gpuDevices > 0) ? 99 : 0;
+    const int gpuLayers  = 0;
+    if (gpuDevices > 0) {
+        LOGW("探测到 %d 个 Vulkan 设备，但 GPU 卸载已停用（v2.4.20 回归回退）→ 本次走 CPU",
+             gpuDevices);
+    }
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = gpuLayers;
