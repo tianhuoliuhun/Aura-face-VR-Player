@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
     minSdk = 24
     targetSdk = 36
-    versionCode = 265
-    versionName = "2.4.14"
+    versionCode = 266
+    versionName = "2.4.15"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -243,6 +243,22 @@ android {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
+
+      // ⚠️⚠️ v2.4.15 起注意：**`lintVitalRelease` 会长时间挂起**（疑似 Media3 1.7.1 的
+      //    lint 规则所致）。实测表现：构建日志停在 `mergeReleaseJavaResource` 之后
+      //    **22 分钟零输出**，`app/build/intermediates` 不再有任何文件更新 ——
+      //    不是"慢"，是真卡住，只能强杀 Gradle 进程。
+      //
+      // 临时绕法（已验证可行，1m9s 完成）：
+      //     gradle :app:assembleRelease -x lintVitalRelease
+      //
+      // 为什么可以接受：vitals lint 只在 release 打包时跑，同一次构建里的
+      // `assembleDebug` 与 `testDebugUnitTest` **完全不受影响**（它们不跑 vitals lint）。
+      // 📌 判断"卡死 vs 慢"的可靠手法：看 `app/build/intermediates` 里
+      //    **最近文件的 mtime**，而不是只看日志 —— 日志可能只是长时间没有新 Task 行。
+      //
+      // TODO: 定位是 Media3 1.7.1 的哪条 lint 规则卡住（或给 lint 加超时/白名单），
+      //       修好后应恢复 `assembleRelease` 的常规用法。
     }
     debug {
       // ⚠️ v2.4.14：debug 包**改用 release 签名**（不再用 `debugConfig`）。
@@ -389,14 +405,14 @@ dependencies {
   implementation(libs.mediapipe.tasks.vision)
   // Liquid Glass effect (Android 12+ RenderEffect backdrop; uses androidx compose 1.10.3)
   implementation(libs.backdrop)
-  implementation("androidx.media3:media3-exoplayer:1.4.1")
-  implementation("androidx.media3:media3-common:1.4.1")
-  implementation("androidx.media3:media3-transformer:1.4.1")
-  implementation("androidx.media3:media3-effect:1.4.1")
+  implementation("androidx.media3:media3-exoplayer:1.7.1")
+  implementation("androidx.media3:media3-common:1.7.1")
+  implementation("androidx.media3:media3-transformer:1.7.1")
+  implementation("androidx.media3:media3-effect:1.7.1")
   // v2.0.142：SimpleCache 需要 media3-database 提供 StandaloneDatabaseProvider
   // （CacheDataSource / SimpleCache / LeastRecentlyUsedCacheEvictor 本身在 media3-datasource，
   //  已由 media3-exoplayer 传递引入，无需再显式声明）
-  implementation("androidx.media3:media3-database:1.4.1")
+  implementation("androidx.media3:media3-database:1.7.1")
 
   // ==========================================================================
   // v2.1.237：ExoPlayer **流媒体协议扩展**（第一批）
@@ -414,12 +430,35 @@ dependencies {
   //    要真正播 rtmp:// 需要在 DataSource.Factory 里显式挂 RtmpDataSource.Factory。
   //    这里先引入（体积很小），实际启用见 `VRPlayerScreen` 的 DataSource 链。
   // ==========================================================================
-  implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
-  implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
-  implementation("androidx.media3:media3-exoplayer-rtsp:1.4.1")
-  implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.4.1")
-  implementation("androidx.media3:media3-datasource-rtmp:1.4.1")
-  implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
+  implementation("androidx.media3:media3-exoplayer-hls:1.7.1")
+  implementation("androidx.media3:media3-exoplayer-dash:1.7.1")
+  implementation("androidx.media3:media3-exoplayer-rtsp:1.7.1")
+  implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.7.1")
+  implementation("androidx.media3:media3-datasource-rtmp:1.7.1")
+  implementation("androidx.media3:media3-datasource-okhttp:1.7.1")
+
+  // ========================================================================
+  // v2.4.14：**改进版 AVI extractor** —— `com.github.dburckh:Media3Avi:2.7.1`
+  // ========================================================================
+  // 为什么需要它（源码实证 → `docs/AVI_EXO_COMPAT_STUDY.md`）：
+  //   官方 `AviExtractor` **只认 `idx1` 一种索引**，它的状态机里
+  //   只有 `STATE_FINDING_IDX1_HEADER` / `STATE_READING_IDX1_BODY`，
+  //   常量表**没有 `INDX` / `AVIX` / `DMLH`**；而且**没有 idx1 时直接**：
+  //       extractorOutput.seekMap(new SeekMap.Unseekable(durationUs));
+  //   → 整个视频**被判为不可 seek**，表现为「拖了没反应」；
+  //     即使文件其实带 OpenDML 索引（`indx`/`ix##`），官方也读不懂。
+  //
+  // 本库（MIT 许可、AAR 仅 55KB、**纯 Java 无 native**、未声明 minSdk）
+  // 用自己重写的 extractor **替换**官方那个，补上：
+  //   · OpenDML：`indx`(IndexBox) / `ix##`(IdxxBox) / `AVIX` 多 movi / `DMLH` 扩展头
+  //   · 多 `movi` 段（官方只支持单个 → >1GB 的 OpenDML AVI 只能读第一段）
+  //   · 无索引时的兜底（按时间均匀生成稀疏关键帧，而不是干脆不给 seek）
+  //   · 更多 H264 fourcc；并规避 `Mp3Extractor` 误判 AVI
+  //
+  // ⚠️ 它会**拉高 Media3 版本**：其 POM 依赖 `media3-*:1.7.1`（runtime scope），
+  //    Gradle 冲突解析取高版本 → 故上面 11 处 media3 依赖已同步升到 1.7.1。
+  // ⚠️ jitpack 源已在 `settings.gradle.kts` 里加好，且**范围限死**在该 group。
+  implementation("com.github.dburckh:Media3Avi:2.7.1")
   // Real Vosk offline speech recognition (Kaldi based, on-device ASR)
   // v117：纯 Java MPEG 音频软件解码兜底（JLayer，LGPL-2.1）
   // 背景：MPEG-1 Audio Layer II（Android 里的 MIME 是 audio/mpeg-L2）在 Android 上属可选格式，

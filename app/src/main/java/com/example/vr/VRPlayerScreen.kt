@@ -3470,7 +3470,31 @@ fun VRPlayerScreen(
             )
             val exo = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(
-                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
+                    // ⚠️ v2.4.14：传入 `AviExtractorsFactory` —— 用**改进版 AVI extractor**
+                    //    **替换**官方那个（`DefaultMediaSourceFactory` 的第二个参数就是
+                    //    `ExtractorsFactory`）。
+                    //
+                    // 为什么必须换（源码实证 → `docs/AVI_EXO_COMPAT_STUDY.md`）：
+                    //   · 官方 `AviExtractor` **只认 `idx1` 一种索引**：状态机里只有
+                    //     `STATE_FINDING_IDX1_HEADER` / `STATE_READING_IDX1_BODY`，
+                    //     常量表里**没有 `INDX` / `AVIX` / `DMLH`**（即不支持 OpenDML）。
+                    //   · **没有 `idx1` 时它直接**：
+                    //       `extractorOutput.seekMap(new SeekMap.Unseekable(durationUs))`
+                    //     → 整个视频被判为**不可 seek**，用户观感就是「拖了没反应」。
+                    //   · 只支持**单个 `movi` 段** → >1GB 的 OpenDML AVI 只能读第一段。
+                    //
+                    // 换用后（本库 MIT、AAR 仅 55KB、纯 Java 无 native）：
+                    //   OpenDML（`indx`/`ix##`）与多 `movi` 均可解析、无索引时也有兜底，
+                    //   → **不再需要靠「把整个文件重封装成 MP4」来换取 seek 能力**。
+                    //
+                    // ⚠️ 下游的 `AviRiffProbe` + `VideoRemuxer` 自修复链路**保留** ——
+                    //    它是更低一层的兜底（extractor 也救不了的文件仍走重封装）。
+                    // ⚠️ 本库内部只会**替换 AVI 那一个 extractor**，其余原样委托
+                    //    `DefaultExtractorsFactory` → 对 mp4/mkv/ts 等零回归。
+                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                        context,
+                        com.homesoft.exo.extractor.AviExtractorsFactory()
+                    )
                         .setDataSourceFactory(smbAwareFactory)
                         // ⚠️ v2.1.248：**补上内嵌 ASS/SSA 字幕支持**。
                         //    Media3 自带 `ssa/SsaParser`，但默认的
