@@ -33,6 +33,7 @@
 
 #include <cctype>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <fstream>
 #include <set>
 #include <thread>
@@ -148,6 +149,91 @@ int getPhysicalCoreCount() {
     if (!phys.empty()) return static_cast<int>(phys.size());
     unsigned n = std::thread::hardware_concurrency();    // 逻辑核（可能被超线程放大）
     return n > 0 ? static_cast<int>(n) : 1;
+}
+
+/**
+ * 确保 ggml 后端已注册（v2.4.18，配合 **GGML_BACKEND_DL** 构建）。
+ *
+ * ## 为什么必须显式注册
+ * DL 构建下后端是**运行时动态加载**的独立 .so（libggml.so 对它们没有 DT_NEEDED），
+ * ggml 的注册表靠扫描目录找后端 —— 而 Android 上「可执行文件目录」是 app_process，
+ * 扫描根本扫不到 APK 的 nativeLibraryDir。所以由 JNI 侧显式 dlopen + 注册：
+ *   1. `ggml_backend_reg_by_name(regName)` 已注册 → 直接返回（幂等）
+ *   2. dlopen 后端 .so（Android 会到应用 nativeLibraryDir 找同名库）
+ *   3. dladdr 拿到该 .so 的**绝对路径** → 调 `ggml_backend_load(path)` 注册
+ *
+ * ⚠️ 任何一步失败都只是「该后端不可用」，**绝不抛错**（CPU 缺了整个本地 AI 就没了，
+ *    所以 CPU 的 dlopen 失败要打 ERROR 级日志）。
+ */
+void ensureBackendRegistered(const char * soName, const char * markerSym, const char * regName, bool fatalIfMissing) {
+    void * gml = dlopen("libggml.so", RTLD_LAZY | RTLD_LOCAL);
+    if (!gml) {
+        LOGE("后端注册：libggml.so 加载失败（%s）", dlerror());
+        return;
+    }
+    using RegByNameFn   = void * (*)(const char *);
+    using BackendLoadFn = void   (*)(const char *);
+    auto regByName = reinterpret_cast<RegByNameFn>(dlsym(gml, "ggml_backend_reg_by_name"));
+    auto loadFn    = reinterpret_cast<BackendLoadFn>(dlsym(gml, "ggml_backend_load"));
+    if (!regByName || !loadFn) return;                 // 非 DL 构建静态注册，无需处理
+    if (regByName(regName) != nullptr) return;         // 已注册（幂等）
+
+    void * h = dlopen(soName, RTLD_LAZY | RTLD_LOCAL);
+    if (!h) {
+        LOGI("后端注册：%s dlopen 失败（%s）", soName, dlerror());
+        if (fatalIfMissing) LOGE("后端注册：CPU 后端不可用，本地推理将无法工作");
+        return;
+    }
+    Dl_info info {};
+    void * sym = dlsym(h, markerSym);
+    if (!sym || !dladdr(sym, &info) || !info.dli_fname) {
+        LOGW("后端注册：%s 缺符号 %s 或取路径失败", soName, markerSym);
+        return;
+    }
+    loadFn(info.dli_fname);
+    LOGI("后端注册：%s → %s（regName=%s，已注册=%s）",
+         soName, info.dli_fname, regName, regByName(regName) ? "是" : "否");
+}
+
+/**
+ * 探测**本构建是否带可用的 Vulkan GPU 后端**（v2.4.18）。
+ *
+ * ## 为什么用 dlopen 而不是直接链接
+ * libggml-vulkan.so 是以 **GGML_BACKEND_DL=ON** 构建的动态后端 ——
+ * libggml.so 对它**没有** DT_NEEDED 依赖（这是刻意的安全设计）：
+ *   · 无该 .so / 设备无 Vulkan（模拟器、老设备 API<28 的系统 libvulkan 缺 1.1 符号）
+ *     → dlopen 失败或设备数为 0 → 返回 0，**纯 CPU，功能照常**
+ *   · 设备有 Vulkan → 注册后端并返回设备数 → 上层把全部层卸到 GPU
+ * 若非 DL 构建则 libggml 已静态注册 Vulkan 后端，同样探测得到设备数。
+ * 三种情形都**绝不崩**。
+ *
+ * ⚠️ dlopen 成功后**刻意不 dlclose**：ggml 后端注册表有进程级全局状态。
+ * ⚠️ DL 构建下 dlopen 只是加载了库，**还必须显式调 ggml_backend_load 注册**，
+ *    否则 llama 的模型加载查注册表时找不到 Vulkan 后端。
+ */
+int detectVulkanDevices() {
+    // 先把 libggml-vulkan.so 拉进来（失败 = 无该后端或老设备缺符号 → 纯 CPU）
+    void * vklib = dlopen("libggml-vulkan.so", RTLD_LAZY | RTLD_LOCAL);
+    if (!vklib) {
+        LOGI("GPU 探测：libggml-vulkan.so 加载失败（%s）→ 纯 CPU", dlerror());
+        return 0;
+    }
+    using DeviceCountFn = int (*)(void);
+    auto count = reinterpret_cast<DeviceCountFn>(dlsym(vklib, "ggml_backend_vk_get_device_count"));
+    if (!count) {
+        LOGW("GPU 探测：libggml-vulkan.so 已加载但缺 ggml_backend_vk_get_device_count 符号");
+        return 0;
+    }
+    const int n = count();
+    if (n <= 0) {
+        LOGI("GPU 探测：Vulkan 设备数 = 0 → 纯 CPU");
+        return 0;
+    }
+    LOGI("GPU 探测：Vulkan 设备数 = %d", n);
+
+    // DL 构建下把后端注册进 ggml 注册表（ensureBackendRegistered 内部幂等）
+    ensureBackendRegistered("libggml-vulkan.so", "ggml_backend_vk_reg", "Vulkan", false);
+    return n;
 }
 
 /**
@@ -331,8 +417,23 @@ Java_com_example_vr_LlamaMtmd_nativeInit(
         g_backend_inited = true;
     }
 
+    // 🔴 GGML_BACKEND_DL 构建：注册表不会自动扫到 APK 的 nativeLibraryDir，
+    //    必须由 JNI 显式注册 CPU 后端（Vulkan 由 detectVulkanDevices 按需注册）。
+    //    ⚠️ CPU 缺席 = 本地推理完全不可用，故 fatalIfMissing=true 打 ERROR。
+    ensureBackendRegistered("libggml-cpu.so", "ggml_backend_cpu_reg", "CPU", true);
+
+    // 🔴 GPU 卸载（v2.4.18）：构建带 Vulkan 后端且设备有 GPU 时把全部层卸到 GPU；
+    //    无 GPU（模拟器 / 老设备 / 纯 CPU 构建）则保持 0 走 CPU —— 与 v2.4.16 前行为一致。
+    //    ⚠️ 探测必须**先于**模型加载，且只在有设备时才设 >0：
+    //       无 Vulkan 却设 n_gpu_layers>0 会让模型加载失败（把功能搞挂）。
+    const int gpuDevices = detectVulkanDevices();
+    const int gpuLayers  = (gpuDevices > 0) ? 99 : 0;
+
     llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;   // 本构建是 CPU / NEON 版，没有 GPU 后端
+    mparams.n_gpu_layers = gpuLayers;
+    if (gpuLayers > 0) {
+        LOGI("GPU 卸载开启：n_gpu_layers=%d（设备数 %d）", gpuLayers, gpuDevices);
+    }
     g_model = llama_model_load_from_file(modelPath.c_str(), mparams);
     if (!g_model) {
         LOGE("模型加载失败（文件损坏 / 内存不足 / mmap 失败）：%s", modelPath.c_str());
@@ -345,11 +446,11 @@ Java_com_example_vr_LlamaMtmd_nativeInit(
     cparams.n_threads       = threads;
     cparams.n_threads_batch = threads;
 
-    // 🔴 v2.4.17：开 Flash Attention。对 CPU 后端它是**等价**的注意力实现，
-    //   但走分块计算 → 注意力阶段更快、且**峰值显存更低**（不影响已分配的 KV cache 总量，
-    //   但本项目 KV 与 n_ctx 成正比、内存本就紧张，低峰值更稳）。
-    //   小模型短文本收益有限，但零行为风险、纯增益，故默认开启。
-    cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    // 🔴 v2.4.17：开 Flash Attention；v2.4.18 改为 **AUTO**。
+    //   ⚠️ 不能用 ENABLED：它会在**不支持** FA 的后端（如无 coopmat 的 Vulkan 设备）
+    //   上直接让 llama_context 创建失败 → 整个本地功能挂掉。
+    //   AUTO = 后端支持就开（CPU 支持、多数新 GPU 支持），不支持则自动回退。
+    cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
 
     g_ctx = llama_init_from_model(g_model, cparams);
     if (!g_ctx) {
@@ -362,7 +463,7 @@ Java_com_example_vr_LlamaMtmd_nativeInit(
 
     if (!mmprojPath.empty()) {
         mtmd_context_params mpar = mtmd_context_params_default();
-        mpar.use_gpu        = false;
+        mpar.use_gpu        = (gpuLayers > 0);   // 有 GPU 时视觉编码器（mmproj）一并卸载
         mpar.n_threads      = threads;
         mpar.print_timings  = false;
         // 🔴 v2.4.14：限制视觉 token 数 —— 不设就吃 metadata 默认值，
@@ -379,8 +480,8 @@ Java_com_example_vr_LlamaMtmd_nativeInit(
         }
     }
 
-    LOGI("初始化完成：model=%s mmproj=%s n_ctx=%d threads=%d",
-         modelPath.c_str(), mmprojPath.c_str(), ctxSize, threads);
+    LOGI("初始化完成：model=%s mmproj=%s n_ctx=%d threads=%d gpu_layers=%d",
+         modelPath.c_str(), mmprojPath.c_str(), ctxSize, threads, gpuLayers);
     return JNI_TRUE;
 }
 
