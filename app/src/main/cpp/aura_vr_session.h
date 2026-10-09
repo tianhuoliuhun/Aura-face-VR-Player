@@ -37,11 +37,20 @@
 #include <thread>
 #include <vector>
 
-// OpenXR 头只在真正接入 SDK 时包含（AURA_HAVE_OPENXR 由 CMake 传入）
+// ⚠️ v2.4.16：改为兼容层 —— 本头文件的**函数声明**用到 XrInstance / XrSession /
+//    XrSpace / XrSwapchain / XrTime 等，但声明本身不需要官方头全文。
+//    接入时兼容层直接 include 官方头；未接入时给同形占位类型，
+//    使引用本头的核心代码（aura_vr_jni.cpp）在主线 flavor 下也能编译。
+#include "aura_xr_compat.h"
+
+// openxr_hw.h 是**华为专有扩展**（不属于 Khronos 标准），
+// 只有接入且 SDK 确实提供时才引入 —— 用 __has_include 兜底，避免换 SDK 时中断。
 #if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
-#  include <openxr.h>
-#  include <openxr_platform.h>
-#  include <openxr_hw.h>
+#  if defined(__has_include)
+#    if __has_include(<openxr_hw.h>)
+#      include <openxr_hw.h>
+#    endif
+#  endif
 #endif
 
 // ---------------------------------------------------------------------------

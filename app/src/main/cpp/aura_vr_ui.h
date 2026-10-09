@@ -26,7 +26,11 @@
  */
 #pragma once
 
-#include <openxr.h>
+// ⚠️ v2.4.16：此处**原本**有一行 `#include <openxr.h>`，但它**完全用不到** ——
+//    本文件是纯 C++ 接口（VrUiItem / VrUiState / float[3] / bool），
+//    正文没有任何 OpenXR 类型。
+//    而它会被**核心**的 aura_vr_jni.cpp 引用 → 那一行让「主线构建」平白多出
+//    一个「必须有 VR SDK」的硬依赖。移除后 standard flavor 可直接编译。
 
 namespace aura {
 

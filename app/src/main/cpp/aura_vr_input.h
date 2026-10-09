@@ -27,7 +27,11 @@
  */
 #pragma once
 
-#include <openxr.h>
+// ⚠️ v2.4.16：改用兼容层 —— 本文件的**函数签名**用到 XrInstance / XrSession /
+//    XrSpace / XrTime，但**不调用**任何 OpenXR API。
+//    接入时走官方头；未接入时用同形占位类型，使核心的 aura_vr_jni.cpp
+//    在 standard flavor 下也能编译（见 aura_xr_compat.h）。
+#include "aura_xr_compat.h"
 
 namespace aura {
 

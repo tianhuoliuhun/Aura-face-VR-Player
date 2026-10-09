@@ -39,6 +39,14 @@
 // ⚠️ 头文件路径按**华为 SDK 的目录布局**：其 openxr.h 直接位于
 //    sdkDemo/openXRsdk/jni/openxr/ 下（该目录已加到 include path），
 //    故是 <openxr.h> 而不是 <openxr/openxr.h>。
+// ⚠️ v2.4.16：本头**只应被 VR 眼镜接入层引用**（aura_vr_input.cpp / aura_vr_session.cpp），
+//    它们已在 CMake 里按 AURA_HAVE_OPENXR 条件编译。
+//    这里再加一道显式闸门 —— 一旦将来被**核心**代码误引，会立刻编译失败，
+//    而不是悄悄把「必须有 VR SDK」的依赖带回主线（那正是 v2.4.16 之前的问题）。
+#if !defined(AURA_HAVE_OPENXR) || !AURA_HAVE_OPENXR
+#  error "aura_xr_loader.h 仅限 AURA_HAVE_OPENXR=1（VR 眼镜接入层）引用"
+#endif
+
 #include <openxr.h>
 #include <openxr_platform.h>
 

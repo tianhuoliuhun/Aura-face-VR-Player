@@ -36,6 +36,7 @@ extern "C" {
 JNIEXPORT jboolean JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeInitialize(
         JNIEnv* env, jclass /*clazz*/, jobject activity, jint renderScalePercent) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
 
     JavaVM* vm = nullptr;
     if (env->GetJavaVM(&vm) != JNI_OK || vm == nullptr) {
@@ -46,6 +47,10 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeInitialize(
     bool ok = AuraVrSession::Get().initialize(vm, activity, renderScalePercent);
     AURA_LOGI("nativeInitialize -> %s", ok ? "OK" : "FAIL");
     return ok ? JNI_TRUE : JNI_FALSE;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return JNI_FALSE;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +62,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeInitialize(
 JNIEXPORT void JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeSetSurface(
         JNIEnv* env, jclass /*clazz*/, jobject surface) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     AuraVrSession::Get().setSurface(env, surface);
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    // 无 VR 眼镜：无需设置 Surface
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -65,7 +75,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeSetSurface(
 // ---------------------------------------------------------------------------
 JNIEXPORT jboolean JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeStart(JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     return AuraVrSession::Get().start() ? JNI_TRUE : JNI_FALSE;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return JNI_FALSE;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +88,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeStart(JNIEnv* /*env*/, jclass /*
 // ---------------------------------------------------------------------------
 JNIEXPORT void JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeShutdown(JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     AuraVrSession::Get().shutdown();
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    // 无 VR 眼镜：无需关闭会话
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +101,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeShutdown(JNIEnv* /*env*/, jclass
 // ---------------------------------------------------------------------------
 JNIEXPORT jstring JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeLastError(JNIEnv* env, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     return toJString(env, AuraVrSession::Get().lastError());
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return toJString(env, "");
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +114,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeLastError(JNIEnv* env, jclass /*
 // ---------------------------------------------------------------------------
 JNIEXPORT jint JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeState(JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     return static_cast<jint>(AuraVrSession::Get().state());
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return 0;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +127,7 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeState(JNIEnv* /*env*/, jclass /*
 // ---------------------------------------------------------------------------
 JNIEXPORT jintArray JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeRecommendEyeSize(JNIEnv* env, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     jintArray arr = env->NewIntArray(2);
     if (arr == nullptr) return nullptr;
     const jint vals[2] = {
@@ -105,6 +136,16 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeRecommendEyeSize(JNIEnv* env, jc
     };
     env->SetIntArrayRegion(arr, 0, 2, vals);
     return arr;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    // Kotlin 侧声明为**非空** IntArray → 必须返回数组（不能返回 null，会 NPE）
+    jintArray arr = env->NewIntArray(2);
+    if (arr != nullptr) {
+        const jint z[2] = {0, 0};
+        env->SetIntArrayRegion(arr, 0, 2, z);
+    }
+    return arr;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +155,7 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeRecommendEyeSize(JNIEnv* env, jc
 JNIEXPORT jintArray JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeAcquireEyeTargets(
         JNIEnv* env, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
 
     std::vector<AuraEyeTarget> targets;
     if (!AuraVrSession::Get().acquireEyeTargets(targets) || targets.size() < 2) {
@@ -128,6 +170,10 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeAcquireEyeTargets(
     };
     env->SetIntArrayRegion(arr, 0, 6, vals);
     return arr;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return nullptr;  // 声明为可空，nullptr = 本帧无新帧
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +185,7 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeAcquireEyeTargets(
 JNIEXPORT jfloatArray JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeEyeTargetsEx(
         JNIEnv* env, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
 
     std::vector<AuraEyeTarget> targets;
     if (!AuraVrSession::Get().acquireEyeTargets(targets) || targets.size() < 2) {
@@ -159,6 +206,10 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeEyeTargetsEx(
     }
     env->SetFloatArrayRegion(arr, 0, 40, vals);
     return arr;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return nullptr;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +220,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeEyeTargetsEx(
 JNIEXPORT void JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeSetExternalRendererEnabled(
         JNIEnv* /*env*/, jclass /*clazz*/, jboolean enabled) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     AuraVrSession::Get().setExternalRendererEnabled(enabled == JNI_TRUE);
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    // 无 VR 眼镜：无外部渲染器概念
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +234,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeSetExternalRendererEnabled(
 JNIEXPORT jboolean JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeHasPendingFrame(
         JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     return AuraVrSession::Get().hasPendingFrame() ? JNI_TRUE : JNI_FALSE;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return JNI_FALSE;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +249,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeHasPendingFrame(
 JNIEXPORT jint JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeBindEyeFramebuffer(
         JNIEnv* /*env*/, jclass /*clazz*/, jint eyeIndex) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     return static_cast<jint>(AuraVrSession::Get().bindEyeFramebuffer(static_cast<int>(eyeIndex)));
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return 0;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +263,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeBindEyeFramebuffer(
 JNIEXPORT void JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeUnbindEyeFramebuffer(
         JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     AuraVrSession::Get().unbindEyeFramebuffer();
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    // 无 VR 眼镜：无 eye framebuffer
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +277,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeUnbindEyeFramebuffer(
 JNIEXPORT jint JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeFrameResult(
         JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     return static_cast<jint>(AuraVrSession::Get().lastFrameResult());
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return 0;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +290,12 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeFrameResult(
 // ---------------------------------------------------------------------------
 JNIEXPORT void JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeSubmitFrame(JNIEnv* /*env*/, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     AuraVrSession::Get().submitFrame();
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    // 无 VR 眼镜：无需提交帧
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +324,7 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeIsSdkAvailable(JNIEnv* /*env*/, 
 //    一次取回全部状态最省。Kotlin 侧封装成 VrInputState 数据类再使用。
 JNIEXPORT jintArray JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativePollVrInput(JNIEnv* env, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     const aura::XrInputState& s = aura::XrInputGet();
     jint buf[6];
     buf[0] = s.selectLeft ? 1 : 0;
@@ -258,6 +340,10 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativePollVrInput(JNIEnv* env, jclass 
     }
     env->SetIntArrayRegion(out, 0, 6, buf);
     return out;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return nullptr;  // 声明为可空
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +402,7 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeVrUiSetVisible(JNIEnv* /*env*/, 
 //   ⚠️ 无有效手柄姿态时返回视野正前方 (0,0,-1)。
 JNIEXPORT jfloatArray JNICALL
 Java_com_example_vr_huawei_HuaweiVrNative_nativeGetAimRay(JNIEnv* env, jclass /*clazz*/) {
+#if defined(AURA_HAVE_OPENXR) && AURA_HAVE_OPENXR
     float out[3] = {0.f, 0.f, -1.f};
     const aura::XrInputState& s = aura::XrInputGet();
     if (s.aimValid && s.headValid) {
@@ -336,6 +423,10 @@ Java_com_example_vr_huawei_HuaweiVrNative_nativeGetAimRay(JNIEnv* env, jclass /*
         env->SetFloatArrayRegion(arr, 0, 3, out);
     }
     return arr;
+
+#else  // 主线（standard flavor）：未接入 VR 眼镜 → 降级
+    return nullptr;  // 声明为可空
+#endif
 }
 
 } // extern "C"

@@ -77,33 +77,14 @@ android {
     noCompress += listOf("onnx", "bin", "txt")
   }
 
-  // ==========================================================================
-  // 华为 VR Glass（VR Engine / OpenXR）native 构建 —— 默认**关闭**
-  // --------------------------------------------------------------------------
-  // 为什么默认关闭：native 构建需要 NDK + CMake + 华为 SDK 三件套，
-  // 在它们到位之前必须保证「普通构建照常可用」（不能因为缺 NDK 就编不过）。
-  //
-  // 启用方式：在项目根 local.properties 里加
-  //     huawei.vr.enable=true
-  //     huawei.vr.sdk.dir=D:/HuaweiVRSDK          ← SDK 解压根目录
-  //     ndk.dir=C:/Users/<你>/AppData/Local/Android/Sdk/ndk/<版本号>
-  //
-  // ⚠️ 设计要点：`useLegacyPackaging = true`（上方 packaging 块）会让 .so
-  //    以压缩形式打包，**保留不动** —— 移除它会让 APK 涨约 24MB。
-  //
-  // ⚠️ ABI 只保留 arm64-v8a：华为 VR Glass 仅支持真机 arm64；
-  //    x86_64（模拟器）没有华为 Runtime，编了也用不上，白增体积。
-  //
-  // ⚠️ CMake 版本必须与本机 SDK 里实际安装的版本一致。
-  //    本机（2026-09-26）装的是 4.1.2；若你的环境不同，改这里或删掉 version
-  //    让 Gradle 自行协商（需 sdkmanager 已装多个版本）。
-  // ==========================================================================
   val huaweiCmakeVersion = "4.1.2"
-  val huaweiVrEnabled: Boolean = run {
-    val f = project.rootProject.file("local.properties")
-    if (!f.exists()) false
-    else f.readLines().any { it.trim() == "huawei.vr.enable=true" }
-  }
+
+  // ⚠️ v2.4.16：`huawei.vr.enable` 这个开关**已被 flavor 取代**（见下方 productFlavors）。
+  //    这里不再读它 —— 「接不接 VR 眼镜」现在由选哪个 flavor 决定。
+  //    ⚠️ local.properties 里那行现在**不会**再影响构建（保留仅为兼容旧文档）。
+  //
+  // SDK 路径仍然需要：huawei / pico / quest / all 四个 flavor 都要拿它取
+  // **Khronos 标准 OpenXR 头文件**（三家共用同一套标准头，差异只在 loader 二进制）。
   val huaweiVrSdkDir: String = run {
     val f = project.rootProject.file("local.properties")
     if (!f.exists()) ""
@@ -112,89 +93,125 @@ android {
       ?.substringAfter("=")?.trim() ?: ""
   }
 
-  if (huaweiVrEnabled) {
-    logger.lifecycle("[HuaweiVR] native 构建已启用，SDK 路径: $huaweiVrSdkDir")
-    // ⚠️ NDK 版本必须与 local.properties 的 ndk.dir 一致：
-    //    AGP 默认要 28.2.13676358，本机装的是 30.0.16248370，不一致会报
-    //    「CXX1104: NDK from ndk.dir had version ... which disagrees with android.ndkVersion」。
-    //    这里显式指定本机实际版本；若你的环境不同，改这个字符串即可。
-    ndkVersion = "30.0.16248370"
-    // ==========================================================================
-  // v2.4.10：ABI **只保留 arm64-v8a**（需求：「仅编译 arm64-v8a，去除多余兼容内容」）
-  // --------------------------------------------------------------------------
-  // 历史：v2.1.234 曾扩到 `arm64-v8a + armeabi-v7a`。现按需求收敛回**单 ABI**。
-  //
-  // 收益：APK 里的 native 库体积**近乎减半**（v7a 那一整套 .so 不再打包）；
-  //      且新增的 arm64-only 依赖（如本地 LLM 运行时）不再需要为 v7a 找替代。
-  //
-  // ⚠️ ⚠️ 为什么**从来不能**加 x86 / x86_64 —— 这是物理上做不到，不是没做：
-  //
-  //   1. **libmars-face-kit.so（旷视 Megvii 闭源预编译二进制）只有两个 ABI**：
-  //      third_party/gpupixel/third_party/mars-face-kit/libs/android/
-  //        ├── arm64-v8a/libmars-face-kit.so
-  //        └── armeabi-v7a/libmars-face-kit.so
-  //      没有源码 → 无法自行编译 x86 版本。
-  //      而 app/src/main/cpp/CMakeLists.txt 里有一条**硬校验**：
-  //        if(NOT EXISTS "<mars-face-kit>/libs/android/${ANDROID_ABI}/libmars-face-kit.so")
-  //            message(FATAL_ERROR ...)
-  //      → 一旦把 x86 加进 abiFilters，**CMake 直接报错终止构建**（不是警告）。
-  //
-  //   2. **libmediapipe_tasks_vision_jni.so**（Maven: tasks-vision:0.10.14）
-  //      只有 arm64-v8a / armeabi-v7a / x86 —— **没有 x86_64**，
-  //      该库是 Google 发布的闭源 AAR，同样无法自行编译。
-  //
-  //   3. 华为 SDK 的 libxr_loader.so 也只有 arm64-v8a / armeabi-v7a
-  //      （D:/HuaweiVrSdk/sdkDemo/openXRsdk/jni/），CMake 对每个 ABI 都会硬校验。
-  //
-  //   ⚠️ 另外提醒：**不要**为了让模拟器用 x86 原生库而加 x86_64 ——
-  //      一旦 APK 里存在 x86_64 目录，x86_64 设备会优先选它（原生 ABI 优先于转译），
-  //      于是从"能用 arm64 转译正常跑"退化成"缺 gpupixel/mars/mediapipe 直接崩"。
-  //
-  //   ✅ 收敛到 arm64 后**对模拟器毫无影响** —— 本机 MuMu 正是走 arm64 转译运行的。
-  //
-  //   唯一 ABI 的 native 库来源覆盖（已逐个核对）：
-  //     libauravr.so        —— 自建 CMake
-  //     libgpupixel.so      —— 源码集成 third_party/gpupixel
-  //     libmars-face-kit.so —— 预编译，arm64-v8a 有
-  //     libijkplayer.so     —— libs/ijkplayer-k0.8.9-release.aar
-  //     libsherpa-onnx-*.so / libonnxruntime.so —— sherpa aar
-  //     libmediapipe_*.so   —— tasks-vision aar
-  //     libopenxr_loader*.so / libxr_loader.so —— openxr_loader aar + 华为 SDK
   // ==========================================================================
-    defaultConfig {
-      ndk {
-        abiFilters += listOf("arm64-v8a")
-      }
+  // 产品风味（flavor）—— **把「VR 眼镜接入」从主线拆出去**（v2.4.16）
+  // --------------------------------------------------------------------------
+  // 背景：华为 VR Glass / PICO / Meta Quest 三家的**接入层**，此前与「核心 native
+  //   构建」耦合在同一个开关之下 —— 关掉它，连 `libauravr.so`（核心：GL 渲染管线
+  //   + llama JNI）都不会再构建，属于「要么全要、要么全丢」。本次按 flavor 拆开。
+  //
+  // 五个 flavor（`standard` 为**主线**）：
+  //   standard —— 普通手机 / 平板：**不含**任何 VR 眼镜接入，也不需要 VR SDK
+  //   huawei   —— 华为 VR Glass（官方 Java 桥 hvrbridge.jar + 华为 loader `libxr_loader.so`）
+  //   pico     —— PICO（Khronos 标准 OpenXR loader）
+  //   quest    —— Meta Quest（同 Khronos loader）
+  //   all      —— 三家全含（一台设备通吃 / 回归测试用）
+  //
+  // ⚠️ **核心 native（libauravr.so）永远构建**，与 flavor 无关 ——
+  //    它承载 GL 渲染管线与 llama JNI，任何 flavor 都必须有。
+  //    只有 OpenXR **会话代码**是否编进去，由 `AURA_HAVE_OPENXR` 宏按 flavor 决定。
+  //
+  // ⚠️ 构建命令**必须带 flavor** —— 否则 `assembleRelease` 会把 5 个 flavor 全编一遍：
+  //      gradle :app:assembleStandardRelease     ← 主线包（日常用，体积最小）
+  //      gradle :app:assembleAllRelease          ← 全兼容包（发版用）
+  // ==========================================================================
+  flavorDimensions += "vr"
+
+  productFlavors {
+    create("standard") {
+      dimension = "vr"
+      // 主线：**不**传 AURA_HAVE_OPENXR
+      //   → CMake 不去找 VR SDK、不编 OpenXR 会话代码、也不复制任何 VR loader
+      //   → 主线包因此**不需要 VR SDK 就能构建**，且少约 4.1MB
+    }
+    create("huawei") {
+      dimension = "vr"
+      externalNativeBuild { cmake { arguments += listOf("-DAURA_HAVE_OPENXR=1") } }
+    }
+    create("pico") {
+      dimension = "vr"
+      externalNativeBuild { cmake { arguments += listOf("-DAURA_HAVE_OPENXR=1") } }
+    }
+    create("quest") {
+      dimension = "vr"
+      externalNativeBuild { cmake { arguments += listOf("-DAURA_HAVE_OPENXR=1") } }
+    }
+    create("all") {
+      dimension = "vr"
+      externalNativeBuild { cmake { arguments += listOf("-DAURA_HAVE_OPENXR=1") } }
+    }
+  }
+
+  // ==========================================================================
+  // 核心 native 构建 —— **永远启用**（不再受任何开关 / flavor 影响）
+  // --------------------------------------------------------------------------
+  // 历史：这一整块原被包在 `if (huawei.vr.enable)` 里 → 关掉华为支持就等于
+  //       连核心 native 一起关掉（架构缺陷，v2.4.16 修正）。
+  //
+  // ⚠️ `useLegacyPackaging = true`（见上方 packaging 块）让 .so 以压缩形式打包，
+  //    **保留不动** —— 移除它会让 APK 涨约 24MB。
+  // ⚠️ NDK 版本必须显式指定并与本机一致：AGP 默认要 28.2.13676358，
+  //    本机装的是 30.0.16248370，不一致会报 CXX1104。
+  // ==========================================================================
+  ndkVersion = "30.0.16248370"
+
+  defaultConfig {
+    // v2.4.10：ABI **只保留 arm64-v8a**（需求：「仅编译 arm64-v8a，去除多余兼容内容」）
+    // ------------------------------------------------------------------------
+    // ⚠️ **从来不能**加 x86 / x86_64 —— 这是物理上做不到，不是没做：
+    //   1. `libmars-face-kit.so`（旷视闭源预编译）只有 arm64-v8a / armeabi-v7a，
+    //      而 cpp/CMakeLists.txt 对它有一条**硬校验**（缺失即 FATAL_ERROR）
+    //      → 加 x86 会让 CMake **直接报错终止构建**。
+    //   2. `libmediapipe_tasks_vision_jni.so`（Google 闭源 AAR）也没有 x86_64。
+    //   3. VR SDK 的 `libxr_loader.so` 同样只有 arm64-v8a / armeabi-v7a。
+    //   ⚠️ 也不要「为了让模拟器用原生库」而加 x86_64：一旦 APK 里存在 x86_64 目录，
+    //      x86_64 设备会优先选它 → 从「arm64 转译正常跑」退化成「缺库直接崩」。
+    ndk {
+      abiFilters += listOf("arm64-v8a")
     }
     externalNativeBuild {
       cmake {
-        path = file("src/main/cpp/CMakeLists.txt")
-        version = huaweiCmakeVersion
+        arguments += listOf(
+          // v2.0.187：本地 fork 的 GPUPixel（submodule，源码级集成）。
+          // 由 CMake 侧 add_subdirectory 编译出 libgpupixel.so，并复用 fork 内
+          // 预编译的 libmars-face-kit.so。目的：接入 fork 的 texture 通道
+          //（共享 EGLContext + SinkTexture），免去每帧「回读→上传」的跨界搬运。
+          "-DGPUPIXEL_FORK_DIR=" + rootProject.file("third_party/gpupixel").absolutePath,
+          // VR 眼镜 SDK 路径 —— 只有 huawei/pico/quest/all flavor 真的用到它
+          // （提供 Khronos 标准 OpenXR 头文件）。主线传空串时 CMake 直接跳过。
+          "-DHUAWEI_VR_SDK_DIR=" + huaweiVrSdkDir
+        )
+        cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti")
       }
     }
-    defaultConfig {
-      externalNativeBuild {
-        cmake {
-          // 把 SDK 路径与「已接入」宏传进 CMake
-          arguments += listOf(
-            "-DHUAWEI_VR_SDK_DIR=$huaweiVrSdkDir",
-            "-DAURA_HAVE_OPENXR=1",
-            // v2.0.187：本地 fork 的 GPUPixel（submodule，源码级集成）。
-            // 由 CMake 侧 add_subdirectory 编译出 libgpupixel.so，并复用 fork 内
-            // 预编译的 libmars-face-kit.so —— 取代原先的 libs/gpupixel-release.aar。
-            // 目的：接入 fork 的 texture 通道（共享 EGLContext + SinkTexture），
-            // 免去每帧「回读→上传」的跨界搬运。详见 GPUPIXEL_TEXTURE_PATH_FEASIBILITY_2026-09-29.md
-            "-DGPUPIXEL_FORK_DIR=" + rootProject.file("third_party/gpupixel").absolutePath
-          )
-          cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti")
-        }
-      }
-    }
-    // 让 CMake 里复制出来的 libxr_loader.so 参与打包
-    sourceSets["main"].jniLibs.directories.add("src/main/cpp/libs")
-  } else {
-    logger.lifecycle("[HuaweiVR] native 构建未启用（local.properties 无 huawei.vr.enable=true），跳过")
   }
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+      version = huaweiCmakeVersion
+    }
+  }
+
+  // ==========================================================================
+  // VR 眼镜 loader 的 jniLibs 源集 —— **只挂给需要的 flavor**（v2.4.16）
+  // --------------------------------------------------------------------------
+  // `src/main/cpp/libs/<abi>/libxr_loader.so` 是 CMake POST_BUILD 从 VR SDK
+  // 复制出来的产物（**不入仓** —— 华为许可禁止再分发 SDK 二进制）。
+  //
+  // ⚠️ 以前是 `sourceSets["main"].jniLibs.directories.add("src/main/cpp/libs")`：
+  //    **无条件**给所有变体打包，主线包也白白带着它。
+  //    现在只挂到 huawei / all（pico/quest 的 loader 来自 Khronos AAR，见 dependencies）。
+  // ==========================================================================
+  sourceSets {
+    getByName("huawei") { jniLibs.srcDir("src/main/cpp/libs") }
+    getByName("all") { jniLibs.srcDir("src/main/cpp/libs") }
+  }
+
+  logger.lifecycle(
+    "[VR-flavor] flavor 维度 vr 已启用｜主线包 :app:assembleStandardRelease｜" +
+      "全兼容包 :app:assembleAllRelease｜VR SDK 路径: " +
+      (if (huaweiVrSdkDir.isEmpty()) "未配置" else huaweiVrSdkDir)
+  )
 
   // v2.0.187：GPUPixel 的 Java 类改由 submodule 源码提供（不再来自 AAR）。
   // 路径对应 fork 的 Android 库模块源码目录；classpath 上不再有 gpupixel-release.aar。
@@ -364,11 +381,20 @@ dependencies {
   // ⚠️ 这是华为 SDK 的一部分，**不入仓**（已在 .gitignore 忽略）；
   //    本地构建前需从 SDK 的 sdkDemo/openXRsdk/libs/ 复制到 app/libs/。
   //    文件缺失时不报错（普通构建不受影响），仅华为 VR 功能不可用。
+  // ⚠️ v2.4.16：**暂时仍对所有 flavor 引入**，原因如实说明 ——
+  //    Java 侧的 VR 接入代码（`com.example.vr.huawei.*`）目前仍放在 `src/main`，
+  //    而**核心**的 VRGLRenderer / VRPlayerScreen / MainActivity **直接 import 了它**
+  //    （合计 40+ 处引用），并非独立的一块。
+  //    → 若按 flavor 摘掉，standard 变体会**立刻编译失败**。
+  //    → 要真正条件化，必须先做「VR 接入**接口抽象**」：
+  //        核心只依赖接口（如 VrGlassBridge），实现由 flavor 提供、standard 给空实现。
+  //      那是**下一阶段**的工作。
+  //    好在它只有约 19KB，对包体积无实质影响。
   val hvrBridgeJar = file("libs/hvrbridge.jar")
   if (hvrBridgeJar.exists()) {
     implementation(files("libs/hvrbridge.jar"))
   } else {
-    logger.lifecycle("[HuaweiVR] app/libs/hvrbridge.jar 不存在，跳过（官方 Java 桥不可用）")
+    logger.lifecycle("[VR-flavor] app/libs/hvrbridge.jar 不存在 → 官方 Java 桥不可用")
   }
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
@@ -565,7 +591,12 @@ dependencies {
   // ⚠️ Meta 设备的 OpenXR 运行时由**系统自带**；PICO（4 Ultra / 新固件）亦兼容标准
   //    loader。若需支持 PICO Neo3 / 老固件（ALVR 实测需 1.0.34 legacy），
   //    改用 1.0.34 或引入 PICO 官方 SDK 的 loader（同名 .so，只能二选一）。
-  implementation("org.khronos.openxr:openxr_loader_for_android:1.1.63")
+  // ⚠️ v2.4.16：改为**按 flavor** 引入 —— 只有 pico / quest / all 需要。
+  //    （华为走自己的 libxr_loader.so，不需要 Khronos 这个。）
+  //    否则主线包会白白多出 libopenxr_loader.so + libopenxr_loader_legacy.so 约 2.7MB。
+  add("picoImplementation", "org.khronos.openxr:openxr_loader_for_android:1.1.63")
+  add("questImplementation", "org.khronos.openxr:openxr_loader_for_android:1.1.63")
+  add("allImplementation", "org.khronos.openxr:openxr_loader_for_android:1.1.63")
   // tar.bz2 模型解压支持（sherpa-onnx 模型打包格式）
   implementation("org.apache.commons:commons-compress:1.27.1")
   testImplementation(libs.androidx.compose.ui.test.junit4)

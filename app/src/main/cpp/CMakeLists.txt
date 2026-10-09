@@ -26,8 +26,33 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
-# 定位华为 OpenXR SDK
+# AURA_HAVE_OPENXR：**是否接入 VR 眼镜（OpenXR）** 的总开关（v2.4.16）
 # ---------------------------------------------------------------------------
+# ⚠️ 判定必须放在**最前面** —— 下面「定位 VR 眼镜 SDK」整段都要靠它决定是否执行。
+#    主线（standard flavor）不传这个宏时，连 SDK 都不会去找，自然也不会因缺 SDK 报错。
+#
+# 由 gradle 按 flavor 传入（见 app/build.gradle.kts）：
+#   standard（主线）        → 不传 → 默认 0 → 不编 OpenXR、不打包任何 VR loader
+#   huawei / pico / quest / all → -DAURA_HAVE_OPENXR=1
+if(NOT DEFINED AURA_HAVE_OPENXR)
+    set(AURA_HAVE_OPENXR 0)
+endif()
+message(STATUS "AURA_HAVE_OPENXR = ${AURA_HAVE_OPENXR}")
+
+# ---------------------------------------------------------------------------
+# 定位 VR 眼镜 SDK —— **仅在 AURA_HAVE_OPENXR=1 时**
+# ---------------------------------------------------------------------------
+# ⚠️ 这里要的是 **Khronos 标准 OpenXR 头文件**（openxr.h / openxr_platform.h）。
+#    华为 / PICO / Meta Quest 三家**共用同一套标准头**，差异只在 **loader 二进制**：
+#      huawei → libxr_loader.so（华为 SDK 自带）
+#      pico   → libopenxr_loader.so（Khronos AAR）
+#      quest  → 同上
+#    所以即使只出 pico/quest flavor，也同样需要这份 SDK 的头文件。
+#
+# ⚠️ 历史坑：这一整段此前是**无条件**的 —— 于是「不接 VR」也必须先装华为 SDK，
+#    否则 CMake 直接 FATAL_ERROR。这正是「主线被 VR 眼镜绑架」的根源，本次修正。
+if(AURA_HAVE_OPENXR)
+
 if(NOT DEFINED HUAWEI_VR_SDK_DIR OR HUAWEI_VR_SDK_DIR STREQUAL "")
     if(DEFINED ENV{HUAWEI_VR_SDK_DIR})
         set(HUAWEI_VR_SDK_DIR "$ENV{HUAWEI_VR_SDK_DIR}")
@@ -99,20 +124,47 @@ if(HUAWEI_VR_LIB_DIR STREQUAL "")
 endif()
 message(STATUS "OpenXR Loader 目录: ${HUAWEI_VR_LIB_DIR}")
 
+endif()  # if(AURA_HAVE_OPENXR) —— 定位 VR 眼镜 SDK
+
 # ---------------------------------------------------------------------------
 # 源文件清单
 # ---------------------------------------------------------------------------
+# ===========================================================================
+# 源文件清单 —— **核心**（任何 flavor 都编）
+# ---------------------------------------------------------------------------
+# v2.4.16：把「VR 眼镜专属」的三个源文件从这里挪出去（见下方条件块），
+#   使主线包（standard flavor）**不需要 VR SDK** 就能编译。
+#
+# 归属判据 = **这个文件是否直接依赖 OpenXR 类型/函数**：
+#   · aura_vr_jni.cpp  —— 核心：JNI 入口（VR 相关调用已用 #if 包住）
+#   · aura_vr_log.cpp  —— 核心：日志（对 XrResult 只做数值映射，不依赖 openxr.h）
+#   · aura_vr_ui.cpp   —— 核心：VR 内 UI（纯 GL + 数学；**不**依赖 OpenXR）
+# ===========================================================================
 set(AURAVR_SOURCES
     aura_vr_jni.cpp
-    aura_vr_session.cpp
     aura_vr_log.cpp
-    # v2.0.195：多 OpenXR loader 运行时选择（dlopen + 函数指针重定向）
-    aura_xr_loader.cpp
-    # v2.0.199：华为 VR Glass 手柄输入（OpenXR Action 系统）
-    aura_vr_input.cpp
     # v2.0.202：VR 内 UI 层（控制条 / 准星 / 射线求交，native GL 绘制）
     aura_vr_ui.cpp
 )
+
+# ===========================================================================
+# VR 眼镜专属源文件 —— 仅 AURA_HAVE_OPENXR=1 时编译
+# ---------------------------------------------------------------------------
+#   aura_vr_session.cpp —— OpenXR 会话/交换链/帧循环（13 处 #if 保护）
+#   aura_xr_loader.cpp  —— 多 loader 运行时选择（dlopen + 函数指针重定向）
+#   aura_vr_input.cpp   —— 手柄输入（OpenXR Action 系统）
+#
+# ⚠️ 这三个都**直接**调用 OpenXR API，无 SDK 时无法编译 → 必须排除在主线之外。
+# ===========================================================================
+if(AURA_HAVE_OPENXR)
+    list(APPEND AURAVR_SOURCES
+        aura_vr_session.cpp
+        # v2.0.195：多 OpenXR loader 运行时选择（dlopen + 函数指针重定向）
+        aura_xr_loader.cpp
+        # v2.0.199：华为 VR Glass 手柄输入（OpenXR Action 系统）
+        aura_vr_input.cpp
+    )
+endif()
 
 # ==============================================================================
 # v2.4.13：**自建 llama.cpp + libmtmd** 的 JNI 封装
@@ -130,10 +182,14 @@ add_library(auravr SHARED ${AURAVR_SOURCES})
 
 target_include_directories(auravr PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${HUAWEI_VR_INCLUDE_DIR}
     # v2.4.13：llama.cpp / mtmd 头文件（随源码置于 cpp/llama/include，无需外部依赖）
     ${CMAKE_CURRENT_SOURCE_DIR}/llama/include
 )
+
+# ⚠️ VR SDK 的头目录**按条件加**：变量为空时不能直接传（CMake 会报错）。
+if(AURA_HAVE_OPENXR)
+    target_include_directories(auravr PRIVATE ${HUAWEI_VR_INCLUDE_DIR})
+endif()
 
 # 链接：Android 系统库 + EGL/GLES
 # ⚠️ v2.0.195：**不再链接** huawei_openxr_loader —— 改为运行时 dlopen
@@ -183,10 +239,8 @@ target_link_libraries(auravr
 #    由 gradle 以 -DAURA_HAVE_OPENXR=1 传入（见 app/build.gradle.kts）。
 #    这里用 CMake 变量判断后，再作为**编译宏**下发给编译器——
 #    否则 CMake 会报「Manually-specified variables were not used by the project」。
-if(NOT DEFINED AURA_HAVE_OPENXR)
-    set(AURA_HAVE_OPENXR 0)
-endif()
-message(STATUS "AURA_HAVE_OPENXR = ${AURA_HAVE_OPENXR}")
+# ⚠️ v2.4.16：AURA_HAVE_OPENXR 的默认值判定已**提前到文件开头**
+#    （因为「定位 SDK」那段要用它决定是否执行），此处不再重复。
 
 target_compile_definitions(auravr PRIVATE
     XR_USE_PLATFORM_ANDROID=1
@@ -209,14 +263,18 @@ target_compile_options(auravr PRIVATE
 # 说明：libxr_loader.so 是预编译二进制，必须随包分发，否则运行时找不到。
 #       ⚠️ 该目录已在 .gitignore 中忽略（华为许可禁止再分发 SDK 二进制）。
 # ---------------------------------------------------------------------------
-add_custom_command(TARGET auravr POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${HUAWEI_VR_LIB_DIR}/libxr_loader.so"
-            "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/libxr_loader.so"
-    COMMENT "复制华为 libxr_loader.so 到 jniLibs (${ANDROID_ABI})"
-)
+# ⚠️ v2.4.16：**仅接入 VR 眼镜时**才复制 loader ——
+#    主线包（standard）不该带任何 VR loader（省约 4.1MB，且不再需要 SDK）。
+if(AURA_HAVE_OPENXR)
+    add_custom_command(TARGET auravr POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${HUAWEI_VR_LIB_DIR}/libxr_loader.so"
+                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/libxr_loader.so"
+        COMMENT "复制华为 libxr_loader.so 到 jniLibs (${ANDROID_ABI})"
+    )
+endif()
 
 # ===========================================================================
 # GPUPixel（本地 fork，git submodule: third_party/gpupixel）—— 源码级集成
