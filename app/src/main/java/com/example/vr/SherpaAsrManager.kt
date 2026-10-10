@@ -49,10 +49,10 @@ import java.util.concurrent.TimeUnit
  * 配套：build.gradle.kts 里 `androidResources.noCompress += "onnx"`，
  * 否则读取时需解压到内存（239MB 峰值）。
  *
- * **下载链路保留**，定位改为「兜底 + 更新」：
- *  - 内置 assets 缺失或损坏时，自动回退到 filesDir 下的下载版模型；
- *  - 需要替换/升级模型时，仍可通过 [startModelDownload] 下载到 filesDir，
- *    且下载版优先于内置版生效（便于不发版换模型）。
+ * ⚠️ v2.4.29 现状：SenseVoice 已**不再是内置模型**（内置地位自 v2.1.208 起由内置 Dolphin 接管）。
+ * 现以**可下载扩展模型**接入（登记在 `AsrExtModels.SENSE_VOICE_ALL`），覆盖 中/英/日/韩/粤，
+ * 并承接「英语」的默认路由（**Dolphin 不含英语**）。旧的 SenseVoice 专用下载通路已删除，
+ * 下载统一走扩展模型通道。
  */
 object SherpaAsrManager {
 
@@ -65,33 +65,18 @@ object SherpaAsrManager {
     private const val DOWNLOAD_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-    // ===== SenseVoice 配置（v2.0.127 引入内置 assets；v2.1.214 起 assets 已移除）=====
+    // ===== SenseVoice-Small（v2.4.29 起为**可下载扩展模型**）=====
     //
-    // 模型：sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 的 model.int8.onnx
-    // （239MB）+ tokens.txt。234M 参数，中英日韩粤，RTF 0.026，自带标点。
+    // 模型：`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 的
+    // model.int8.onnx（239MB）+ tokens.txt。234M 参数，中英日韩粤，RTF 0.026，自带标点。
     //
-    // ⚠️ v2.1.244 清理：原先这里的 `SVC_ASSET_DIR/MODEL/TOKENS` 三个常量与
-    // `assetModelAvailable()` 探测函数**已整套删除**。理由：
-    //  - SenseVoice 的 assets 自 **v2.1.214** 起就不再打进 APK（内置地位由 Dolphin 接管）；
-    //  - 但探测逻辑残留了下来，导致**每次初始化都必然打出一条**
-    //    `W SherpaAsr: 内置模型不可用：sense-voice/model.int8.onnx` ——
-    //    这条警告 100% 触发、且不代表任何故障，实测已让用户与排查者误判为「ASR 坏了」。
-    //  - 死代码 + 永久噪音警告 = 纯负资产，故删除而不是注释掉。
-    //  SenseVoice 的**下载通路仍完整保留**（见下方 SVC_*_URL），用于「不发版换模型」的兜底。
-
-    // 下载版（filesDir）：用于不发版替换模型
-    private const val SVC_DIR_NAME = "sense-voice-cpu"
-    private const val SVC_MODEL = "model.int8.onnx"
-    private const val SVC_TOKENS = "tokens.txt"
-    // v2.1.223：原值 229 是 **SenseVoice-Small** 的体积，属 SenseVoice 时代的残留
-    //（该模型的 assets 已随 v2.1.214 移除）。此常量目前只用于「准备下载 / 不可用详情」
-    //两处兜底提示，把用户看到的体积数字改成当前真实内置模型（Dolphin 99MB），
-    // 避免继续显示一个早已不存在的 229MB。
-    private const val SVC_MODEL_MB = 99
-    private const val SVC_MODEL_URL =
-        "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx"
-    private const val SVC_TOKENS_URL =
-        "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt"
+    // ⚠️ v2.4.29：原先这里有一整套**专用下载通路**（`SVC_*` 常量 + `svcDir` +
+    // `downloadedModelReady` + `startModelDownload` + `downloadSenseVoiceCpu`）。
+    //    自 SenseVoice 于 v2.1.208 退役后它**已无任何调用方**（死代码），
+    //    而它的 URL/体积又与「把 SenseVoice 接成扩展模型」会构成
+    //    **同一份数据两处登记**（本项目头号事故源）→ **整套删除**。
+    //    现在统一由 `AsrExtModels.SENSE_VOICE_ALL` + 通用扩展下载
+    //    （`startExtModelDownload`）承接，落盘目录 `sherpa_models/ext-sense-voice`。
 
     /** v127e：推理线程数可选范围与推荐值（推荐 4–6，兼顾速度与播放流畅度） */
     const val MIN_THREADS = 1
@@ -123,9 +108,7 @@ object SherpaAsrManager {
 
     // ===== 模型路径 =====
 
-    /** 下载版模型目录（filesDir） */
-    private fun svcDir(context: Context): File =
-        File(context.filesDir, "sherpa_models/$SVC_DIR_NAME")
+    // v2.4.29：`svcDir()`（旧 SenseVoice 下载版目录）已随旧下载通路一并删除。
 
     // =======================================================================
     // v2.1.208：**Dolphin 内置 assets**（模型随 APK 打包，替代原 SenseVoice 的内置地位）
@@ -171,14 +154,7 @@ object SherpaAsrManager {
     // 「内置模型不可用：sense-voice/model.int8.onnx」的 W 级警告（纯噪音）。
     // 详见文件上方 SVC 配置区的说明。
 
-    /** 下载版是否就绪（带最小尺寸校验，避免中断下载留下的残缺文件被误判） */
-    private fun downloadedModelReady(context: Context): Boolean {
-        val dir = svcDir(context)
-        val model = dir.resolve(SVC_MODEL)
-        val tok = dir.resolve(SVC_TOKENS)
-        return model.exists() && model.length() > 100_000_000L &&
-            tok.exists() && tok.length() > 1024L
-    }
+    // v2.4.29：`downloadedModelReady()`（旧 SenseVoice 下载版就绪判定）已随旧下载通路删除。
 
     /**
      * 当前生效的模型来源。
@@ -232,15 +208,25 @@ object SherpaAsrManager {
         //    的精确匹配，`activeModelId` 走 `resolveExtModel(..., "auto")?.dirName ?: "builtin"`；
         //    少登记一处就退回 `"builtin"`，这条 chip 永不点亮。
         add(SherpaLang("auto", R.string.asr_lang_auto, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.COMMON))
-        add(SherpaLang("zh", R.string.asr_lang_zh, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.CHINESE))
-        add(SherpaLang("ja", R.string.asr_lang_ja, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.EAST_ASIA))
-        add(SherpaLang("ko", R.string.asr_lang_ko, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.EAST_ASIA))
-        add(SherpaLang("yue", R.string.asr_lang_yue, modelId = AsrExtModels.DOLPHIN_DIR, group = AsrExtModels.AsrLangGroup.CHINESE))
-        // —— 英语：3 个候选分开标（内置 / 轻量 / 全量），全部放「常用」组便于对比 ——
-        // —— 英语：3 个候选分开标 ——
-        //    「英语1（内置）」放常用组；「英语2/3」的模型是欧洲包（FC/V3），归入欧洲组，
-        //    避免常用组里堆 3 个英语让首屏变乱（用户 2026-10-01 要求整理）。
-        add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.DOLPHIN_DIR, suffix = "1", group = AsrExtModels.AsrLangGroup.COMMON))
+        // ⚠️ v2.4.29：中/日/韩/粤 现在各有两个候选 —— ①「1」= 内置 **Dolphin**（开箱即用、默认），
+        //    ②「2」= **SenseVoice-Small**（需下载）。两处手动登记即与下方循环生成的条目
+        //    uid 相同 → 循环那两条会被去重丢掉，从而**标签稳定**（否则循环按索引会给
+        //    SenseVoice 编号「1」、Dolphin 没有号，看起来颠倒）。
+        add(SherpaLang("zh", R.string.asr_lang_zh, modelId = AsrExtModels.DOLPHIN_DIR, suffix = "1", group = AsrExtModels.AsrLangGroup.CHINESE))
+        add(SherpaLang("zh", R.string.asr_lang_zh, modelId = AsrExtModels.SENSE_VOICE_DIR, suffix = "2", group = AsrExtModels.AsrLangGroup.CHINESE))
+        add(SherpaLang("ja", R.string.asr_lang_ja, modelId = AsrExtModels.DOLPHIN_DIR, suffix = "1", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("ja", R.string.asr_lang_ja, modelId = AsrExtModels.SENSE_VOICE_DIR, suffix = "2", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("ko", R.string.asr_lang_ko, modelId = AsrExtModels.DOLPHIN_DIR, suffix = "1", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("ko", R.string.asr_lang_ko, modelId = AsrExtModels.SENSE_VOICE_DIR, suffix = "2", group = AsrExtModels.AsrLangGroup.EAST_ASIA))
+        add(SherpaLang("yue", R.string.asr_lang_yue, modelId = AsrExtModels.DOLPHIN_DIR, suffix = "1", group = AsrExtModels.AsrLangGroup.CHINESE))
+        add(SherpaLang("yue", R.string.asr_lang_yue, modelId = AsrExtModels.SENSE_VOICE_DIR, suffix = "2", group = AsrExtModels.AsrLangGroup.CHINESE))
+        // —— 英语：3 个候选分开标（默认 SenseVoice / 轻量 / 全量）——
+        //    「英语1」放常用组，用 **SenseVoice-Small**（v2.4.29）；
+        //    「英语2/3」的模型是欧洲包（FC/V3），归入欧洲组，避免常用组里堆 3 个英语。
+        // ⚠️ v2.4.29：原先「英语1」指向 `DOLPHIN_DIR` —— 但 **Dolphin 不含英语**，
+        //    等于「英语」没有任何可用模型（选中后必然初始化失败或跑错模型）。
+        //    现改指 SenseVoice（英文是其强项），与 `AsrExtModels.SENSE_VOICE_ALL` 成对。
+        add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.SENSE_VOICE_DIR, suffix = "1", group = AsrExtModels.AsrLangGroup.COMMON))
         add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.FASTCONF_DIR, suffix = "2", group = AsrExtModels.AsrLangGroup.EUROPE))
         add(SherpaLang("en", R.string.asr_lang_en, modelId = AsrExtModels.PARAKEET_V3_DIR, suffix = "3", group = AsrExtModels.AsrLangGroup.EUROPE))
         // —— 其余扩展语言：按候选数生成 chip（多候选加序号，单候选无后缀）——
@@ -267,12 +253,12 @@ object SherpaAsrManager {
             // v2.1.233：**去重** —— 用户反馈「AI 字幕的选择有重复项」
             //
             // 真重复（uid 完全相同）来自两处登记撞车：
-            //   上面手动 add 了 zh / ja / ko（modelId = DOLPHIN_DIR），
-            //   而 DOLPHIN_LANGS 里**也**含 zh / ja / ko，于是下面的循环又生成一遍 ——
+            //   上面手动 add 了 zh / ja / ko / yue（Dolphin + SenseVoice 各一条），
+            //   而 AsrExtModels 里**也**含这些键，于是下面的循环又生成一遍 ——
             //   同语言同模型 = 两条一模一样的 chip（选中判定用 uid，两条会**同时高亮**）。
             //
-            // 按 uid（`语言@模型`）去重，保留第一条（= 手动登记的那条，无序号后缀，
-            // 显示为「中文」而不是「中文 2」，更符合预期）。
+            // 按 uid（`语言@模型`，**不含序号**）去重，保留第一条（= 手动登记的那条，
+            // 从而标签可控：如「中文 1」= Dolphin、「中文 2」= SenseVoice）。
             // ===================================================================
         }.distinctBy { "${it.code}@${it.modelId}" }
 
@@ -367,12 +353,10 @@ object SherpaAsrManager {
 
     // ===== 下载管理 =====
 
-    fun startModelDownload(context: Context) {
-        if (isModelDownloading) return
-        downloadJob = CoroutineScope(Dispatchers.IO).launch {
-            downloadSenseVoiceCpu(context)
-        }
-    }
+    // v2.4.29：`startModelDownload()`（旧 SenseVoice 专用下载入口，下载到
+    // `sherpa_models/sense-voice-cpu`）已删除 —— 它自 SenseVoice 退役后就没有调用方，
+    // 且与新的扩展模型登记重复。需要下载 SenseVoice 时走 `startDownloadFor` /
+    // `startExtModelDownload`（登记在 AsrExtModels.SENSE_VOICE_ALL）。
 
     fun cancelDownload(context: Context) {
         downloadJob?.cancel()
@@ -382,56 +366,8 @@ object SherpaAsrManager {
         downloadStatus = context.getString(R.string.asr_canceled)
     }
 
-    /** 下载 SenseVoice 模型（单文件 ×2，带进度与断点续传） */
-    private suspend fun downloadSenseVoiceCpu(context: Context): File? = withContext(Dispatchers.IO) {
-        // ⚠️ v2.1.244：这里**必须**用 `downloadedModelReady`（查 SenseVoice 自己的目录），
-        //    不能用 `isModelReady` —— 后者已改为按 Dolphin 判定，而 Dolphin 的内置资产
-        //    恒存在 → 该判断会恒为 true 并直接 return，**下载就永远不执行了**；
-        //    反之若 Dolphin 资产缺失，则每次点下载都会重新下载一遍 239MB。
-        //    「缓存是否已存在」只能由它自己的目录说话。
-        if (downloadedModelReady(context)) {
-            Log.i(TAG, "SenseVoice cached: ${svcDir(context)}")
-            return@withContext svcDir(context)
-        }
-        val dir = svcDir(context)
-        dir.mkdirs()
-        withContextMain {
-            isModelDownloading = true
-            modelDownloadProgress = 0f
-            downloadStatus = context.getString(R.string.asr_preparing_download, SVC_MODEL_MB)
-        }
-
-        // 模型占 99% 体积，词表瞬间完成，因此进度按 0.99 / 0.01 分配
-        val modelOk = downloadFileWithResume(
-            url = SVC_MODEL_URL,
-            dest = dir.resolve(SVC_MODEL),
-            progressBase = 0f,
-            progressSpan = 0.99f,
-            expectMinBytes = 100_000_000L,
-            label = context.getString(R.string.asr_download_model)
-        )
-        if (!modelOk) {
-            withContextMain {
-                isModelDownloading = false
-                downloadStatus = context.getString(R.string.asr_model_download_failed)
-            }
-            return@withContext null
-        }
-        val tokensOk = downloadFileWithResume(
-            url = SVC_TOKENS_URL,
-            dest = dir.resolve(SVC_TOKENS),
-            progressBase = 0.99f,
-            progressSpan = 0.01f,
-            expectMinBytes = 1024L,
-            label = context.getString(R.string.asr_vocab_label)
-        )
-        withContextMain {
-            isModelDownloading = false
-            modelDownloadProgress = 1f
-            downloadStatus = if (tokensOk) context.getString(R.string.asr_model_ready) else context.getString(R.string.asr_vocab_download_failed)
-        }
-        if (tokensOk) dir else null
-    }
+    // v2.4.29：`downloadSenseVoiceCpu()`（旧 SenseVoice 专用下载）已删除。
+    // 见上方「下载管理」处的说明 —— 统一走扩展模型下载。
 
     /**
      * 单文件下载（支持 Range 断点续传 + 进度回调）。
@@ -512,8 +448,8 @@ object SherpaAsrManager {
      *  - `sherpa_models/sherpa-onnx-qnn-*`：SenseVoice QNN（各 SoC 一套，约 161~241MB）
      *  - `vosk_models/`：Vosk 各语言模型（40MB~1.3GB）
      *
-     * **只删已知废弃目录，不做通配清理**；当前在用的
-     * `sherpa_models/sense-voice-cpu`（下载版兜底/更新通道）与 `silero_vad.onnx` 一律保留。
+     * **只删已知废弃目录，不做通配清理**；当前在用的扩展模型目录
+     * （`sherpa_models/ext-*`，含 v2.4.29 起的 `ext-sense-voice`）与 `silero_vad.onnx` 一律保留。
      *
      * 供 Application.onCreate 在后台线程调用（删除量大，不能占用主线程）。
      * @return 释放的字节数
@@ -779,10 +715,13 @@ object SherpaAsrManager {
         val builtin: Boolean
     )
 
-    /** SenseVoice 内置覆盖的语言（这些语言的候选列表最前面会带一条内置） */
+    /** 由**内置 Dolphin**覆盖的语言 —— 这些语言的候选列表最前面会带一条「内置」项。 */
     // v2.1.223：补上 "auto"。此前漏了它 → 「自动」语言走不到内置分支，
     // 在「选择模型」里被当成需要下载的扩展模型（显示 ~100MB），但它其实是内置的。
-    private val BUILTIN_LANGS = setOf("auto", "zh", "en", "ja", "ko", "yue")
+    // ⚠️ v2.4.29：**移除 "en"** —— Dolphin **不含英语**，原先给「英语」列一条
+    //    「内置 Dolphin」是错的（选中即失败）。英语改由 SenseVoice-Small 承接
+    //    （见 sherpaLanguages 的英语1 与 AsrExtModels.SENSE_VOICE_ALL）。
+    private val BUILTIN_LANGS = setOf("auto", "zh", "ja", "ko", "yue")
 
     private fun choicePrefs(context: Context) =
         context.getSharedPreferences("vr_player_prefs", Context.MODE_PRIVATE)
@@ -881,6 +820,12 @@ object SherpaAsrManager {
         val cands = AsrExtModels.candidatesByKey(langKey)
         // 无扩展候选 → 走内置 Dolphin（随 APK），nothing to download
         if (cands.isEmpty()) return false
+        // v2.4.29：**用户明确选了某个候选时只看该候选** —— 否则「选了 SenseVoice（中/日/韩/粤
+        //   也登记了它）却因该语言另有内置 Dolphin 而显示『无需下载』」→ 选中后初始化失败。
+        val choice = modelChoiceFor(context, langKey)
+        if (choice.isNotEmpty() && choice != "builtin") {
+            cands.firstOrNull { it.dirName == choice }?.let { return !isExtModelReady(context, it) }
+        }
         // 候选里有内置 Dolphin 且 assets 完好 → 该语言开箱即用
         if (cands.any { it.modelType == "dolphin" && dolphinAssetAvailable(context) }) return false
         // 已有任一候选就绪 → 无需再下
@@ -890,20 +835,26 @@ object SherpaAsrManager {
     /**
      * 按语言键下载对应模型（扩展语言 → 扩展模型；其余 → **无需下载**）。
      *
-     * v2.1.232 修正：原先这里在「没有扩展候选」时调 [startModelDownload]，
-     * 而 [startModelDownload] 下载的是 **SenseVoice-Small** ——
-     * 但 SenseVoice 早在 v2.1.208 就被内置 Dolphin 取代、已不在识别链路上。
-     * 结果就是：选「自动」→ cands 为空 → 白白下载一个**根本用不上**的模型。
+     * v2.1.232 修正：原先这里在「没有扩展候选」时会下载一个**根本用不上**的模型。
+     * 无扩展候选 → 由**随包的 Dolphin** 覆盖 → 直接返回、不下载。
      *
-     * 现在无候选时直接返回（`auto` / `zh` / `en` / `ja` / `ko` / `yue` 等内置语种
-     * 由随包的 Dolphin 覆盖）。SenseVoice 的下载通路 [startModelDownload] 本身保留，
-     * 需要替换/升级模型的场景仍可调用 —— **功能不删，只是不再被误触发**。
+     * ⚠️ v2.4.29：SenseVoice 已作为扩展模型重新接入（中/英/日/韩/粤），
+     * 因此**新增「用户显式选择优先」** —— 用户选了 SenseVoice 时，即使该语言
+     * 另有内置 Dolphin，也要真的去下 SenseVoice（否则选中后初始化失败）。
      */
     fun startDownloadFor(context: Context, langKey: String) {
         val cands = AsrExtModels.candidatesByKey(langKey)
         if (cands.isEmpty()) {
             Log.i(TAG, "startDownloadFor($langKey)：无扩展候选，由内置 Dolphin 覆盖，无需下载")
             return
+        }
+        // v2.4.29：**用户明确选了某个候选 → 优先下它**（即使该语言另有内置 Dolphin 覆盖）。
+        val choice = modelChoiceFor(context, langKey)
+        if (choice.isNotEmpty() && choice != "builtin") {
+            cands.firstOrNull { it.dirName == choice }?.let { m ->
+                if (!isExtModelReady(context, m)) startExtModelDownload(context, m)
+                return
+            }
         }
         // ⚠️ v2.1.208：Dolphin 已内置到 assets —— 对该语言而言无需任何下载，
         //    直接返回（否则 UI 的「下载模型」按钮会触发一次无意义的下载流程）。
@@ -1161,6 +1112,31 @@ object SherpaAsrManager {
                         provider = "cpu",
                     )
                 }
+
+                // —— SenseVoice-Small（中/英/日/韩/粤）：单一 `model.int8.onnx` + tokens（v2.4.29）
+                // ⚠️ 字段名是 `senseVoice`（已用 javap 核对 AAR：OfflineModelConfig.senseVoice），
+                //    modelType 用 sherpa 约定的 `sense_voice`；结构与 Dolphin 同为「单文件」。
+                // `language` 传该语言自己的 SenseVoice 代码（zh/en/ja/ko/yue）；
+                // 其余（理论上到不了）退 `auto` 让模型自带 LID。
+                "sense_voice" -> OfflineModelConfig(
+                    senseVoice = OfflineSenseVoiceModelConfig(
+                        model = modelPath,
+                        language = when (m.key) {
+                            "zh" -> "zh"
+                            "en" -> "en"
+                            "ja" -> "ja"
+                            "ko" -> "ko"
+                            "yue" -> "yue"
+                            else -> "auto"
+                        },
+                        useInverseTextNormalization = false,
+                    ),
+                    modelType = "sense_voice",
+                    tokens = tokensPath,
+                    numThreads = numThreads,
+                    debug = false,
+                    provider = "cpu",
+                )
 
                 // —— CTC（IndicConformer 南亚语）：**单一 model.onnx**，无 encoder/decoder/joiner 三分。
                 // ⚠️ 必须填 `nemo` 字段（而不是 transducer）：填错字段时 sherpa 会因为

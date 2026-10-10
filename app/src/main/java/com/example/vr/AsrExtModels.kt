@@ -100,10 +100,10 @@ data class AsrExtModel(
 
     /**
      * 是否为「单文件模型」——
-     * `ctc`（IndicConformer）与 `dolphin`（Dolphin）都只有**一个** `model.onnx`，
-     * 没有 encoder/decoder/joiner 三件套；transducer 家族则需要。
+     * `ctc`（IndicConformer）、`dolphin`（Dolphin）与 `sense_voice`（SenseVoice-Small）
+     * 都只有**一个** `model.onnx`，没有 encoder/decoder/joiner 三件套；transducer 家族则需要。
      */
-    val isSingleModel: Boolean get() = modelType == "ctc" || modelType == "dolphin"
+    val isSingleModel: Boolean get() = modelType == "ctc" || modelType == "dolphin" || modelType == "sense_voice"
 }
 
 /**
@@ -155,6 +155,56 @@ object AsrExtModels {
         name = name,
         url = "https://www.modelscope.cn/models/csukuangfj/$repo/resolve/master/$name",
         minBytes = minBytes
+    )
+
+    // =======================================================================
+    // SenseVoice-Small（中 / 英 / 日 / 韩 / 粤）—— v2.4.29
+    // -----------------------------------------------------------------------
+    // 背景：它原是**内置**模型，v2.1.208 起内置地位被 Dolphin 取代并退役。
+    //   但 **Dolphin 不含英语** → 原先「英语」那条 chip 指向 Dolphin（`DOLPHIN_DIR`），
+    //   实际等于**英语没有可用模型**。故本轮把它接成**可下载扩展模型**：
+    //     ① 英语的默认候选改指 SenseVoice（补上英语缺口）；
+    //     ② 中/日/韩/粤 也一并登记为并列候选（用户可切换）。
+    //
+    // ⚠️ 结构与 Dolphin 完全同构（**单文件**）：`model.int8.onnx` + `tokens.txt`。
+    //   - `modelType` 用 sherpa 约定的 **`sense_voice`**；
+    //   - 装配字段名是 **`senseVoice`**（已用 javap 核对 AAR：
+    //     `OfflineModelConfig.senseVoice` / `OfflineSenseVoiceModelConfig(model, language, ...)`）；
+    //   - `language` 传该语言自己的 SenseVoice 代码（`zh`/`en`/`ja`/`ko`/`yue`）。
+    //
+    // 源：`csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17`
+    //   实测体积：model.int8.onnx **239,233,841**（≈229MB）+ tokens.txt 315,894。
+    // =======================================================================
+
+    /** SenseVoice 的落盘目录名（`filesDir/sherpa_models/ext-sense-voice`） */
+    const val SENSE_VOICE_DIR = "sense-voice"
+
+    private const val SENSE_VOICE_REPO = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
+
+    private fun senseVoice(key: String, labelRes: Int) = AsrExtModel(
+        key = key,
+        labelResId = labelRes,
+        dirName = SENSE_VOICE_DIR,
+        modelType = "sense_voice",
+        encoder = "model.int8.onnx",
+        tokens = "tokens.txt",
+        sizeMb = 229,
+        files = listOf(
+            f(SENSE_VOICE_REPO, "model.int8.onnx", 220_000_000L),
+            f(SENSE_VOICE_REPO, "tokens.txt", 300_000L)
+        )
+    )
+
+    /**
+     * SenseVoice-Small 覆盖的 5 种语言。**顺序即优先级**（[candidatesByKey] 取第一个已就绪的），
+     * 因此 `en` 在此排在英语其它候选（FastConformer / Parakeet v3）之前 → 成为**默认英语**。
+     */
+    val SENSE_VOICE_ALL: List<AsrExtModel> = listOf(
+        senseVoice("zh", R.string.asr_lang_zh),
+        senseVoice("en", R.string.asr_lang_en),
+        senseVoice("ja", R.string.asr_lang_ja),
+        senseVoice("ko", R.string.asr_lang_ko),
+        senseVoice("yue", R.string.asr_lang_yue)
     )
 
     // =======================================================================
@@ -609,7 +659,7 @@ object AsrExtModels {
      * 全部已接入的扩展模型（顺序即 UI 中的显示顺序）。
      * 语言键直接复用 `sherpa_lang_code` 取值空间。
      */
-    val ALL: List<AsrExtModel> = listOf(
+    val ALL: List<AsrExtModel> = SENSE_VOICE_ALL + listOf(
         // 东南亚
         VIETNAMESE, THAI,
         // 欧洲（轻量档：102MB / 10 语）
@@ -728,6 +778,7 @@ object AsrExtModels {
     fun friendlyModelName(modelId: String): String = when {
         modelId == "builtin" -> "Dolphin（内置）"
         modelId.startsWith("dolphin") -> "Dolphin"
+        modelId.startsWith("sense-voice") -> "SenseVoice"
         modelId.startsWith("parakeet") -> "Parakeet v3"
         modelId.contains("fast-conformer") -> "FastConformer"
         modelId.contains("thai") -> "Zipformer 泰语"
