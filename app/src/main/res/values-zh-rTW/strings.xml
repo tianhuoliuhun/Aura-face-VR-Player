@@ -461,6 +461,9 @@
     <!-- ===== batch ===== -->
     <string name="asr_section_title">實時字幕（引擎與模型）</string>
     <string name="asr_sensevoice_bundled">Dolphin · 內置模型（無需下載）· 40 語 + 22 方言 · 自帶語種識別</string>
+    <string name="asr_sv_quick_title">SenseVoice-Small</string>
+    <string name="asr_sv_quick_sub">中 / 英 / 日 / 韓 / 粵 · 推薦</string>
+    <string name="asr_sv_download">下載模型（%1$d MB）</string>
     <string name="asr_model_ready_source">已就緒 · %1$s</string>
     <string name="asr_model_unavailable">模型不可用（內置資源缺失，可下載兜底）</string>
     <string name="asr_dolphin_unavailable">Dolphin 模型不可用（內置資源缺失且未下載）</string>

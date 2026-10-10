@@ -459,6 +459,9 @@
     <!-- ===== batch ===== -->
     <string name="asr_section_title">Realtime subtitles (engine &amp; model)</string>
     <string name="asr_sensevoice_bundled">Dolphin - bundled (no download) - 40 languages + 22 dialects - auto detection</string>
+    <string name="asr_sv_quick_title">SenseVoice-Small</string>
+    <string name="asr_sv_quick_sub">ZH / EN / JA / KO / YUE · Recommended</string>
+    <string name="asr_sv_download">Download model (%1$d MB)</string>
     <string name="asr_model_ready_source">Ready - %1$s</string>
     <string name="asr_model_unavailable">Model unavailable (bundled copy missing, download as fallback)</string>
     <string name="asr_dolphin_unavailable">Dolphin model unavailable (bundled copy missing and not downloaded)</string>

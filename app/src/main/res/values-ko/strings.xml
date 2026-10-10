@@ -421,6 +421,9 @@
     <string name="subtitle_ipd">VR 양안 시차/동공 거리 미세 조정</string>
     <string name="asr_section_title">실시간 자막 (엔진과 모델)</string>
     <string name="asr_sensevoice_bundled">Dolphin · 내장 모델(다운로드 불필요) · 40개 언어 + 22개 방언 · 자동 언어 인식</string>
+    <string name="asr_sv_quick_title">SenseVoice-Small</string>
+    <string name="asr_sv_quick_sub">중·영·일·한·광둥어 · 추천</string>
+    <string name="asr_sv_download">모델 다운로드（%1$d MB）</string>
     <string name="asr_model_ready_source">준비됨 · %1$s</string>
     <string name="asr_model_unavailable">모델을 사용할 수 없습니다 (내장본 누락, 다운로드로 대체 가능)</string>
     <string name="asr_dolphin_unavailable">Dolphin 모델을 사용할 수 없습니다 (내장본 누락, 미다운로드)</string>

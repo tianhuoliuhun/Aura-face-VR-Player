@@ -7399,7 +7399,9 @@ BatchTranscribeSection(
                                                             accentOnColor = AccentOnColor,
                                                             sherpaLangCode = sherpaLangCode,
                                                             onSherpaLangCodeChange = { changeAsrLanguage(it) },
-                                                            onUserInteraction = { keepUiAlight() }
+                                                            onUserInteraction = { keepUiAlight() },
+                                                            // v2.4.30：AI 字幕面板里把 SenseVoice 单独置顶
+                                                            senseVoiceFirst = true
                                                         )
                                 }
                                 /**

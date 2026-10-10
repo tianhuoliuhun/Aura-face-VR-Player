@@ -51,6 +51,11 @@ fun BatchTranscribeSection(
     sherpaLangCode: String,
     onSherpaLangCodeChange: (String) -> Unit,
     onUserInteraction: () -> Unit,
+    /**
+     * v2.4.30：是否在面板**顶部单独列出 SenseVoice-Small**（提高其 UI 优先等级）。
+     * AI 字幕面板（字幕浮层）传 true；设置面板保持 false（那里语言/模型列表已足够）。
+     */
+    senseVoiceFirst: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -65,6 +70,10 @@ fun BatchTranscribeSection(
         downloadProgress = SherpaAsrManager.modelDownloadProgress
         isDownloading = SherpaAsrManager.isModelDownloading
     }
+
+    // 当前生效模型统一解析一次（chips 选中判定要用）。
+    // v2.4.30：从下方上移到这里 —— 顶部的 SenseVoice 快捷区块也要用它做选中判定。
+    val activeModelId = SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName ?: "builtin"
 
     Surface(
         color = Color.White.copy(alpha = 0.06f),
@@ -87,6 +96,26 @@ fun BatchTranscribeSection(
                     color = Color.White.copy(alpha = 0.55f),
                     fontSize = 9.sp,
                     lineHeight = 12.sp
+                )
+            }
+
+            // ===== v2.4.30：SenseVoice-Small **单独列出 + 置顶**（提高 UI 优先等级）=====
+            // 为什么必须在最前面单独给一块：默认的「按分类」视角里，
+            // `dedupeKeepPreferred` 对**每种语言只显示首选一条** —— 中/日/韩/粤 的首选是
+            // **内置 Dolphin**，于是 SenseVoice 在这些语言下**在面板里根本选不到**。
+            // 这里给它一个独立入口：点语言即「切到该语言 + 选 SenseVoice」。
+            if (senseVoiceFirst) {
+                SenseVoiceQuickBlock(
+                    context = context,
+                    sherpaLangCode = sherpaLangCode,
+                    activeModelId = activeModelId,
+                    accentColor = accentColor,
+                    accentOnColor = accentOnColor,
+                    onUserInteraction = onUserInteraction,
+                    onPick = { code ->
+                        onSherpaLangCodeChange(code)
+                        SherpaAsrManager.setModelChoice(context, code, AsrExtModels.SENSE_VOICE_DIR)
+                    }
                 )
             }
 
@@ -193,8 +222,7 @@ fun BatchTranscribeSection(
                 }
             }
 
-            // 当前生效模型统一解析一次（chips 选中判定要用）
-            val activeModelId = SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName ?: "builtin"
+            // v2.4.30：`activeModelId` 已上移到函数开头统一计算（顶部 SenseVoice 区块也要用）。
             // ===== 识别语言 =====
             // v2.1.232：改用与设置面板**同一份** AsrLanguageChips。
             // 此前这里是另一份独立副本，两个 bug 都源自它：
@@ -220,6 +248,132 @@ fun BatchTranscribeSection(
                 fontSize = 8.sp,
                 lineHeight = 11.sp
             )
+        }
+    }
+}
+
+/**
+ * v2.4.30：**SenseVoice-Small 专属快捷区块**（AI 字幕面板置顶，单独列出）。
+ *
+ * ## 为什么必须「单独列出」
+ * 默认的「按分类」视角里，`AsrLanguageChips.dedupeKeepPreferred` 对**每种语言只显示
+ * 首选一条**；中/日/韩/粤 的首选是**内置 Dolphin**（rank 1），于是 SenseVoice
+ * 在这些语言下**在面板里选不到**（只能切到「按模型」视角才能找到）。
+ * 这里给 SenseVoice 一个独立、置顶、描强调色边框的入口：
+ *   · 5 个语言 chip —— 点 = 「切到该语言 + 选 SenseVoice」，一步到位；
+ *   · 未下载时给一个下载按钮（带体积），下载中由下方通用进度条显示。
+ */
+@Composable
+private fun SenseVoiceQuickBlock(
+    context: android.content.Context,
+    sherpaLangCode: String,
+    activeModelId: String,
+    accentColor: Color,
+    accentOnColor: Color,
+    onUserInteraction: () -> Unit,
+    onPick: (String) -> Unit
+) {
+    // SenseVoice 的 5 条登记**共用同一个 dirName/模型**，取第一条即可代表整个模型。
+    val entry = AsrExtModels.SENSE_VOICE_ALL.first()
+    var ready by remember { mutableStateOf(SherpaAsrManager.isExtModelReady(context, entry)) }
+    var downloading by remember { mutableStateOf(SherpaAsrManager.isModelDownloading) }
+    LaunchedEffect(SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
+        ready = SherpaAsrManager.isExtModelReady(context, entry)
+        downloading = SherpaAsrManager.isModelDownloading
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            // 强调色底 + 描边 → 视觉上「优先于」下方的一般模型区块
+            .background(accentColor.copy(alpha = 0.14f))
+            .border(1.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    stringResource(R.string.asr_sv_quick_title),
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    stringResource(R.string.asr_sv_quick_sub),
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 8.sp
+                )
+            }
+            if (ready) {
+                Text(
+                    stringResource(R.string.asr_ready),
+                    color = accentColor.copy(alpha = 0.95f),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            } else if (!downloading) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(accentColor.copy(alpha = 0.9f))
+                        .clickable {
+                            onUserInteraction()
+                            SherpaAsrManager.startExtModelDownload(context, entry)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.asr_sv_download, entry.sizeMb),
+                        color = accentOnColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 5 个语言 chip（中/英/日/韩/粤）。每行 5 个 —— 列表恰好 5 条，故只有一行。
+        val perRow = 5
+        AsrExtModels.SENSE_VOICE_ALL.chunked(perRow).forEach { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                rowItems.forEach { m ->
+                    val code = m.key
+                    // 选中判定与别处完全一致：uid = `语言@模型`
+                    val sel = "$code@${AsrExtModels.SENSE_VOICE_DIR}" == "$sherpaLangCode@$activeModelId"
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (sel) accentColor else Color.White.copy(alpha = 0.10f))
+                            .clickable {
+                                onUserInteraction()
+                                onPick(code)
+                            }
+                            .padding(vertical = 5.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(m.labelResId),
+                            color = if (sel) accentOnColor else Color.White.copy(alpha = 0.88f),
+                            fontSize = 8.sp,
+                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1
+                        )
+                    }
+                }
+                repeat(perRow - rowItems.size) {
+                    Box(modifier = Modifier.weight(1f))
+                }
+            }
         }
     }
 }

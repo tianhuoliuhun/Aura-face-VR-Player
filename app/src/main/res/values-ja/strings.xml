@@ -421,6 +421,9 @@
     <string name="subtitle_ipd">VR 両眼視差/瞳孔間距離の微調整</string>
     <string name="asr_section_title">リアルタイム字幕（エンジンとモデル）</string>
     <string name="asr_sensevoice_bundled">Dolphin・内蔵モデル（ダウンロード不要）・40 言語 + 22 方言・言語自動判別</string>
+    <string name="asr_sv_quick_title">SenseVoice-Small</string>
+    <string name="asr_sv_quick_sub">中・英・日・韓・粤 · おすすめ</string>
+    <string name="asr_sv_download">モデルをダウンロード（%1$d MB）</string>
     <string name="asr_model_ready_source">準備完了・%1$s</string>
     <string name="asr_model_unavailable">モデルを利用できません（内蔵分が不足。ダウンロードで代替可能）</string>
     <string name="asr_dolphin_unavailable">Dolphin モデルを利用できません（内蔵分が不足、未ダウンロード）</string>
