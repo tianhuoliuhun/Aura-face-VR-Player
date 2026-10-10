@@ -2701,9 +2701,12 @@ fun VRPlayerScreen(
                     out = mkvOut
                 }
             }
+            // v2.4.28：产物必须先**验能播**（含视频轨）再切换 —— 防止「修复后反而播不了」。
+            // ⚠️ 这一步放在 IO 线程（MediaExtractor 打开文件是 IO）。
+            val valid = result.success && out.length() > 1024 && hasVideoTrack(out)
             withContext(Dispatchers.Main) {
                 isRemuxing = false
-                if (result.success && out.length() > 1024) {
+                if (valid) {
                     Toast.makeText(
                         context,
                         context.getString(R.string.toast_container_fixed),
@@ -2715,9 +2718,14 @@ fun VRPlayerScreen(
                     )
                     photoReloadTrigger++
                 } else {
-                    // 失败（FFmpeg 也转不了 / native 库缺失）：明确提示不支持拖动定位。
+                    // 失败 / 产物不合格：**保留原文件**（宁可不修，也不能把能播的搞坏），
+                    // 并标记 seekUnsupported 以免每次拖动都重试。
                     seekUnsupported = true
-                    Log.w("VRPlayerScreen", "容器修复失败：code=${result.code} ${result.message}")
+                    Log.w(
+                        "VRPlayerScreen",
+                        "容器修复未采用：success=${result.success} size=${out.length()} " +
+                            "code=${result.code} ${result.message}"
+                    )
                     Toast.makeText(
                         context,
                         context.getString(R.string.toast_seek_unsupported),
@@ -4882,8 +4890,13 @@ fun VRPlayerScreen(
                                                 //    （缓冲期间不推进是正常的）。
                                                 // ==================================================
                                                 val aviNeedsRebuild = aviProbe?.needsIndexRebuild == true
+                                                // ⚠️ v2.4.28：**容器修复只对 EXO 生效**。
+                                                //    MPV / IJK 的 seek 由 libavformat 负责，本来正常；
+                                                //    对它们触发重封装只会白等（实测对一条 9113s 的
+                                                //    MPV 视频重封装了 2.5 分钟、还因丢包导致播不了）。
+                                                val engineIsExo = playerInstance?.engine == DecoderEngine.EXO
                                                 scope.launch {
-                                                    if (seekIssuedFlag && aviNeedsRebuild &&
+                                                    if (seekIssuedFlag && aviNeedsRebuild && engineIsExo &&
                                                         !seekUnsupported && !isRemuxing &&
                                                         selectedMediaItem.isVideo
                                                     ) {
@@ -4899,6 +4912,8 @@ fun VRPlayerScreen(
                                                     delay(1500L)
                                                     if (!seekIssuedFlag || seekTarget <= 3000L) return@launch
                                                     val inst = playerInstance ?: return@launch
+                                                    // v2.4.28：非 EXO（MPV/IJK/系统）不参与容器修复判定
+                                                    if (inst.engine != DecoderEngine.EXO) return@launch
                                                     val posA = inst.currentPosition
                                                     val moved = kotlin.math.abs(posA - seekTarget)
                                                     val stuckAtStart = posA < 2000L && seekTarget > 5000L
@@ -4913,7 +4928,14 @@ fun VRPlayerScreen(
                                                         frozen = !buffering && inst.isPlaying && (posB - posA) <= 0L
                                                     }
 
-                                                    if ((stuckAtStart || moved > 5000L || frozen) &&
+                                                    // ⚠️ v2.4.28：判据收紧 —— 只认两种**明确故障**：
+                                                    //    ① `stuckAtStart`：位置停在片头（≈0）而目标很远
+                                                    //       —— 容器确实把 seek 吞掉了；
+                                                    //    ② `frozen`：位置到了但播放冻住。
+                                                    //    **去掉 `moved > 5000`**：长视频/关键帧级 seek
+                                                    //    本来就可能偏离几秒~几十秒，用它判「失败」会误伤
+                                                    //    （实测把一条播放正常的 9113s 视频误判成需修复）。
+                                                    if ((stuckAtStart || frozen) &&
                                                         !seekUnsupported && !isRemuxing &&
                                                         selectedMediaItem.isVideo
                                                     ) {
@@ -8684,6 +8706,36 @@ private fun isContainerFixOutput(uriStr: String?): Boolean {
         p.contains("/remuxed_") || p.contains("/levelpatched_")
     } catch (_: Throwable) {
         false
+    }
+}
+
+/**
+ * v2.4.28：文件是否**含视频轨**（容器修复「切换前先验能播」用）。
+ *
+ * 为什么需要：重封装可能产出「打不开 / 只剩音频」的坏文件（例如源里大量包无时间戳被跳过）。
+ * 若直接切过去，就会从「能播但拖不动」变成「完全播不了」——用户报过这个。
+ * 所以：**产物无法确认含视频轨就一直不换**（宁可不修，也不能把能播的搞坏）。
+ *
+ * ⚠️ 这是 **IO** 操作（打开文件），调用方必须在后台线程。
+ */
+private fun hasVideoTrack(file: java.io.File): Boolean {
+    if (!file.isFile || file.length() < 1024) return false
+    val ex = android.media.MediaExtractor()
+    return try {
+        ex.setDataSource(file.absolutePath)
+        var ok = false
+        for (i in 0 until ex.trackCount) {
+            val mime = ex.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME) ?: continue
+            if (mime.startsWith("video/")) {
+                ok = true
+                break
+            }
+        }
+        ok
+    } catch (_: Throwable) {
+        false
+    } finally {
+        try { ex.release() } catch (_: Throwable) {}
     }
 }
 
