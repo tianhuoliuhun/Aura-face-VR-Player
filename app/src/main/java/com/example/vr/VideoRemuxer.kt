@@ -38,6 +38,13 @@ object VideoRemuxer {
         val videoTrackMissing: Boolean = false
     )
 
+    /**
+     * ⚠️ **v2.4.26 起不再用于「容器修复」**：这条 MediaExtractor+MediaMuxer 路径在
+     *    源片含 **B 帧**（PTS 在解码顺序下非单调）时，会触发 [doRemux] 里「时间戳倒退就
+     *    跳过样本」的兜底 → 实测把 6302 帧砍到 464 帧（≈2fps）→ 播放极卡。
+     *    容器修复已改走 [FfmpegRemuxer.remuxToMkv]（libavformat，不丢帧）。
+     *    本函数保留仅为兼容/回溯；**不要再用于容器修复**。
+     */
     fun remux(context: Context, inputUri: Uri, outputFile: File): RemuxResult {
         return doRemux(context, inputUri, outputFile, patchLevelIdc = null, spoofResolution = null)
     }

@@ -2653,7 +2653,10 @@ fun VRPlayerScreen(
 
     /**
      * Auto-fixes a video whose container does not support seeking (position resets
-     * to 0 after seekTo) by re-muxing it into a fresh MP4. No re-encoding. (8/1 功能)
+     * to 0 after seekTo) by re-muxing it into a fresh MP4 via FFmpeg. No re-encoding. (8/1 功能)
+     *
+     * ⚠️ v2.4.26：从「MediaExtractor+MediaMuxer → MP4」改为「FFmpeg → MP4(MKV 兜底)」。
+     *    MediaMuxer 要求时间戳单调，含 B 帧的源会被「退帧跳过」砍掉 90%+ 帧 → 卡顿。
      */
     fun startRemuxFix() {
         val uriStr = selectedMediaItem.uri ?: return
@@ -2671,14 +2674,39 @@ fun VRPlayerScreen(
         ).show()
 
         scope.launch(Dispatchers.IO) {
-            val out = File(context.cacheDir, "remuxed_${selectedMediaItem.id}.mp4")
-            val result = VideoRemuxer.remux(context, Uri.parse(uriStr), out)
+            // v2.4.26：容器修复改用 **FFmpeg(libavformat) 转封装**（输出 MP4），
+            //   不再用 MediaExtractor + MediaMuxer。实测根因：源片含 B 帧（fMP4 的 trun
+            //   带非零 sample_composition_time_offset → PTS 在解码顺序下非单调），而
+            //   MediaMuxer 要求时间戳单调递增，旧实现「时间戳倒退就跳过样本」把 6302 帧
+            //   砍到 464 帧（≈2fps）→ 修复后播放极卡。
+            //   FFmpeg 的 av_interleaved_write_frame 会缓冲重排、写出 ctts，**不丢帧**；
+            //   stbl 采样表保证 ExoPlayer 可 seek。MP4 收不下时（如裸 PCM 音频）退回 MKV。
+            val base = "remuxed_${selectedMediaItem.id}"
+            val mp4Out = File(context.cacheDir, "$base.mp4")
+            var out = mp4Out
+            var result = try {
+                FfmpegRemuxer.remuxToMp4(context, Uri.parse(uriStr), mp4Out)
+            } catch (t: Throwable) {
+                FfmpegRemuxer.Result(false, null, -200, t.message)
+            }
+            if (!result.success) {
+                val mkvOut = File(context.cacheDir, "$base.mkv")
+                val r2 = try {
+                    FfmpegRemuxer.remuxToMkv(context, Uri.parse(uriStr), mkvOut)
+                } catch (t: Throwable) {
+                    FfmpegRemuxer.Result(false, null, -200, t.message)
+                }
+                if (r2.success) {
+                    result = r2
+                    out = mkvOut
+                }
+            }
             withContext(Dispatchers.Main) {
                 isRemuxing = false
                 if (result.success && out.length() > 1024) {
                     Toast.makeText(
                         context,
-                        if (result.audioIncluded) context.getString(R.string.toast_container_fixed) else context.getString(R.string.toast_container_fixed_no_audio),
+                        context.getString(R.string.toast_container_fixed),
                         Toast.LENGTH_LONG
                     ).show()
                     selectedMediaItem = selectedMediaItem.copy(
@@ -2686,31 +2714,15 @@ fun VRPlayerScreen(
                         title = selectedMediaItem.title + context.getString(R.string.suffix_fixed)
                     )
                     photoReloadTrigger++
-                } else if (result.videoTrackMissing) {
-                    // ⚠️ v2.4.9 起**语义变更：不再引导用户切 MPV**。
-                    //
-                    // 典型场景就是 AVI 容器内的 AV1 —— EXO 的 `AviExtractor` 只认
-                    // 14 个 fourcc（不含 `AV01`）→ 视频轨被整条丢弃，重封装也救不了。
-                    //
-                    // v2.1.247 曾提示「请切 MPV（它有完整 FFmpeg，认 `V_AV1`）」，
-                    // 但那是个**不可靠的承诺**：AVI 里的 AV1 能不能被 libavformat
-                    // 正确识别取决于具体封装写法，并非总能成；用户为此还要切内核，
-                    // 很可能只是从「有声音没画面」变成「连声音都没有」。
-                    //
-                    // → 现在明确判为**不支持**，并给出真正可操作的出路
-                    //   （重新封装为 MKV / MP4），而不是把用户引向一个可能同样失败的开关。
-                    //
-                    // 注：正常路径下打开文件时 `AviRiffProbe` 已提前拦下并提示过，
-                    //     这里只是「没探到 fourcc、却仍然丢轨」的兜底分支。
+                } else {
+                    // 失败（FFmpeg 也转不了 / native 库缺失）：明确提示不支持拖动定位。
                     seekUnsupported = true
+                    Log.w("VRPlayerScreen", "容器修复失败：code=${result.code} ${result.message}")
                     Toast.makeText(
                         context,
-                        context.getString(R.string.toast_avi_no_video_track),
-                        Toast.LENGTH_LONG
+                        context.getString(R.string.toast_seek_unsupported),
+                        Toast.LENGTH_SHORT
                     ).show()
-                } else {
-                    seekUnsupported = true
-                    Toast.makeText(context, context.getString(R.string.toast_seek_unsupported), Toast.LENGTH_SHORT).show()
                 }
             }
         }

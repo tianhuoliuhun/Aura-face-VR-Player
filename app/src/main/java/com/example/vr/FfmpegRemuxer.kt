@@ -55,21 +55,34 @@ object FfmpegRemuxer {
 
     private external fun nativeVersion(): String
     private external fun nativeRemuxToMkv(inputPath: String, outputPath: String): Int
+    private external fun nativeRemuxToMp4(inputPath: String, outputPath: String): Int
 
     /**
-     * 把 [inputUri] 转封装成 Matroska 写入 [outFile]。
+     * 把 [inputUri] 转封装成 Matroska（MKV）写入 [outFile] —— 字幕链路兜底用。
      *
      * ⚠️ **同步、耗时**（1.19GB 实测 30~60s）——调用方必须在后台线程。
      * ⚠️ 失败时产物不可信（可能部分写出），调用方应删除。
      */
-    fun remuxToMkv(context: Context, inputUri: Uri, outFile: File): Result {
+    fun remuxToMkv(context: Context, inputUri: Uri, outFile: File): Result =
+        runRemux(context, inputUri, outFile, mp4 = false)
+
+    /**
+     * 把 [inputUri] 转封装成 **MP4** 写入 [outFile] —— **容器修复**用（v2.4.26）。
+     *
+     * 走 libavformat 的 mov muxer：会写 stbl + **ctts**，**保留 B 帧**（不像
+     * MediaExtractor+MediaMuxer 会因时间戳非单调而丢帧），且 ExoPlayer 可 seek。
+     */
+    fun remuxToMp4(context: Context, inputUri: Uri, outFile: File): Result =
+        runRemux(context, inputUri, outFile, mp4 = true)
+
+    private fun runRemux(context: Context, inputUri: Uri, outFile: File, mp4: Boolean): Result {
         var pfd: ParcelFileDescriptor? = null
         val inPath: String = when (inputUri.scheme?.lowercase()) {
             "file" -> inputUri.path
                 ?: return Result(false, null, -100, "file URI 无路径")
             "content" -> {
                 // content://（相册）没有真实路径 → 走 fd：libavformat 打开 /proc/self/fd/N
-                // ⚠️ fd 必须活到 nativeRemuxToMkv 返回（本函数 finally 里统一关闭）
+                // ⚠️ fd 必须活到 native 调用返回（本函数 finally 里统一关闭）
                 pfd = context.contentResolver.openFileDescriptor(inputUri, "r")
                     ?: return Result(false, null, -100, "openFileDescriptor 返回 null")
                 "/proc/self/fd/${pfd.fd}"
@@ -79,7 +92,8 @@ object FfmpegRemuxer {
             else -> inputUri.toString()
         }
         return try {
-            val code = nativeRemuxToMkv(inPath, outFile.absolutePath)
+            val code = if (mp4) nativeRemuxToMp4(inPath, outFile.absolutePath)
+            else nativeRemuxToMkv(inPath, outFile.absolutePath)
             if (code == 0) Result(true, outFile.absolutePath, 0, null)
             else Result(false, null, code, codeMessage(code))
         } catch (t: Throwable) {

@@ -51,7 +51,10 @@ Java_com_example_vr_FfmpegRemuxer_nativeVersion(JNIEnv *env, jclass) {
 }
 
 /**
- * 把 `inPath` 转封装为 Matroska 写到 `outPath`（不解码，纯容器转换）。
+ * 共用的转封装实现（JNI 入口的公共体）。
+ *
+ * `fmtName`：`"matroska"`=MKV（字幕链路兜底，兼容性最宽）；`"mov"`=MP4（**容器修复**用，
+ * 本库 libavformat 已编入 movenc —— 会写 stbl + **ctts**，**保留 B 帧**且可 seek）。
  *
  * 返回 0 表示成功；负数为失败码（Java 侧映射成可读文案）：
  *   -1 打不开输入        -2 find_stream_info 失败
@@ -59,12 +62,9 @@ Java_com_example_vr_FfmpegRemuxer_nativeVersion(JNIEnv *env, jclass) {
  *   -5 打不开输出文件    -6 建流/拷参数失败
  *   -7 写帧失败（写出了部分数据时也按失败处理，产物不可信）
  *
- * ⚠️ 同步调用，在调用方的后台线程执行（RealtimeSubtitle 的启动协程）。
- *    1.19GB 实测约 30~60s（纯 IO，不解码）。
+ * ⚠️ 同步调用，在调用方的后台线程执行。1.19GB 实测约 30~60s（纯 IO，不解码）。
  */
-JNIEXPORT jint JNICALL
-Java_com_example_vr_FfmpegRemuxer_nativeRemuxToMkv(JNIEnv *env, jclass,
-                                                   jstring jIn, jstring jOut) {
+static int remuxJni(JNIEnv *env, jstring jIn, jstring jOut, const char *fmtName) {
     const char *inPath = env->GetStringUTFChars(jIn, nullptr);
     const char *outPath = env->GetStringUTFChars(jOut, nullptr);
     if (!inPath || !outPath) {
@@ -92,13 +92,13 @@ Java_com_example_vr_FfmpegRemuxer_nativeRemuxToMkv(JNIEnv *env, jclass,
         ret = -2;
         goto done;
     }
-    LOGI("输入: %u 个流, 时长 %.1fs", in->nb_streams,
-         in->duration > 0 ? in->duration / 1000000.0 : 0.0);
+    LOGI("输入: %u 个流, 时长 %.1fs → 容器 %s", in->nb_streams,
+         in->duration > 0 ? in->duration / 1000000.0 : 0.0, fmtName);
 
-    // 2) 输出上下文：显式指定 matroska（不靠文件后缀猜）。
-    if ((ret = avformat_alloc_output_context2(&out, nullptr, "matroska", outPath)) < 0) {
+    // 2) 输出上下文：显式指定容器名（不靠文件后缀猜）。
+    if ((ret = avformat_alloc_output_context2(&out, nullptr, fmtName, outPath)) < 0) {
         av_strerror(ret, errbuf, sizeof(errbuf));
-        LOGE("alloc_output_context2 失败: %s", errbuf);
+        LOGE("alloc_output_context2(%s) 失败: %s", fmtName, errbuf);
         ret = -3;
         goto done;
     }
@@ -196,6 +196,31 @@ done:
     if (ret == 0) LOGI("remux 成功 → %s", outPath);
     else LOGE("remux 失败 code=%d → %s", ret, outPath);
     return ret;
+}
+
+/**
+ * 转封装为 Matroska（MKV）—— 字幕链路 `AudioTee` 的兜底（兼容性最宽）。
+ */
+JNIEXPORT jint JNICALL
+Java_com_example_vr_FfmpegRemuxer_nativeRemuxToMkv(JNIEnv *env, jclass,
+                                                   jstring jIn, jstring jOut) {
+    return remuxJni(env, jIn, jOut, "matroska");
+}
+
+/**
+ * 转封装为 MP4（mov muxer）—— **容器修复**用。
+ *
+ * ⚠️ 为什么容器修复必须走 FFmpeg 而不是 MediaExtractor+MediaMuxer：
+ *    `MediaMuxer` 要求时间戳单调递增，而含 B 帧的源（fMP4 的 trun 带非零
+ *    sample_composition_time_offset → PTS 在解码顺序下非单调）会触发旧实现的
+ *    「时间戳倒退就跳过样本」→ 实测把 6302 帧砍到 464 帧（≈2fps）→ 播放极卡。
+ *    libavformat 的 `av_interleaved_write_frame` 会按时间缓冲重排、写出 ctts，
+ *    **不丢帧**；stbl 采样表保证 ExoPlayer 可 seek。
+ */
+JNIEXPORT jint JNICALL
+Java_com_example_vr_FfmpegRemuxer_nativeRemuxToMp4(JNIEnv *env, jclass,
+                                                   jstring jIn, jstring jOut) {
+    return remuxJni(env, jIn, jOut, "mov");
 }
 
 } // extern "C"
