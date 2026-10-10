@@ -2658,6 +2658,10 @@ fun VRPlayerScreen(
     fun startRemuxFix() {
         val uriStr = selectedMediaItem.uri ?: return
         if (isRemuxing) return
+        // v2.4.25：当前已是本机修复产物 → 不再重复修复。
+        // 否则排队的 seek 校验协程会把「已修复文件」再修一次（输入=输出同路径），
+        // 造成同一文件反复重封装、标题反复追加"（已修复）"、反复重载 → 卡顿。
+        if (isContainerFixOutput(uriStr)) return
         isRemuxing = true
         seekUnsupported = false
         Toast.makeText(
@@ -2730,6 +2734,8 @@ fun VRPlayerScreen(
     fun startLevelPatchFix() {
         val uriStr = selectedMediaItem.uri ?: return
         if (isRemuxing) return
+        // v2.4.25：已是本机修复产物 → 不再重复改写 SPS（防 8K 场景反复重编码）。
+        if (isContainerFixOutput(uriStr)) return
         isRemuxing = true
         Toast.makeText(
             context,
@@ -8645,6 +8651,29 @@ private const val SEEK_THUMB_QUANTUM_MS = 1000L
 /** 拖动预览目标尺寸（匹配 UI 的 160dp×90dp，在 xxhdpi 上足够清晰）。 */
 private const val SEEK_THUMB_W = 320
 private const val SEEK_THUMB_H = 180
+
+// ===================== v2.4.25：容器修复「收敛」判据 =====================
+
+/**
+ * 判断当前 URI 是否已经是**本机容器修复的产物**（`cacheDir` 下的
+ * `remuxed_*.mp4` / `levelpatched_*.mp4`）。
+ *
+ * 为什么要这条判据：容器修复成功后，会把 `selectedMediaItem.uri` 换成修复产物并
+ * 重载播放。而此时**仍在排队的 seek 校验协程**（每次拖动都会起一个，延迟 1.5~2.5s）
+ * 会拿「已修复的文件」再触发一次修复 —— 输入与输出是**同一个 cache 路径**，
+ * 于是同一文件被反复重封装、标题不断追加"（已修复）"、播放反复重载 → **卡顿**。
+ *
+ * 有了它：修复产物不再被当作"待修复源"，**每个文件最多修复一次**，链路自然收敛。
+ */
+private fun isContainerFixOutput(uriStr: String?): Boolean {
+    if (uriStr.isNullOrEmpty()) return false
+    return try {
+        val p = android.net.Uri.parse(uriStr).path ?: return false
+        p.contains("/remuxed_") || p.contains("/levelpatched_")
+    } catch (_: Throwable) {
+        false
+    }
+}
 
 // ===================== v2.3.1（P2+P4）：AI 弹幕编排参数 =====================
 
