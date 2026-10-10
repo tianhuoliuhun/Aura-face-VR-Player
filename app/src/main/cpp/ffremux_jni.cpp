@@ -173,6 +173,11 @@ static int remuxJni(JNIEnv *env, jstring jIn, jstring jOut, const char *fmtName)
         }
         av_packet_free(&pkt);
         LOGI("remux 完成: 写出 %lld 包（跳过无时间戳 %lld，失败 %lld）", written, skipped, failed);
+        // 🔴 v2.4.27：`av_read_frame` 正常读完文件时返回 **AVERROR_EOF**（= -541478725，
+        //   即 -("EOF ")），**不是 0**。此前直接把循环结束后的 `ret` 返回，
+        //   于是「转封装成功」被误判成失败（日志：写出 16149 包、失败 0，却报 code=-541478725）
+        //   → 表现为「自动修复失败」。这里把 EOF 归一为成功；其它负值才真是错误。
+        if (ret == AVERROR_EOF) ret = 0;
         if (written == 0) { ret = -7; goto trailer; }
     }
 
