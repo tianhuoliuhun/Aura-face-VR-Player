@@ -73,7 +73,7 @@ fun BatchTranscribeSection(
 
     // 当前生效模型统一解析一次（chips 选中判定要用）。
     // v2.4.30：从下方上移到这里 —— 顶部的 SenseVoice 快捷区块也要用它做选中判定。
-    val activeModelId = SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName ?: "builtin"
+    val activeModelId = SherpaAsrManager.activeModelIdFor(context, sherpaLangCode)
 
     Surface(
         color = Color.White.copy(alpha = 0.06f),

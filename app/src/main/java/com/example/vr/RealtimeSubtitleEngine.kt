@@ -1356,7 +1356,7 @@ class SherpaSegmentRecognizer(
         return try {
             stream.acceptWaveform(samples, 16000)
             recognizer.decode(stream)
-            recognizer.getResult(stream).text.trim()
+            sanitizeAsrText(recognizer.getResult(stream).text)
         } finally {
             stream.release()
         }
@@ -1366,3 +1366,17 @@ class SherpaSegmentRecognizer(
         try { recognizer.release() } catch (_: Exception) {}
     }
 }
+
+/**
+ * 清理 ASR 输出文本（v2.4.31）。
+ *
+ * ⚠️ **SenseVoice 的输出可能带特殊标签**：`<|zh|>`（语种）、`<|NEUTRAL|>`（情感）、
+ * `<|Speech|>`（事件）、`<|woitn|>`（ITN 开关）等。sherpa-onnx 通常会在 native 侧
+ * 把它们剥离，但**不能假设一定剥干净** —— 一旦漏出就会被当成字幕显示给用户（很刺眼）。
+ * 这里做一道**防御性清理**，只删 `<|...|>` 形态的子串：
+ *   · 对 Dolphin 等无标签模型是**无副作用的空操作**；
+ *   · 半截标签（如被截断的 `<|zh`）也一并收尾。
+ */
+private val ASR_SPECIAL_TOKEN_RE = Regex("<\\|[^|>]*\\|?>?")
+private fun sanitizeAsrText(raw: String): String =
+    raw.replace(ASR_SPECIAL_TOKEN_RE, "").trim()

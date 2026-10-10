@@ -7157,10 +7157,10 @@ fun VRPlayerScreen(
                                     // sherpa-onnx 引擎语言选择（v111；v127 含 SenseVoice CPU）
                                     // v2.0.208：多级收纳 —— 支持「按语言 / 按模型」两种分组视角，
                                     //           语区可折叠，同语言多模型时支持选择模型。
-                                    // 当前生效模型统一解析一次（chips 选中判定要用；此处仅供本处使用）
-                                    val activeModelId =
-                                        SherpaAsrManager.resolveExtModel(context, sherpaLangCode)?.dirName
-                                            ?: "builtin"
+                                    // 当前生效模型统一解析一次（chips 选中判定要用）
+                                    // v2.4.31：改调 `activeModelIdFor`（与 AI 字幕面板**共用同一实现**，
+                                    //          不再两处各写一遍 `resolveExtModel(...)?.dirName ?: "builtin"`）
+                                    val activeModelId = SherpaAsrManager.activeModelIdFor(context, sherpaLangCode)
                                     // v2.1.232：语言选择的**唯一实现**在 AsrLanguageChips ——
                                     // 此前设置面板与字幕悬浮窗各有一份副本，改一处漏一处已发生两次
                                     //（v2.1.226 内置候选选不中、v2.1.231 四项分类）。现在共用同一份。

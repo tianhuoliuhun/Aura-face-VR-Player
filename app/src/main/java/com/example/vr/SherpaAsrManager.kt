@@ -337,7 +337,10 @@ object SherpaAsrManager {
         sherpaLanguages.forEach { chip ->
             chip.modelId?.let { id -> byId.getOrPut(id) { mutableListOf() } += chip }
         }
+        // v2.4.31：**SenseVoice 组置顶**（提高其 UI 优先等级）——
+        // 「按模型」视角第一组就是它，不用往下翻。`sortedBy` 稳定，其余组保持原相对顺序。
         return byId.map { (id, chips) -> id to chips }
+            .sortedBy { if (it.first == AsrExtModels.SENSE_VOICE_DIR) 0 else 1 }
     }
 
     /**
@@ -749,6 +752,16 @@ object SherpaAsrManager {
      */
     var modelChoiceVersion: Int by mutableIntStateOf(0)
         private set
+
+    /**
+     * 当前生效的模型 id（`builtin` 或扩展模型 dirName）—— **UI 选中判定的唯一来源**。
+     *
+     * ⚠️ v2.4.31：抽成单一实现。此前「设置面板 / AI 字幕面板」各自写了一遍
+     * `resolveExtModel(context, sherpaLangCode)?.dirName ?: "builtin"` ——
+     * 属本项目「同一份逻辑两处登记」的头号事故源（改一处漏一处）。
+     */
+    fun activeModelIdFor(context: Context, langKey: String): String =
+        resolveExtModel(context, langKey)?.dirName ?: "builtin"
 
     fun setModelChoice(context: Context, langKey: String, modelId: String) {
         choicePrefs(context).edit().putString("asr_model_choice_$langKey", modelId).apply()
