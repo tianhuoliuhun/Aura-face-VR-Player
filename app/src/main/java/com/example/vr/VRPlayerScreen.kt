@@ -589,6 +589,19 @@ fun VRPlayerScreen(
         )
     }
 
+    /**
+     * v2.4.32：**「Exo 打不开 → 本次改用 MPV 重试」的 URI**。
+     *
+     * 背景：有些 MP4/fMP4 的编解码配置畸形（实测：HEVC 的 `hvcC` 参数集数组为空），
+     *   Media3 的 `HevcConfig`/`BoxParser` 会**直接抛异常** → `ExoPlaybackException(Source error)`
+     *   → Exo 完全打不开。这类**解析层面**的失败，切软/硬解都救不了，只有换 FFmpeg 内核（MPV）能解。
+     *
+     * 语义：**只对「这一个文件」生效、只重试一次**，而且**不回写**用户的解码器设置
+     *   （与上方容器路由「刻意不写回 prefs」同一原则）——避免「开了个坏文件就把引擎永久改掉」。
+     * 置位点见 Exo 的 `onPlayerError`；消费点见 `setupVideoPlayer` 的 `effectiveEngine`。
+     */
+    var mpvRetryUri by remember { mutableStateOf<String?>(null) }
+
     // v2.1.233：IJK 内核的可调参数（对应设置面板「解码器参数 · IJK」那几项）。
     // 只有选中 IJK 时才会被读取；切回 EXO 时这些值不参与播放，但仍保留在 prefs 里，
     // 用户下次切回 IJK 时不用重设。
@@ -3127,6 +3140,17 @@ fun VRPlayerScreen(
             .ifEmpty { MediaFormats.extFromMime(selectedMediaItem.mimeType) }
         var effectiveEngine = decoderEngine
         // ======================================================================
+        // v2.4.32：**该文件 Exo 打开失败过 → 本次直接用 MPV**（只对这一个文件、只重试一次）
+        // ----------------------------------------------------------------------
+        // 与下方容器路由同为「只改 effectiveEngine、不写回 prefs」：用户的解码器设置不变。
+        // 置位见 Exo 的 `onPlayerError`（换软/硬解救不了的**解析类**失败）。
+        if (mpvRetryUri != null && mpvRetryUri == selectedMediaItem.uri &&
+            decoderEngine != DecoderEngine.MPV
+        ) {
+            effectiveEngine = DecoderEngine.MPV
+            Log.i("VRPlayerScreen", "该文件 Exo 打开失败过 → 本次改用 MPV（顺带确认 vo 预判）")
+        }
+        // ======================================================================
         // v2.1.244：**预判式选 vo** —— MPV 的视频输出模式
         // ----------------------------------------------------------------------
         // 背景：EMBED（mediacodec_embed）只吃硬件帧格式（mpv 源码 query_format 只认
@@ -3667,6 +3691,34 @@ fun VRPlayerScreen(
                             Toast.makeText(context, context.getString(R.string.toast_hw_failed_sw), Toast.LENGTH_SHORT).show()
                             isSoftwareDecoding = true
                         }
+                        // v2.4.32：**Exo 打不开该文件 → 本次自动改用 MPV 重试一次**。
+                        //   典型：某些 MP4/fMP4 的编解码配置畸形（实测 HEVC 的 hvcC 参数集数组为空）
+                        //   → Media3 的 HevcConfig/BoxParser 直接抛异常（Source error，日志里是
+                        //   `Unexpected IndexOutOfBoundsException`）。这类**解析层面**的失败
+                        //   切软/硬解都救不了，只有换 MPV（FFmpeg）能解。
+                        //   ⚠️ 只对「这一个文件」重试**一次**（`mpvRetryUri` 去重），
+                        //      并且**不改**用户的解码器设置；MPV 不可用则不尝试（避免空转）。
+                        val uriNow = selectedMediaItem.uri
+                        // 判据用 **ExoPlaybackException 的 `type`**（`PlaybackException` 本身没有 type）：
+                        //   TYPE_SOURCE     = 读取/解析容器失败（本实例即这类）；
+                        //   TYPE_UNEXPECTED = 其它非解码类异常（Loader 把解析器抛的
+                        //                     IndexOutOfBounds 包装后的那种）。
+                        //   TYPE_DECODER 交给上面的软解回退，不在这里抢。
+                        val exoType = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.type ?: -1
+                        val sourceLikeFailure =
+                            exoType == androidx.media3.exoplayer.ExoPlaybackException.TYPE_SOURCE ||
+                                exoType == androidx.media3.exoplayer.ExoPlaybackException.TYPE_UNEXPECTED
+                        if (sourceLikeFailure && uriNow != null && uriNow != mpvRetryUri &&
+                            MpvPlayerFactory.isAvailable(context)
+                        ) {
+                            Log.w("VRPlayerScreen", "Exo 无法打开（type=$exoType）→ 改用 MPV 重试一次")
+                            mpvRetryUri = uriNow
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.toast_exo_fallback_mpv),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 })
                 
@@ -3801,7 +3853,9 @@ fun VRPlayerScreen(
     // 省掉一个「应用/重启播放」按钮（否则用户改完看不到效果，会以为参数没接上）。
     // ⚠️ v2.1.244：**mpvVoMode 刻意不放进来** —— MPV 是全局单例，重建会撞
     //    `!mpctx->initialized` 断言并 native 崩溃（实测）。vo 改为创建前预判。
-    LaunchedEffect(isSoftwareDecoding, decoderEngine, ijkOptions, photoReloadTrigger) {
+    // ⚠️ v2.4.32：`mpvRetryUri` 也作为 key —— Exo 打开失败时置位它（见 onPlayerError），
+    //    借此**触发一次重建**并用 MPV 重试；它只在失败时变一次，不会引起意外重建。
+    LaunchedEffect(isSoftwareDecoding, decoderEngine, ijkOptions, photoReloadTrigger, mpvRetryUri) {
         if (!decoderRebindSeen) {
             // 首次组合时上面的 Effect A 已经完成绑定，这里跳过，避免重复创建播放器
             decoderRebindSeen = true

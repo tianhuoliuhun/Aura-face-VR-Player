@@ -807,6 +807,7 @@
     <string name="theme_gaussian_blur">Gaussian blur</string>
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV playback failed, switched back to EXO</string>
+    <string name="toast_exo_fallback_mpv">EXO cannot parse this file; switched to MPV for this playback</string>
     <string name="mpv_param_hwdec">MediaCodec (HW)</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV libraries</string>

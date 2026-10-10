@@ -799,6 +799,7 @@
     <string name="theme_gaussian_blur">高斯模糊</string>
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV 解码失败，已切回 EXO 解码器</string>
+    <string name="toast_exo_fallback_mpv">该文件 EXO 无法解析，本次已改用 MPV 内核</string>
     <string name="mpv_param_hwdec">MediaCodec 硬解</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV 解码库</string>

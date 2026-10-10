@@ -767,6 +767,7 @@
     <string name="theme_gaussian_blur">ガウスぼかし</string>
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV の再生に失敗したため EXO に戻しました</string>
+    <string name="toast_exo_fallback_mpv">このファイルは EXO で解析できないため、今回 MPV に切り替えました</string>
     <string name="mpv_param_hwdec">MediaCodec ハードウェア</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV ライブラリ</string>
