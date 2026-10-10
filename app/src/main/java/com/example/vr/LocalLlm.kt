@@ -17,10 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -100,6 +102,13 @@ object LocalLlmManager {
 
     /** 下载重试次数。 */
     private const val MAX_DOWNLOAD_ATTEMPTS = 3
+
+    /**
+     * 单次推理总超时（毫秒）。v2.4.23 审查 #1：本地推理在 CPU 上可达数十秒，
+     * 一旦卡住（高负载 / 内存抖动 / 采样异常）没有任何取消手段会让后续全部排队挂死。
+     * 与 native `sampleLoop` 的 180s 看门狗对齐；超时后标记「引擎不健康」，下次推理前重建。
+     */
+    private const val INFERENCE_TIMEOUT_MS = 180_000L
 
     /**
      * 下载用的 User-Agent。
@@ -226,6 +235,13 @@ object LocalLlmManager {
         private set
 
     /**
+     * 引擎健康标记（v2.4.23 审查 #1）。推理超时后无法取消正在执行的 native 采样，
+     * 只能标记本字段；下次 [ensureLoaded] 看到它为真时先释放再重建引擎，避免把卡死状态
+     * 带入下一次推理。
+     */
+    @Volatile private var engineUnhealthy = false
+
+    /**
      * 最近一次推理耗时（毫秒）。
      *
      * 供 UI 显示「上次 12.3s」这类信息 —— 让用户能判断"慢"是正常的还是异常了。
@@ -268,10 +284,39 @@ object LocalLlmManager {
         return f.isFile && f.length() >= MIN_MMPROJ_BYTES
     }
 
-    /** 模型是否已就绪（带最小体积校验，避免把下载中断的残片当成可用）。 */
+    /** 模型是否已就绪（体积 + GGUF 魔数双重校验，避免把下载中断的残片当成可用）。 */
     fun isReady(context: Context, model: LocalLlmModel): Boolean {
         val f = fileOf(context, model)
-        return f.isFile && f.length() >= MIN_VALID_BYTES
+        return f.isFile && f.length() >= MIN_VALID_BYTES && hasGgufMagic(f)
+    }
+
+    /** 文件头 4 字节是否为 GGUF 魔数。v2.4.23 审查 #10。 */
+    private fun hasGgufMagic(f: File): Boolean {
+        if (!f.isFile || f.length() < 4) return false
+        return try {
+            RandomAccessFile(f, "r").use { raf ->
+                val magic = ByteArray(4)
+                raf.read(magic) == 4 &&
+                    magic[0] == 'G'.code.toByte() && magic[1] == 'G'.code.toByte() &&
+                    magic[2] == 'U'.code.toByte() && magic[3] == 'F'.code.toByte()
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * v2.4.23 审查 #10：下载完成后的完整性校验。
+     * - 已知期望大小时，written 必须达到期望大小（服务器提前关闭连接会少字节）；
+     * - 检查 GGUF 魔数，避免把截断/错误文件当成可用模型。
+     * 主权重与 mmproj 均为 GGUF 格式，魔数校验对两者通用。
+     */
+    private fun verifyDownloadedFile(file: File, expectedFull: Long, minBytes: Long): Boolean {
+        val len = file.length()
+        if (len < minBytes) return false
+        // 期望大小已知且大于最小阈值时，必须达到期望大小（容忍 ≤1MB 的内容长度误差）。
+        if (expectedFull > minBytes && len < expectedFull - 1_048_576L) return false
+        return hasGgufMagic(file)
     }
 
     /** 已下载的模型（没有则 null）。 */
@@ -284,11 +329,25 @@ object LocalLlmManager {
     // ===================== 下载 =====================
 
     fun cancelDownload() {
-        downloadJob?.cancel()
+        val job = downloadJob
         downloadJob = null
-        isDownloading = false
-        downloadProgress = 0f
-        downloadStatus = ""
+        if (job == null) {
+            isDownloading = false
+            downloadProgress = 0f
+            downloadStatus = ""
+            return
+        }
+        // v2.4.23 审查 #13：取消时等待旧 job 真正退出再清状态，期间保留 isDownloading=true，
+        // 避免新下载在旧 job 仍阻塞读流时并发写同一个 .part。
+        CoroutineScope(Dispatchers.IO).launch {
+            job.cancel()
+            job.join()
+            withContext(Dispatchers.Main) {
+                isDownloading = false
+                downloadProgress = 0f
+                downloadStatus = ""
+            }
+        }
     }
 
     /**
@@ -302,12 +361,21 @@ object LocalLlmManager {
         onDone: (Boolean) -> Unit = {}
     ) {
         if (isDownloading) return
+        // v2.4.23 审查 #13：启动前**同步**置位，堵住「双击 → 两个协程同写 .part」的竞态窗口
+        // （原代码 isDownloading 只在 downloadFileGeneric 内部才置 true，存在竞态）。
+        isDownloading = true
         downloadJob = CoroutineScope(Dispatchers.IO).launch {
-            val ok = downloadInternal(context, model)
-            withContext(Dispatchers.Main) {
-                isDownloading = false
-                downloadProgress = if (ok) 1f else 0f
-                onDone(ok)
+            try {
+                val ok = downloadInternal(context, model)
+                withContext(Dispatchers.Main) {
+                    downloadProgress = if (ok) 1f else 0f
+                    onDone(ok)
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isDownloading = false
+                    downloadJob = null
+                }
             }
         }
     }
@@ -333,8 +401,8 @@ object LocalLlmManager {
     ): Boolean = withContext(Dispatchers.IO) {
         val dir = dir(context)
         val dest = File(dir, fileName)
-        // 已经够大 → 视为已完成（避免重复下载）
-        if (dest.isFile && dest.length() >= minBytes) return@withContext true
+        // 已经够大且魔数正确 → 视为已完成（避免重复下载；损坏文件会被 isReady 判否并触发重下）
+        if (dest.isFile && dest.length() >= minBytes && hasGgufMagic(dest)) return@withContext true
 
         if (!dir.exists() && !dir.mkdirs()) {
             lastError = "无法创建模型目录：${dir.absolutePath}"
@@ -342,6 +410,8 @@ object LocalLlmManager {
             return@withContext false
         }
         val tmp = File(dir, fileName + ".part")
+        // v2.4.23 审查 #10：完整文件期望大小（跨 attempt 保留，供完成判据使用）
+        var expectedFull = expectBytes
 
         withContext(Dispatchers.Main) {
             isDownloading = true
@@ -361,6 +431,13 @@ object LocalLlmManager {
                     }.build()
                     var ok = false
                     httpClient.newCall(req).execute().use { resp ->
+                        // v2.4.23 审查 #11：416（Range 不可满足）说明 .part 已 ≥ 真实大小（损坏/过大），
+                        // 清除残片后 return，下一轮 attempt 重新计算 existing=0 并从头下载。
+                        if (resp.code == 416) {
+                            Log.w(TAG, "$label 收到 416，清除 .part 并从头重下（$url）")
+                            tmp.delete()
+                            return@use
+                        }
                         if (resp.code != 200 && resp.code != 206) {
                             Log.w(TAG, "$label 下载 HTTP ${resp.code}（$url）")
                             // 401/403 常见于镜像需要鉴权、404 是路径不对
@@ -371,7 +448,15 @@ object LocalLlmManager {
                             return@use
                         }
                         val body = resp.body ?: return@use
-                        val total = body.contentLength().let { if (it > 0) it + existing else expectBytes }
+                        val contentLen = body.contentLength()
+                        // v2.4.23 审查 #10：算出**完整文件**期望大小（用于完成判据，而非仅进度上限）。
+                        //   200 → contentLen（若已知）；206 → contentLen + 已下字节；未知则退回 expectBytes。
+                        expectedFull = if (contentLen > 0) {
+                            if (resp.code == 206) contentLen + existing else contentLen
+                        } else {
+                            expectBytes
+                        }
+                        val total = expectedFull
                         val append = existing > 0 && resp.code == 206
                         if (!append) tmp.delete()
                         body.byteStream().use { input ->
@@ -398,14 +483,23 @@ object LocalLlmManager {
                         }
                         ok = true
                     }
-                    if (ok && tmp.length() >= minBytes) {
-                        if (dest.exists()) dest.delete()
-                        if (tmp.renameTo(dest)) {
-                            Log.i(TAG, "$label 下载完成：${dest.absolutePath}（${dest.length() / 1048576}MB）")
-                            return@withContext true
+                    if (ok) {
+                        // v2.4.23 审查 #10：完整性 + GGUF 魔数校验，通过才改名为最终文件。
+                        if (verifyDownloadedFile(tmp, expectedFull, minBytes)) {
+                            if (dest.exists()) dest.delete()
+                            if (tmp.renameTo(dest)) {
+                                Log.i(TAG, "$label 下载完成：${dest.absolutePath}（${dest.length() / 1048576}MB）")
+                                return@withContext true
+                            }
+                        } else {
+                            Log.w(
+                                TAG,
+                                "$label 下载校验失败（${tmp.length()} 字节 / 期望 ${expectBytes} 字节，第 $attempt 次），保留 .part 重试"
+                            )
                         }
+                    } else {
+                        Log.w(TAG, "$label 下载不完整（${tmp.length()} 字节，第 $attempt 次）")
                     }
-                    Log.w(TAG, "$label 下载不完整（${tmp.length()} 字节，第 $attempt 次）")
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -439,19 +533,27 @@ object LocalLlmManager {
             return
         }
         if (isDownloading) return
+        // v2.4.23 审查 #13：与 startDownload 一致，启动前同步置位，堵双击竞态。
+        isDownloading = true
         downloadJob = CoroutineScope(Dispatchers.IO).launch {
-            val ok = downloadFileGeneric(
-                context = context,
-                fileName = fileName,
-                urls = model.mmprojUrls,
-                expectBytes = model.mmprojSizeBytes,
-                minBytes = MIN_MMPROJ_BYTES,
-                label = "视觉编码器"
-            )
-            withContext(Dispatchers.Main) {
-                isDownloading = false
-                downloadProgress = if (ok) 1f else 0f
-                onDone(ok)
+            try {
+                val ok = downloadFileGeneric(
+                    context = context,
+                    fileName = fileName,
+                    urls = model.mmprojUrls,
+                    expectBytes = model.mmprojSizeBytes,
+                    minBytes = MIN_MMPROJ_BYTES,
+                    label = "视觉编码器"
+                )
+                withContext(Dispatchers.Main) {
+                    downloadProgress = if (ok) 1f else 0f
+                    onDone(ok)
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isDownloading = false
+                    downloadJob = null
+                }
             }
         }
     }
@@ -485,6 +587,15 @@ object LocalLlmManager {
         return engineLock.withLock {
             // 双重检查：等锁期间可能已被别的协程加载好了
             if (loadedModelId == model.id) return@withLock true
+
+            // v2.4.23 审查 #1：上轮推理超时 → 标记不健康。此处先释放再重建引擎，
+            // 把卡死状态清掉。nativeFree 与卡住的采样都持同一把 g_mutex，会自然串行，
+            // 不会并发访问全局 ctx（配合 native 侧 180s 看门狗，卡死调用最迟 180s 内交还）。
+            if (engineUnhealthy) {
+                Log.w(TAG, "引擎被标记不健康（上轮推理超时），先释放再重建")
+                releaseInternal()
+                engineUnhealthy = false
+            }
 
             // 🔴 加载前**内存预检**（v2.4.14）
             //    为什么必须做：llama.cpp 在权重 / KV cache 分配失败时会调 abort()
@@ -614,27 +725,40 @@ object LocalLlmManager {
         try {
             // ⚠️ 跑在**单线程推理调度器**上（不是 Dispatchers.IO）：
             //    多个并发请求（字幕预读 + 弹幕生成）在此排队，而不是堆到 64 个线程上。
-            return withContext(inferenceDispatcher) {
-                val t0 = System.currentTimeMillis()
-                val text = LlamaMtmd.completeSafe(
-                    prompt = prompt,
-                    system = systemPrompt ?: "",
-                    rgb = rgb,
-                    imgW = imgW,
-                    imgH = imgH,
-                    maxTokens = maxTokens,
-                    temperature = temperature
-                )
-                val ms = System.currentTimeMillis() - t0
-                lastInferenceMs = ms
-                if (text.isBlank()) {
-                    Log.w(TAG, "推理返回空（${ms}ms，图=${rgb?.size ?: 0}B）")
-                    null
-                } else {
-                    Log.d(TAG, "推理完成 ${ms}ms / ${text.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
-                    text
+            // v2.4.23：外裹总超时（审查 #1）。withTimeoutOrNull 会取消本协程，
+            //    但 native 采样无法被中断——所以同时标记 engineUnhealthy，
+            //    让下次 ensureLoaded 重建引擎（放弃当前执行器上的卡死调用）。
+            val text = withTimeoutOrNull(INFERENCE_TIMEOUT_MS) {
+                withContext(inferenceDispatcher) {
+                    val t0 = System.currentTimeMillis()
+                    val r = LlamaMtmd.completeSafe(
+                        prompt = prompt,
+                        system = systemPrompt ?: "",
+                        rgb = rgb,
+                        imgW = imgW,
+                        imgH = imgH,
+                        maxTokens = maxTokens,
+                        temperature = temperature
+                    )
+                    val ms = System.currentTimeMillis() - t0
+                    lastInferenceMs = ms
+                    if (r.isBlank()) {
+                        Log.w(TAG, "推理返回空（${ms}ms，图=${rgb?.size ?: 0}B）")
+                        null
+                    } else {
+                        Log.d(TAG, "推理完成 ${ms}ms / ${r.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
+                        r
+                    }
                 }
             }
+            if (text == null) {
+                // 超时：native 仍在跑但本协程已放弃。标记不健康，下次推理前重建。
+                engineUnhealthy = true
+                lastError = "本地推理超时（>${INFERENCE_TIMEOUT_MS / 1000}s），已标记引擎需重建"
+                Log.e(TAG, lastError!!)
+                return null
+            }
+            return text
         } finally {
             isInferencing = false
         }

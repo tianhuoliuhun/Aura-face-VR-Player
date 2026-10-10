@@ -275,14 +275,14 @@ object MediaFormats {
         // 去掉 query 后再取（file:///a/b.wmv?x=1 这类）
         val seg = path.substringAfterLast('/')
         val ext = seg.substringAfterLast('.', "")
-        return ext.lowercase().takeIf { it.isNotEmpty() && it.length <= 5 } ?: ""
+        return ext.lowercase().takeIf { it.isNotEmpty() && it.length <= 8 } ?: ""
     }
 
     /** 从文件名（SMB / FTP 列表项）取扩展名。 */
     fun extensionOfName(name: String?): String {
         val n = name ?: return ""
         val ext = n.substringAfterLast('.', "")
-        return ext.lowercase().takeIf { it.isNotEmpty() && it.length <= 5 } ?: ""
+        return ext.lowercase().takeIf { it.isNotEmpty() && it.length <= 8 } ?: ""
     }
 
     /**

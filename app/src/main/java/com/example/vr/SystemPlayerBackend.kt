@@ -80,7 +80,7 @@ object SystemPlayerFactory {
     ): SystemBackend? {
         val mainHandler = Handler(Looper.getMainLooper())
         val mp = MediaPlayer()
-        val backend = SystemBackend(mp = mp, callbacks = callbacks, mainHandler = mainHandler)
+        val backend = SystemBackend(mp = mp, callbacks = callbacks, mainHandler = mainHandler, currentUri = uri)
 
         return try {
             // ⚠️ 顺序：先 setSurface 再 setDataSource 再 prepare。
@@ -158,7 +158,8 @@ object SystemPlayerFactory {
 class SystemBackend(
     private val mp: MediaPlayer,
     private val callbacks: SystemPlayerFactory.Callbacks,
-    private val mainHandler: Handler
+    private val mainHandler: Handler,
+    override val currentUri: android.net.Uri
 ) : VrPlayerBackend {
 
     override val engine: DecoderEngine = DecoderEngine.SYSTEM
@@ -227,15 +228,17 @@ class SystemBackend(
 
     override fun release() {
         if (released) return
+        // 审查 #1：原把 released=true 放在 safe{} 之前，safe 一见 released 就返回 null →
+        // 监听清理 / reset / release 永不被调用 → MediaPlayer 不 release、旧回调打到新播放上。
+        // 改为直接 try，并置 released=true 于最后。
+        try { mp.setOnPreparedListener(null) } catch (_: Throwable) {}
+        try { mp.setOnCompletionListener(null) } catch (_: Throwable) {}
+        try { mp.setOnErrorListener(null) } catch (_: Throwable) {}
+        try { mp.setOnInfoListener(null) } catch (_: Throwable) {}
+        try { mp.setOnVideoSizeChangedListener(null) } catch (_: Throwable) {}
+        try { mp.reset() } catch (_: Throwable) {}   // 回归 Idle 状态，release 才不会被内部状态卡住
+        try { mp.release() } catch (_: Throwable) {}
         released = true
-        // ⚠️ 先清监听再 release：否则 release 过程中的回调会打到已废弃的 backend 上
-        safe { mp.setOnPreparedListener(null) }
-        safe { mp.setOnCompletionListener(null) }
-        safe { mp.setOnErrorListener(null) }
-        safe { mp.setOnInfoListener(null) }
-        safe { mp.setOnVideoSizeChangedListener(null) }
-        safe { mp.reset() }   // 回归 Idle 状态，release 才不会被内部状态卡住
-        safe { mp.release() }
     }
 
     // ===================== 内部：prepared 处理 =====================

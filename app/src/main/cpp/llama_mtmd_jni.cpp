@@ -27,6 +27,7 @@
 #include <jni.h>
 #include <android/log.h>
 
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -337,19 +338,61 @@ jstring newStringSafe(JNIEnv * env, const std::string & s) {
     return r;
 }
 
+/// 按**字节上限**截断 UTF-8 字符串，但不切开多字节字符（v2.4.23，审查 #7）。保留头部。
+static void utf8TruncateToBytes(std::string & s, size_t maxBytes) {
+    if (s.size() <= maxBytes) return;
+    size_t i = 0;
+    size_t lastBoundary = 0;
+    while (i < maxBytes) {
+        unsigned char b = static_cast<unsigned char>(s[i]);
+        int len;
+        if (b < 0x80) len = 1;
+        else if ((b & 0xE0) == 0xC0) len = 2;
+        else if ((b & 0xF0) == 0xE0) len = 3;
+        else if ((b & 0xF8) == 0xF0) len = 4;
+        else { ++i; continue; }            // 非法首字节，逐字节跳过
+        if (i + (size_t) len > maxBytes) break;   // 该字符会越过上限 → 停在上一边界
+        lastBoundary = i + (size_t) len;
+        i += (size_t) len;
+    }
+    s.resize(lastBoundary > 0 ? lastBoundary : maxBytes);
+}
+
 /// 把一次 decode + 采样的循环跑完（图文与纯文本共用）。⚠️ 调用方须持锁。
 std::string sampleLoop(llama_sampler * smpl, int maxTokens) {
     std::string out;
     if (!g_ctx || !g_vocab) return out;
 
+    // v2.4.23：推理总时长看门狗（审查 #1，与 Kotlin 侧 INFERENCE_TIMEOUT_MS 对齐）。
+    //    超时无法取消正在执行的 native 采样，只能提前结束本轮并交还控制权，
+    //    由 Kotlin 侧标记「引擎不健康」、下次推理前重建。
+    const long long kSampleLoopTimeoutMs = 180000;
+    auto t0 = std::chrono::steady_clock::now();
+
     for (int i = 0; i < maxTokens; ++i) {
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - t0).count()
+                > kSampleLoopTimeoutMs) {
+            LOGW("采样循环超过 %lldms，强制提前结束（已生成 %zu 字节）",
+                 (long long) kSampleLoopTimeoutMs, out.size());
+            break;
+        }
+
         // -1 = 取最后一个 logits（此时只 decode 了一个 token）
         const llama_token id = llama_sampler_sample(smpl, g_ctx, -1);
         if (llama_vocab_is_eog(g_vocab, id)) break;
 
-        char buf[512];
-        const int n = llama_token_to_piece(g_vocab, id, buf, (int32_t) sizeof(buf), 0, true);
-        if (n > 0) out.append(buf, (size_t) n);
+        // v2.4.23：单 token 缓冲不足（返回负数）时按 -n 重新分配再取，避免静默丢字（审查 #16）。
+        char smallBuf[512];
+        int n = llama_token_to_piece(g_vocab, id, smallBuf, (int32_t) sizeof(smallBuf), 0, true);
+        if (n < 0) {
+            std::string tmp;
+            tmp.resize((size_t)(-n));
+            n = llama_token_to_piece(g_vocab, id, &tmp[0], (int32_t) tmp.size(), 0, true);
+            if (n > 0) out.append(tmp, (size_t) n);
+        } else if (n > 0) {
+            out.append(smallBuf, (size_t) n);
+        }
 
         llama_sampler_accept(smpl, id);
 
@@ -547,8 +590,9 @@ Java_com_example_vr_LlamaMtmd_nativeComplete(
 
     if (!system.empty()) prompt = system + "\n\n" + prompt;
     if (prompt.size() > MAX_PROMPT_CHARS) {
-        LOGW("prompt 过长（%zu 字符），截断到 %zu", prompt.size(), MAX_PROMPT_CHARS);
-        prompt.resize(MAX_PROMPT_CHARS);
+        LOGW("prompt 过长（%zu 字节），按 UTF-8 边界截断到 %zu（审查 #7）",
+             prompt.size(), MAX_PROMPT_CHARS);
+        utf8TruncateToBytes(prompt, MAX_PROMPT_CHARS);
     }
 
     // 采样参数钳位。

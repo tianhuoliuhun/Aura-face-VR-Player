@@ -141,10 +141,50 @@ object LocalDanmuGenerator {
      * ⚠️ 第 4 条用 [isMetaLine] 判据而不是"长度阈值"：
      *    短弹幕本来就短，按长度过滤会**误杀真正的弹幕**。
      */
+    /**
+     * 剥离 <think>...</think> 整段（v2.4.23 审查 #5）。
+     * Qwen3 系列可能先输出推理段，若不剥离会被当成弹幕/译文。大小写不敏感、允许无闭合。
+     */
+    private fun stripThinkBlocks(text: String): String {
+        return text.replace(
+            Regex(
+                "<think>.*?(</think>|$)",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            ),
+            ""
+        )
+    }
+
+    /**
+     * 是否为纯模板/标签行（v2.4.23 审查 #5）：如 `<think>`、`</think>`、
+     * `<|im_start|>` / `<|im_end|>`、User / Assistant / system 等角色词。
+     * 这类行不含真实弹幕内容，应直接丢弃。
+     */
+    private fun isTemplateOrTagLine(s: String): Boolean {
+        val low = s.lowercase()
+        if (low.contains("<think>") || low.contains("</think>") ||
+            low.contains("im_start") || low.contains("im_end")
+        ) return true
+        // 去掉 < > : 与空白后，若原串含 < 或 > 且剩余只由字母/下划线组成 → 模板/标签行
+        val stripped = low.replace(Regex("[<>\\s:]"), "")
+        if (stripped.isEmpty()) return true
+        if ((s.contains("<") || s.contains(">")) && stripped.all { it.isLetter() || it == '_' }) return true
+        if (stripped in setOf("user", "assistant", "system")) return true
+        return false
+    }
+
+    /** 按 Unicode 码点（而非 UTF-16 单元）截断，避免切开 emoji 代理对（v2.4.23 审查 #8）。 */
+    private fun truncateByCodePoints(s: String, maxCodePoints: Int): String {
+        if (s.codePointCount(0, s.length) <= maxCodePoints) return s
+        return s.substring(0, s.offsetByCodePoints(0, maxCodePoints))
+    }
+
     fun parseLines(raw: String, limit: Int = MAX_ITEMS): List<String> {
         if (raw.isBlank()) return emptyList()
+        // v2.4.23 审查 #5：先整体剥离 <think>...</think> 推理段
+        val cleaned = stripThinkBlocks(raw)
         val out = mutableListOf<String>()
-        for (line in raw.lines()) {
+        for (line in cleaned.lines()) {
             var s = line.trim()
             if (s.isEmpty()) continue
 
@@ -156,7 +196,11 @@ object LocalDanmuGenerator {
             s = unwrapQuotes(s)
             if (s.isEmpty()) continue
 
-            if (s.length > MAX_ITEM_CHARS) s = s.substring(0, MAX_ITEM_CHARS)
+            // v2.4.23 审查 #5：纯标签/模板行（如 <think>、</think>、User、Assistant）直接丢弃
+            if (isTemplateOrTagLine(s)) continue
+
+            // v2.4.23 审查 #8：按 Unicode 码点截断，避免切开 emoji 代理对
+            if (s.codePointCount(0, s.length) > MAX_ITEM_CHARS) s = truncateByCodePoints(s, MAX_ITEM_CHARS)
             // ④ 丢掉"模型的自言自语"
             if (isMetaLine(s)) continue
 

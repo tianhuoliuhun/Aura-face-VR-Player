@@ -649,8 +649,12 @@
     <string name="rt_preparing">正在準備即時字幕引擎…</string>
     <string name="rt_unavailable">即時字幕不可用：辨識模型未就緒</string>
     <string name="rt_no_audio">該影片沒有可用的音軌，無法生成即時字幕</string>
+    <string name="rt_audio_unsupported_codec">音訊編碼不支援：%s</string>
+    <string name="rt_audio_io_failed">音訊讀取失敗（IO）</string>
+    <string name="rt_audio_remux_failed">音訊轉封裝失敗（code=%d）</string>
     <string name="rt_started">即時字幕已開啟，正在生成…</string>
     <string name="rt_all_done">即時字幕已全部生成完成（共 %1$d 條）</string>
+    <string name="rt_partial_failed">部分時段未能生成字幕（共 %1$d 段，已跳過）</string>
     <string name="rt_no_speech">未偵測到語音內容（可能是純音樂或無人聲）</string>
     <string name="rt_generating_pct">即時字幕生成中 %1$d%%　已生成 %2$s/%3$s</string>
     <string name="rt_generating_to">即時字幕生成中　已生成至 %1$s</string>

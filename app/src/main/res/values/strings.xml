@@ -639,8 +639,12 @@
     <string name="rt_preparing">正在准备实时字幕引擎…</string>
     <string name="rt_unavailable">实时字幕不可用：识别模型未就绪</string>
     <string name="rt_no_audio">该视频没有可用的音轨，无法生成实时字幕</string>
+    <string name="rt_audio_unsupported_codec">音频编码不支持：%s</string>
+    <string name="rt_audio_io_failed">音频读取失败（IO）</string>
+    <string name="rt_audio_remux_failed">音频转封装失败（code=%d）</string>
     <string name="rt_started">实时字幕已开启，正在生成…</string>
     <string name="rt_all_done">实时字幕已全部生成完成（共 %1$d 条）</string>
+    <string name="rt_partial_failed">部分时段未能生成字幕（共 %1$d 段，已跳过）</string>
     <string name="rt_no_speech">未检测到语音内容（可能是纯音乐或无人声）</string>
     <string name="rt_generating_pct">实时字幕生成中 %1$d%%　已生成 %2$s/%3$s</string>
     <string name="rt_generating_to">实时字幕生成中　已生成至 %1$s</string>

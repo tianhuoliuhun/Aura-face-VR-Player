@@ -196,6 +196,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
         cache.clear()
         clearScanned()
         producedAnyCue = false
+        failedNotified = false
         generatedUpToMs = 0L
         cursorMs = 0L
         hasAudioTrack = true
@@ -234,15 +235,35 @@ class RealtimeSubtitleEngine(private val context: Context) {
 
                 // 3) 打开独立音频解码器（AudioTee）
                 val t = AudioTee(context, mediaUri)
-                if (!t.open()) {
-                    hasAudioTrack = false
-                    listener.onStatus(context.getString(R.string.rt_no_audio))
-                    isRunning = false
-                    return@launch
+                when (val r = t.open()) {
+                    is AudioTee.AudioTeeOpenResult.Success -> {
+                        teeLocal = t
+                        durationMs = t.durationMs
+                        listener.onStatus(context.getString(R.string.rt_started))
+                    }
+                    is AudioTee.AudioTeeOpenResult.NoTrack -> {
+                        // 仅「真无音轨」才置 false，避免把编码/IO 失败也误判成无音轨（审查 #4）
+                        hasAudioTrack = false
+                        listener.onStatus(context.getString(R.string.rt_no_audio))
+                        isRunning = false
+                        return@launch
+                    }
+                    is AudioTee.AudioTeeOpenResult.UnsupportedCodec -> {
+                        listener.onStatus(context.getString(R.string.rt_audio_unsupported_codec, r.mime))
+                        isRunning = false
+                        return@launch
+                    }
+                    is AudioTee.AudioTeeOpenResult.IoFailed -> {
+                        listener.onStatus(context.getString(R.string.rt_audio_io_failed))
+                        isRunning = false
+                        return@launch
+                    }
+                    is AudioTee.AudioTeeOpenResult.RemuxFailed -> {
+                        listener.onStatus(context.getString(R.string.rt_audio_remux_failed, r.code))
+                        isRunning = false
+                        return@launch
+                    }
                 }
-            teeLocal = t
-            durationMs = t.durationMs
-            listener.onStatus(context.getString(R.string.rt_started))
 
                 // 4) 预读主循环
                 prefetchLoop(t, rec, vad, myGen)
@@ -355,10 +376,19 @@ class RealtimeSubtitleEngine(private val context: Context) {
 
             val gap = nextUnscannedRange(endMs)
             if (gap == null) {
-                // 全片已覆盖：只报一次完成，然后低频轮询（用户 seek 后可能出现新缺口）
-                if (!isFullyGenerated) {
-                    isFullyGenerated = true
-                    listener?.onStatus(context.getString(R.string.rt_all_done, cache.size()))
+                // 全片已覆盖（scannedRanges + failedRanges 合计覆盖完整时长）。
+                // v2.4.23：只有失败窗口也为空时，才算真正全部生成成功；
+                // 否则提示用户哪些时段未能生成，且 isFullyGenerated 保持 false。
+                if (failedRanges.isEmpty()) {
+                    if (!isFullyGenerated) {
+                        isFullyGenerated = true
+                        listener?.onStatus(context.getString(R.string.rt_all_done, cache.size()))
+                    }
+                } else if (!failedNotified) {
+                    failedNotified = true
+                    listener?.onStatus(
+                        context.getString(R.string.rt_partial_failed, failedRanges.size)
+                    )
                 }
                 delay(500)
                 continue
@@ -367,25 +397,48 @@ class RealtimeSubtitleEngine(private val context: Context) {
             val t0 = System.currentTimeMillis()
             val winFrom = gap.first
             val winTo = gap.last + 1   // 半开区间
-            // v2.0.134：单窗口解码/识别异常不应中断整条生成链路——
-            // 否则最后一个窗口抛错会让进度卡在 99% 且引擎停摆。
-            // 标记已扫描后继续，保证进度能走到 100% 并完成。
-            try {
-                processWindow(t, r, vad, winFrom, winTo)
-            } catch (e: Exception) {
-                Log.w(TAG, "窗口 ${winFrom}~${winTo}ms 处理失败（已跳过）: ${e.message}")
-            }
-            // v2.0.136：窗口处理（可达数秒）期间若引擎已被重启，本代已过期——
-            // 直接退出，不能把本代窗口标记为已扫描，否则会污染新一代的调度。
-            if (myGen != generation) return
-            markScanned(winFrom, winTo)
-            Log.i(
-                TAG,
-                "窗口 ${winFrom}~${winTo}ms 完成，耗时 ${System.currentTimeMillis() - t0}ms，" +
-                    "缓存 ${cache.size()} 条，已覆盖 ${scannedMs()}/${if (total > 0) total else -1}ms"
-            )
 
-            generatedMs = scannedMs()
+            // v2.4.23：失败窗口不得标记已扫描（审查 #1）。
+            // 最多重试 2 次（共 3 次尝试）；成功/空 → 标记已扫描并继续；
+            // 仍失败 → 记入 failedRanges，不再重试（由 nextUnscannedRange 视为已覆盖）。
+            var attempts = 0
+            var result: WindowProcessResult = WindowProcessResult.Failed(Exception("unused"))
+            var done = false
+            while (attempts < 3) {
+                attempts++
+                result = try {
+                    processWindow(t, r, vad, winFrom, winTo)
+                } catch (e: Exception) {
+                    Log.w(TAG, "窗口 ${winFrom}~${winTo}ms 处理抛异常（第${attempts}次）: ${e.message}")
+                    WindowProcessResult.Failed(e)
+                }
+                when (result) {
+                    is WindowProcessResult.Success, is WindowProcessResult.Empty -> { done = true; break }
+                    is WindowProcessResult.Failed -> { /* 进入下一轮重试 */ }
+                }
+            }
+
+            // v2.0.136：窗口处理（可达数秒）期间若引擎已被重启，本代已过期——
+            // 直接退出，不能把本代窗口标记为已扫描/失败，否则会污染新一代的调度。
+            if (myGen != generation) return
+
+            if (done) {
+                markScanned(winFrom, winTo)
+                Log.i(
+                    TAG,
+                    "窗口 ${winFrom}~${winTo}ms 完成，耗时 ${System.currentTimeMillis() - t0}ms，" +
+                        "缓存 ${cache.size()} 条，已覆盖 ${scannedMs()}/${if (total > 0) total else -1}ms"
+                )
+            } else {
+                recordFailed(winFrom, winTo)
+                Log.w(
+                    TAG,
+                    "窗口 ${winFrom}~${winTo}ms 重试 ${attempts} 次仍失败，记入 failedRanges：" +
+                        (result as? WindowProcessResult.Failed)?.error?.message
+                )
+            }
+
+            generatedMs = scannedMs() + failedMs()
             if (total > 0L && generatedMs < total) isFullyGenerated = false
 
             // 状态文案
@@ -433,7 +486,9 @@ class RealtimeSubtitleEngine(private val context: Context) {
             // 旧代码匹配条件用 pos < it.last 且跳转用 pos = hit.last，导致每个已扫描区间的
             // 最后一毫秒永远被当成新 gap 返回——每个窗口都重复解码上窗末尾 1ms（logcat 实证：
             // 窗口首尾 16122~18081 / 18080~19906 重叠）。正确：命中判定含 last，跳到 last+1。
+            // v2.4.23：失败窗口（failedRanges）同样视为已覆盖，不再重试。
             val hit = scannedRanges.firstOrNull { pos >= it.first && pos <= it.last }
+                ?: failedRanges.firstOrNull { pos >= it.first && pos <= it.last }
             if (hit == null) {
                 val len = minOf(DECODE_WINDOW_MS, toMs - pos)
                 if (len <= 0L) return@synchronized null
@@ -469,6 +524,31 @@ class RealtimeSubtitleEngine(private val context: Context) {
         scannedRanges.addAll(merged)
     }
 
+    /** 标记区间解码/识别失败（合并相邻/重叠区间，保持按起点有序） */
+    private fun recordFailed(fromMs: Long, toMs: Long) = synchronized(scanLock) {
+        if (toMs <= fromMs) return@synchronized
+        val merged = ArrayList<LongRange>(failedRanges.size + 1)
+        var newStart = fromMs
+        var newEnd = toMs
+        var inserted = false
+        for (r in failedRanges) {
+            when {
+                r.last < newStart -> merged.add(r)                    // 完全在前
+                r.first > newEnd -> {                                 // 完全在后
+                    if (!inserted) { merged.add(newStart until newEnd); inserted = true }
+                    merged.add(r)
+                }
+                else -> {                                             // 有重叠 → 合并
+                    newStart = minOf(newStart, r.first)
+                    newEnd = maxOf(newEnd, r.last)
+                }
+            }
+        }
+        if (!inserted) merged.add(newStart until newEnd)
+        failedRanges.clear()
+        failedRanges.addAll(merged)
+    }
+
     /** 已覆盖总时长（毫秒） */
     private fun scannedMs(): Long = synchronized(scanLock) {
         var sum = 0L
@@ -476,13 +556,31 @@ class RealtimeSubtitleEngine(private val context: Context) {
         sum
     }
 
+    /** 失败窗口总时长（毫秒） */
+    private fun failedMs(): Long = synchronized(scanLock) {
+        var sum = 0L
+        for (r in failedRanges) sum += (r.last - r.first)
+        sum
+    }
+
     /** 清空扫描记录（重新生成时用） */
     private fun clearScanned() = synchronized(scanLock) {
         scannedRanges.clear()
+        failedRanges.clear()
     }
 
     /** v127e：已扫描（解码+识别过）的音频区间，合并相邻；仅预读线程访问 */
     private val scannedRanges = ArrayList<LongRange>()
+
+    /**
+     * v2.4.23：重试 2 次仍解码/识别失败的区间（合并相邻）。
+     * 这些窗口**不**计入 scannedRanges（避免被当作已成功生成），但会被 [nextUnscannedRange]
+     * 视为已覆盖，从而不再无限重试；[isFullyGenerated] 只有在此集合为空时才可能为 true。
+     */
+    private val failedRanges = ArrayList<LongRange>()
+
+    /** 已向用户提示过「部分时段未能生成」 */
+    @Volatile private var failedNotified = false
 
     /** 启动参数留存，供 [restart] 重新生成时复用 */
     private var currentUri: Uri? = null
@@ -491,6 +589,18 @@ class RealtimeSubtitleEngine(private val context: Context) {
     private fun fmt(ms: Long): String {
         val s = (ms / 1000L).coerceAtLeast(0L)
         return "%02d:%02d".format(s / 60, s % 60)
+    }
+
+    /**
+     * v2.4.23：单个解码窗口的处理结果（审查 #1：失败窗口不得标记已扫描）。
+     * - [Success]：解码成功且识别出字幕 → 标记已扫描。
+     * - [Empty]：解码成功但本窗口无语音/无样本 → 也标记已扫描（无需重跑）。
+     * - [Failed]：解码或识别抛异常 → 计入重试，耗尽后记入 [failedRanges]。
+     */
+    private sealed class WindowProcessResult {
+        object Success : WindowProcessResult()
+        object Empty : WindowProcessResult()
+        data class Failed(val error: Throwable) : WindowProcessResult()
     }
 
     /**
@@ -505,28 +615,35 @@ class RealtimeSubtitleEngine(private val context: Context) {
         vad: com.k2fsa.sherpa.onnx.Vad?,
         fromMs: Long,
         toMs: Long
-    ) {
+    ): WindowProcessResult {
         val decoded = withContext(Dispatchers.Default) {
             try {
                 t.decodeWindow(fromMs, toMs)
             } catch (e: Exception) {
                 Log.w(TAG, "decode window failed: ${e.message}")
-                null
+                return@withContext null
             }
-        } ?: return
+        } ?: return WindowProcessResult.Failed(Exception("decodeWindow returned null", null))
 
         val samples = decoded.samples
-        if (samples.isEmpty()) return
+        if (samples.isEmpty()) return WindowProcessResult.Empty
 
         // samples 已被重采样为 16k 单声道；ptsBaseMs 是首样本的绝对时间
         val cues = withContext(Dispatchers.Default) {
-            recognizeSegments(samples, decoded.ptsBaseMs, r, vad)
-        }
-        if (cues.isEmpty()) return
+            try {
+                recognizeSegments(samples, decoded.ptsBaseMs, r, vad)
+            } catch (e: Throwable) {
+                Log.w(TAG, "recognize window failed: ${e.message}")
+                return@withContext null
+            }
+        } ?: return WindowProcessResult.Failed(Exception("recognizeSegments threw", null))
+
+        if (cues.isEmpty()) return WindowProcessResult.Empty
 
         producedAnyCue = true
         cache.putAll(cues)
         listener?.onCuesUpdated(cache.snapshot())
+        return WindowProcessResult.Success
     }
 
     // ==================== VAD 分段 + 识别 ====================
@@ -844,7 +961,17 @@ class RealtimeSubtitleEngine(private val context: Context) {
          * 用文件描述符打开：`setDataSource(context, uri, null)` 对相册（photo picker）
          * 的临时 URI 会抛 "Failed to instantiate extractor"（v123 实测）。
          */
-        fun open(): Boolean {
+        /** open() 的结果（审查 #4）：区分「真无音轨」与「编码/IO/转封装失败」，
+         *  避免所有失败都被统一误报成「没有可用的音轨」。 */
+        internal sealed class AudioTeeOpenResult {
+            object Success : AudioTeeOpenResult()
+            object NoTrack : AudioTeeOpenResult()            // 真无音轨
+            data class UnsupportedCodec(val mime: String) : AudioTeeOpenResult()
+            object IoFailed : AudioTeeOpenResult()
+            data class RemuxFailed(val code: Int) : AudioTeeOpenResult()
+        }
+
+        fun open(): AudioTeeOpenResult {
             val scheme = uri.scheme?.lowercase()
             if (scheme == "smb") {
                 // v2.0.142：smb://（应用内 SMB 浏览器）走 jcifs 真随机访问，
@@ -857,14 +984,14 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "AudioTee smb 直连失败（${e.message}），回退整文件下载")
                     try { ex.release() } catch (_: Exception) {}
-                    val tmp = downloadSmbToTemp(uri) ?: return false
+                    val tmp = downloadSmbToTemp(uri) ?: return AudioTeeOpenResult.IoFailed
                     val ex2 = MediaExtractor()
                     try {
                         ex2.setDataSource(tmp.absolutePath)
                     } catch (e2: Exception) {
                         Log.w(TAG, "AudioTee smb 临时文件打开失败：${e2.message}")
                         try { ex2.release() } catch (_: Exception) {}
-                        return false
+                        return AudioTeeOpenResult.IoFailed
                     }
                     extractor = ex2
                     return openCodec(ex2)
@@ -882,14 +1009,14 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "AudioTee http 直连失败（${e.message}），回退整文件临时下载")
                     try { ex.release() } catch (_: Exception) {}
-                    val tmp = downloadToTemp(uri) ?: return false
+                    val tmp = downloadToTemp(uri) ?: return AudioTeeOpenResult.IoFailed
                     val ex2 = MediaExtractor()
                     try {
                         ex2.setDataSource(tmp.absolutePath)
                     } catch (e2: Exception) {
                         Log.w(TAG, "AudioTee 临时文件打开失败：${e2.message}")
                         try { ex2.release() } catch (_: Exception) {}
-                        return false
+                        return AudioTeeOpenResult.IoFailed
                     }
                     extractor = ex2
                     return openCodec(ex2)
@@ -905,7 +1032,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
                         // fd 不可 seek 时回退到临时文件（与 v123 同策略）
                         Log.w(TAG, "AudioTee fd 方式失败（${e.message}），回退临时文件")
                         pfd.close()
-                        val tmp = copyToTemp(uri) ?: return false
+                        val tmp = copyToTemp(uri) ?: return AudioTeeOpenResult.IoFailed
                         val ex2 = MediaExtractor()
                         // v2.4.21：临时文件也解不开时（实测：多段 OpenDML AVI —— 框架
                         // `Failed to instantiate extractor`，复制 1.19GB 纯属白费）不再
@@ -926,17 +1053,17 @@ class RealtimeSubtitleEngine(private val context: Context) {
                     }
                     pfd.close()
                 } else {
-                    return false
+                    return AudioTeeOpenResult.IoFailed
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "AudioTee open failed: ${e.message}")
-                return false
+                return AudioTeeOpenResult.IoFailed
             }
             extractor = ex
             return openCodec(ex)
         }
 
-        private fun openCodec(ex: MediaExtractor): Boolean {
+        private fun openCodec(ex: MediaExtractor): AudioTeeOpenResult {
             var audioTrack = -1
             var mime = ""
             var durationUs = 0L
@@ -951,7 +1078,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
                     break
                 }
             }
-            if (audioTrack < 0) return false
+            if (audioTrack < 0) return AudioTeeOpenResult.NoTrack
             durationMs = durationUs / 1000L
             ex.selectTrack(audioTrack)
             return try {
@@ -959,10 +1086,10 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 c.configure(ex.getTrackFormat(audioTrack), null, null, 0)
                 c.start()
                 codec = c
-                true
+                AudioTeeOpenResult.Success
             } catch (e: Exception) {
                 Log.w(TAG, "AudioTee codec 创建失败：${e.message}（暂不支持该音频格式）")
-                false
+                AudioTeeOpenResult.UnsupportedCodec(mime)
             }
         }
 
@@ -988,7 +1115,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
          * 产物按 URI 缓存（`asr_remuxed_<hash>.mkv`）—— 同一媒体不重复转。
          * ⚠️ 同步、耗时 —— 调用方（open 的协程）本就在后台线程，可接受。
          */
-        private fun openViaFfmpegRemux(): Boolean {
+        private fun openViaFfmpegRemux(): AudioTeeOpenResult {
             val outFile = java.io.File(context.cacheDir, "asr_remuxed_${uri.hashCode()}.mkv")
             if (!outFile.exists() || outFile.length() < 1024L) {
                 Log.i(TAG, "AudioTee 走 FFmpeg 转封装兜底（框架解不开该容器）→ ${outFile.name}")
@@ -996,7 +1123,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 if (!r.success) {
                     Log.w(TAG, "FFmpeg 转封装失败 code=${r.code}: ${r.message}")
                     outFile.delete()
-                    return false
+                    return AudioTeeOpenResult.RemuxFailed(r.code)
                 }
             } else {
                 Log.i(TAG, "AudioTee 复用已有转封装产物：${outFile.name}")
@@ -1010,7 +1137,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
             }
             if (!ok) {
                 outFile.delete()
-                return false
+                return AudioTeeOpenResult.IoFailed
             }
             extractor = ex3
             return openCodec(ex3)
@@ -1063,6 +1190,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
             var inputDone = false
             var outputDone = false
             val toUs = toMs * 1000L
+            var pcmEncoding = android.media.AudioFormat.ENCODING_PCM_16BIT
             var mono = FloatArray(0)
 
             while (!outputDone) {
@@ -1085,6 +1213,12 @@ class RealtimeSubtitleEngine(private val context: Context) {
                     val f = c.outputFormat
                     if (f.containsKey(MediaFormat.KEY_SAMPLE_RATE)) outRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                     if (f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) outChannels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    // 审查 #6：记录 PCM 编码，否则浮点/24 位/32 位输出会被当成 16 位整数 → 波形全错
+                    pcmEncoding = if (f.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                        f.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                    } else {
+                        android.media.AudioFormat.ENCODING_PCM_16BIT
+                    }
                     continue
                 }
                 if (outIdx < 0) {
@@ -1103,15 +1237,23 @@ class RealtimeSubtitleEngine(private val context: Context) {
                     val bytes = ByteArray(info.size)
                     buf.get(bytes)
                     val ch = outChannels.coerceAtLeast(1)
-                    val frames = bytes.size / (2 * ch)
+                    // 审查 #6：按解码输出的 PCM 编码解析，而非一律当 16 位。
+                    val bytesPerSample = when (pcmEncoding) {
+                        android.media.AudioFormat.ENCODING_PCM_8BIT -> 1
+                        android.media.AudioFormat.ENCODING_PCM_16BIT -> 2
+                        android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED -> 3
+                        android.media.AudioFormat.ENCODING_PCM_32BIT -> 4
+                        android.media.AudioFormat.ENCODING_PCM_FLOAT -> 4
+                        else -> 2
+                    }
+                    val frames = bytes.size / (bytesPerSample * ch).coerceAtLeast(1)
                     val part = FloatArray(frames)
                     for (f in 0 until frames) {
-                        var sum = 0
+                        var sum = 0f
                         for (k in 0 until ch) {
-                            val off = (f * ch + k) * 2
-                            sum += ((bytes[off].toInt() and 0xff) or (bytes[off + 1].toInt() shl 8)).toShort().toInt()
+                            sum += decodePcmSample(bytes, (f * ch + k) * bytesPerSample, pcmEncoding)
                         }
-                        part[f] = sum / ch.toFloat() / 32768f
+                        part[f] = sum / ch
                     }
                     mono = appendFloat(mono, part)
                 }
@@ -1153,6 +1295,36 @@ class RealtimeSubtitleEngine(private val context: Context) {
             System.arraycopy(a, 0, out, 0, a.size)
             System.arraycopy(b, 0, out, a.size, b.size)
             return out
+        }
+
+        /** 审查 #6：按 PCM 编码把一个采样点的字节解成归一化浮点（[-1,1]）。 */
+        private fun decodePcmSample(bytes: ByteArray, off: Int, enc: Int): Float {
+            return when (enc) {
+                android.media.AudioFormat.ENCODING_PCM_FLOAT ->
+                    java.nio.ByteBuffer.wrap(bytes, off, 4)
+                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).float
+                android.media.AudioFormat.ENCODING_PCM_8BIT ->
+                    ((bytes[off].toInt() and 0xff) - 128) / 128f
+                android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED -> {
+                    val v = (bytes[off].toInt() and 0xff) or
+                            ((bytes[off + 1].toInt() and 0xff) shl 8) or
+                            ((bytes[off + 2].toInt() and 0xff) shl 16)
+                    val signed = if (v >= 0x800000) v - 0x1000000 else v
+                    signed / 8388608f
+                }
+                android.media.AudioFormat.ENCODING_PCM_32BIT -> {
+                    val v = (bytes[off].toInt() and 0xff) or
+                            ((bytes[off + 1].toInt() and 0xff) shl 8) or
+                            ((bytes[off + 2].toInt() and 0xff) shl 16) or
+                            (bytes[off + 3].toInt() shl 24)
+                    v / 2147483648f
+                }
+                else -> { // ENCODING_PCM_16BIT 及未知 → 按 16 位有符号
+                    val lo = bytes[off].toInt() and 0xff
+                    val hi = bytes[off + 1].toInt() shl 8
+                    ((lo or hi)).toShort().toInt() / 32768f
+                }
+            }
         }
 
         private fun resampleLinear(input: FloatArray, srcRate: Int, dstRate: Int): FloatArray {

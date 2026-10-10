@@ -38,6 +38,12 @@ interface VrPlayerBackend {
      */
     val exo: ExoPlayer?
 
+    /**
+     * 本播放器绑定的媒体 URI（创建时记录）。用于位置轮询时校验「播放器确实在播当前片」，
+     * 防止切片瞬间把旧片位置误存到新片 URI 下（v2.4.x 修复，审查 #10）。
+     */
+    val currentUri: android.net.Uri?
+
     val currentPosition: Long
     val duration: Long
     val isPlaying: Boolean
@@ -57,8 +63,9 @@ interface VrPlayerBackend {
  * ⚠️ [duration] 在 buffering 阶段可能是负数（C.TIME_UNSET）。这里不做修正，
  *    保持与改造前完全一致：调用方原本就是自己判 `duration > 0`。
  */
-class ExoBackend(override val exo: ExoPlayer) : VrPlayerBackend {
+class ExoBackend(override val exo: ExoPlayer, uri: android.net.Uri? = null) : VrPlayerBackend {
     override val engine: DecoderEngine = DecoderEngine.EXO
+    override val currentUri: android.net.Uri? = uri
     override val currentPosition: Long get() = exo.currentPosition
     override val duration: Long get() = exo.duration
     override val isPlaying: Boolean get() = exo.isPlaying

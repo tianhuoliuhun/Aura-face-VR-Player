@@ -96,7 +96,7 @@ object MpvPlayerFactory {
         callbacks: Callbacks
     ): MpvBackend? {
         val mainHandler = Handler(Looper.getMainLooper())
-        val backend = MpvBackend(callbacks = callbacks, mainHandler = mainHandler)
+        val backend = MpvBackend(callbacks = callbacks, mainHandler = mainHandler, currentUri = uri)
 
         return try {
             MPVLib.create(context)
@@ -141,12 +141,13 @@ object MpvPlayerFactory {
 
             // ===== 2. 初始化 =====
             MPVLib.init()
+            backend.created = true   // native 上下文已就绪，release 时方可 destroy
 
             // ===== 3. 事件订阅 =====
             MPVLib.observeProperty("video-params/w", MPVLib.MpvFormat.MPV_FORMAT_INT64)
             MPVLib.observeProperty("video-params/h", MPVLib.MpvFormat.MPV_FORMAT_INT64)
 
-            MPVLib.addObserver(object : MPVLib.EventObserver {
+            backend.observer = object : MPVLib.EventObserver {
                 override fun eventProperty(property: String) { /* 未使用 */ }
                 override fun eventProperty(property: String, value: Long) {
                     // 宽或高任一变化都走到这里，交给同一处理函数去重
@@ -164,7 +165,7 @@ object MpvPlayerFactory {
                     when (eventId) {
                         MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> {
                             backend.onFileLoaded()
-                            mainHandler.post { callbacks.onPrepared(backend) }
+                            backend.post { callbacks.onPrepared(backend) }
                         }
                         MPVLib.MpvEvent.MPV_EVENT_VIDEO_RECONFIG -> backend.onVideoParamsChanged()
                         MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
@@ -176,23 +177,28 @@ object MpvPlayerFactory {
                             //    mpv_event_to_node）：reason ∈ {eof,stop,quit,error,redirect}。
                             val reason = backend.endFileReason(data)
                             if (reason == "eof") {
-                                mainHandler.post { callbacks.onCompletion() }
+                                backend.post { callbacks.onCompletion() }
                             } else if (reason == "error") {
+                                // 审查 #5：原仅 fileLoadedOnce 时上报，导致根本打不开的文件被静默
+                                // 忽略、用户看 15 秒黑屏。END_FILE 带 error 一律立即上报，并撤掉
+                                // 看门狗避免重复上报。
                                 val detail = runCatching { data.get("file_error")?.asString() }.getOrNull()
-                                if (backend.fileLoadedOnce) {
-                                    mainHandler.post {
-                                        callbacks.onError("mpv 解码错误" + (detail?.let { ": $it" } ?: ""))
-                                    }
+                                backend.cancelWatchdog()
+                                backend.post {
+                                    callbacks.onError("mpv 解码错误" + (detail?.let { ": $it" } ?: ""))
                                 }
                             }
                             // stop / quit / redirect：主动切源或退出，既不是播完也不是错误 → 静默
                         }
                         MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
-                            mainHandler.post { callbacks.onFirstFrame() }
+                            backend.post { callbacks.onFirstFrame() }
                         }
                     }
                 }
-            })
+            }
+
+            // ===== 3.5 注册观察者（存为字段，release 时移除，对应审查 #2）=====
+            MPVLib.addObserver(backend.observer!!)
 
             // ===== 4. 交出 Surface =====
             MPVLib.attachSurface(surface)
@@ -321,7 +327,8 @@ enum class MpvVoMode(val id: Int, val voName: String) {
  */
 class MpvBackend(
     private val callbacks: MpvPlayerFactory.Callbacks,
-    private val mainHandler: Handler
+    private val mainHandler: Handler,
+    override val currentUri: android.net.Uri
 ) : VrPlayerBackend {
 
     private companion object {
@@ -339,8 +346,24 @@ class MpvBackend(
 
     @Volatile private var released = false
 
+    /**
+     * MPVLib.create + init 是否成功完成。只有成功过才允许 destroy：
+     * 否则 [MpvPlayerFactory.create] 的 catch 里调用 release() 时，destroy 会作用在
+     * 一个从未初始化的上下文上 → native 崩（v2.4.x 修复）。
+     */
+    @Volatile internal var created = false
+
     /** content:// 通路占用的 fd，release 时才关（见 MpvPlayerFactory 类注释第 3 条）。 */
     internal var ownedFd: ParcelFileDescriptor? = null
+
+    /**
+     * 当前播放订阅的事件观察者，存为字段以便 release 时移除。
+     * MPVLib 是全局单例，观察者列表属于它而非某个播放；若不移除，第 N 次播放时
+     * 同一事件会发给 N 个观察者，旧观察者里的 fileLoadedOnce 已为 true，会把当前
+     * 播放误回退（v2.4.x 修复，对应审查 #2）。
+     */
+    // 注：create() 是顶层工厂函数（非类成员），需经 backend.observer 写入，故 internal 可见性
+    internal var observer: MPVLib.EventObserver? = null
 
     /** 是否收到过 FILE_LOADED —— 用于区分「根本没加载成功」与「加载后出错」。 */
     @Volatile internal var fileLoadedOnce = false
@@ -393,14 +416,23 @@ class MpvBackend(
 
     override fun release() {
         if (released) return
-        released = true
         cancelWatchdog()
+        // 审查 #2：移除本播放订阅的观察者，避免它留在 MPVLib 全局单例里打到新播放上。
+        observer?.let { runCatching { MPVLib.removeObserver(it) } }
+        observer = null
+        // ⚠️ 关键修复（v2.4.x，审查 #1）：原实现先置 released=true 再用 safe{} 调 native，
+        //    而 safe 一见 released 就返回 null → detachSurface/destroy 永不被调用 →
+        //    全局单例里的上一个播放从不销毁，下次 MPVLib.init() 撞 !initialized 断言崩。
+        //    改为：每步各自 try（绕过 released 检查），最后才置 released=true。
         // ⚠️ 顺序：先 detachSurface 再 destroy。反过来的话 mpv 销毁 vo 时仍持有
         //    Surface，某些设备上会 native 崩（"Surface has been released"）。
-        safe { MPVLib.detachSurface() }
-        safe { MPVLib.destroy() }
-        safe { ownedFd?.close() }
+        if (created) {
+            try { MPVLib.detachSurface() } catch (_: Throwable) {}
+            try { MPVLib.destroy() } catch (_: Throwable) {}
+        }
+        try { ownedFd?.close() } catch (_: Throwable) {}
         ownedFd = null
+        released = true
     }
 
     // ===================== 事件辅助（由 MpvPlayerFactory 调用）=====================
@@ -446,7 +478,7 @@ class MpvBackend(
         if (w == lastW && h == lastH) return
         lastW = w
         lastH = h
-        mainHandler.post { callbacks.onVideoSizeChanged(w, h) }
+        post { callbacks.onVideoSizeChanged(w, h) }
     }
 
     /**
@@ -511,4 +543,11 @@ class MpvBackend(
         } catch (t: Throwable) {
             null
         }
+
+    /**
+     * 对外回调统一过闸：release 之后已入队的回调不再执行，避免旧观察者 / 旧播放的
+     * 回调误写当前界面状态（isVideoPlaying 被写成 true 等，对应审查 #2）。
+     */
+    // internal：create() 顶层工厂内的观察者需经 backend.post 投递到主线程
+    internal fun post(block: () -> Unit) = mainHandler.post { if (!released) block() }
 }

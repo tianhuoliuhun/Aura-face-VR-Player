@@ -1826,6 +1826,10 @@ fun VRPlayerScreen(
     // 门面刻意复刻了 ExoPlayer 的方法名与签名（play/pause/seekTo/currentPosition/
     // duration/isPlaying/setPlaybackSpeed/release），因此下面 20 多处调用点无需改动。
     var playerInstance by remember { mutableStateOf<VrPlayerBackend?>(null) }
+    // 审查 #13：每次 setupVideoPlayer 都会 new 一个 Surface，旧的不释放会累积泄漏。
+    // 用 AtomicReference（remember 一次，跨重组保留）记录当前绑定到播放器的 Surface，
+    // 新建前先 release 旧的；不用 State 以免触发重组或后台线程写快照。
+    val surfaceHolder = remember { java.util.concurrent.atomic.AtomicReference<android.view.Surface?>(null) }
     // v2.1.234：当前正在播放的 URI。
     // 用途：给「视频信息」面板猜容器格式（Exo 没有直接给出封装的 API，只能按扩展名推）。
     // 不能直接用 `decodedUri` —— 那是 setupVideoPlayer 里的**局部变量**，
@@ -2946,7 +2950,10 @@ fun VRPlayerScreen(
             }
 
             surfaceTexture.setDefaultBufferSize(videoWidth, videoHeight)
+            // 审查 #13：释放上一次绑定的 Surface，避免每次切片累积泄漏
+            surfaceHolder.getAndSet(null)?.let { runCatching { it.release() } }
             val nativeSurface = Surface(surfaceTexture)
+            surfaceHolder.set(nativeSurface)
         // ===================================================================
         // v2.1.233：视频尺寸处理 —— **Exo 与 ijk 共用同一份**
         // 原先这段逻辑整个写在 Exo 的 onVideoSizeChanged 里；接入 ijk 后如果
@@ -3645,7 +3652,7 @@ fun VRPlayerScreen(
                 isVideoPlaying = true
             }
             // v2.1.233：包一层门面，使 playerInstance 与 IJK 分支同类型
-            playerInstance = ExoBackend(exo)
+            playerInstance = ExoBackend(exo, Uri.parse(videoUriStr))
         } catch (e: Exception) {
             Log.e("VRPlayerScreen", "Error preparing video content", e)
         }
@@ -3685,10 +3692,15 @@ fun VRPlayerScreen(
                     realtimeDone = realtimeSubtitleEngine.isFullyGenerated
                 }
                 if (player.isPlaying && player.currentPosition > 0L) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastSavedAt >= 2_000L) {
-                        lastSavedAt = now
-                        PlaybackPositions.save(prefs, selectedMediaItem.uri, player.currentPosition)
+                    // 审查 #10：切片瞬间 selectedMediaItem.uri 已指向新片，但 playerInstance
+                    // 仍是旧播放器 → 会把「旧片位置」误存到新片 URI 下。仅当播放器绑定的
+                    // URI 与当前片一致时才保存。
+                    if (player.currentUri?.toString() == selectedMediaItem.uri) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastSavedAt >= 2_000L) {
+                            lastSavedAt = now
+                            PlaybackPositions.save(prefs, selectedMediaItem.uri, player.currentPosition)
+                        }
                     }
                 }
             }

@@ -647,8 +647,12 @@
     <string name="rt_preparing">Preparing real-time subtitle engine…</string>
     <string name="rt_unavailable">Real-time subtitles unavailable: recognizer model not ready</string>
     <string name="rt_no_audio">This video has no usable audio track; real-time subtitles cannot be generated</string>
+    <string name="rt_audio_unsupported_codec">Audio codec not supported: %s</string>
+    <string name="rt_audio_io_failed">Audio read failed (IO)</string>
+    <string name="rt_audio_remux_failed">Audio remux failed (code=%d)</string>
     <string name="rt_started">Real-time subtitles enabled, generating…</string>
     <string name="rt_all_done">Real-time subtitle generation complete (%1$d cues)</string>
+    <string name="rt_partial_failed">Some segments failed to generate subtitles (%1$d skipped)</string>
     <string name="rt_no_speech">No speech detected (possibly pure music or no vocals)</string>
     <string name="rt_generating_pct">Generating real-time subtitles %1$d%%　generated %2$s/%3$s</string>
     <string name="rt_generating_to">Generating real-time subtitles　generated up to %1$s</string>

@@ -118,7 +118,7 @@ object IjkPlayerFactory {
         // ⚠️ backend **只建一个实例**：onPrepared 回调与返回值必须是同一个对象，
         //    否则调用方在回调里拿到的 backend 与 playerInstance 是两个实例，
         //    release() 只关掉其中一个 → 另一个泄漏且 fd 永不释放。
-        val backend = IjkBackend(mp)
+        val backend = IjkBackend(mp, uri)
         try {
             // ===== 参数必须在 setDataSource 之前（见类注释第 2 条）=====
             // 硬解：走 Android MediaCodec；关掉则用 FFmpeg 软解
@@ -252,7 +252,10 @@ data class IjkOptions(
  *    的死循环，一次异常就会把整个协程打断 → 字幕时间轴与进度条一起卡死。
  *    所以这里**每个 getter 都用 [safe] 包一层**，把异常降级成"当前读不到"。
  */
-class IjkBackend(private val mp: IjkMediaPlayer) : VrPlayerBackend {
+class IjkBackend(
+    private val mp: IjkMediaPlayer,
+    override val currentUri: android.net.Uri
+) : VrPlayerBackend {
 
     override val engine: DecoderEngine = DecoderEngine.IJK
     override val exo: androidx.media3.exoplayer.ExoPlayer? = null
@@ -286,12 +289,15 @@ class IjkBackend(private val mp: IjkMediaPlayer) : VrPlayerBackend {
 
     override fun release() {
         if (released) return
-        released = true
-        safe { mp.stop() }
-        safe { mp.release() }
+        // 审查 #1：原把 released=true 放在 safe{} 之前，safe 一见 released 就返回 null →
+        // mp.stop()/mp.release() 永不被调用 → 解码线程 / MediaCodec / ownedFd 全部泄漏。
+        // 改为直接 try，并置 released=true 于最后。
+        try { mp.stop() } catch (_: Throwable) {}
+        try { mp.release() } catch (_: Throwable) {}
         // content:// 通路占用的 fd 在此关闭（见 IjkPlayerFactory.create 的说明）
-        safe { ownedFd?.close() }
+        try { ownedFd?.close() } catch (_: Throwable) {}
         ownedFd = null
+        released = true
     }
 
     /** 把 ijk 的"非法状态异常"降级为 null。 */

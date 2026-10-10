@@ -1702,7 +1702,16 @@ class SubtitleTranslator(private val context: Context) {
             maxTokens = 256,
             temperature = 0.2f
         ) ?: return ""
-        return out.trim().lines().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        // v2.4.23 审查 #5：本地模型可能先输出 <think>...</think> 推理段，
+        // 若不剥离会被当成译文（取首行即标签）。整体剥离后再取首行非空译文。
+        val cleaned = out.replace(
+            Regex(
+                "<think>.*?(</think>|$)",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            ),
+            ""
+        )
+        return cleaned.trim().lines().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     }
 
     private suspend fun translateViaGoogleFree(text: String, targetLangCode: String): String {

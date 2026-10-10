@@ -607,8 +607,12 @@
     <string name="rt_preparing">실시간 자막 엔진 준비 중…</string>
     <string name="rt_unavailable">실시간 자막 사용 불가: 인식 모델 미준비</string>
     <string name="rt_no_audio">이 영상에는 사용 가능한 오디오 트랙이 없어 실시간 자막을 생성할 수 없습니다</string>
+    <string name="rt_audio_unsupported_codec">오디오 코덱 미지원：%s</string>
+    <string name="rt_audio_io_failed">오디오 읽기 실패（IO）</string>
+    <string name="rt_audio_remux_failed">오디오 리먹싱 실패（code=%d）</string>
     <string name="rt_started">실시간 자막 켜짐, 생성 중…</string>
     <string name="rt_all_done">실시간 자막 생성 완료（총 %1$d 개）</string>
+    <string name="rt_partial_failed">일부 구간 자막 생성 실패（총 %1$d 구간 건너뜀）</string>
     <string name="rt_no_speech">음성이 감지되지 않음（순수 음악이거나 무음성 가능）</string>
     <string name="rt_generating_pct">실시간 자막 생성 중 %1$d%%　생성됨 %2$s/%3$s</string>
     <string name="rt_generating_to">실시간 자막 생성 중　생성 위치 %1$s</string>
