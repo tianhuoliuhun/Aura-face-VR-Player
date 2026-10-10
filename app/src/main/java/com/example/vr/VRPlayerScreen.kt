@@ -2651,7 +2651,7 @@ fun VRPlayerScreen(
      * Auto-fixes a video whose container does not support seeking (position resets
      * to 0 after seekTo) by re-muxing it into a fresh MP4. No re-encoding. (8/1 功能)
      */
-    fun startRemuxFix() {
+    fun startRemuxFix() { /* ⛔ 容器修复(重封装为MP4)已禁用 v2.4.22 — 依据三份审查报告(视频容器转封装逻辑审查等)。原 VideoRemuxer.remux 实现见 git history 与备份文件。恢复：删除本行注释 + 取消 :4865/:4895 两处调用注释，并恢复 VideoRemuxer.remux(...) 调用。
         val uriStr = selectedMediaItem.uri ?: return
         if (isRemuxing) return
         isRemuxing = true
@@ -2705,7 +2705,7 @@ fun VRPlayerScreen(
                     Toast.makeText(context, context.getString(R.string.toast_seek_unsupported), Toast.LENGTH_SHORT).show()
                 }
             }
-        }
+        */
     }
 
     // Helper inside Compose to rebuild/re-bind Android ExoPlayer to GLES
@@ -2723,7 +2723,7 @@ fun VRPlayerScreen(
      * Rewrites the SPS (level_idc and/or width/height) so the hardware
      * decoder accepts the stream. No re-encoding. (8/2-8/3 功能)
      */
-    fun startLevelPatchFix() {
+    fun startLevelPatchFix() { /* ⛔ 容器修复(SPS/分辨率改写)已禁用 v2.4.22 — 依据三份审查报告。原 VideoRemuxer.remuxWithLevelPatch/remuxWithSpsSpoof 实现见 git/备份。恢复：删除本行注释 + 取消 :3065 调用注释。
         val uriStr = selectedMediaItem.uri ?: return
         if (isRemuxing) return
         isRemuxing = true
@@ -2774,7 +2774,7 @@ fun VRPlayerScreen(
                     ).show()
                 }
             }
-        }
+        */
     }
 
     // 音轨/字幕轨选择（8/2 功能）
@@ -3060,9 +3060,10 @@ fun VRPlayerScreen(
                 ) {
                     val cap = DecoderCapabilities.getBestHardwareDecoderMax()
                     if (cap != null && (width > cap.width || height > cap.height)) {
-                        resolutionTipText = context.getString(R.string.toast_8k_patching, width, height)
-                        showResolutionTip = true
-                        startLevelPatchFix()
+                        // ⛔ 容器修复(SPS/分辨率改写)已禁用 v2.4.22（依据三份审查报告）
+                        // resolutionTipText = context.getString(R.string.toast_8k_patching, width, height)
+                        // showResolutionTip = true
+                        // startLevelPatchFix()
                     }
                 }
             } catch (e: Exception) {
@@ -4862,7 +4863,7 @@ fun VRPlayerScreen(
                                                             "该 AVI 无 idx1 索引 → 直接重建索引（不重编码），" +
                                                                 "目标 ${seekTarget / 1000}s"
                                                         )
-                                                        startRemuxFix()
+                                                        // startRemuxFix()  // ⛔ 容器修复已禁用 v2.4.22
                                                         return@launch
                                                     }
 
@@ -4892,7 +4893,7 @@ fun VRPlayerScreen(
                                                             "seek 异常（stuckAtStart=$stuckAtStart " +
                                                                 "moved=$moved frozen=$frozen）→ 重建索引"
                                                         )
-                                                        startRemuxFix()
+                                                        // startRemuxFix()  // ⛔ 容器修复已禁用 v2.4.22
                                                     }
                                                 }
                                                 scope.launch {
