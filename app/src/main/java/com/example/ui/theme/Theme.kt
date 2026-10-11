@@ -62,7 +62,8 @@ private fun Typography.withAppFont(): Typography = copy(
 fun MyApplicationTheme(
   darkTheme: Boolean = isSystemInDarkTheme(),
   // Dynamic color is available on Android 12+
-  dynamicColor: Boolean = true,
+  // 设置面板布局审查 #1：关闭，避免未显式设色的组件（开关等）在 Android 12+ 跟随壁纸变色。
+  dynamicColor: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   val colorScheme =

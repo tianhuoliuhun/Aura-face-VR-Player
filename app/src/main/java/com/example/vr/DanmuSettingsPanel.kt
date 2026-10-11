@@ -119,7 +119,7 @@ fun DanmuSettingsPanel(
                 Text(
                     text = stringResource(R.string.danmu_enable_title),
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
@@ -129,9 +129,10 @@ fun DanmuSettingsPanel(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Switch(
+            AuraSwitch(
                 checked = config.isEnabled,
-                onCheckedChange = { onConfigChange(config.copy(isEnabled = it)) }
+                onCheckedChange = { onConfigChange(config.copy(isEnabled = it)) },
+                accentColor = accentColor
             )
         }
 
@@ -527,7 +528,7 @@ fun DanmuSettingsPanel(
                 Text(
                     text = stringResource(R.string.danmu_use_local_llm),
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
@@ -537,9 +538,10 @@ fun DanmuSettingsPanel(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Switch(
+            AuraSwitch(
                 checked = config.useLocalLlm,
-                onCheckedChange = { onConfigChange(config.copy(useLocalLlm = it)) }
+                onCheckedChange = { onConfigChange(config.copy(useLocalLlm = it)) },
+                accentColor = accentColor
             )
         }
         DanmuSliderRow(
@@ -625,7 +627,7 @@ fun DanmuSettingsPanel(
                 Text(
                     text = stringResource(R.string.danmu_auto_tracks),
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
@@ -635,9 +637,10 @@ fun DanmuSettingsPanel(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Switch(
+            AuraSwitch(
                 checked = config.autoTracks,
-                onCheckedChange = { onConfigChange(config.copy(autoTracks = it)) }
+                onCheckedChange = { onConfigChange(config.copy(autoTracks = it)) },
+                accentColor = accentColor
             )
         }
         DanmuSliderRow(
@@ -999,14 +1002,14 @@ private fun DanmuSliderRow(
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 13.sp,
+                fontSize = 14.sp,
                 modifier = Modifier.weight(1f)
             )
             Text(
                 text = valueText,
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
+                color = accentColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
             )
         }
         Slider(
@@ -1047,7 +1050,7 @@ private fun <T> DanmuColorRow(
         Text(
             text = title,
             color = Color.White.copy(alpha = if (enabled) 1f else 0.4f),
-            fontSize = 13.sp,
+            fontSize = 14.sp,
             modifier = Modifier.padding(bottom = 4.dp)
         )
         options.chunked(4).forEach { rowOptions ->
@@ -1114,7 +1117,7 @@ private fun <T> DanmuTextChipRow(
         Text(
             text = title,
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = 14.sp,
             modifier = Modifier.padding(bottom = 4.dp)
         )
         options.chunked(3).forEach { rowOptions ->

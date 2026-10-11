@@ -324,7 +324,7 @@ fun LutFilterSection(
         Text(
             text = stringResource(R.string.lut_current, LutUtils.lutDisplayName(lutName, context)),
             color = Color.White.copy(alpha = 0.45f),
-            fontSize = 9.sp
+            fontSize = 11.sp
         )
     }
 }
@@ -590,22 +590,19 @@ fun BeautyEngineSection(
                     Text(
                         stringResource(R.string.beauty_gp_vr_face),
                         color = Color.White,
-                        fontSize = 11.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         stringResource(R.string.beauty_gp_vr_face_desc),
                         color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 9.sp
+                        fontSize = 11.sp
                     )
                 }
-                Switch(
+                AuraSwitch(
                     checked = vrFace,
                     onCheckedChange = onVrFaceChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = accentColor
-                    )
+                    accentColor = accentColor
                 )
             }
 
@@ -620,22 +617,19 @@ fun BeautyEngineSection(
                     Text(
                         stringResource(R.string.beauty_gp_half_res),
                         color = Color.White,
-                        fontSize = 11.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         stringResource(R.string.beauty_gp_half_res_desc),
                         color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 9.sp
+                        fontSize = 11.sp
                     )
                 }
-                Switch(
+                AuraSwitch(
                     checked = halfRes,
                     onCheckedChange = onHalfResChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = accentColor
-                    )
+                    accentColor = accentColor
                 )
             }
         }
@@ -683,19 +677,14 @@ fun BeautyCompareSwitch(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(stringResource(R.string.beauty_compare_original), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            Text(stringResource(R.string.beauty_compare_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
+            Text(stringResource(R.string.beauty_compare_original), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.beauty_compare_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
         }
-        Switch(
+        AuraSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = accentOnColor,
-                checkedTrackColor = accentColor,
-                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
-            ),
-            modifier = Modifier.height(26.dp)
+            accentColor = accentColor,
+            accentOnColor = accentOnColor
         )
     }
 }

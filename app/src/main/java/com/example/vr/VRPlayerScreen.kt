@@ -5143,7 +5143,7 @@ fun VRPlayerScreen(
                             Text(
                                 stringResource(R.string.subtitle_quick_title),
                                 color = AccentColor,
-                                fontSize = 13.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Row(
@@ -5156,7 +5156,7 @@ fun VRPlayerScreen(
                                     color = Color.White.copy(alpha = 0.6f),
                                     fontSize = 10.sp
                                 )
-                                Switch(
+                                AuraSwitch(
                                     checked = isSubtitleEnabled,
                                     onCheckedChange = {
                                         isSubtitleEnabled = it
@@ -5167,13 +5167,8 @@ fun VRPlayerScreen(
                                         }
                                         keepUiAlight()
                                     },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = AccentOnColor,
-                                        checkedTrackColor = AccentColor,
-                                        uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                                        uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
-                                    ),
-                                    modifier = Modifier.height(24.dp)
+                                    accentColor = AccentColor,
+                                    accentOnColor = AccentOnColor
                                 )
                             }
                         }
@@ -5188,7 +5183,7 @@ fun VRPlayerScreen(
                                 Text(
                                     stringResource(R.string.subtitle_translate_title),
                                     color = Color.White,
-                                    fontSize = 11.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
@@ -5196,23 +5191,18 @@ fun VRPlayerScreen(
                                         "${stringResource(subtitleTranslator.config.engine.displayNameResId)} → ${stringResource(subtitleTranslator.config.targetLanguage.nameResId)}"
                                     else stringResource(R.string.subtitle_translate_off),
                                     color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 9.sp
+                                    fontSize = 11.sp
                                 )
                             }
-                            Switch(
+                            AuraSwitch(
                                 checked = subtitleTranslator.config.isEnabled,
                                 onCheckedChange = {
                                     subtitleTranslator.config = subtitleTranslator.config.copy(isEnabled = it)
                                     if (isMemoryModeEnabled) prefs.edit().putBoolean("translation_enabled", it).apply()
                                     keepUiAlight()
                                 },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = AccentOnColor,
-                                    checkedTrackColor = AccentColor,
-                                    uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                                    uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
-                                ),
-                                modifier = Modifier.height(24.dp)
+                                accentColor = AccentColor,
+                                accentOnColor = AccentOnColor
                             )
                         }
 
@@ -5756,7 +5746,7 @@ fun VRPlayerScreen(
                                     Text(
                                         stringResource(R.string.ui_language),
                                         color = Color.White,
-                                        fontSize = 11.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     // 6 种语言分两行排（一列太挤）
@@ -5820,28 +5810,24 @@ fun VRPlayerScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.projection_auto_detect), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                            Text(stringResource(R.string.projection_auto_detect), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                            Text(stringResource(R.string.projection_auto_detect_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                            Text(stringResource(R.string.projection_auto_detect_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        Switch(
+                                        AuraSwitch(
                                             checked = isSmartProjectionEnabled,
                                             onCheckedChange = {
                                                 isSmartProjectionEnabled = it
                                                 prefs.edit().putBoolean("smart_projection_enabled", it).apply()
                                                 keepUiAlight()
                                             },
-                                            colors = SwitchDefaults.colors(
-                                                checkedThumbColor = AccentOnColor,
-                                                checkedTrackColor = AccentColor,
-                                                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                                                uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
-                                            )
+                                            accentColor = AccentColor,
+                                            accentOnColor = AccentOnColor
                                         )
                                     }
 
@@ -6528,7 +6514,7 @@ fun VRPlayerScreen(
                                                 Text(
                                                     title,
                                                     color = Color.White,
-                                                    fontSize = 11.sp,
+                                                    fontSize = 14.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                     // v2.1.213：标题限 1 行 —— 某些语言的标题较长
                                                     //（德/俄语系），不限行会把 Switch 挤出可视区
@@ -6540,7 +6526,7 @@ fun VRPlayerScreen(
                                                     Text(
                                                         desc,
                                                         color = Color.White.copy(alpha = 0.5f),
-                                                        fontSize = 9.sp,
+                                                        fontSize = 11.sp,
                                                         // v2.1.213：**描述必须限行**。
                                                         // 原先不限行，描述一长（如时间标记球那句 33 字）
                                                         // 就会换行成 4~5 行、把整行撑得极高，
@@ -6551,15 +6537,11 @@ fun VRPlayerScreen(
                                                     )
                                                 }
                                             }
-                                            Switch(
+                                            AuraSwitch(
                                                 checked = checked,
                                                 onCheckedChange = { onChange(it); keepUiAlight() },
-                                                colors = SwitchDefaults.colors(
-                                                    checkedThumbColor = AccentOnColor,
-                                                    checkedTrackColor = AccentColor,
-                                                    uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                                                    uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
-                                                ),
+                                                accentColor = AccentColor,
+                                                accentOnColor = AccentOnColor,
                                                 modifier = Modifier
                                                     // v2.1.213：**scale() 不改变布局占位**，
                                                     // Switch 仍按标准宽度（约 52dp）占位、在窄屏上
@@ -6591,27 +6573,23 @@ fun VRPlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.floating_ball_enable), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                            Text(stringResource(R.string.floating_ball_enable), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                            Text(stringResource(R.string.floating_ball_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                            Text(stringResource(R.string.floating_ball_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        Switch(
+                                        AuraSwitch(
                                             checked = isFloatingBallEnabled,
                                             onCheckedChange = {
                                                 isFloatingBallEnabled = it
                                                 keepUiAlight()
                                             },
-                                            colors = SwitchDefaults.colors(
-                                                checkedThumbColor = AccentOnColor,
-                                                checkedTrackColor = AccentColor,
-                                                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                                                uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
-                                            ),
+                                            accentColor = AccentColor,
+                                            accentOnColor = AccentOnColor,
                                             modifier = Modifier.scale(0.8f).testTag("floating_ball_switch")
                                         )
                                     }
@@ -6965,24 +6943,20 @@ fun VRPlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.memc_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                            Text(stringResource(R.string.memc_enabled), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                            Text(stringResource(R.string.memc_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                            Text(stringResource(R.string.memc_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        Switch(
+                                        AuraSwitch(
                                             checked = isMemcEnabled,
                                             onCheckedChange = { isMemcEnabled = it; keepUiAlight() },
-                                            colors = SwitchDefaults.colors(
-                                                checkedThumbColor = AccentOnColor,
-                                                checkedTrackColor = AccentColor,
-                                                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                                                uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
-                                            ),
+                                            accentColor = AccentColor,
+                                            accentOnColor = AccentOnColor,
                                             modifier = Modifier.scale(0.8f)
                                         )
                                     }
@@ -7032,7 +7006,7 @@ fun VRPlayerScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.fsr_enabled), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                            Text(stringResource(R.string.fsr_enabled), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -7045,20 +7019,16 @@ fun VRPlayerScreen(
                                             val reasonLine = if (fsrDecision.enabled) {
                                                 "$baseReason · ${fsrDecision.targetWidth}×${fsrDecision.targetHeight}"
                                             } else baseReason
-                                            Text(reasonLine, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp,
+                                            Text(reasonLine, color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        Switch(
+                                        AuraSwitch(
                                             checked = isFsrEnabled,
                                             onCheckedChange = { isFsrEnabled = it; keepUiAlight() },
-                                            colors = SwitchDefaults.colors(
-                                                checkedThumbColor = AccentOnColor,
-                                                checkedTrackColor = AccentColor,
-                                                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                                                uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
-                                            ),
+                                            accentColor = AccentColor,
+                                            accentOnColor = AccentOnColor,
                                             modifier = Modifier.scale(0.8f)
                                         )
                                     }

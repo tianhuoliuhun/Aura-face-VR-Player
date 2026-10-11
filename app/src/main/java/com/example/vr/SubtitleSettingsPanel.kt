@@ -218,17 +218,14 @@ fun SubtitleSettingsPanel(
                     color = if (isSubtitleEnabled) Color.White else Color.White.copy(alpha = 0.5f),
                     fontSize = 11.sp
                 )
-                Switch(
+                AuraSwitch(
                     checked = isSubtitleEnabled,
                     onCheckedChange = {
                         onSubtitleEnabledChange(it)
                         onUserActivity()
                     },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = accentOnColor,
-                        checkedTrackColor = accentColor
-                    ),
-                    modifier = Modifier.height(24.dp)
+                    accentColor = accentColor,
+                    accentOnColor = accentOnColor
                 )
             }
         }
@@ -256,25 +253,22 @@ fun SubtitleSettingsPanel(
                 Text(
                     text = stringResource(R.string.subtitle_strip_punct),
                     color = Color.White,
-                    fontSize = 11.sp
+                    fontSize = 14.sp
                 )
                 Text(
                     text = stringResource(R.string.subtitle_strip_punct_hint),
                     color = Color.White.copy(alpha = 0.45f),
-                    fontSize = 9.sp
+                    fontSize = 11.sp
                 )
             }
-            Switch(
+            AuraSwitch(
                 checked = stripPunctuation,
                 onCheckedChange = {
                     onStripPunctuationChange(it)
                     onUserActivity()
                 },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = accentOnColor,
-                    checkedTrackColor = accentColor
-                ),
-                modifier = Modifier.height(24.dp)
+                accentColor = accentColor,
+                accentOnColor = accentOnColor
             )
         }
 
@@ -354,13 +348,13 @@ fun SubtitleSettingsPanel(
                 Text(
                     text = if (loadedSubtitleFileName.isNotEmpty()) stringResource(R.string.subtitle_current_file, loadedSubtitleFileName) else stringResource(R.string.subtitle_no_file),
                     color = Color.White,
-                    fontSize = 11.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
                     text = if (loadedCueCount > 0) stringResource(R.string.subtitle_cues_loaded, loadedCueCount) else stringResource(R.string.subtitle_import_hint),
                     color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 9.sp
+                    fontSize = 11.sp
                 )
             }
 
@@ -386,7 +380,7 @@ fun SubtitleSettingsPanel(
                     Icon(
                         imageVector = Icons.Default.FileOpen,
                         contentDescription = null,
-                        modifier = Modifier.height(14.dp)
+                        modifier = Modifier.height(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(stringResource(R.string.subtitle_import), fontSize = 10.sp)
@@ -562,7 +556,7 @@ fun SubtitleSettingsPanel(
                             imageVector = Icons.Default.FileOpen,
                             contentDescription = null,
                             tint = accentColor,
-                            modifier = Modifier.height(12.dp)
+                            modifier = Modifier.height(16.dp)
                         )
                     }
                 }
@@ -632,18 +626,15 @@ fun SubtitleSettingsPanel(
                         )
                     }
 
-                    Switch(
+                    AuraSwitch(
                         checked = translator.config.isEnabled,
                         onCheckedChange = { enabled ->
                             translator.config = translator.config.copy(isEnabled = enabled)
                             onTranslateEnabledChange(enabled)
                             onUserActivity()
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = accentOnColor,
-                            checkedTrackColor = accentColor
-                        ),
-                        modifier = Modifier.height(24.dp)
+                        accentColor = accentColor,
+                        accentOnColor = accentOnColor
                     )
                 }
 

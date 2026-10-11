@@ -73,6 +73,36 @@ fun TooltipIconButton(
     }
 }
 
+/**
+ * 统一开关（设置面板布局审查 v2.4.37 #1/#2/#3）。
+ * 选中：accent 轨道 + accentOn 滑块；未选中：白 0.7 滑块 / 白 0.15 轨道
+ * （与 ExperimentalSwitchRow / BeautyCompareSwitch 既有写法一致）。
+ * 固定高度 26dp，统一所有面板开关尺寸。
+ * 把各面板的裸 Switch(...) 收敛到这一处实现，避免「同一功能两份 UI」。
+ */
+@Composable
+fun AuraSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    accentColor: Color = Color(0xFFD0BCFF),
+    accentOnColor: Color = Color.White,
+    enabled: Boolean = true
+) {
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        enabled = enabled,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = accentOnColor,
+            checkedTrackColor = accentColor,
+            uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
+            uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
+        ),
+        modifier = modifier.height(26.dp)
+    )
+}
+
 /** 带百分比读数的滑杆行（美颜/人像精修参数统一组件） */
 @Composable
 fun BeautySliderItem(
@@ -89,12 +119,12 @@ fun BeautySliderItem(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+            Text(label, color = Color.White, fontSize = 14.sp)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (badge != null) {
-                    Text(badge, color = Color(0xFFE8A33D), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(badge, color = Color(0xFFE8A33D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("${(value * 100).toInt()}%", color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("${(value * 100).toInt()}%", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
         Slider(
@@ -134,26 +164,21 @@ fun ExperimentalSwitchRow(
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 11.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = desc,
                 color = Color.White.copy(alpha = 0.5f),
-                fontSize = 9.sp,
-                lineHeight = 12.sp
+                fontSize = 11.sp,
+                lineHeight = 14.sp
             )
         }
-        Switch(
+        AuraSwitch(
             checked = checked,
             onCheckedChange = onChanged,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = accentOnColor,
-                checkedTrackColor = accentColor,
-                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                uncheckedTrackColor = Color.White.copy(alpha = 0.15f)
-            ),
-            modifier = Modifier.height(26.dp)
+            accentColor = accentColor,
+            accentOnColor = accentOnColor
         )
     }
 }
