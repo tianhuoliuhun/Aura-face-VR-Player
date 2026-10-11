@@ -485,8 +485,11 @@ object GpuPixelBeauty {
             if (!GpuPixelBeauty.available) return null
             return try {
                 ensure()
-                val det = detector ?: FaceDetector.Create().also { detector = it }
+                // 🔴 v2.4.33：**取 detector 与使用必须在同一把 [detectLock] 内**。
+                //   原先 `val det = detector ?: …` 在锁**外**：release() 可能恰好在取到
+                //   局部变量之后、进入锁之前把它 destroy() → native use-after-free → SIGSEGV。
                 val raw = synchronized(detectLock) {
+                    val det = detector ?: FaceDetector.Create().also { detector = it }
                     det.detect(
                         rgba, w, h, stride,
                         FaceDetector.GPUPIXEL_MODE_FMT_VIDEO,
@@ -611,7 +614,6 @@ object GpuPixelBeauty {
                 reshape?.Destroy()
                 sink?.Destroy()
                 sinkTexture?.Destroy()
-                detector?.destroy()
             } catch (_: Throwable) {
             }
             source = null
@@ -623,7 +625,14 @@ object GpuPixelBeauty {
             textureMode = false
             resultTextureId = 0
             resultSerial = 0L
-            detector = null
+            // 🔴 v2.4.33：detector 的销毁**必须在 [detectLock] 内**（与 detect 互斥）。
+            //   原先它只受 `@Synchronized`（锁 Pipeline 实例）保护，而 detect 走的是 detectLock
+            //   → 两把锁互不排斥 → detect 正在使用时这里 destroy 掉 → native 访问已释放内存
+            //   → 可能直接 SIGSEGV。#3 补上 release() 调用后，这个竞态就会变成真实可触发。
+            synchronized(detectLock) {
+                try { detector?.destroy() } catch (_: Throwable) {}
+                detector = null
+            }
             // v2.0.186：清空属性/平滑缓存，避免下次创建时沿用旧值导致「跳过首次下发」
             lastSmooth = Float.NaN; lastWhite = Float.NaN
             lastSlim = Float.NaN; lastEye = Float.NaN

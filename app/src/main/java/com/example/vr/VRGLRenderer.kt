@@ -651,6 +651,26 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var beautyMasterEnabled = false
     /** v2.0.160：美颜引擎。0 = GLSL（内置），1 = GPUPixel（独立 Mars-Face 检测 + 人脸区域处理） */
     @Volatile var beautyEngineType = BEAUTY_ENGINE_GLSL
+
+    /**
+     * v2.4.33（审查 #1）：**有效美颜引擎** —— 消除「设置里选了 GPUPixel、但 GPUPixel 不可用
+     * → 美颜彻底没有输出」的三重否定。
+     *
+     * ## 病根（三个判断点各自为政）
+     * 选 GPUPixel 而 `GpuPixelBeauty.available == false`（init 失败）时：
+     *  - [isGpuPixelActive] 因 `!available` 返回 false → 不走离屏 FBO；
+     *  - 主 shader 的 `bc` 与 [isHalfPassActive] 都**硬要求** `beautyEngineType == GLSL` → 也不跑。
+     * 三者同时为假 ⇒ 用户看到「开了美颜却完全没效果」，而设置里明明选的是 GPUPixel。
+     *
+     * 修法：所有判断统一读**本属性**（GPUPixel 不可用时**一次性**折回 GLSL），
+     * 行为与注释里那句「失败即回退 GLSL」一致 —— 只是此前没有对应代码。
+     */
+    private val effectiveBeautyEngine: Int
+        get() = if (beautyEngineType == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available) {
+            BEAUTY_ENGINE_GLSL
+        } else {
+            beautyEngineType
+        }
     // ---- GPUPixel 引擎参数（与 GLSL 参数独立，prefs 前缀 beauty_gp_*）----
     @Volatile var beautyGpSmooth = 0.7f
     @Volatile var beautyGpWhite = 0.4f
@@ -1972,7 +1992,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 对比模式：所有美颜 uniform 归零，仅保留亮度/对比度等调色
         // v2.0.160：原「对比原图」改为「美颜总开关」；且 GLSL 美颜只在 GLSL 引擎下生效
         // （GPUPixel 引擎下由其独立滤镜负责，避免双重磨皮/美白叠加）
-        val bc = if (beautyMasterEnabled && beautyEngineType == BEAUTY_ENGINE_GLSL) 1f else 0f
+        val bc = if (beautyMasterEnabled && effectiveBeautyEngine == BEAUTY_ENGINE_GLSL) 1f else 0f
         // v2.0.177：磨皮半分辨率 pass 激活时，主 shader 的磨皮段必须关闭（传 0）——
         // 磨皮的「低频层 + 频域分离合成」已搬到离屏 pass，主 shader 只负责其余美颜效果。
         // 若此处仍传 beautyLevel，会变成「主 shader 糊一次 + 合成 pass 再糊一次」的双重磨皮。
@@ -2214,7 +2234,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform1i(prog.hProjectionMode, projectionMode.id)
         uniform1i(prog.hStereoMode, stereoMode.id)
 
-        val bc = if (beautyMasterEnabled && beautyEngineType == BEAUTY_ENGINE_GLSL) 1f else 0f
+        val bc = if (beautyMasterEnabled && effectiveBeautyEngine == BEAUTY_ENGINE_GLSL) 1f else 0f
         uniform1f(prog.hBeautyStrength, beautyLevel * bc)
         uniform1f(prog.hTextureDetail, beautyTextureDetail)
         uniform1f(prog.hBrightness, brightnessLevel)
@@ -2738,6 +2758,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             faceInitExecutor.shutdownNow()
             // v2.0.186（P0-B）：GPUPixel 检测线程也要一并关闭
             gpDetectExecutor.shutdownNow()
+            // 🔴 v2.4.33：**必须等检测线程真正结束**，否则它可能正在 `Pipeline.detect()`
+            //   里跑 native 检测，而紧接着的 `GpuPixelBeauty.release()` 会把 GL 资源与
+            //   FaceDetector 销毁掉 → use-after-free / SIGSEGV。
+            //   `shutdownNow` 只是「请求中断」，不等待；这里显式 awaitTermination。
+            runCatching { gpDetectExecutor.awaitTermination(300, java.util.concurrent.TimeUnit.MILLISECONDS) }
+            runCatching { faceExecutor.awaitTermination(300, java.util.concurrent.TimeUnit.MILLISECONDS) }
+            // v2.4.33（审查 #3）：**GPUPixel 的原生资源此前从未释放** ——
+            //   `GpuPixelBeauty.release()` 全工程无调用点，Pipeline / FaceDetector /
+            //   Source/Sink 滤镜在退出视频后仍存活；GpuPixelBeauty 是单例，会跨视频残留状态。
+            //   本方法运行在**创建 GPUPixel 上下文的 GL 线程**，正是销毁 GL 资源要求的线程。
+            runCatching { GpuPixelBeauty.release() }
+                .onFailure { Log.w(TAG, "GpuPixelBeauty.release 失败", it) }
             mediaPipeManager?.release()
             mediaPipeManager = null
             if (lutTextureId != -1) {
@@ -2818,7 +2850,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 开关关闭时 VR 下退回**纯 GLSL 美颜**（GLSL 在 VR 下的面部效果本就受限，见下方注释）。
      */
     private fun isGpuPixelActive(): Boolean {
-        if (!beautyMasterEnabled || beautyEngineType != BEAUTY_ENGINE_GPUPIXEL) return false
+        if (!beautyMasterEnabled || effectiveBeautyEngine != BEAUTY_ENGINE_GPUPIXEL) return false
         if (!GpuPixelBeauty.available) return false
         return isPlanarProjection() || gpuPixelVrFaceBeauty
     }
@@ -3985,7 +4017,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         !huaweiVrMode &&
             !isGpuPixelActive() &&
             beautyMasterEnabled &&
-            beautyEngineType == BEAUTY_ENGINE_GLSL &&
+            // v2.4.33（#1）：用 effectiveBeautyEngine —— GPUPixel 不可用时按 GLSL 跑半分辨率磨皮，
+            // 而不是「三个判断全为假 → 美颜无输出」。
+            effectiveBeautyEngine == BEAUTY_ENGINE_GLSL &&
             beautyLevel > 0.01f &&
             displayWidth > 0 && displayHeight > 0
 
