@@ -321,6 +321,16 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private val faceExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
+    /**
+     * v2.4.38（美颜审查 #10）：GPUPixel **后台初始化**线程。
+     *
+     * 初始化要做「assets 拷贝到外部目录 + `loadLibrary`」等 IO，旧实现直接在 GL 线程
+     * （[onDrawFrame]）调用，失败后还会每 60s 重跑 → 阻塞渲染。现改为在此线程一次性执行。
+     */
+    private val gpInitExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    /** 自动初始化是否已派发（只派发一次；失败不自动重试，重试由 UI 点击触发） */
+    private val gpInitDispatched = java.util.concurrent.atomic.AtomicBoolean(false)
+
     // ===== v2.0.186（P0-B）：GPUPixel 检测 / GL 处理 双线程流水线 =====
     /**
      * 独立的检测线程：跑 Mars-Face（纯 CPU 推理）。
@@ -1923,8 +1933,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // Clear screen
         // v2.0.160：GPUPixel 引擎激活时先画到离屏 FBO（绘制完做「人脸区域处理 + 贴回」再上屏）。
         // 惰性初始化 GPUPixel：失败一次即标记不可用，UI 据此弹提示并自动回退 GLSL。
-        if (beautyEngineType == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available) {
-            GpuPixelBeauty.init(context)
+        // v2.4.38（美颜审查 #10）：GPUPixel 初始化（assets 拷贝 IO + loadLibrary）**移到后台线程**，
+        // 且自动路径**只派发一次**（[gpInitDispatched]）—— 失败后不再自动重试，重试只能由用户在
+        // 设置里重新点击 GPUPixel 引擎（UI 侧 `GpuPixelBeauty.init(force = true)`）触发。
+        // 旧实现在这里每帧调用、失败后每 60s 在 GL 线程重跑一次 Init，直接阻塞渲染线程。
+        if (beautyEngineType == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available &&
+            gpInitDispatched.compareAndSet(false, true)
+        ) {
+            val appCtx = context
+            gpInitExecutor.execute { runCatching { GpuPixelBeauty.init(appCtx) } }
         }
         val gpActive = isGpuPixelActive()
         // v2.0.177：磨皮半分辨率 pass 激活时，主渲染写到 downFbo（全分辨率纹理）而非屏幕，
@@ -2767,6 +2784,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         try {
             faceExecutor.shutdownNow()
             faceInitExecutor.shutdownNow()
+            // v2.4.38（美颜审查 #10）：后台初始化线程一并关闭
+            gpInitExecutor.shutdownNow()
             // v2.0.186（P0-B）：GPUPixel 检测线程也要一并关闭
             gpDetectExecutor.shutdownNow()
             // 🔴 v2.4.33：**必须等检测线程真正结束**，否则它可能正在 `Pipeline.detect()`
@@ -5429,12 +5448,33 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 }
                 val scaledBmp = faceScaledBmp!!
                 val canvas = android.graphics.Canvas(scaledBmp)
+                // v2.4.38（美颜审查 #9）：**等比缩放 + 居中填充**（letterbox），不再把非方形采样区
+                // 直接拉伸成 256×256 —— 后者会让 MediaPipe 看到宽高比失真的脸，在 16:9 / 4:3 或
+                // 窄视口下检出率与五官定位精度下降。采样区本就是正方形时（常见情形，faceReadSize=512）
+                // 退化为整幅缩放，行为与旧实现完全一致。
+                val scaledSizeF = faceSampleSize.toFloat()
+                val fitScale = minOf(scaledSizeF / fw, scaledSizeF / fh)
+                val drawW = (fw * fitScale).toInt().coerceAtLeast(1)
+                val drawH = (fh * fitScale).toInt().coerceAtLeast(1)
+                val lbOffX = (faceSampleSize - drawW) / 2
+                val lbOffY = (faceSampleSize - drawH) / 2
+                // 黑边区域先擦除，否则复用位图会残留上一帧内容
+                scaledBmp.eraseColor(android.graphics.Color.BLACK)
                 canvas.drawBitmap(
                     srcBmp,
                     android.graphics.Rect(0, 0, fw, fh),
-                    android.graphics.Rect(0, 0, faceSampleSize, faceSampleSize),
+                    android.graphics.Rect(lbOffX, lbOffY, lbOffX + drawW, lbOffY + drawH),
                     null
                 )
+                // MediaPipe 返回的是「含黑边的整张 256×256 画布」归一化坐标，须先换算回内容子矩形
+                // 再套 mapCrop*ToViewport 得到视口 UV。lbW/lbH 为内容在画布中的归一化占比。
+                val lbX0 = lbOffX / scaledSizeF
+                val lbY0 = lbOffY / scaledSizeF
+                val lbW = drawW / scaledSizeF
+                val lbH = drawH / scaledSizeF
+                val mpX: (Float) -> Float = { px -> mapCropXToViewport((px - lbX0) / lbW) }
+                val mpY: (Float) -> Float = { py -> mapCropYToViewport((py - lbY0) / lbH) }
+                val mpLenX: (Float) -> Float = { len -> mapCropLenToViewport(len / lbW) }
 
                 // Track face landmarks using Google MediaPipe (with legacy fallback)
                 val manager = mediaPipeManager
@@ -5444,9 +5484,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         // v2.0.156：MediaPipe 给的是「采样裁剪图」空间的坐标，必须换算成视口 UV
                         // 再喂给 shader —— 否则人脸一偏离画面中心，妆容与变形就整体错位
                         // （采样区只覆盖视口中央一小块，不换算相当于把局部坐标当成全屏坐标用）。
-                        val cxUv = mapCropXToViewport(result.centerX)
-                        val cyUv = mapCropYToViewport(result.centerY)
-                        val eyeDistUv = mapCropLenToViewport(result.eyeDistance)
+                        val cxUv = mpX(result.centerX)
+                        val cyUv = mpY(result.centerY)
+                        val eyeDistUv = mpLenX(result.eyeDistance)
                         // Smooth tracking updates using low-pass lerp filter to eliminate jitter
                         // v2.0.173：检测成功 → 立即置 1 并清零失败计数（见下方失败分支的防抖说明）
                         faceMissStreak = 0
@@ -5458,20 +5498,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         // Sync the precise MediaPipe 468-point features when available
                         if (result.hasDetailedLandmarks) {
                             hasDetailedLandmarks = 1
-                            eyeLeftXUniform = eyeLeftXUniform * 0.75f + mapCropXToViewport(result.eyeLeftX) * 0.25f
-                            eyeLeftYUniform = eyeLeftYUniform * 0.75f + mapCropYToViewport(result.eyeLeftY) * 0.25f
-                            eyeRightXUniform = eyeRightXUniform * 0.75f + mapCropXToViewport(result.eyeRightX) * 0.25f
-                            eyeRightYUniform = eyeRightYUniform * 0.75f + mapCropYToViewport(result.eyeRightY) * 0.25f
-                            mouthXUniform = mouthXUniform * 0.75f + mapCropXToViewport(result.mouthX) * 0.25f
-                            mouthYUniform = mouthYUniform * 0.75f + mapCropYToViewport(result.mouthY) * 0.25f
-                            chinXUniform = chinXUniform * 0.75f + mapCropXToViewport(result.chinX) * 0.25f
-                            chinYUniform = chinYUniform * 0.75f + mapCropYToViewport(result.chinY) * 0.25f
+                            eyeLeftXUniform = eyeLeftXUniform * 0.75f + mpX(result.eyeLeftX) * 0.25f
+                            eyeLeftYUniform = eyeLeftYUniform * 0.75f + mpY(result.eyeLeftY) * 0.25f
+                            eyeRightXUniform = eyeRightXUniform * 0.75f + mpX(result.eyeRightX) * 0.25f
+                            eyeRightYUniform = eyeRightYUniform * 0.75f + mpY(result.eyeRightY) * 0.25f
+                            mouthXUniform = mouthXUniform * 0.75f + mpX(result.mouthX) * 0.25f
+                            mouthYUniform = mouthYUniform * 0.75f + mpY(result.mouthY) * 0.25f
+                            chinXUniform = chinXUniform * 0.75f + mpX(result.chinX) * 0.25f
+                            chinYUniform = chinYUniform * 0.75f + mpY(result.chinY) * 0.25f
                             // v2.0.159：嘴形（宽按水平比例、高按垂直比例缩放；角度不平滑，
                             // 避免在 ±π 附近来回抖动）
                             mouthHalfWidthUniform = mouthHalfWidthUniform * 0.75f +
-                                mapCropLenToViewport(result.mouthHalfWidth) * 0.25f
+                                mpLenX(result.mouthHalfWidth) * 0.25f
                             mouthHalfHeightUniform = mouthHalfHeightUniform * 0.75f +
-                                (result.mouthHalfHeight * faceCropScaleY) * 0.25f
+                                ((result.mouthHalfHeight / lbH) * faceCropScaleY) * 0.25f
                             mouthAngleUniform = result.mouthAngle
                         } else {
                             // Fallback tracker: derive rough feature positions from center/eye distance

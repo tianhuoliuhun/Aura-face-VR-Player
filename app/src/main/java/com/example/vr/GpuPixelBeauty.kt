@@ -46,9 +46,20 @@ object GpuPixelBeauty {
     var available: Boolean = false
         private set
 
-    /** 上次 init 失败的时刻（自动重试的 60s 冷却；UI 主动点击可跳过） */
+    /** 上次 init 失败的时刻（v2.4.38 起仅用于诊断日志，不再作为自动重试的判据） */
     @Volatile
     private var lastFailedMs = 0L
+
+    /**
+     * v2.4.38（美颜审查 #10）：**非强制（自动）初始化**是否已尝试过。
+     *
+     * 旧实现用「失败后 60s 冷却」做自动重试 —— 结果每 60s 都会在 GL 线程重跑一次
+     * `GPUPixel.Init`（含 assets 拷贝 IO + `loadLibrary`），正是渲染卡顿的来源。
+     * 现改为：自动路径**只尝试一次**，失败后不再自动重试；重试仅由用户在设置里
+     * 重新点击 GPUPixel 引擎（[init] 传 `force = true`）触发。
+     */
+    @Volatile
+    private var autoAttempted = false
 
     /**
      * v2.0.187：是否使用 **texture 零拷贝通道**（输入 + 输出都走 GPU 纹理）。
@@ -76,19 +87,18 @@ object GpuPixelBeauty {
      * 错误的 property key + 空 landmarks，已修复）。初始化失败时 [available] 保持
      * false，上层 Toast 提示并保持 GLSL 引擎。
      *
-     * 失败重试：UI 主动点击传 [force]=true 立即重试；onDrawFrame 自动兜底走 60s 冷却
-     * （避免每帧重试 loadLibrary）。
+     * 失败重试（v2.4.38 审查 #10）：**自动路径只尝试一次**（见 [autoAttempted]），失败后
+     * 不再自动重试；仅由 UI 主动点击传 [force]=true 触发重试，且调用点已移到后台线程
+     * （不再占用 GL 线程）。
      *
      * @param force 用户主动点击引擎按钮时传 true
      */
     @Synchronized
     fun init(context: Context, force: Boolean = false): Boolean {
         if (available) return true
-        if (!force && lastFailedMs != 0L &&
-            android.os.SystemClock.uptimeMillis() - lastFailedMs < 60_000L
-        ) {
-            return false
-        }
+        // v2.4.38（美颜审查 #10）：自动路径只尝试一次；失败后交由用户点击重试
+        if (!force && autoAttempted) return false
+        autoAttempted = true
         return try {
             // GPUPixel.Init 会把 **assets 里的 GPUPixel 资源**（lookup 图 + Mars-Face 模型）
             // 拷到应用外部目录 gpupixel/ 下，再 nativeSetResourcePath 指过去。
