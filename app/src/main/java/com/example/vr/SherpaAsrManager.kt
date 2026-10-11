@@ -672,6 +672,11 @@ object SherpaAsrManager {
      * 可实际上 Dolphin 一直随包可用。
      */
     fun isModelReadyFor(context: Context, langKey: String): Boolean {
+        // v2.4.39：**用户显式选择的候选优先** —— 否则「中/日/韩/粤 选了尚未下载的 SenseVoice」
+        //   会因该语言另有内置 Dolphin 而误报「已就绪」：UI 不给下载入口，
+        //   而 createRecognizer 走 SenseVoice 路径时又因文件缺失创建失败。
+        //   （选中的若是 Dolphin 候选，isExtModelReady 对 assets 版仍返回 true，行为不变。）
+        chosenExtModel(context, langKey)?.let { return isExtModelReady(context, it) }
         val cands = AsrExtModels.candidatesByKey(langKey)
         if (cands.isNotEmpty()) {
             // 候选里有内置 Dolphin 且 assets 完好 → 开箱即用，无需下载
@@ -689,6 +694,18 @@ object SherpaAsrManager {
      * 全都就绪时退回第一个（此时体积已不重要）。
      */
     fun modelInfoFor(context: Context, langKey: String): Triple<String, Int, Boolean> {
+        // v2.4.39：**用户显式选择的候选优先** —— 这是「选了 SenseVoice 仍显示 Dolphin」的根因。
+        //   此前本函数有一套自己的回退（只要该语言带内置 Dolphin 就返回 "Dolphin"），
+        //   **完全不看 modelChoiceFor**；而识别链路（resolveExtModel）是看用户选择的
+        //   → 出现「选 SenseVoice，显示 Dolphin，实际用 SenseVoice」的不一致。
+        chosenExtModel(context, langKey)?.let { m ->
+            // 选中的是「已内置的 Dolphin」→ 仍按内置显示（0MB、非扩展），与旧行为一致
+            if (m.modelType == "dolphin" && dolphinAssetAvailable(context)) {
+                return Triple("Dolphin", 0, false)
+            }
+            // 名称统一走友好名（`sense-voice` → "SenseVoice"），不再往 UI 抛原始目录名
+            return Triple(AsrExtModels.friendlyModelName(m.dirName), m.sizeMb, true)
+        }
         val cands = AsrExtModels.candidatesByKey(langKey)
         // v2.1.208：内置模型已改为 Dolphin（SenseVoice 已移除），无扩展候选时显示 Dolphin。
         // 体积给 0：Dolphin 是**随 APK 内置**的，不该让用户看到"需下载 99MB"。
@@ -700,7 +717,7 @@ object SherpaAsrManager {
             return Triple("Dolphin", 0, false)
         }
         val pick = cands.firstOrNull { !isExtModelReady(context, it) } ?: cands.first()
-        return Triple(pick.dirName, pick.sizeMb, true)
+        return Triple(AsrExtModels.friendlyModelName(pick.dirName), pick.sizeMb, true)
     }
 
     // =======================================================================
@@ -740,6 +757,29 @@ object SherpaAsrManager {
      */
     fun modelChoiceFor(context: Context, langKey: String): String =
         choicePrefs(context).getString("asr_model_choice_$langKey", "builtin") ?: "builtin"
+
+    /**
+     * v2.4.39：用户**显式选中**的扩展模型（该语言存在该候选、且不是 `builtin`）。
+     *
+     * 这是「用户选择优先」的**唯一定义** —— [resolveExtModel] / [isModelReadyFor] /
+     * [modelInfoFor] / [isDownloadNeededFor] / [startDownloadFor] 一律经它判断，
+     * 避免再出现「一处看了用户选择、另一处没看」的分叉。
+     *
+     * ## 背景（本次修复的根因）
+     * v2.4.29 起 SenseVoice-Small 作为**可下载扩展模型**重新接入（中/英/日/韩/粤），
+     * 与**内置 Dolphin** 形成「同语言多候选」。但当时只给 [isDownloadNeededFor] /
+     * [startDownloadFor] 补了「用户选择优先」—— [isModelReadyFor] 与 [modelInfoFor]
+     * **仍无视用户选择**：只要该语言带内置 Dolphin 就直接返回「Dolphin / 已就绪」。
+     * 结果：在中/日/韩/粤 选中 SenseVoice 后，卡片与实时字幕区**仍显示 Dolphin**
+     * （而识别其实已按选择切到 SenseVoice，显示与行为不一致）。
+     *
+     * @return `null` = 未显式选择 / 选的是 `builtin` / 候选项不存在 → 调用方走原有回退逻辑
+     */
+    private fun chosenExtModel(context: Context, langKey: String): AsrExtModel? {
+        val choice = modelChoiceFor(context, langKey)
+        if (choice.isEmpty() || choice == "builtin") return null
+        return AsrExtModels.candidatesByKey(langKey).firstOrNull { it.dirName == choice }
+    }
 
     /**
      * 模型选择版本号：**任何一次 [setModelChoice] 都会自增**。
@@ -808,11 +848,8 @@ object SherpaAsrManager {
         val cands = AsrExtModels.candidatesByKey(langKey)
         if (cands.isEmpty()) return null
 
-        val choice = modelChoiceFor(context, langKey)
-        // 用户明确选了某个扩展模型（非 builtin）→ 只认它
-        if (choice.isNotEmpty() && choice != "builtin") {
-            cands.firstOrNull { it.dirName == choice }?.let { return it }
-        }
+        // 用户明确选了某个扩展模型（非 builtin）→ 只认它（「用户选择优先」唯一定义见 chosenExtModel）
+        chosenExtModel(context, langKey)?.let { return it }
         // ⚠️ v2.1.208：内置 SenseVoice 已移除，「builtin」这个历史选择值**不再特殊处理** ——
         //    旧版本可能把它存进 prefs，这里让它继续往下走「自动选择」分支（等价于未选择），
         //    否则会 return null 而走到已失效的 SenseVoice 路径上。
@@ -835,10 +872,7 @@ object SherpaAsrManager {
         if (cands.isEmpty()) return false
         // v2.4.29：**用户明确选了某个候选时只看该候选** —— 否则「选了 SenseVoice（中/日/韩/粤
         //   也登记了它）却因该语言另有内置 Dolphin 而显示『无需下载』」→ 选中后初始化失败。
-        val choice = modelChoiceFor(context, langKey)
-        if (choice.isNotEmpty() && choice != "builtin") {
-            cands.firstOrNull { it.dirName == choice }?.let { return !isExtModelReady(context, it) }
-        }
+        chosenExtModel(context, langKey)?.let { return !isExtModelReady(context, it) }
         // 候选里有内置 Dolphin 且 assets 完好 → 该语言开箱即用
         if (cands.any { it.modelType == "dolphin" && dolphinAssetAvailable(context) }) return false
         // 已有任一候选就绪 → 无需再下
@@ -862,12 +896,9 @@ object SherpaAsrManager {
             return
         }
         // v2.4.29：**用户明确选了某个候选 → 优先下它**（即使该语言另有内置 Dolphin 覆盖）。
-        val choice = modelChoiceFor(context, langKey)
-        if (choice.isNotEmpty() && choice != "builtin") {
-            cands.firstOrNull { it.dirName == choice }?.let { m ->
-                if (!isExtModelReady(context, m)) startExtModelDownload(context, m)
-                return
-            }
+        chosenExtModel(context, langKey)?.let { m ->
+            if (!isExtModelReady(context, m)) startExtModelDownload(context, m)
+            return
         }
         // ⚠️ v2.1.208：Dolphin 已内置到 assets —— 对该语言而言无需任何下载，
         //    直接返回（否则 UI 的「下载模型」按钮会触发一次无意义的下载流程）。

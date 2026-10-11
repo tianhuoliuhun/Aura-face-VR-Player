@@ -5212,7 +5212,11 @@ fun VRPlayerScreen(
                             accentOnColor = AccentOnColor,
                             sherpaLangCode = sherpaLangCode,
                             onSherpaLangCodeChange = { changeAsrLanguage(it) },
-                            onUserInteraction = { keepUiAlight() }
+                            onUserInteraction = { keepUiAlight() },
+                            // v2.4.39：这里也要**单独置顶 SenseVoice** —— 否则默认「按分类」视角下
+                            //   中/日/韩/粤 每种语言只显示首选（内置 Dolphin）一条 chip，
+                            //   SenseVoice 在本面板**根本选不到**（与设置面板行为不一致）。
+                            senseVoiceFirst = true
                         )
 
                         // v127e：推理线程数（1~10，推荐 4~6）
