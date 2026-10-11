@@ -86,7 +86,15 @@ fun LocalModelSection(
         //    此前 UI 在这里**毫无反馈** —— 用户只看到「译文一直不出现」，
         //    很自然会判定成「本地 AI 无法执行 / 功能坏了」。
         //    所以这里显式给出「进行中」与「上次耗时」，让"慢"变得可预期。
-        if (LocalLlmManager.isInferencing) {
+        if (LocalLlmManager.isQueued) {
+            // v2.4.35（#3）：先显示「排队中」，让用户知道并非卡死，只是前面还有任务
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.local_model_queued),
+                color = accentColor,
+                fontSize = 11.sp
+            )
+        } else if (LocalLlmManager.isInferencing) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = stringResource(R.string.local_model_inferencing),
@@ -158,8 +166,9 @@ fun LocalModelSection(
                     text = stringResource(R.string.local_model_delete),
                     accentColor = accentColor,
                     onClick = {
-                        LocalLlmManager.release()
-                        if (LocalLlmManager.fileOf(context, model).delete()) refreshKey++
+                        // v2.4.35（#15）：用持锁的 deleteModel，避免「删除与加载并发」误报文件损坏
+                        LocalLlmManager.deleteModel(context, model)
+                        refreshKey++
                     }
                 )
             }

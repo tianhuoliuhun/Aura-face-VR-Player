@@ -338,7 +338,6 @@
     <string name="beauty_engine_glsl">GLSL（内蔵）</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
     <string name="beauty_engine_unavailable">GPUPixel の初期化に失敗しました。GLSL エンジンを維持します</string>
-    <string name="beauty_gp_sharpen">シャープ化</string>
     <string name="beauty_gp_vr_face">VR 映像の顔美顔</string>
     <string name="beauty_gp_vr_face_desc">VR / 全景モードでも GPUPixel 美顔を適用し全画面に反映：肌補正・美白は全画面、小顔・目拡大は顔検出が必要（負荷は大きめ、既定でオン）</string>
     <string name="beauty_preset_custom">カスタム</string>
@@ -622,7 +621,7 @@
     <string name="toast_subtitle_generated">字幕を生成・読み込み完了：%1$s（%2$d 件）</string>
     <string name="toast_subtitle_gen_failed">字幕生成失敗：%1$s</string>
     <string name="asr_vocab_label">語彙</string>
-    <string name="beauty_gp_half_res">半分の解像度で美顔処理</string>
+    <string name="beauty_gp_half_res">GPUPixel 半分の解像度で美顔処理</string>
     <string name="beauty_gp_half_res_desc">美顔を 1/2 解像度で処理します。負荷は下がりますが細部はやや軟らかくなります。オフにするとフル解像度処理（画質最優先・負荷大）。GPUPixel エンジンのみ有効</string>
 
 <!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
@@ -873,6 +872,7 @@
     <string name="local_model_mmproj_download">ダウンロード</string>
     <string name="local_model_vision_on">視覚有効</string>
     <string name="local_model_inferencing">ローカル AI 推論中…（CPU 推論のため時間がかかります）</string>
+    <string name="local_model_queued">ローカル AI 待機中…（前の処理を待っています）</string>
     <string name="local_model_last_inference">前回の推論時間: %1$.1f 秒</string>
     <string name="danmu_image_long_side">画像の長辺（px）</string>
     <string name="danmu_use_local_llm">ローカルモデルで弾幕を生成</string>

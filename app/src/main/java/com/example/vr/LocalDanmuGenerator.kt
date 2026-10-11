@@ -2,6 +2,8 @@ package com.example.vr
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * **本地 LLM 弹幕生成**（v2.4.12）—— 端侧 llama.cpp + Qwen3.5-0.8B。
@@ -105,9 +107,14 @@ object LocalDanmuGenerator {
             val w = frame.width
             val h = frame.height
             if (w > 0 && h > 0) {
-                val px = IntArray(w * h)
-                frame.getPixels(px, 0, w, 0, 0, w, h)
-                rgbBytes = ImageScale.argbToRgbBytes(px)
+                // v2.4.35（审查 #17）：ARGB→RGB 转换（约 60 万像素）从主线程挪到 Dispatchers.Default，
+                //    避免每 5 秒一次的转换跟着 VR 渲染跑、叠加掉帧。
+                val converted = withContext(Dispatchers.Default) {
+                    val px = IntArray(w * h)
+                    frame.getPixels(px, 0, w, 0, 0, w, h)
+                    ImageScale.argbToRgbBytes(px)
+                }
+                rgbBytes = converted
                 rgbW = w
                 rgbH = h
             }

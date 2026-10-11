@@ -183,49 +183,47 @@ fun VRPlayerScreen(
             } else BEAUTY_PRESET_CUSTOM
         )
     }
-    // v2.0.160：原「对比原图」改为「美颜总开关」；v2.0.172：默认改为**关**，开关状态记忆
-    // （记忆模式下重启恢复上次状态；未设置时默认关）
+    // v2.0.160：原「对比原图」改为「美颜总开关」；v2.0.172：默认改为**关**。
+    // v2.4.35（#13）：美颜参数与记忆模式解耦 —— 开关状态始终落盘，不再跟随 isMemoryModeEnabled。
     var beautyMasterEnabled by remember {
-        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_master_enabled", false) else false)
+        mutableStateOf(prefs.getBoolean("beauty_master_enabled", false))
     }
     // v2.0.160：美颜引擎（0 = GLSL 内置，1 = GPUPixel）。两套引擎的检测与参数完全独立
     var beautyEngineType by remember {
-        mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("beauty_engine_type", BEAUTY_ENGINE_GLSL) else BEAUTY_ENGINE_GLSL)
+        mutableIntStateOf(prefs.getInt("beauty_engine_type", BEAUTY_ENGINE_GLSL))
     }
     var beautyGpSmooth by remember {
-        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_smooth", 0.7f) else 0.7f)
+        mutableFloatStateOf(prefs.getFloat("beauty_gp_smooth", 0.7f))
     }
     var beautyGpWhite by remember {
-        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_white", 0.4f) else 0.4f)
-    }
-    var beautyGpSharpen by remember {
-        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_sharpen", 0.3f) else 0.3f)
+        mutableFloatStateOf(prefs.getFloat("beauty_gp_white", 0.4f))
     }
     var beautyGpSlim by remember {
-        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_slim", 0.4f) else 0.4f)
+        mutableFloatStateOf(prefs.getFloat("beauty_gp_slim", 0.4f))
     }
     var beautyGpEyeZoom by remember {
-        mutableFloatStateOf(if (isMemoryModeEnabled) prefs.getFloat("beauty_gp_eye_zoom", 0.3f) else 0.3f)
+        mutableFloatStateOf(prefs.getFloat("beauty_gp_eye_zoom", 0.3f))
     }
     // v2.0.160（P3）：GPUPixel 方案下把人脸美颜也应用到 VR/全景视频（屏幕空间后处理）。
     // v2.0.184：恢复为**真开关**（默认开）—— v2.0.182 曾把它从激活条件里拿掉（当时 VR 无条件生效），
     // 于是它退化成 UI 占位；现重新纳入 isGpuPixelActive()，让用户能真正控制「VR 下是否启用 GPUPixel 美颜」。
     var gpuPixelVrFaceBeauty by remember {
-        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_gp_vr_face", true) else true)
+        mutableStateOf(prefs.getBoolean("beauty_gp_vr_face", true))
     }
-    // v2.0.187：GPUPixel 美颜半分辨率处理（默认开，跟随记忆模式）
+    // v2.0.187：GPUPixel 美颜半分辨率处理（默认开）。
+    // v2.4.35（#13）：不再跟随记忆模式 —— 美颜参数始终落盘，故此处始终读取 prefs。
     var gpuPixelHalfResBeauty by remember {
-        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("beauty_gp_half_res", true) else true)
+        mutableStateOf(prefs.getBoolean("beauty_gp_half_res", true))
     }
     var beautyLevel by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_level", 0.65f) else 0.65f
+            prefs.getFloat("beauty_level", 0.65f)
         )
     }
     // v2.0.159：磨皮「皮肤质感」= 频域分离的高频保留度（0.5~1.3；> 1 相当于 USM 锐化）
     var beautyTextureDetail by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_texture_detail", 0.88f) else 0.88f
+            prefs.getFloat("beauty_texture_detail", 0.88f)
         )
     }
     var brightnessLevel by remember {
@@ -242,62 +240,62 @@ fun VRPlayerScreen(
     // 12 Fine-grained Beauty cosmetics states
     var beautyWhitening by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_whitening", 0.5f) else 0.5f
+            prefs.getFloat("beauty_whitening", 0.5f)
         )
     }
     var beautyFaceSlimming by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_face_slimming", 0.4f) else 0.4f
+            prefs.getFloat("beauty_face_slimming", 0.4f)
         )
     }
     var beautyBigEyes by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_big_eyes", 0.3f) else 0.3f
+            prefs.getFloat("beauty_big_eyes", 0.3f)
         )
     }
     var beautyDarkCircles by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_dark_circles", 0.3f) else 0.3f
+            prefs.getFloat("beauty_dark_circles", 0.3f)
         )
     }
     var beautyNoseSlimming by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_nose_slimming", 0.2f) else 0.2f
+            prefs.getFloat("beauty_nose_slimming", 0.2f)
         )
     }
     var beautyMouth by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_mouth", 0.2f) else 0.2f
+            prefs.getFloat("beauty_mouth", 0.2f)
         )
     }
     var beautyTeethWhitening by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_teeth_whitening", 0.3f) else 0.3f
+            prefs.getFloat("beauty_teeth_whitening", 0.3f)
         )
     }
     var beautyLipstick by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_lipstick", 0.3f) else 0.3f
+            prefs.getFloat("beauty_lipstick", 0.3f)
         )
     }
     var beautyBlush by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_blush", 0.3f) else 0.3f
+            prefs.getFloat("beauty_blush", 0.3f)
         )
     }
     var beautyEyebrows by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_eyebrows", 0.4f) else 0.4f
+            prefs.getFloat("beauty_eyebrows", 0.4f)
         )
     }
     var beautyLongLegs by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_long_legs", 0.4f) else 0.4f
+            prefs.getFloat("beauty_long_legs", 0.4f)
         )
     }
     var beautySmallHead by remember {
         mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("beauty_small_head", 0.3f) else 0.3f
+            prefs.getFloat("beauty_small_head", 0.3f)
         )
     }
 
@@ -1184,7 +1182,6 @@ fun VRPlayerScreen(
         beautyEngineType,
         beautyGpSmooth,
         beautyGpWhite,
-        beautyGpSharpen,
         beautyGpSlim,
         beautyGpEyeZoom,
         gpuPixelVrFaceBeauty,
@@ -1280,38 +1277,37 @@ fun VRPlayerScreen(
         }
         prefs.edit().apply {
             putBoolean("is_memory_mode_enabled", isMemoryModeEnabled)
+            // v2.4.35（#13）：美颜参数与记忆模式解耦 —— 以下美颜 key 始终落盘，不受 isMemoryModeEnabled 影响
+            putInt("beauty_engine_type", beautyEngineType)
+            putBoolean("beauty_master_enabled", beautyMasterEnabled)
+            putFloat("beauty_level", beautyLevel)
+            putFloat("beauty_texture_detail", beautyTextureDetail)
+            putFloat("beauty_gp_smooth", beautyGpSmooth)
+            putFloat("beauty_gp_white", beautyGpWhite)
+            putFloat("beauty_gp_slim", beautyGpSlim)
+            putFloat("beauty_gp_eye_zoom", beautyGpEyeZoom)
+            putBoolean("beauty_gp_vr_face", gpuPixelVrFaceBeauty)
+            putBoolean("beauty_gp_half_res", gpuPixelHalfResBeauty)
+            putFloat("beauty_whitening", beautyWhitening)
+            putFloat("beauty_face_slimming", beautyFaceSlimming)
+            putFloat("beauty_big_eyes", beautyBigEyes)
+            putFloat("beauty_dark_circles", beautyDarkCircles)
+            putFloat("beauty_nose_slimming", beautyNoseSlimming)
+            putFloat("beauty_mouth", beautyMouth)
+            putFloat("beauty_teeth_whitening", beautyTeethWhitening)
+            putFloat("beauty_lipstick", beautyLipstick)
+            putFloat("beauty_blush", beautyBlush)
+            putFloat("beauty_eyebrows", beautyEyebrows)
+            putFloat("beauty_long_legs", beautyLongLegs)
+            putFloat("beauty_small_head", beautySmallHead)
+            if (beautyPresetId >= 0) putInt("beauty_preset_id", beautyPresetId)
             if (isMemoryModeEnabled) {
                 putInt("projection_mode", projectionMode.id)
                 // v2.1.211：鱼眼视场角（与投影模式同组持久化）
                 putInt("fisheye_fov_deg", fisheyeFovDeg)
                 putInt("stereo_mode", stereoMode.id)
-                putFloat("beauty_level", beautyLevel)
-                putFloat("beauty_texture_detail", beautyTextureDetail)
-                // v2.0.160：双引擎相关
-                putBoolean("beauty_master_enabled", beautyMasterEnabled)
-                putInt("beauty_engine_type", beautyEngineType)
-                putFloat("beauty_gp_smooth", beautyGpSmooth)
-                putFloat("beauty_gp_white", beautyGpWhite)
-                putFloat("beauty_gp_sharpen", beautyGpSharpen)
-                putFloat("beauty_gp_slim", beautyGpSlim)
-                putFloat("beauty_gp_eye_zoom", beautyGpEyeZoom)
-                putBoolean("beauty_gp_vr_face", gpuPixelVrFaceBeauty)
-                putBoolean("beauty_gp_half_res", gpuPixelHalfResBeauty)
                 putFloat("brightness_level", brightnessLevel)
                 putFloat("contrast_level", contrastLevel)
-                putFloat("beauty_whitening", beautyWhitening)
-                putFloat("beauty_face_slimming", beautyFaceSlimming)
-                putFloat("beauty_big_eyes", beautyBigEyes)
-                putFloat("beauty_dark_circles", beautyDarkCircles)
-                putFloat("beauty_nose_slimming", beautyNoseSlimming)
-                putFloat("beauty_mouth", beautyMouth)
-                putFloat("beauty_teeth_whitening", beautyTeethWhitening)
-                putFloat("beauty_lipstick", beautyLipstick)
-                putFloat("beauty_blush", beautyBlush)
-                putFloat("beauty_eyebrows", beautyEyebrows)
-                putFloat("beauty_long_legs", beautyLongLegs)
-                putFloat("beauty_small_head", beautySmallHead)
-                if (beautyPresetId >= 0) putInt("beauty_preset_id", beautyPresetId)
                 putBoolean("is_split_screen_vr", isSplitScreenVR)
                 putBoolean("is_gyro_enabled", isGyroEnabled)
                 putBoolean("huawei_vr_enabled", huaweiVrEnabled)
@@ -1395,34 +1391,8 @@ fun VRPlayerScreen(
                 //    漏掉本行会在「关闭记忆模式」后残留旧值（本项目头号坑）。
                 remove("fisheye_fov_deg")
                 remove("stereo_mode")
-                remove("beauty_level")
-                // v2.0.184：补齐此前遗漏的美颜 key（关闭记忆模式时应一并清除，
-                // 否则残留旧值会在下次开启记忆模式时被"恢复"成过期状态）
-                remove("beauty_texture_detail")
-                remove("beauty_master_enabled")
-                remove("beauty_engine_type")
-                remove("beauty_gp_smooth")
-                remove("beauty_gp_white")
-                remove("beauty_gp_sharpen")
-                remove("beauty_gp_slim")
-                remove("beauty_gp_eye_zoom")
-                remove("beauty_gp_vr_face")
-                remove("beauty_gp_half_res")
                 remove("brightness_level")
                 remove("contrast_level")
-                remove("beauty_whitening")
-                remove("beauty_face_slimming")
-                remove("beauty_big_eyes")
-                remove("beauty_dark_circles")
-                remove("beauty_nose_slimming")
-                remove("beauty_mouth")
-                remove("beauty_teeth_whitening")
-                remove("beauty_lipstick")
-                remove("beauty_blush")
-                remove("beauty_eyebrows")
-                remove("beauty_long_legs")
-                remove("beauty_small_head")
-                remove("beauty_preset_id")
                 remove("is_split_screen_vr")
                 remove("is_gyro_enabled")
                 remove("huawei_vr_enabled")
@@ -4249,7 +4219,6 @@ fun VRPlayerScreen(
                 view.renderer.beautyEngineType = beautyEngineType
                 view.renderer.beautyGpSmooth = beautyGpSmooth
                 view.renderer.beautyGpWhite = beautyGpWhite
-                view.renderer.beautyGpSharpen = beautyGpSharpen
                 view.renderer.beautyGpSlim = beautyGpSlim
                 view.renderer.beautyGpEyeZoom = beautyGpEyeZoom
                 view.renderer.gpuPixelVrFaceBeauty = gpuPixelVrFaceBeauty
@@ -7553,8 +7522,6 @@ BatchTranscribeSection(
                                     onGpSmoothChange = { beautyGpSmooth = it; keepUiAlight() },
                                     gpWhite = beautyGpWhite,
                                     onGpWhiteChange = { beautyGpWhite = it; keepUiAlight() },
-                                    gpSharpen = beautyGpSharpen,
-                                    onGpSharpenChange = { beautyGpSharpen = it; keepUiAlight() },
                                     gpSlim = beautyGpSlim,
                                     onGpSlimChange = { beautyGpSlim = it; keepUiAlight() },
                                     gpEyeZoom = beautyGpEyeZoom,

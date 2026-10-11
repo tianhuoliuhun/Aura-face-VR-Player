@@ -536,8 +536,6 @@ fun BeautyEngineSection(
     onGpSmoothChange: (Float) -> Unit,
     gpWhite: Float,
     onGpWhiteChange: (Float) -> Unit,
-    gpSharpen: Float,
-    onGpSharpenChange: (Float) -> Unit,
     gpSlim: Float,
     onGpSlimChange: (Float) -> Unit,
     gpEyeZoom: Float,
@@ -611,7 +609,8 @@ fun BeautyEngineSection(
                 )
             }
 
-            // v2.0.187：半分辨率美颜处理 —— 见 VRGLRenderer.gpuPixelHalfResBeauty 的说明
+            // v2.0.187：GPUPixel 专属「半分辨率美颜」开关（GLSL 半分辨率磨皮 pass 始终开启、无独立开关）。
+            // v2.4.35（#14）：标签已显式标注 GPUPixel，澄清该开关仅作用于 GPUPixel 引擎。
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,

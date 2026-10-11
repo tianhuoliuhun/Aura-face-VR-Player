@@ -235,6 +235,17 @@ object LocalLlmManager {
         private set
 
     /**
+     * 是否**正在排队**（已进入 [complete] 但尚未抢到单线程推理调度器）。
+     *
+     * v2.4.35（审查 #3）：与 [isInferencing] 区分「排队中」与「推理中」。
+     * 此前 [isInferencing] 在进入 [complete] 时就（抢到线程之前）置 true，
+     * 导致 UI 把「在等别人」也显示成「推理中」，用户无法分辨「慢」与「卡在队列」。
+     * 现在：进入即 `isQueued=true`；真正开始执行（进入推理调度器）时才置 `isInferencing=true`。
+     */
+    var isQueued by mutableStateOf(false)
+        private set
+
+    /**
      * 引擎健康标记（v2.4.23 审查 #1）。推理超时后无法取消正在执行的 native 采样，
      * 只能标记本字段；下次 [ensureLoaded] 看到它为真时先释放再重建引擎，避免把卡死状态
      * 带入下一次推理。
@@ -616,6 +627,14 @@ object LocalLlmManager {
                 return@withLock false
             }
 
+            // v2.4.35（审查 #15）：等锁期间模型文件可能被并发删除，加载前再确认一次；
+            //    删除路径（deleteModel）同样持 engineLock，与这里互斥，故该检查可靠。
+            if (!isReady(context, model)) {
+                lastError = "模型文件已被删除（可能被并发删除），请重新下载"
+                Log.e(TAG, lastError!!)
+                return@withLock false
+            }
+
             // ⚠️ 用内部版而不是 release()：后者会另起协程，在持锁状态下调它会绕开本锁
             releaseInternal()
 
@@ -677,6 +696,24 @@ object LocalLlmManager {
         }
     }
 
+    /**
+     * v2.4.35（审查 #15）：删除模型文件（含 mmproj）。
+     *
+     * ⚠️ 持 [engineLock] 执行「释放 + 删除」组合，与 [ensureLoaded] 的加载互斥，
+     *    避免「删除与加载并发」—— 否则 [ensureLoaded] 可能读到已被删除的文件、
+     *    nativeInit 失败并误报「文件损坏或内存不足」，误导用户。
+     *    （此前的 `release()` 只在锁内释放引擎，文件删除发生在锁外，故存在竞态。）
+     */
+    fun deleteModel(context: Context, model: LocalLlmModel) {
+        CoroutineScope(Dispatchers.IO).launch {
+            engineLock.withLock {
+                releaseInternal()
+                runCatching { fileOf(context, model).delete() }
+                runCatching { mmprojFileOf(context, model)?.delete() }
+            }
+        }
+    }
+
     /** ⚠️ **内部**释放：不做排队，供已持有 [engineLock] 的调用方使用。 */
     private fun releaseInternal() {
         try {
@@ -712,17 +749,16 @@ object LocalLlmManager {
     ): String? {
         if (loadedModelId == null) {
             Log.w(TAG, "complete 被调用但模型未加载")
+            // v2.4.35（审查 #9）：模型未加载也要暴露原因，而不是让调用方只看到空结果
+            lastError = "模型未加载，无法执行本地推理（请先下载并加载模型）"
             return null
         }
-        // ⚠️ v2.4.16：本地推理在 CPU 上要**几十秒**，必须让 UI 能显示「推理中…」——
-        //    否则用户只看到「点了没反应 / 译文一直不出现」，很容易判定成「功能坏了」。
-        //
-        // ⚠️ 这里**直接赋值**而不切 `Dispatchers.Main`：
-        //    Compose 的 snapshot state 写入本身是线程安全的；
-        //    而在 finally 里 `withContext(Main)` 一旦碰上协程取消会**再抛**
-        //    CancellationException，反而掩盖真实错误。
-        isInferencing = true
+        // v2.4.35（#3）：进入即标记「排队中」—— 此刻还没抢到单线程推理调度器，
+        //    真正开始执行（进入推理调度器）时才置 isInferencing（running）。
+        //    UI 据此区分「慢（推理中）」与「在等别人（排队中）」。
+        isQueued = true
         try {
+            var blankOutput = false
             // ⚠️ 跑在**单线程推理调度器**上（不是 Dispatchers.IO）：
             //    多个并发请求（字幕预读 + 弹幕生成）在此排队，而不是堆到 64 个线程上。
             // v2.4.23：外裹总超时（审查 #1）。withTimeoutOrNull 会取消本协程，
@@ -730,37 +766,52 @@ object LocalLlmManager {
             //    让下次 ensureLoaded 重建引擎（放弃当前执行器上的卡死调用）。
             val text = withTimeoutOrNull(INFERENCE_TIMEOUT_MS) {
                 withContext(inferenceDispatcher) {
-                    val t0 = System.currentTimeMillis()
-                    val r = LlamaMtmd.completeSafe(
-                        prompt = prompt,
-                        system = systemPrompt ?: "",
-                        rgb = rgb,
-                        imgW = imgW,
-                        imgH = imgH,
-                        maxTokens = maxTokens,
-                        temperature = temperature
-                    )
-                    val ms = System.currentTimeMillis() - t0
-                    lastInferenceMs = ms
-                    if (r.isBlank()) {
-                        Log.w(TAG, "推理返回空（${ms}ms，图=${rgb?.size ?: 0}B）")
-                        null
-                    } else {
-                        Log.d(TAG, "推理完成 ${ms}ms / ${r.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
-                        r
+                    // 抢到推理线程 → 离开排队、进入真正推理
+                    isQueued = false
+                    isInferencing = true
+                    try {
+                        val t0 = System.currentTimeMillis()
+                        val r = LlamaMtmd.completeSafe(
+                            prompt = prompt,
+                            system = systemPrompt ?: "",
+                            rgb = rgb,
+                            imgW = imgW,
+                            imgH = imgH,
+                            maxTokens = maxTokens,
+                            temperature = temperature
+                        )
+                        val ms = System.currentTimeMillis() - t0
+                        lastInferenceMs = ms
+                        if (r.isBlank()) {
+                            // v2.4.35（审查 #9）：空输出也要暴露原因，而不是塌缩成空结果
+                            Log.w(TAG, "推理返回空（${ms}ms，图=${rgb?.size ?: 0}B）")
+                            lastError = "本地推理返回空（模型未产出内容，可能 prompt 过长或模板不匹配）"
+                            blankOutput = true
+                            null
+                        } else {
+                            Log.d(TAG, "推理完成 ${ms}ms / ${r.length} 字（${if (rgb != null) "含图" else "纯文本"}）")
+                            r
+                        }
+                    } finally {
+                        isInferencing = false
                     }
                 }
             }
             if (text == null) {
-                // 超时：native 仍在跑但本协程已放弃。标记不健康，下次推理前重建。
-                engineUnhealthy = true
-                lastError = "本地推理超时（>${INFERENCE_TIMEOUT_MS / 1000}s），已标记引擎需重建"
-                Log.e(TAG, lastError!!)
+                if (blankOutput) {
+                    // 空输出：lastError 已在上面设置，仅补日志
+                    Log.e(TAG, lastError!!)
+                } else {
+                    // 超时：native 仍在跑但本协程已放弃。标记不健康，下次推理前重建。
+                    engineUnhealthy = true
+                    lastError = "本地推理超时（>${INFERENCE_TIMEOUT_MS / 1000}s），已标记引擎需重建"
+                    Log.e(TAG, lastError!!)
+                }
                 return null
             }
             return text
         } finally {
-            isInferencing = false
+            isQueued = false
         }
     }
 

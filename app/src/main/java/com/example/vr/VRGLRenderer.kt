@@ -674,7 +674,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // ---- GPUPixel 引擎参数（与 GLSL 参数独立，prefs 前缀 beauty_gp_*）----
     @Volatile var beautyGpSmooth = 0.7f
     @Volatile var beautyGpWhite = 0.4f
-    @Volatile var beautyGpSharpen = 0.3f
     @Volatile var beautyGpSlim = 0.4f
     @Volatile var beautyGpEyeZoom = 0.3f
     /**
@@ -5330,8 +5329,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     // 故 EMA 反映的是纯 GPU 开销，降采样决策比之前更准确。
                     val t0 = System.nanoTime()
                     val pipeline = GpuPixelBeauty.getOrCreatePipeline()
-                    // v2.0.188：同步 GPUPixel 锐化级别（依赖 fork 注册的 `sharpen` 属性）
-                    pipeline.sharpenLevel = beautyGpSharpen
 
                     // v2.0.187：GL 线程判定 texture 通道不可用时，在这里把链切回 raw-data。
                     // 必须在这里（faceExecutor 上）做 —— 它持有 GPUPixel context 的线程语义，
