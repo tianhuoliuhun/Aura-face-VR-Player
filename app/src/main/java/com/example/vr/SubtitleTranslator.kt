@@ -236,7 +236,9 @@ class SubtitleTranslator(private val context: Context) {
 
         /** 预读翻译的前瞻窗口（秒）与单轮条数上限 */
         private const val PREFETCH_LOOKAHEAD_MS = 60_000L
-        private const val PREFETCH_MAX_ITEMS = 20
+        // v2.4.36 审查 #2：远期预翻译单轮上限收紧到 8 条（原 20），避免一次性把大量
+        //    推理任务堆进本地引擎队列、挤掉实时字幕翻译。窗口外的条目本就在 filter 阶段丢弃。
+        private const val PREFETCH_MAX_ITEMS = 8
 
         /**
          * MyMemory 限速常量（v2.0.144）。
@@ -1152,7 +1154,8 @@ class SubtitleTranslator(private val context: Context) {
                 val key = makeCacheKey(targetLang, text)
                 if (translationCache.containsKey(key)) continue
                 try {
-                    val translated = fetchTranslation(text, targetLang)
+                    // v2.4.36 审查 #2：远期预翻译用最低优先级，让实时字幕翻译插队
+                    val translated = fetchTranslation(text, targetLang, LocalLlmManager.PRIORITY_SUBTITLE_PRETRANSLATE)
                     if (translated.isNotBlank()) translationCache[key] = translated
                 } catch (e: CancellationException) {
                     throw e
@@ -1260,7 +1263,12 @@ class SubtitleTranslator(private val context: Context) {
      * Translates input text using the selected engine (Bing free endpoint or LLM API).
      * Requests are serialized by a mutex to stay within free-tier rate limits.
      */
-    private suspend fun fetchTranslation(text: String, targetLangCode: String): String {
+    private suspend fun fetchTranslation(
+        text: String,
+        targetLangCode: String,
+        // v2.4.36 审查 #2：本地推理优先级。预读（远期）传较低优先级，让实时字幕插队。
+        priority: Int = LocalLlmManager.PRIORITY_SUBTITLE_LIVE
+    ): String {
         val result = translationSemaphore.withPermit {
             try {
                 when (config.engine) {
@@ -1271,7 +1279,7 @@ class SubtitleTranslator(private val context: Context) {
                     // v2.4.12：端侧推理（不走 HTTP）—— **必须显式列出**。
                     // ⚠️ 若漏了这一行，它会落进下面的 `else` 被当成 OpenAI 兼容请求，
                     //    而本地引擎没有 baseUrl/Key → 必然失败且报错信息完全误导。
-                    TranslationEngine.LOCAL_LLM -> translateViaLocalLlm(text, targetLangCode)
+                    TranslationEngine.LOCAL_LLM -> translateViaLocalLlm(text, targetLangCode, priority)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -1680,7 +1688,12 @@ class SubtitleTranslator(private val context: Context) {
      * prompt 里写"翻译成简体中文"比"翻译成 zh"对小模型更明确
      * （复用 [TranslationTargetLanguage.displayName]，不再硬编码一份映射）。
      */
-    private suspend fun translateViaLocalLlm(text: String, targetLangCode: String): String {
+    private suspend fun translateViaLocalLlm(
+        text: String,
+        targetLangCode: String,
+        // v2.4.36 审查 #2：透传推理优先级（实时字幕 > 弹幕 > 远期预翻译）
+        priority: Int = LocalLlmManager.PRIORITY_SUBTITLE_LIVE
+    ): String {
         val model = LocalLlmManager.readyModel(context)
         if (model == null) {
             Log.w("SubtitleTranslator", "本地翻译：模型未下载，跳过（回落显示原文）")
@@ -1700,7 +1713,8 @@ class SubtitleTranslator(private val context: Context) {
             prompt = prompt,
             systemPrompt = system,
             maxTokens = 256,
-            temperature = 0.2f
+            temperature = 0.2f,
+            priority = priority
         ) ?: return ""
         // v2.4.23 审查 #5：本地模型可能先输出 <think>...</think> 推理段，
         // 若不剥离会被当成译文（取首行即标签）。整体剥离后再取首行非空译文。

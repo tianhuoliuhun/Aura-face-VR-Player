@@ -16,9 +16,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
+import java.util.concurrent.PriorityBlockingQueue
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
@@ -119,6 +124,13 @@ object LocalLlmManager {
      */
     private const val DOWNLOAD_UA = "Mozilla/5.0 (Android) AuraFaceVRPlayer"
 
+    // v2.4.36 审查 #12：模型下载 URL **锁定到具体 commit hash**，不再用 `resolve/main`。
+    // 上游 main 一旦更新同名文件（或主模型与 mmproj 不配套），`resolve/main` 会静默换成新内容；
+    // 锁到 commit 可保证「下载即确定」，与已落盘的模型完全可复现。
+    // 该 commit 即当前 main HEAD（bartowski/Qwen_Qwen3.5-0.8B-GGUF）。
+    private const val MODEL_REPO = "bartowski/Qwen_Qwen3.5-0.8B-GGUF"
+    private const val MODEL_REPO_COMMIT = "f36b1ea49a332ede8fe5f389bbf5b3575ef71f48"
+
     const val MODEL_ID_QWEN35_08B = "qwen35-0.8b-q4km"
 
     /**
@@ -134,10 +146,10 @@ object LocalLlmManager {
             fileName = "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
             sizeBytes = 574_000_000L,
             urls = listOf(
-                // 主源：Hugging Face 官方
-                "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+                // 主源：Hugging Face 官方（v2.4.36 审查 #12：锁定到具体 commit，不再用 resolve/main）
+                "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
                 // 兜底：镜像（⚠️ 历史上「按文件下载」在真机曾返回 401，故放最后且允许失败）
-                "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"
+                "https://hf-mirror.com/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"
             ),
             // ⚠️ v2.4.14：4096 → **2048**。
             //    翻译与弹幕都是**短文本**任务，4096 纯属浪费 —— 而 KV cache 大小
@@ -158,8 +170,8 @@ object LocalLlmManager {
             mmprojFileName = "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
             mmprojSizeBytes = 207_000_000L,
             mmprojUrls = listOf(
-                "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
-                "https://hf-mirror.com/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf"
+                "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
+                "https://hf-mirror.com/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf"
             )
         )
     )
@@ -182,6 +194,60 @@ object LocalLlmManager {
         Thread(r, "local-llm-inference")
     }
     private val inferenceDispatcher = inferenceExecutor.asCoroutineDispatcher()
+
+    // ===================== 推理优先级队列（v2.4.36 审查 #2） =====================
+    /**
+     * 本地推理**优先级**（数字越大越先执行）：
+     * 当前播放点附近的**实时字幕翻译** > **弹幕** > **远期预翻译**。
+     *
+     * 单条推理在 CPU 上要几十秒，三者共用一个单线程引擎；没有优先级时，
+     * 弹幕/预翻译会排在实时字幕前面，用户看到「字幕一直不出来」。
+     *
+     * ⚠️ 这里只做**排队排序**，不抢占正在执行的推理（native 采样无法被取消）；
+     *   排序保证「实时字幕」在队列里插到最前，等当前那条跑完就轮到它。
+     */
+    const val PRIORITY_SUBTITLE_LIVE = 3
+    const val PRIORITY_DANMU = 2
+    const val PRIORITY_SUBTITLE_PRETRANSLATE = 1
+
+    /**
+     * 一个待执行的推理任务。实现 [Comparable] 以便 [PriorityBlockingQueue] 按
+     * 「优先级降序、同优先级按入队顺序（seq 升序）」排序 —— 高优先级先出队、同优先级不饿死。
+     */
+    private class InferenceTask(
+        val priority: Int,
+        val seq: Long,
+        val deferred: CompletableDeferred<String?>,
+        val block: suspend () -> String?
+    ) : Comparable<InferenceTask> {
+        override fun compareTo(other: InferenceTask): Int {
+            val p = other.priority.compareTo(priority)
+            if (p != 0) return p
+            return seq.compareTo(other.seq)
+        }
+    }
+
+    /** 待执行任务的优先级队列（单 worker 串行消费，天然就是「先来后到 + 优先级」）。 */
+    private val inferenceQueue = PriorityBlockingQueue<InferenceTask>()
+    private val inferenceSeq = AtomicLong(0)
+    private val inferenceWorkerStarted = AtomicBoolean(false)
+    private val inferenceScheduler = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /** 懒启动唯一的消费协程：从队列取最高优先级任务、执行、完成其 deferred。 */
+    private fun ensureInferenceWorker() {
+        if (inferenceWorkerStarted.compareAndSet(false, true)) {
+            inferenceScheduler.launch {
+                while (true) {
+                    val task = inferenceQueue.take() // 阻塞直到有任务
+                    try {
+                        task.deferred.complete(task.block())
+                    } catch (e: Throwable) {
+                        task.deferred.completeExceptionally(e)
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * 引擎**生命周期锁**：串行化 [ensureLoaded] 与 [release]。
@@ -743,9 +809,10 @@ object LocalLlmManager {
         imgW: Int = 0,
         imgH: Int = 0,
         maxTokens: Int = 256,
-        temperature: Float = 0.3f
-        // ⚠️ 跑在**单线程推理调度器**上（不是 Dispatchers.IO）：
-        //    多个并发请求（字幕预读 + 弹幕生成）在此排队，而不是堆到 64 个线程上。
+        temperature: Float = 0.3f,
+        // v2.4.36 审查 #2：推理优先级（实时字幕 > 弹幕 > 远期预翻译）。
+        // 默认给弹幕；字幕翻译链路显式传更高/更低优先级。
+        priority: Int = PRIORITY_DANMU
     ): String? {
         if (loadedModelId == null) {
             Log.w(TAG, "complete 被调用但模型未加载")
@@ -753,27 +820,35 @@ object LocalLlmManager {
             lastError = "模型未加载，无法执行本地推理（请先下载并加载模型）"
             return null
         }
-        // v2.4.35（#3）：进入即标记「排队中」—— 此刻还没抢到单线程推理调度器，
-        //    真正开始执行（进入推理调度器）时才置 isInferencing（running）。
+        // v2.4.35（#3）：进入即标记「排队中」—— 此刻已入优先级队列、但还没轮到执行，
+        //    真正开始执行（worker 取出本任务）时才置 isInferencing（running）。
         //    UI 据此区分「慢（推理中）」与「在等别人（排队中）」。
         isQueued = true
         try {
             var blankOutput = false
-            // ⚠️ 跑在**单线程推理调度器**上（不是 Dispatchers.IO）：
-            //    多个并发请求（字幕预读 + 弹幕生成）在此排队，而不是堆到 64 个线程上。
-            // v2.4.23：外裹总超时（审查 #1）。withTimeoutOrNull 会取消本协程，
-            //    但 native 采样无法被中断——所以同时标记 engineUnhealthy，
-            //    让下次 ensureLoaded 重建引擎（放弃当前执行器上的卡死调用）。
-            val text = withTimeoutOrNull(INFERENCE_TIMEOUT_MS) {
-                withContext(inferenceDispatcher) {
-                    // 抢到推理线程 → 离开排队、进入真正推理
+            val task = InferenceTask(
+                priority = priority,
+                seq = inferenceSeq.incrementAndGet(),
+                deferred = CompletableDeferred(),
+                block = {
+                    // 被 worker 取出 → 离开排队、进入真正推理
                     isQueued = false
                     isInferencing = true
                     try {
+                        // ===== v2.4.36 审查 #4 + #6 =====
+                        // #4：拼成 ChatML 角色格式（system/user/assistant），替代 native 里的纯文本拼接，
+                        //     提升指令遵从、抑制 Qwen3 系列 <think> 段泄漏（解析层已剥 #5）。
+                        // #6：persona/风格提示词没有长度限制，易超 2048 token 的 n_ctx；
+                        //     按粗略 token 估算截断 user 的前部（保留尾部台词/格式指令），并提示「提示词过长」。
+                        val systemText = systemPrompt ?: ""
+                        val userText = truncatePromptIfNeeded(prompt, systemText, maxTokens)
+                        val chatml = buildChatML(systemText, userText)
+                        // 把 chatml 放进 system 字段、prompt 留空：native 的 `system + "\n\n" + prompt`
+                        // 会变成 `chatml + "\n\n"`，恰好是 assistant 角色前应有的换行（无需改 native）。
                         val t0 = System.currentTimeMillis()
                         val r = LlamaMtmd.completeSafe(
-                            prompt = prompt,
-                            system = systemPrompt ?: "",
+                            prompt = "",
+                            system = chatml,
                             rgb = rgb,
                             imgW = imgW,
                             imgH = imgH,
@@ -796,7 +871,12 @@ object LocalLlmManager {
                         isInferencing = false
                     }
                 }
-            }
+            )
+            inferenceQueue.put(task)
+            ensureInferenceWorker()
+            // v2.4.23 审查 #1：外裹总超时。超时 → 标记引擎不健康，下次推理前重建
+            //    （native 采样无法被取消；worker 仍会把卡死的调用跑完，只是上层不再等）。
+            val text = withTimeoutOrNull(INFERENCE_TIMEOUT_MS) { task.deferred.await() }
             if (text == null) {
                 if (blankOutput) {
                     // 空输出：lastError 已在上面设置，仅补日志
@@ -813,6 +893,55 @@ object LocalLlmManager {
         } finally {
             isQueued = false
         }
+    }
+
+    // ===================== 提示词构造（v2.4.36 审查 #4 / #6） =====================
+
+    /**
+     * v2.4.36 审查 #4：把 system + user 拼成 **ChatML** 角色格式（Qwen3.5 使用）。
+     * 替代 native 里的 `system + "\n\n" + prompt` 纯文本拼接 —— 角色标记能显著提升指令遵从，
+     * 也避免模型把「不要编号 / 不要引号 / 不要开场白」这类约束当成可选项。
+     *
+     * 在 user 角色开头用空 `<think>\n\n</think>` 抑制 Qwen3 系列思考段：
+     * 若模型不支持思考则无害，解析层（审查 #5）也已剥 `<think>` 段兜底。
+     */
+    private fun buildChatML(system: String, user: String): String = buildString {
+        append("<|im_start|>system\n")
+        append(system)
+        append("<|im_end|>\n")
+        append("<|im_start|>user\n")
+        append("<think>\n\n</think>\n\n")
+        append(user)
+        append("<|im_end|>\n")
+        append("<|im_start|>assistant\n")
+    }
+
+    /**
+     * v2.4.36 审查 #6：persona/风格提示词没有长度限制，拼进 prompt 后很容易超过
+     * n_ctx（2048 token）。这里做**粗略 token 估算**（1 码点 ≈ 1 token：CJK 准确，
+     * ASCII 偏保守 → 更早截断，落在安全侧），若整段超出预算则**截断 user 的前部**、
+     * 保留尾部（台词/字幕通常在尾部，人设/风格在前面），避免把正文切掉。
+     * 截断发生时在 UI 提示「提示词过长」。
+     */
+    private fun truncatePromptIfNeeded(user: String, system: String, maxTokens: Int): String {
+        val budget = currentContextSize() - maxTokens - 64
+        if (budget <= 0) return user
+        // 角色标记 + `<|im_start|>` 等固定开销约 80 token
+        val overhead = system.codePointCount(0, system.length) + 80
+        val allowedUser = (budget - overhead).coerceAtLeast(256)
+        val userCp = user.codePointCount(0, user.length)
+        if (userCp <= allowedUser) return user
+        // 截断前部、保留尾部（尾部通常是真正要翻译/处理的台词）
+        lastError = "提示词过长，已自动截断并保留台词（请缩短风格/人设描述）"
+        Log.w(TAG, "prompt 超长（${userCp} 码点 > 预算 ${allowedUser}），截断前部")
+        val drop = userCp - allowedUser
+        return user.substring(user.offsetByCodePoints(0, drop))
+    }
+
+    /** 当前已加载模型的上下文长度（用于 #6 的预算估算）；未知时退回 2048。 */
+    private fun currentContextSize(): Int {
+        val id = loadedModelId ?: return 2048
+        return MODELS.firstOrNull { it.id == id }?.contextSize ?: 2048
     }
 
     // ===================== 内存预检（v2.4.14） =====================

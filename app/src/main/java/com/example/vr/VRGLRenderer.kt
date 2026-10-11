@@ -1408,9 +1408,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 // 解耦：既能抹平色块，又不会变成塑料脸。
                 // （旧实现是单尺度双边 + 0.90 强混合：半径不足只能靠混合硬拉，观感是"糊"不是"净"。）
                 if (isSkin(color.rgb)) {   // ← v2.0.177：纯标量比较，零采样成本
-                vec2 stepF = vec2(uTexelSize.x * 6.0, uTexelSize.y * 6.0);
+                // v2.4.36 审查 #11：磨皮半径固定 6 纹素 → 随分辨率变化覆盖范围。
+                //   改成按画面宽度相对 1080p 等比缩放（用 1/uTexelSize.x 反推宽度，免新增 uniform），
+                //   使 4K 与 1080p 的皮肤覆盖一致。
+                float smoothRadiusScale = (1.0 / uTexelSize.x) / 1080.0;
+                vec2 stepF = uTexelSize * 6.0 * smoothRadiusScale;
 
-                // 8 个远邻域（±6 像素）
+                // 8 个远邻域（±6 像素，已按分辨率缩放）
                 vec4 n1 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepF) : texture2D(uSamplerImage, tc + stepF);
                 vec4 n2 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepF) : texture2D(uSamplerImage, tc - stepF);
                 vec4 n3 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + vec2(stepF.x, 0.0)) : texture2D(uSamplerImage, tc + vec2(stepF.x, 0.0));
@@ -3857,7 +3861,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform vec2 uTexelSize;
         void main() {
             vec4 color = texture2D(uTex, vTex);
-            vec2 stepF = vec2(uTexelSize.x * 6.0, uTexelSize.y * 6.0);
+            // v2.4.36 审查 #11：半分辨率 pass 的磨皮半径同样按源宽度相对 1080p 缩放，
+            //   与上面主 shader 的语义对齐（uTexelSize 此处是半分辨率纹理的纹素尺寸，
+            //   反推出的宽度是半分辨率宽度，缩放后落在源像素上仍与全分辨率路径一致）。
+            float smoothRadiusScale = (1.0 / uTexelSize.x) / 1080.0;
+            vec2 stepF = uTexelSize * 6.0 * smoothRadiusScale;
             vec4 n1 = texture2D(uTex, vTex + stepF);
             vec4 n2 = texture2D(uTex, vTex - stepF);
             vec4 n3 = texture2D(uTex, vTex + vec2(stepF.x, 0.0));
