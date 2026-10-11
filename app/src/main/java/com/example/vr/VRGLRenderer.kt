@@ -708,10 +708,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      */
     @Volatile var gpuPixelHalfResBeauty = true
     // GPUPixel 处理结果（faceExecutor 产出 → GL 线程贴回 FBO）
-    @Volatile private var gpRegionPending: ByteArray? = null
-    // v2.0.183：后台线程写入、GL 线程读取 —— 加 @Volatile 保证可见性（配合 gpRegionPending 的 volatile 写）
-    @Volatile private var gpRegionW = 0
-    @Volatile private var gpRegionH = 0
+    // v2.4.34（#8）：数据与尺寸封装进同一对象、用 AtomicReference 原子取走，
+    // 避免「先读 bytes 再置 null」两步之间被 faceExecutor 的新写入覆盖（丢帧），
+    // 以及分辨率变化时「旧 bytes 配新 W/H」导致的 glTexSubImage2D 尺寸错配。
+    private data class GpRegion(val bytes: ByteArray, val w: Int, val h: Int)
+    private val gpRegionPending = java.util.concurrent.atomic.AtomicReference<GpRegion?>(null)
     // v2.0.186：删除 gpRegionPool 复用池 —— JNI 侧 nativeGetRgbaBuffer 每次都
     // NewByteArray + SetByteArrayRegion（jni_sink_raw_data.cc:97-104），Java 拿到的
     // 必然是全新数组，"native 复用输出 buffer" 对 Java 层不成立。原先再 arraycopy
@@ -1455,12 +1456,19 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     //   · 采样数 9 → 3（仅比 v2.0.177 多 2 次，远低于旧的 9 次）
                     //   · 背景获得极轻降噪 → 分界线消失，观感统一
                     // 权重固定 0.25（与 v2.0.176 的非皮肤分支一致），保持「背景不被过度处理」。
+                    // v2.4.34（#12）：非皮肤分支改为对称 2D 采样（上下左右 4 邻域），
+                    // 消除对水平边缘（窗框/地平线/字幕）造成的纵向拖影。
                     vec2 stepV = vec2(0.0, uTexelSize.y * 6.0);
+                    vec2 stepH = vec2(uTexelSize.x * 6.0, 0.0);
                     vec3 vUp = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepV).rgb
                                                : texture2D(uSamplerImage, tc + stepV).rgb;
                     vec3 vDn = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepV).rgb
                                                : texture2D(uSamplerImage, tc - stepV).rgb;
-                    vec3 vAvg = (color.rgb + vUp + vDn) / 3.0;
+                    vec3 vL  = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepH).rgb
+                                               : texture2D(uSamplerImage, tc - stepH).rgb;
+                    vec3 vR  = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepH).rgb
+                                               : texture2D(uSamplerImage, tc + stepH).rgb;
+                    vec3 vAvg = (color.rgb + vUp + vDn + vL + vR) / 5.0;
                     color.rgb = mix(color.rgb, vAvg, uBeautyStrength * 0.25);
                 }
             }
@@ -2103,7 +2111,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             //   省掉「glReadPixels 回读 8.29MB + JNI 拷贝 8.29MB + GL 线程再 memcpy 8.29MB」
             // · raw-data 通道（回退）：上面的 CPU 回读路径，行为与 v2.0.186 完全一致
             if (!applyGpTextureResult(gpResultTexIdPending)) {
-                val hadPending = gpRegionPending != null
+                val hadPending = gpRegionPending.get() != null
                 uploadPendingGpRegion()
                 var fromStable = false
                 if (!hadPending && gpHasStableResult && gpResultTexId != 0) {
@@ -4665,29 +4673,32 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *    真正的缩放交给 GPU 的线性采样完成，比 CPU 上采样便宜得多。
      */
     private fun uploadPendingGpRegion() {
-        val bytes = gpRegionPending ?: return
-        gpRegionPending = null
+        // v2.4.34（#8）：原子「读 + 置 null」一步完成，避免与 faceExecutor 的新写入竞争丢帧
+        val region = gpRegionPending.getAndSet(null) ?: return
         // v2.0.186（P0-A）：不再有输出复用池 —— 每帧的 bytes 是 sink 新建的独立数组，
         // 上传后交由 GC 回收（原"还池"逻辑已随 gpRegionPool 一并删除）。
-        if (gpFboTexId != 0 && gpRegionW > 0 && gpRegionH > 0) {
-            doUploadGpRegion(bytes)
+        if (gpFboTexId != 0 && region.w > 0 && region.h > 0) {
+            doUploadGpRegion(region)
         }
     }
 
-    private fun doUploadGpRegion(bytes: ByteArray) {
+    private fun doUploadGpRegion(region: GpRegion) {
+        val bytes = region.bytes
+        val srcW = region.w
+        val srcH = region.h
         // 需不需要缩放贴回：回读尺寸 < 目标矩形尺寸（即降采样了）就必须走 blit 拉伸。
-        // ⚠️ 不能用「gpRegionW == gpLastReadW」判断 —— 二者恒等（回读就是该尺寸），
+        // ⚠️ 不能用「srcW == gpLastReadW」判断 —— 二者恒等（回读就是该尺寸），
         //    那样会永远走直通，把降采样结果只填在视口左上角。
         val dstW = (gpReadUvW * gpFboW + 0.5f).toInt()
         val dstH = (gpReadUvH * gpFboH + 0.5f).toInt()
         val needsScale = dstW > 0 && dstH > 0 &&
-            (gpRegionW != dstW || gpRegionH != dstH)
+            (srcW != dstW || srcH != dstH)
 
         if (!needsScale) {
             // 1:1 直通：直接把处理结果写回 FBO 的同一区域（无人脸 ROI 缩放的旧路径）
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gpFboTexId)
             GLES20.glTexSubImage2D(
-                GLES20.GL_TEXTURE_2D, 0, gpLastReadX0, gpLastReadY0, gpRegionW, gpRegionH,
+                GLES20.GL_TEXTURE_2D, 0, gpLastReadX0, gpLastReadY0, srcW, srcH,
                 GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, java.nio.ByteBuffer.wrap(bytes)
             )
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
@@ -4695,12 +4706,12 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
 
         // 缩放路径：先传到临时纹理，再拉伸贴回 FBO 的对应区域（GPU 线性上采样）
-        ensureGpUploadTex(gpRegionW, gpRegionH)
+        ensureGpUploadTex(srcW, srcH)
         val uploadTex = gpUploadTexId
         if (uploadTex == 0) return
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, uploadTex)
         GLES20.glTexSubImage2D(
-            GLES20.GL_TEXTURE_2D, 0, 0, 0, gpRegionW, gpRegionH,
+            GLES20.GL_TEXTURE_2D, 0, 0, 0, srcW, srcH,
             GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, java.nio.ByteBuffer.wrap(bytes)
         )
 
@@ -5276,7 +5287,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // （叠加回读/贴回本身的 1~2 帧延迟，同量级，视觉不可感知）；
             // 磨皮/美白完全不依赖检测，降频对它们零影响。
             val interval = gpDetectInterval.coerceAtLeast(1)
-            val doDetect = gpCachedLandmarks == null || (gpFrameTick % interval == 0)
+            // v2.4.34（#5）：无脸场景也要降频。此前 `gpCachedLandmarks == null` 一旦成立
+            // （连续 3 次未检出脸后被清空），`== null` 分支会让检测**每帧**都跑 →
+            // 风景/无脸画面 CPU 满载、VR 设备发热明显。改为：无脸时放大检测间隔（退避），
+            // 有脸时仍按 gpDetectInterval 正常降频。首帧 gpFrameTick=0 仍会立即检测一次。
+            val noFaceInterval = 8
+            val detectInterval = if (gpCachedLandmarks == null) noFaceInterval else interval
+            val doDetect = gpFrameTick % detectInterval == 0
             gpFrameTick++
 
             gpInFlight.addAndGet(if (doDetect) 2 else 1)
@@ -5323,8 +5340,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         pipeline.fallbackToRawDataSink()
                     }
 
-                    gpRegionW = fw
-                    gpRegionH = fh
                     val useTexChannel =
                         GpuPixelBeauty.useTextureSink && !gpTextureFallbackRequested
                     if (useTexChannel) {
@@ -5363,7 +5378,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                             // env->NewByteArray(size) + SetByteArrayRegion 拷进新数组，
                             // 故 out 是本次调用独有的新数组（native 侧 rgba_buffer_ 的复用
                             // 被 JNI 边界隔离），GL 线程下一帧消费它不存在竞争。
-                            gpRegionPending = out
+                            // v2.4.34（#8）：数据与尺寸打包成同一对象原子写入，
+                            // 避免分辨率变化时「旧 bytes 配新 W/H」的尺寸错配
+                            gpRegionPending.set(GpRegion(out, fw, fh))
                         }
                     }
 
