@@ -57,7 +57,12 @@ object DanmuImporter {
     data class Result(
         val items: List<ImportedDanmu>,
         val skipped: Int,
-        val format: Format
+        val format: Format,
+        /**
+         * v2.4.41（弹幕审查 #12）：是否因 [MAX_ITEMS] 上限被**截断**。
+         * 旧实现直接 `break`，不计入 skipped、也无任何提示 → 用户看到的条数与文件不符却不知原因。
+         */
+        val truncated: Boolean = false
     ) {
         val size: Int get() = items.size
         /** 最后一条的时间（ms），用于 UI 展示「覆盖时长」 */
@@ -148,6 +153,7 @@ object DanmuImporter {
     fun parseBiliXml(xml: String): Result {
         val out = mutableListOf<ImportedDanmu>()
         var skipped = 0
+        var truncated = false   // v2.4.41（#12）：是否因 MAX_ITEMS 截断
         try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = false
@@ -157,7 +163,7 @@ object DanmuImporter {
             var event = parser.eventType
             while (event != XmlPullParser.END_DOCUMENT) {
                 if (event == XmlPullParser.START_TAG && parser.name == "d") {
-                    if (out.size >= MAX_ITEMS) break
+                    if (out.size >= MAX_ITEMS) { truncated = true; break }
                     val p = parser.getAttributeValue(null, "p")
                     val text = parser.nextText().orEmpty().trim()
                     val item = buildFromP(p, text)
@@ -170,7 +176,7 @@ object DanmuImporter {
             logger("B站 XML 解析中断: ${e.message}")
         }
         out.sortBy { it.timeMs }
-        return Result(items = out, skipped = skipped, format = Format.BILI_XML)
+        return Result(items = out, skipped = skipped, format = Format.BILI_XML, truncated = truncated)
     }
 
     /**
@@ -240,10 +246,11 @@ object DanmuImporter {
     fun parseJson(json: String): Result {
         val out = mutableListOf<ImportedDanmu>()
         var skipped = 0
+        var truncated = false   // v2.4.41（#12）：是否因 MAX_ITEMS 截断
         try {
             val objects = splitTopLevelObjects(json)
             for (obj in objects) {
-                if (out.size >= MAX_ITEMS) break
+                if (out.size >= MAX_ITEMS) { truncated = true; break }
                 val item = buildFromJsonObject(obj)
                 if (item != null) out.add(item) else skipped++
             }
@@ -251,7 +258,7 @@ object DanmuImporter {
             logger("JSON 解析中断: ${e.message}")
         }
         out.sortBy { it.timeMs }
-        return Result(items = out, skipped = skipped, format = Format.JSON)
+        return Result(items = out, skipped = skipped, format = Format.JSON, truncated = truncated)
     }
 
     /** 由单个 JSON 对象文本构造弹幕；不合法返回 null（抽出来便于单测） */
@@ -287,7 +294,10 @@ object DanmuImporter {
             val hex = s.substring(1)
             return when (hex.length) {
                 6 -> hex.toLongOrNull(16)?.let { Color(0xFF000000L or it) }
-                8 -> hex.toLongOrNull(16)?.let { Color(it) }
+                // v2.4.41（弹幕审查 #13）：8 位 `#AARRGGBB` 的 alpha 为 0 时**补成不透明**。
+                //   旧实现直接 `Color(it)` → `#00FFFFFF` 会**完全透明**（用户以为颜色没生效）；
+                //   多数来源的 8 位串本意只表达 RGB，alpha 位为 0 属占位。
+                8 -> hex.toLongOrNull(16)?.let { withOpaqueIfTransparent(it) }
                 3 -> {  // #RGB 简写 → 展开为 #RRGGBB
                     val r = hex[0]; val g = hex[1]; val b = hex[2]
                     val full = "$r$r$g$g$b$b"
@@ -296,12 +306,24 @@ object DanmuImporter {
                 else -> null
             }
         }
-        // 纯数字：可能是十进制 RGB888 或十六进制（不带 #）
+        // 纯数字：**优先按十进制** —— B 站 XML 的 `p` 第 4 项就是十进制 RGB（如 16777215 = 白）；
+        // 含十六进制字母的串会 `toIntOrNull()` 失败，自然落到下面的十六进制分支。
+        // ⚠️ 「全数字且恰好 6 位」天然有歧义（`100000` 既可读作十进制也可读作十六进制）——
+        //    这是两种来源格式的**约定冲突**，此处保持十进制语义以兼容 B 站（不改，属既定取舍）。
         s.toIntOrNull()?.let { return rgbIntToColor(it) }
         s.toLongOrNull(16)?.let { v ->
-            return if (s.length >= 8) Color(v) else Color(0xFF000000L or v)
+            return if (s.length >= 8) withOpaqueIfTransparent(v) else Color(0xFF000000L or v)
         }
         return null
+    }
+
+    /**
+     * v2.4.41（弹幕审查 #13）：8 位 ARGB 中 **alpha == 0 时补成不透明**。
+     * 六位 `#000000`（纯黑）不受影响 —— 只有显式给了 alpha 位且为 0 才补。
+     */
+    private fun withOpaqueIfTransparent(v: Long): Color {
+        val argb = v and 0xFFFFFFFFL
+        return if ((argb ushr 24) and 0xFFL == 0L) Color(argb or 0xFF000000L) else Color(argb)
     }
 
     /**

@@ -902,13 +902,15 @@
     <string name="danmu_import_clear">가져오기 해제</string>
     <string name="danmu_import_hint">Bilibili 탄막 XML(&lt;d p="시간,모드,크기,색,..."&gt;)과 JSON 배열(time / text / color)을 지원합니다. 스크롤 탄막만 사용하고 나머지는 건너뜁니다.</string>
     <string name="danmu_import_loading">파일 읽는 중…</string>
-    <string name="danmu_import_ok">{count}개 가져왔습니다</string>
-    <string name="danmu_import_fail_unreadable">파일을 읽을 수 없습니다. 다시 선택해 주세요</string>
+    <string name="danmu_import_ok">%1$d개 가져왔습니다</string>
+    <string name="danmu_import_ok_truncated">%1$d개 가져왔습니다 (상한에 도달하여 나머지는 잘렸습니다)</string>
+    <string name="danmu_import_bound_other_video">가져온 탄막은 다른 동영상용입니다. 타임라인이 맞지 않을 수 있습니다</string>
+            <string name="danmu_import_fail_unreadable">파일을 읽을 수 없습니다. 다시 선택해 주세요</string>
     <string name="danmu_import_fail_format">형식을 알 수 없습니다(Bilibili XML 또는 JSON 필요)</string>
     <string name="danmu_import_fail_empty">사용할 수 있는 스크롤 탄막이 없습니다</string>
     <string name="danmu_err_import_no_file">가져오기 모드: 먼저 탄막 파일을 선택하세요</string>
     <string name="danmu_err_import_empty">가져온 탄막이 비어 있습니다. 파일을 확인하세요</string>
-    <string name="danmu_status_imported">{count}개 가져옴</string>
+    <string name="danmu_status_imported">%1$d개 가져옴</string>
     <string name="danmu_status_import_source">소스: 로컬 가져오기</string>
     <string name="danmu_time_jitter">시간 흩뿌리기</string>
     <string name="danmu_time_jitter_hint">같은 배치의 탄막은 원래 동시에 나옵니다. 배치 시각을 중심으로 정규분포로 흩뿌려 자연스럽게 엇갈리게 합니다. 0 = 끄기(동시).</string>

@@ -772,7 +772,8 @@ fun VRPlayerScreen(
         if (isMemoryModeEnabled) {
             danmuConfig = DanmuConfig(
                 isEnabled = prefs.getBoolean("danmu_enabled", false),
-                apiKey = prefs.getString("danmu_api_key", "") ?: "",
+                // v2.4.41（弹幕审查 #14）：Key 落盘加密（历史明文值原样返回，平滑迁移）
+            apiKey = DanmuKeyStore.decrypt(prefs.getString("danmu_api_key", "") ?: ""),
                 baseUrl = prefs.getString("danmu_base_url", DanmuConfig.DEFAULT_BASE_URL)
                     ?: DanmuConfig.DEFAULT_BASE_URL,
                 modelName = prefs.getString("danmu_model_name", DanmuConfig.DEFAULT_MODEL)
@@ -830,7 +831,8 @@ fun VRPlayerScreen(
         prefs.edit().apply {
             if (isMemoryModeEnabled) {
                 putBoolean("danmu_enabled", danmuConfig.isEnabled)
-                putString("danmu_api_key", danmuConfig.apiKey)
+                // v2.4.41（弹幕审查 #14）：加密后再落盘（密文带 `enc1:` 前缀）
+            putString("danmu_api_key", DanmuKeyStore.encrypt(danmuConfig.apiKey))
                 putString("danmu_base_url", danmuConfig.baseUrl)
                 putString("danmu_model_name", danmuConfig.modelName)
                 putString("danmu_persona", danmuConfig.personaPrompt)
@@ -1880,6 +1882,22 @@ fun VRPlayerScreen(
             }
             val name = danmuImportStore.displayNameOf(context.contentResolver, uri)
             danmuConfig = danmuConfig.copy(importedUri = uri.toString(), importedName = name)
+            // v2.4.41（弹幕审查 #16）：记下「这份弹幕是给哪个视频选的」。
+            // 换到别的视频时给一句提示 —— **不自动清除**（同剧多集共用一份弹幕是合法用法）。
+            if (isMemoryModeEnabled) {
+                prefs.edit().putString("danmu_import_for_video", selectedMediaItem.uri.orEmpty()).apply()
+            }
+        }
+    }
+
+    // v2.4.41（弹幕审查 #16）：导入的弹幕文件绑定的是「选择它时的那个视频」；换片时提示时间轴可能对不上。
+    // ⚠️ 只提示、不自动清除 —— 「是否预期」属产品决策，清除入口在弹幕面板里本来就有。
+    LaunchedEffect(selectedMediaItem.uri, danmuConfig.importedUri, danmuConfig.isEnabled) {
+        if (!danmuConfig.isEnabled || danmuConfig.importedUri.isBlank()) return@LaunchedEffect
+        val bound = prefs.getString("danmu_import_for_video", "").orEmpty()
+        val cur = selectedMediaItem.uri.orEmpty()
+        if (bound.isNotBlank() && cur.isNotBlank() && bound != cur) {
+            danmuLastError = context.getString(R.string.danmu_import_bound_other_video)
         }
     }
 
@@ -1994,6 +2012,10 @@ fun VRPlayerScreen(
                 //    是否装了 mmproj），但**mmproj 已就绪时本地模型也能看图** →
                 //    这种情况同样要取帧。两条判据任一成立即取。
                 var frame: android.graphics.Bitmap? = null
+                // v2.4.41（弹幕审查 #10）：记下**本批截图的播放位置** ——
+                //   ① 响应到达时若播放位置已明显偏离 → 丢弃该批（内容对应的画面已经过去了）；
+                //   ② 未偏离时，出生时刻按「截图位置」倒推，使屏上位置与画面时间轴一致。
+                val capturePosMs = currentPositionMs
                 val needFrame = danmuConfig.needsImage ||
                     (danmuConfig.useLocalLlm && LocalLlmManager.visionAvailable)
                 if (needFrame) {
@@ -2091,17 +2113,23 @@ fun VRPlayerScreen(
                 } else {
                     danmuLastError = ""
                     val now = android.os.SystemClock.elapsedRealtime()
-                    // 同步屏幕宽度（引擎按它算位置与过期）
-                    // ⚠️ 分屏 VR 下引擎坐标系是**单眼宽**，由渲染层接管（DanmuOverlay 内同步），
-                    //    这里只在拿到非 0 值时兜底设置，避免覆盖渲染层已设好的单眼宽。
-                    val glW = (currentGlSurfaceView?.width ?: 0).toFloat()
-                    if (glW > 0f && danmuEngine.screenWidthPx <= 0f) {
-                        danmuEngine.screenWidthPx = glW
+                    // v2.4.41（弹幕审查 #10）：请求耗时 2~10s（读超时最长 30s），期间画面已推进 ——
+                    //   偏离超过阈值就丢弃该批（否则内容对应的是「已经过去」的画面，明显滞后）。
+                    val driftMs = kotlin.math.abs(currentPositionMs - capturePosMs)
+                    if (driftMs > DANMU_LATE_DROP_MS) {
+                        android.util.Log.i(
+                            "VRPlayerScreen",
+                            "弹幕批丢弃：响应与截图位置相差 ${driftMs}ms（>${DANMU_LATE_DROP_MS}ms）"
+                        )
+                    } else {
+                        // 出生时刻按「截图位置」倒推（= now − 已过去的时长），
+                        // 于是弹幕在屏上的位置与该条对应的画面时间轴一致。
+                        val spawnBaseMs = now - driftMs.coerceAtLeast(0L)
+                        val added = danmuEngine.enqueue(fetched.lines, spawnBaseMs)
+                        danmuGeneratedCount += added
+                        // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）
+                        danmuEngine.prune(now)
                     }
-                    val added = danmuEngine.enqueue(fetched.lines, now)
-                    danmuGeneratedCount += added
-                    // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）
-                    danmuEngine.prune(now)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e  // 协程取消必须原样抛出，否则 LaunchedEffect 无法正确结束
@@ -2146,24 +2174,35 @@ fun VRPlayerScreen(
         // 用户可能在播放到一半时才切到导入模式或选好文件，此时不该把前面积压的弹幕全补投。
         danmuImportStore.resetCursorTo(currentPositionMs)
         danmuLastError = ""
+        // v2.4.41（弹幕审查 #6）：**待投递队列** —— 本拍拿不到轨道的条目暂存于此，下一拍重试；
+        // 超过 [DANMU_IMPORT_RETRY_WINDOW_MS] 仍未上屏才丢弃（旧实现直接丢，密集时大量消失）。
+        val pending = mutableListOf<Triple<String, Long, Color?>>()
         while (true) {
             if (isVideoPlaying) {
-                val due = danmuImportStore.drainUntil(currentPositionMs)
-                if (due.isNotEmpty()) {
+                val pos = currentPositionMs
+                val due = danmuImportStore.drainUntil(pos)
+                if (due.isNotEmpty() || pending.isNotEmpty()) {
                     val now = android.os.SystemClock.elapsedRealtime()
-                    // ⚠️ 引擎坐标系兜底（与 AI 循环同款；分屏时由渲染层设成单眼宽）
-                    val glW = (currentGlSurfaceView?.width ?: 0).toFloat()
-                    if (glW > 0f && danmuEngine.screenWidthPx <= 0f) {
-                        danmuEngine.screenWidthPx = glW
-                    }
                     // 颜色：文件里指定的色优先；没写颜色（null）时才由引擎回落到配置色。
                     // ⚠️ 不走 `DanmuColorMode` 随机 —— 文件已经表达了自己的颜色意图，
                     //    再随机就把它覆盖了（用户会觉得"导入的颜色没生效"）。
-                    val entries = due.map { d ->
-                        Triple(d.text, now, d.color)
+                    //
+                    // ⚠️ v2.4.41（弹幕审查 #6）①：出生时刻**按「当前播放位置 − 该条时间戳」换算**。
+                    //    旧实现所有到期条目都用同一个 `now` → 时间戳被"打平"、同批拥挤同一代轨道，
+                    //    且屏上位置与画面脱节。
+                    val fresh = due.map { d ->
+                        val lateMs = (pos - d.timeMs).coerceAtLeast(0L)
+                        Triple(d.text, now - lateMs, d.color)
                     }
-                    val added = danmuEngine.enqueueTimed(entries)
-                    danmuGeneratedCount += added
+                    pending.addAll(fresh)
+                    val batch = pending.toList()
+                    pending.clear()
+                    // ⚠️ v2.4.41（弹幕审查 #5）：导入路径**不做相似度去重**（dedupe = false）——
+                    //    文件是「已知正确」的数据，「哈哈哈」这类重复是真实弹幕的一部分。
+                    val outcome = danmuEngine.enqueueTimed(batch, dedupe = false)
+                    danmuGeneratedCount += outcome.placed
+                    val deadline = now - DANMU_IMPORT_RETRY_WINDOW_MS
+                    pending.addAll(outcome.unplaced.filter { it.second >= deadline })
                     danmuEngine.prune(now)
                 }
             }
@@ -8763,6 +8802,23 @@ private const val DANMU_SEEK_POLL_MS = 200L
  * 取 120 与「同批抖动默认 σ=400ms」相比小一个量级，不会成为出场时机的瓶颈。
  */
 private const val DANMU_IMPORT_TICK_MS = 120L
+
+/**
+ * v2.4.41（弹幕审查 #6）：导入弹幕「无可用轨道」后的**重试窗口**（ms）。
+ *
+ * 旧实现 `pickTrack` 返回 null 就直接丢弃；密集批次下大量弹幕**无声消失**。
+ * 现在未入队的条目会进待投递队列、下一拍重试；**超过本窗口仍未上屏才丢弃**
+ * （≈1s，仍接近原时间点，「稍晚冒出」好过「永远不来」）。
+ */
+private const val DANMU_IMPORT_RETRY_WINDOW_MS = 1_000L
+
+/**
+ * v2.4.41（弹幕审查 #10）：AI 弹幕**响应到达时**与截图时刻播放位置的**最大允许偏离**（ms）。
+ *
+ * 模型请求耗时 2~10s（读超时最长 30s），期间画面早已推进 —— 超过本阈值说明这批弹幕
+ * 对应的画面「已经过去了」，直接丢弃，不再错位展示。
+ */
+private const val DANMU_LATE_DROP_MS = 10_000L
 
 /**
  * 把抓到的原始帧缩放到拖动预览尺寸（320×180，16:9）。

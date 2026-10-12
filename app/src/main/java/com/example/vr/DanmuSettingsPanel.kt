@@ -393,7 +393,12 @@ fun DanmuSettingsPanel(
                         )
                     }
                     is DanmuImportStore.LoadResult.Success -> Text(
-                        text = stringResource(R.string.danmu_import_ok, st.count),
+                        // v2.4.41（弹幕审查 #12）：被上限截断时如实说明（旧实现静默丢弃）
+                        text = if (st.truncated) {
+                            stringResource(R.string.danmu_import_ok_truncated, st.count)
+                        } else {
+                            stringResource(R.string.danmu_import_ok, st.count)
+                        },
                         color = Color(0xFF7BD88F),
                         fontSize = 11.sp,
                         modifier = Modifier.padding(top = 2.dp)

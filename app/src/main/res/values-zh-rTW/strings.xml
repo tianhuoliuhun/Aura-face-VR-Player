@@ -944,13 +944,15 @@
     <string name="danmu_import_clear">清除匯入</string>
     <string name="danmu_import_hint">支援 B 站彈幕 XML（&lt;d p="時間,模式,字級,顏色,..."&gt;）與 JSON 陣列（time / text / color）。僅使用捲動類彈幕，其餘類型會被跳過。</string>
     <string name="danmu_import_loading">正在讀取檔案…</string>
-    <string name="danmu_import_ok">匯入成功，共 {count} 條</string>
-    <string name="danmu_import_fail_unreadable">檔案無法讀取，請重新選擇</string>
+    <string name="danmu_import_ok">匯入成功，共 %1$d 條</string>
+    <string name="danmu_import_ok_truncated">已匯入 %1$d 條（已達上限，超出部分已截取）</string>
+    <string name="danmu_import_bound_other_video">匯入的彈幕是為另一個影片選擇的，時間軸可能對不上</string>
+            <string name="danmu_import_fail_unreadable">檔案無法讀取，請重新選擇</string>
     <string name="danmu_import_fail_format">無法辨識該檔案格式（需要 B 站 XML 或 JSON）</string>
     <string name="danmu_import_fail_empty">檔案裡沒有可用的捲動彈幕</string>
     <string name="danmu_err_import_no_file">匯入模式：請先選擇一個彈幕檔案</string>
     <string name="danmu_err_import_empty">匯入的彈幕為空，請檢查檔案</string>
-    <string name="danmu_status_imported">已匯入 {count} 條</string>
+    <string name="danmu_status_imported">已匯入 %1$d 條</string>
     <string name="danmu_status_import_source">來源：本機匯入</string>
     <string name="danmu_time_jitter">時間抖動</string>
     <string name="danmu_time_jitter_hint">同一批彈幕原本同時出現，這裡以批次時刻為中心做常態分布抖動，讓它們疏密自然地錯開。0 = 關閉（同時出場）。</string>

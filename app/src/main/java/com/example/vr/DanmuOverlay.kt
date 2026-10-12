@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -69,8 +70,8 @@ fun DanmuOverlay(
     config: DanmuConfig,
     isSplitScreenVR: Boolean = false,
     /**
-     * v2.4.40（弹幕审查 #1）：播放是否**暂停**。
-     * 暂停时渲染层用「虚拟时钟」冻结弹幕（不推进、不 prune），恢复后自然续走。
+     * v2.4.40/2.4.41（弹幕审查 #1）：播放是否**暂停**。
+     * 暂停时渲染层冻结弹幕（不推进时钟、不 prune）；恢复那一帧把暂停时长补给 `bornMs`。
      */
     isPaused: Boolean = false,
     areaHeightRatio: Float = DEFAULT_AREA_HEIGHT_RATIO,
@@ -82,44 +83,52 @@ fun DanmuOverlay(
     // ⚠️ 不能用 LaunchedEffect + delay(16) 自建定时器：那样与 VSync 不同步，
     //    会出现抖动；withFrameNanos 直接挂在合成器的帧回调上，天然对齐。
     //
-    // ===== v2.4.40（弹幕审查 #1）：暂停时**冻结**弹幕 =====
+    // ===== 暂停冻结（弹幕审查 #1；v2.4.40 首修，v2.4.41 修正**时钟域一致性**）=====
     // 旧实现每帧无条件 `frameTimeMs = elapsedRealtime()`：暂停期间时钟照走 → 弹幕继续往左飞；
-    // 而上层在**恢复时**又给 `bornMs` 平移「暂停时长」把位置拉回 → 用户看到
-    // 「暂停还在动、恢复向右跳一下」。
+    // 上层在恢复时又平移 `bornMs` 把位置拉回 → 用户看到「暂停还在动、恢复向右跳一下」。
     //
-    // 现改为**虚拟时钟**（`elapsedRealtime − 累计暂停时长`）：
-    //   · 暂停中：不推进时钟、也不 prune → 位置与存活集完全冻结；
-    //   · 恢复后：用减去累计暂停的虚拟时刻续走 → 暂停前后位置天然连续。
-    // 因此**上层不再需要平移 bornMs**（原先的 `shiftBornTime` 调用已随之移除）。
+    // 现把「冻结 + 补偿」都放进**这一个帧循环**（同一处、同一时钟域）：
+    //   · 暂停中：直接 `continue` —— 不推进 `frameTimeMs`、也不 prune → 位置与存活集完全冻结；
+    //   · **恢复的那一帧**：把暂停时长 `D` 补给所有 `bornMs`（`shiftBornTime(D)`）→
+    //     `now - born` 不变 → 位置连续、不跳；随后时钟继续走。
+    //
+    // 🔴 **为什么补偿 bornMs 而不用「虚拟时钟」（now = elapsedRealtime − 累计暂停）**：
+    //    入队方（AI 循环 / 导入调度）用**原始** `elapsedRealtime()` 写 `bornMs`。
+    //    若这里把 now 减掉累计暂停，则**恢复之后新入队**的条目与时钟就差了「累计暂停」——
+    //    它们会延迟那么久才飘进来（暂停 60s 就迟 60s）。补偿 bornMs 才能让新旧条目同域。
+    //
+    // ⚠️ 用 `rememberUpdatedState` 读 `isPaused`：`LaunchedEffect(Unit)` 的闭包只在**首次组合**
+    //    捕获参数的值，参数变化不会重启协程 → 直接读参数会永远拿到初始值。
+    val pausedNow = rememberUpdatedState(isPaused)
     var frameTimeMs by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    /** 累计暂停时长（毫秒）；虚拟时钟 = 实时钟 − 本值。 */
-    var pauseAccumMs by remember { mutableLongStateOf(0L) }
-    /** 本次暂停的起始（实时钟）；0 = 当前未暂停。 */
-    var pauseStartedAtMs by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(isPaused) {
-        if (isPaused) {
-            pauseStartedAtMs = SystemClock.elapsedRealtime()
-        } else if (pauseStartedAtMs != 0L) {
-            pauseAccumMs += SystemClock.elapsedRealtime() - pauseStartedAtMs
-            pauseStartedAtMs = 0L
-        }
-    }
-    LaunchedEffect(isPaused) {
+    LaunchedEffect(Unit) {
+        var pausedAtMs = 0L
+        var wasPaused = false
         while (true) {
             withFrameNanos { /* 仅用于等待下一帧 */ }
-            // 暂停：既不推进时钟也不 prune → 弹幕原地冻结
-            if (isPaused) continue
-            val t = SystemClock.elapsedRealtime() - pauseAccumMs
-            frameTimeMs = t
+            val now = SystemClock.elapsedRealtime()
+            if (pausedNow.value) {
+                if (!wasPaused) { pausedAtMs = now; wasPaused = true }
+                continue   // 冻结：不推进时钟、不 prune
+            }
+            if (wasPaused) {
+                // 刚恢复：把暂停时长补给弹幕（同一 elapsedRealtime 域）→ 位置连续
+                engine.shiftBornTime(now - pausedAtMs)
+                wasPaused = false
+                pausedAtMs = 0L
+            }
+            frameTimeMs = now
             // ⚠️ prune 必须在这里（effect 的挂起点）调用，**不能放进 Canvas 的 draw 块**：
             //    draw 阶段应是纯绘制、无副作用；在绘制中删列表元素属于改状态，
             //    且会与同一帧正在进行的遍历打架（ConcurrentModification 风险）。
-            engine.prune(t)
+            engine.prune(now)
         }
     }
 
-    // 引擎的时间基准与这里必须一致（都用「实时钟 − 累计暂停」），否则位置会跳。
-    val nowMs = frameTimeMs
+    // ⚠️ 弹幕审查 #8：**不要在组合阶段**读 `frameTimeMs` —— 那样每帧都会重组整层并重新测量
+    //    （分屏 VR 下代价翻倍），与「Canvas 而非堆叠 composable」的初衷相反。
+    //    改为把「读时间」下推到 Canvas 的 **draw lambda** 内（那里读 State 只失效**绘制**阶段）。
+    val nowMsProvider: () -> Long = { frameTimeMs }
 
     // 画面高度比例 → 实际 dp。用 BoxWithConstraints 拿到真实可用高度。
     val textColor = config.textColorOption.color
@@ -147,7 +156,7 @@ fun DanmuOverlay(
         Row(modifier = modifier.fillMaxSize()) {
             DanmuEye(
                 engine = engine,
-                nowMs = nowMs,
+                nowMsProvider = nowMsProvider,
                 strokeColor = strokeOption.strokeColor,
                 strokeWidthDp = strokeOption.widthDp,
                 bgColor = bgOption.bgColor,
@@ -161,7 +170,7 @@ fun DanmuOverlay(
             )
             DanmuEye(
                 engine = engine,
-                nowMs = nowMs,
+                nowMsProvider = nowMsProvider,
                 strokeColor = strokeOption.strokeColor,
                 strokeWidthDp = strokeOption.widthDp,
                 bgColor = bgOption.bgColor,
@@ -177,7 +186,7 @@ fun DanmuOverlay(
     } else {
         DanmuEye(
             engine = engine,
-            nowMs = nowMs,
+            nowMsProvider = nowMsProvider,
             strokeColor = strokeOption.strokeColor,
             strokeWidthDp = strokeOption.widthDp,
             bgColor = bgOption.bgColor,
@@ -198,7 +207,11 @@ fun DanmuOverlay(
 @Composable
 private fun DanmuEye(
     engine: DanmuEngine,
-    nowMs: Long,
+    /**
+     * v2.4.41（弹幕审查 #8）：**时间供给器**，而不是直接传一个 `Long`。
+     * 在 Canvas 的 **draw** lambda 内调用它 —— 只在绘制阶段读 State，不再每帧重组/重测量。
+     */
+    nowMsProvider: () -> Long,
     strokeColor: Color,
     strokeWidthDp: Float,
     bgColor: Color,
@@ -276,6 +289,10 @@ private fun DanmuEye(
         LaunchedEffect(widthPx, areaHeightPx, trackCount, trackHeightPx) {
             engine.screenWidthPx = widthPx
             engine.trackHeightPx = trackHeightPx
+            // ===== v2.4.41（弹幕审查 #3）：把**实际生效的轨道数**同步给引擎 =====
+            // 引擎 `pickTrack` 之前只用 `maxTracks`（用户上限），而「行数自适应」算出的真实行数
+            // （`trackCount`）只有渲染层知道 → 引擎会把弹幕分到区域外的行上，被 clipRect 裁掉。
+            engine.visibleTrackCount = trackCount
         }
 
         Canvas(
@@ -283,25 +300,19 @@ private fun DanmuEye(
                 .fillMaxWidth()
                 .height(with(density) { areaHeightPx.toDp() })
         ) {
+            // v2.4.41（弹幕审查 #8）：在 **draw** 阶段读时间 —— 组合阶段读会让每帧都重组整层
+            // 并重新测量（分屏 VR 代价翻倍），与「Canvas 而非堆叠 composable」的初衷相反。
+            val nowMs = nowMsProvider()
             // 弹幕只在顶部区域内飘，超出区域的部分裁掉（避免长文本压到字幕区）
             clipRect(left = 0f, top = 0f, right = size.width, bottom = size.height) {
                 for (item in engine.snapshot()) {
-                    val x = item.currentX(nowMs, widthPx, engine.speedPxPerSec)
-                    // 整条已在右侧屏外（还没进来）或左侧屏外（已走完）→ 跳过
-                    if (x > widthPx) continue
-                    if (x + item.widthPx < 0f) continue
-
-                    val top = item.track * trackHeightPx
-
-                    // ===== v2.4.6：文字颜色逐条取 `item.color` =====
-                    // 入队时已按颜色模式掷定并固定在条目上（见 DanmuItem.color），
-                    // 这里只是把「本条的颜色 + 全局不透明度」组成实际绘制样式。
-                    // ⚠️ 不透明度仍是**全局**的（opacityPercent），随机只作用于色相。
-                    val itemStyle = textColorStyleFor(item.color, fontSizeSp, alpha)
-
-                    // 每条只测量一次；宽度回填给引擎用于轨道避让
+                    // ⚠️ v2.4.41（弹幕审查 #9）：**先测量、再判可见**。
+                    //    旧实现把测量放在两次 `continue` 之后 → 「尚未上屏」的条目 `widthPx` 恒为 0，
+                    //    而引擎 `pickTrack` 用 `widthPx` 算尾部间距 → 按 0 宽避让 → 长弹幕可能重叠。
+                    //    测到即回填，后续（含未上屏条目的）避让都用正确宽度。
                     // ⚠️ 缓存 key 必须含颜色 —— 同一句话在不同颜色下是不同 layout，
                     //    否则先来的颜色会「传染」给后来的同文本条目（随机色会失效）。
+                    val itemStyle = textColorStyleFor(item.color, fontSizeSp, alpha)
                     val layout = layoutCache.measure(
                         textMeasurer = textMeasurer,
                         text = item.text,
@@ -312,6 +323,12 @@ private fun DanmuEye(
                         item.widthPx = layout.size.width.toFloat()
                     }
 
+                    val x = item.currentX(nowMs, widthPx, engine.speedPxPerSec)
+                    // 整条已在右侧屏外（还没进来）或左侧屏外（已走完）→ 不画（已测量过，无妨）
+                    if (x > widthPx) continue
+                    if (x + item.widthPx < 0f) continue
+
+                    val top = item.track * trackHeightPx
                     val w = layout.size.width.toFloat()
                     val h = layout.size.height.toFloat()
                     // 垂直：在轨道内居中
@@ -338,7 +355,15 @@ private fun DanmuEye(
                             )
                         }
                     }
-                    drawText(textLayoutResult = layout, topLeft = Offset(x, y))
+                    // ===== v2.4.41（弹幕审查 #7）：**显式传当前 alpha** =====
+                    // `layout` 是缓存的 TextLayoutResult，颜色（含 alpha）在**测量时**就烤了进去；
+                    // 而缓存 key 只含字号与基础色、**不含全局不透明度** → 调不透明度后已缓存条目
+                    // 仍用旧 alpha（文字与实时变化的描边/背景不同步）。这里显式传色即修（不依赖缓存里的颜色）。
+                    drawText(
+                        textLayoutResult = layout,
+                        topLeft = Offset(x, y),
+                        color = item.color.copy(alpha = alpha)
+                    )
                 }
             }
         }

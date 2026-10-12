@@ -942,13 +942,15 @@
     <string name="danmu_import_clear">Clear import</string>
     <string name="danmu_import_hint">Supports Bilibili danmaku XML (&lt;d p="time,mode,size,color,..."&gt;) and JSON arrays (time / text / color). Only scrolling danmaku are used; other types are skipped.</string>
     <string name="danmu_import_loading">Reading file…</string>
-    <string name="danmu_import_ok">Imported {count} danmaku</string>
-    <string name="danmu_import_fail_unreadable">File could not be read, please choose again</string>
+    <string name="danmu_import_ok">Imported %1$d danmaku</string>
+    <string name="danmu_import_ok_truncated">Imported %1$d danmaku (limit reached; the rest was truncated)</string>
+    <string name="danmu_import_bound_other_video">This danmaku file was imported for a different video; the timeline may not match</string>
+            <string name="danmu_import_fail_unreadable">File could not be read, please choose again</string>
     <string name="danmu_import_fail_format">Unrecognized format (needs Bilibili XML or JSON)</string>
     <string name="danmu_import_fail_empty">No usable scrolling danmaku in this file</string>
     <string name="danmu_err_import_no_file">Import mode: choose a danmaku file first</string>
     <string name="danmu_err_import_empty">Imported danmaku is empty, check the file</string>
-    <string name="danmu_status_imported">{count} imported</string>
+    <string name="danmu_status_imported">%1$d imported</string>
     <string name="danmu_status_import_source">Source: imported file</string>
     <string name="danmu_time_jitter">Time jitter</string>
     <string name="danmu_time_jitter_hint">A batch would appear all at once; this spreads their timestamps with a normal distribution around the batch time. 0 = off (all at once).</string>

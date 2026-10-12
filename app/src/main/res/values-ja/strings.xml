@@ -902,13 +902,15 @@
     <string name="danmu_import_clear">読み込みを解除</string>
     <string name="danmu_import_hint">Bilibili 弾幕 XML（&lt;d p="時間,モード,サイズ,色,..."&gt;）と JSON 配列（time / text / color）に対応。スクロール弾幕のみ使用し、他はスキップします。</string>
     <string name="danmu_import_loading">ファイルを読み込み中…</string>
-    <string name="danmu_import_ok">{count} 件を取り込みました</string>
-    <string name="danmu_import_fail_unreadable">ファイルを読み込めません。選び直してください</string>
+    <string name="danmu_import_ok">%1$d 件を取り込みました</string>
+    <string name="danmu_import_ok_truncated">%1$d 件を取り込みました（上限に達したため残りは切り捨てました）</string>
+    <string name="danmu_import_bound_other_video">取り込んだ弾幕は別の動画用です。タイムラインが合わない可能性があります</string>
+            <string name="danmu_import_fail_unreadable">ファイルを読み込めません。選び直してください</string>
     <string name="danmu_import_fail_format">形式を判別できません（Bilibili XML または JSON が必要です）</string>
     <string name="danmu_import_fail_empty">使用できるスクロール弾幕がありません</string>
     <string name="danmu_err_import_no_file">読込モード：先に弾幕ファイルを選んでください</string>
     <string name="danmu_err_import_empty">読み込んだ弾幕が空です。ファイルを確認してください</string>
-    <string name="danmu_status_imported">{count} 件取り込み済み</string>
+    <string name="danmu_status_imported">%1$d 件取り込み済み</string>
     <string name="danmu_status_import_source">ソース：ファイル読込</string>
     <string name="danmu_time_jitter">時間のばらつき</string>
     <string name="danmu_time_jitter_hint">同じバッチの弾幕は本来同時に出ます。ここではバッチ時刻を中心に正規分布でばらけさせ、自然な粗密を作ります。0 で無効（同時）。</string>

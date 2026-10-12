@@ -82,16 +82,17 @@ class DanmuEngine {
             // 变速时平移出生时间，让已有弹幕**不瞬移**。
             // 由 x = W - (now-born)/1000 * speed 可解出：
             //   born' = now - (now - born) * oldSpeed / newSpeed
+            //
+            // ⚠️ v2.4.41（弹幕审查 #4）：改用 [now]（= `nowProvider?.invoke() ?: elapsedRealtime()`）。
+            //    旧代码写成 `val provider = nowProvider; if (provider != null) { … }` —— 而 `nowProvider`
+            //    在生产代码里**从未被赋值**（恒 null）→ 平移从不执行 → 拖速度滑条时屏上弹幕按新速度
+            //    重算位置 = **跳位**。
             if (items.isNotEmpty()) {
-                // ⚠️ nowProvider 是可变属性，不能依赖智能转换 → 先取到局部变量
-                val provider = nowProvider
-                if (provider != null) {
-                    val now = provider.invoke()
-                    for (item in items) {
-                        val elapsed = now - item.bornMs
-                        if (elapsed > 0) {
-                            item.bornMs = now - (elapsed.toDouble() * old / clamped).toLong()
-                        }
+                val now = now()
+                for (item in items) {
+                    val elapsed = now - item.bornMs
+                    if (elapsed > 0) {
+                        item.bornMs = now - (elapsed.toDouble() * old / clamped).toLong()
                     }
                 }
             }
@@ -116,6 +117,15 @@ class DanmuEngine {
 
     /** 屏幕宽度（px）。用于计算位置与「是否已离开」。 */
     var screenWidthPx: Float = 1080f
+
+    /**
+     * v2.4.41（弹幕审查 #3）：**实际生效的轨道数**（渲染层按「字号 + 可用区域」算好后同步）。
+     *
+     * `0` = 尚未同步 → 退回 [maxTracks]（旧行为）。
+     * 非 0 时 [pickTrack] 用 `min(visibleTrackCount, maxTracks)` —— 否则「行数自适应」算出的真实行数
+     * 引擎不知道，会把弹幕分到区域外（被渲染层 clipRect 裁掉），既浪费分配又显得稀疏。
+     */
+    var visibleTrackCount: Int = 0
 
     // ---- v2.4.6：颜色（逐条随机）----
 
@@ -234,7 +244,7 @@ class DanmuEngine {
         }
 
         // ③ 交给共用的插入流程（去重 + 轨道分配 + 上色）
-        return insertCandidates(candidates) { null }  // null → 按 colorMode 掷色（AI 弹幕的行为）
+        return insertCandidates(candidates) { null }.first  // null → 按 colorMode 掷色（AI 弹幕的行为）
     }
 
     /** [enqueue] 的内部候选（文本 + 已定出生时刻） */
@@ -253,24 +263,44 @@ class DanmuEngine {
      * 唯一差别是颜色来源：这里用调用方给的 [colors]（允许元素为 null → 回落 [singleColor]）。
      *
      * @param entries 每条 = (文本, 出生时刻, 指定颜色 or null)
-     * @return 实际入队条数
+     * @param dedupe  **是否做相似度去重**。v2.4.41（弹幕审查 #5）：导入路径传 `false` ——
+     *                文件是「已知正确」的数据，重复项（「哈哈哈」）是真实弹幕的一部分。
+     * @return 本次**入队结果**：成功条数 + 因**无可用轨道**未入队的条目（供调用方下一拍重试）
      */
     fun enqueueTimed(
-        entries: List<Triple<String, Long, Color?>>
-    ): Int {
-        if (entries.isEmpty()) return 0
+        entries: List<Triple<String, Long, Color?>>,
+        dedupe: Boolean = true
+    ): EnqueueOutcome {
+        if (entries.isEmpty()) return EnqueueOutcome(0)
         val candidates = mutableListOf<Candidate>()
         val colors = mutableListOf<Color?>()
-        for ((text, bornMs, color) in entries) {
+        // 记录候选 → 原始 entry 下标，便于把「未入队」的条目**原样**还给调用方
+        val srcIndex = mutableListOf<Int>()
+        for ((i, e) in entries.withIndex()) {
+            val (text, bornMs, color) = e
             val t = text.trim()
             if (t.isEmpty()) continue
             if (items.size + candidates.size >= maxPending) break
             candidates.add(Candidate(text = t, bornMs = bornMs))
             colors.add(color)
+            srcIndex.add(i)
         }
-        if (candidates.isEmpty()) return 0
-        return insertCandidates(candidates) { idx -> colors[idx] }
+        if (candidates.isEmpty()) return EnqueueOutcome(0)
+        val (placed, unplacedIdx) = insertCandidates(candidates, dedupe) { idx -> colors[idx] }
+        return EnqueueOutcome(placed, unplacedIdx.map { entries[srcIndex[it]] })
     }
+
+    /**
+     * v2.4.41（弹幕审查 #6）：一次 [enqueueTimed] 的结果。
+     *
+     * 旧实现「找不到轨道就 `continue` 丢掉」—— 密集批次下大量弹幕**无声消失**（下一拍也不会再试）。
+     * 现在把未入队的条目还给调用方（导入调度），由它放进**待投递队列**下一拍重试，
+     * 超过约 1 秒仍上不了屏才丢弃。
+     */
+    data class EnqueueOutcome(
+        val placed: Int,
+        val unplaced: List<Triple<String, Long, Color?>> = emptyList()
+    )
 
     /**
      * 把候选按**出生时刻升序**做去重 + 轨道分配 + 入库（[enqueue] / [enqueueTimed] 共用）。
@@ -283,17 +313,24 @@ class DanmuEngine {
      */
     private fun insertCandidates(
         candidates: List<Candidate>,
+        dedupe: Boolean = true,
         colorOf: (Int) -> Color?
-    ): Int {
+    ): Pair<Int, List<Int>> {
         // 按出生时刻升序分配轨道（同时刻保持原下标序 —— sortedBy 是稳定排序）
         val order = candidates.indices.sortedBy { candidates[it].bornMs }
 
         var added = 0
+        // v2.4.41（弹幕审查 #6）：**本批无可用轨道**的候选下标 —— 交给调用方重试，不再静默丢弃。
+        val unplaced = mutableListOf<Int>()
         val usedTracks = HashSet<Int>()
         for (ci in order) {
             val c = candidates[ci]
-            if (isDuplicate(c.text)) continue
-            val track = pickTrack(c.bornMs, usedTracks) ?: continue
+            // v2.4.41（弹幕审查 #5）：**导入路径不去重**（`dedupe = false`）—— 文件是「已知正确」的
+            // 数据，里面重复的「哈哈哈」是真实弹幕的一部分，不该被模型用的相似度规则压掉；
+            // AI 路径保留去重（防模型复读）。
+            if (dedupe && isDuplicate(c.text)) continue
+            val track = pickTrack(c.bornMs, usedTracks)
+            if (track == null) { unplaced.add(ci); continue }
 
             // 指定色优先；未指定才按颜色模式掷（保证外部导入不会被随机覆盖）
             val specified = colorOf(ci)
@@ -305,7 +342,7 @@ class DanmuEngine {
             while (recentTexts.size > DEDUP_WINDOW) recentTexts.removeFirst()
             added++
         }
-        return added
+        return added to unplaced
     }
 
     /**
@@ -438,7 +475,10 @@ class DanmuEngine {
      * @return 轨道下标；没有可用轨道时返回 null
      */
     private fun pickTrack(nowMs: Long, usedTracks: Set<Int> = emptySet()): Int? {
-        val trackCount = maxTracks.coerceIn(1, MAX_TRACKS_LIMIT)
+        // v2.4.41（弹幕审查 #3）：优先用渲染层同步来的**真实轨道数**（行数自适应的结果），
+        // 再受用户上限 maxTracks 约束；未同步（0）→ 退回 maxTracks（旧行为）。
+        val effectiveLimit = if (visibleTrackCount > 0) min(visibleTrackCount, maxTracks) else maxTracks
+        val trackCount = effectiveLimit.coerceIn(1, MAX_TRACKS_LIMIT)
         if (trackCount <= 0) return null
 
         // 每条轨道上「最靠右（最新）」的那条弹幕

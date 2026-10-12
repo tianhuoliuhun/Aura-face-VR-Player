@@ -25,34 +25,37 @@ import kotlinx.coroutines.withContext
 class DanmuImportStore {
 
     /**
-     * 已加载的导入弹幕（**按时间升序**，由 [DanmuImporter] 保证）。
+     * v2.4.41（弹幕审查 #11）：**不可变快照** —— items / fileName / uri / cursor **一次性替换**。
      *
-     * 用 `@Volatile` 是因为写入发生在 IO 协程、读取发生在编排协程 —— 让可见性有保证。
+     * ## 为什么要把它们合成一个对象
+     * 旧实现是四个独立的 `@Volatile` 字段、**分步写入**（先 items 再 cursor 再 uri…）。
+     * 加载发生在 IO 协程、清除发生在主线程、投递游标在编排协程推进 —— 三者可能交错：
+     *   · `load` 写完 `items` 但还没写 `uri` 时被 `clear()` → 出现「items 非空但 uri 为空」；
+     *   · `drainUntil` 拿到新 `items` 却配上旧 `cursor` → 漏投或重投。
+     * 换成一个 `@Volatile` 引用后，任何一侧看到的都是一致的整体（写者只做一次 `snap = …`）。
      */
+    private data class Snap(
+        val items: List<DanmuImporter.ImportedDanmu> = emptyList(),
+        val fileName: String = "",
+        val uri: String = "",
+        /** 调度游标（**下标**，指向下一条待投递的弹幕）—— 用下标而非时间，O(1) 推进 */
+        val cursor: Int = 0
+    )
+
     @Volatile
-    var items: List<DanmuImporter.ImportedDanmu> = emptyList()
-        private set
+    private var snap = Snap()
+
+    /** 已加载的导入弹幕（**按时间升序**，由 [DanmuImporter] 保证） */
+    val items: List<DanmuImporter.ImportedDanmu> get() = snap.items
 
     /** 当前文件显示名（用于 UI） */
-    @Volatile
-    var fileName: String = ""
-        private set
+    val fileName: String get() = snap.fileName
 
     /** 当前文件 URI（用于 UI 与去重判断） */
-    @Volatile
-    var uri: String = ""
-        private set
+    val uri: String get() = snap.uri
 
     /** 是否已有可用内容 */
-    val hasContent: Boolean get() = items.isNotEmpty()
-
-    /**
-     * 调度游标（**下标**，指向下一条待投递的弹幕）。
-     *
-     * ⚠️ 用下标而非时间做游标，是为了 O(1) 推进；配合 [resetCursorTo] 处理 seek。
-     */
-    @Volatile
-    private var cursor: Int = 0
+    val hasContent: Boolean get() = snap.items.isNotEmpty()
 
     /**
      * 从 URI 读取并解析弹幕文件。
@@ -84,12 +87,19 @@ class DanmuImportStore {
             if (parsed.items.isEmpty()) {
                 return@withContext LoadResult.Failure(Error.EMPTY)
             }
-            items = parsed.items
-            fileName = displayName
-            uri = fileUri.toString()
-            cursor = 0
+            // v2.4.41（#11）：**一次性替换快照**（旧实现分 4 步写，可能被 clear/投递看到中间态）
+            snap = Snap(
+                items = parsed.items,
+                fileName = displayName,
+                uri = fileUri.toString(),
+                cursor = 0
+            )
             logger("导入弹幕：${parsed.items.size} 条（跳过 ${parsed.skipped}）来自 $displayName")
-            LoadResult.Success(count = parsed.items.size, skipped = parsed.skipped)
+            LoadResult.Success(
+                count = parsed.items.size,
+                skipped = parsed.skipped,
+                truncated = parsed.truncated
+            )
         } catch (e: Exception) {
             logger("导入弹幕失败: ${e.message}")
             LoadResult.Failure(Error.UNREADABLE)
@@ -98,10 +108,8 @@ class DanmuImportStore {
 
     /** 清空（用户点「清除导入」或关闭功能时） */
     fun clear() {
-        items = emptyList()
-        fileName = ""
-        uri = ""
-        cursor = 0
+        // v2.4.41（#11）：整体替换为初始快照（原子，不会留下「items 已清但 uri 还在」的中间态）
+        snap = Snap()
     }
 
     /**
@@ -121,16 +129,18 @@ class DanmuImportStore {
      * @return 本批要投递的弹幕（按时间升序）；没有则返回空列表
      */
     fun drainUntil(positionMs: Long): List<DanmuImporter.ImportedDanmu> {
-        val list = items
+        // v2.4.41（#11）：取**一次**快照 —— items 与 cursor 保证来自同一整体（不会「新 list + 旧 cursor」）
+        val s = snap
+        val list = s.items
         if (list.isEmpty()) return emptyList()
-        var i = cursor
+        var i = s.cursor
         if (i >= list.size) return emptyList()
         val out = ArrayList<DanmuImporter.ImportedDanmu>()
         while (i < list.size && list[i].timeMs <= positionMs && out.size < MAX_PER_TICK) {
             out.add(list[i])
             i++
         }
-        cursor = i
+        snap = s.copy(cursor = i)
         return out
     }
 
@@ -145,8 +155,9 @@ class DanmuImportStore {
      * **向后 seek（回退）同样要重置** —— 否则回退后所有弹幕都被判为「已投过」，再也不出现。
      */
     fun resetCursorTo(positionMs: Long) {
-        val list = items
-        if (list.isEmpty()) { cursor = 0; return }
+        val s = snap
+        val list = s.items
+        if (list.isEmpty()) { snap = s.copy(cursor = 0); return }
         // 二分找第一个 timeMs >= positionMs 的下标
         var lo = 0
         var hi = list.size
@@ -154,11 +165,11 @@ class DanmuImportStore {
             val mid = (lo + hi) / 2
             if (list[mid].timeMs < positionMs) lo = mid + 1 else hi = mid
         }
-        cursor = lo
+        snap = s.copy(cursor = lo)
     }
 
     /** 已投递条数（UI 状态卡展示进度用） */
-    fun deliveredCount(): Int = cursor
+    fun deliveredCount(): Int = snap.cursor
 
     /**
      * 从 URI 解析出「给用户看的文件名」。
@@ -185,7 +196,12 @@ class DanmuImportStore {
 
     /** 加载结果 */
     sealed interface LoadResult {
-        data class Success(val count: Int, val skipped: Int) : LoadResult
+        data class Success(
+            val count: Int,
+            val skipped: Int,
+            /** v2.4.41（弹幕审查 #12）：是否因上限被截断（UI 据此提示「已截取前 N 条」） */
+            val truncated: Boolean = false
+        ) : LoadResult
         data class Failure(val error: Error) : LoadResult
     }
 
