@@ -4200,6 +4200,22 @@ fun VRPlayerScreen(
             drawContent()
         }
 
+        // 🔴 v2.4.48（用户反馈「模糊生效但层级不对」）：**backdrop 必须挂在「装得下视频 + 全部 UI」
+        //    的容器层**上，而**不是**挂在 AndroidView 自己身上。
+        //    旧写法把 `.layerBackdrop(liquidBackdrop)` 挂在 AndroidView 上 —— AndroidView 是
+        //    **SurfaceView 宿主**，Compose 根本不往它的图层里画东西（SurfaceView 在合成器里是
+        //    独立窗口、打洞）→ 被记录下来的图层是**空的** → 玻璃面板取样拿到空层
+        //    → 模糊「不生效」（这正是用户说的"层级不对"）。
+        //    现在改为**第一个全屏子 Box** 承载 layerBackdrop：它是真实 Compose 图层，
+        //    record 块里的 `drawRect(ThemeBgColor)` + `VideoBackdrop` 位图才会真的被记进去，
+        //    后面（同层级的）玻璃面板才有东西可糊。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .layerBackdrop(liquidBackdrop)
+                .testTag("liquid_backdrop_host")
+        )
+
         // 1. OpenGL standard and VR view (Always on full bleed)
         AndroidView(
             factory = { ctx ->
@@ -4286,7 +4302,6 @@ fun VRPlayerScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .layerBackdrop(liquidBackdrop)
                 .testTag("opengl_vr_player_view")
         )
 
