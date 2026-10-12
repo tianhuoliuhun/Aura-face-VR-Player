@@ -155,7 +155,7 @@ fun Modifier.glassPanel(
                 brush = ShaderBrush(
                     ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
                 ),
-                alpha = 0.15f,
+                alpha = 0.35f,
             )
         }
         if (!GlassCapability.supportsBlur) {
@@ -276,12 +276,12 @@ fun Modifier.glassPanel(
     //    不能抢了折射边的通透感。
     val liquidSurface: DrawScope.() -> Unit = {
         onDrawSurface()
-        drawRect(
-            brush = ShaderBrush(
-                ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
-            ),
-            alpha = 0.1f,
-        )
+            drawRect(
+                brush = ShaderBrush(
+                    ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
+                ),
+                alpha = 0.35f,
+            )
     }
     return this
         .drawBackdrop(
