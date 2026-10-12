@@ -5824,6 +5824,8 @@ fun VRPlayerScreen(
                                         append("玻璃诊断：")
                                         append(if (GlassCapability.supportsBlur) "模糊✓" else "模糊✗(降级)")
                                         append(" · 采样=").append(if (VideoBackdrop.enabled) "开" else "关")
+                                        // v2.4.47：采样间隔（用户要求 30ms 一帧，可直接核对）
+                                        append(" · 间隔=").append(VideoBackdrop.captureIntervalMs).append("ms")
                                         append(" · tick=").append(bdTick)
                                         append(" · 帧=").append(VideoBackdrop.currentSize() ?: "无")
                                         append(" · 提交=").append(VideoBackdrop.version)

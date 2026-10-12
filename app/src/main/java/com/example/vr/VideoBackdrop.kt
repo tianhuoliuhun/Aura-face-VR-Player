@@ -83,6 +83,13 @@ object VideoBackdrop {
         private set
 
     /**
+     * v2.4.47：GL 侧当前的**采样间隔（ms）**，由 [com.example.vr.VRGLRenderer] 写入，
+     * 仅供设置页「玻璃诊断」显示（用户要求「30ms 一帧」后可直接核对）。
+     */
+    @Volatile
+    var captureIntervalMs: Long = 0L
+
+    /**
      * GL 线程调用：把一帧（已按 Bitmap 的**自上而下**顺序排好）提交为新的背景。
      *
      * @param pixels ARGB packed 且**行序已翻转**为自上而下（与 Bitmap 一致）
@@ -104,9 +111,11 @@ object VideoBackdrop {
         version++
         lastCommitAtMs = android.os.SystemClock.elapsedRealtime()
         lastError = null
-        // v2.4.46（审查 #2）：每 2 次提交推进一次 tick（约 10Hz @ 每 3 帧采样一次 → 20fps 采样）
-        // —— 背景是糊的，不需要 60Hz 的新鲜度；但**必须推进**，否则背景层永不重绘。
-        if (!paused && version % 2L == 0L) tick = version
+        // v2.4.47（用户要求「30ms 一帧」）：GL 侧已按时间节流到 30ms，这里**每次提交都推进 tick**，
+        // 于是 backdrop 层正好以 30ms 的节奏重录。
+        // （v2.4.46 曾额外「每 2 次才推进一次」，与 30ms 节流叠加会变成 60ms，偏慢。）
+        // 但仍必须**推进** —— 不推进的话 GL 提交了新帧，背景层也永不重绘（审查 #2）。
+        if (!paused) tick = version
     }
 
     /** Compose 线程调用：当前可作为背景绘制的帧；不需要时返回 null */

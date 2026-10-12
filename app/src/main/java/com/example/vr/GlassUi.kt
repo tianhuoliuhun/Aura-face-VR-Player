@@ -73,12 +73,27 @@ enum class GlassStyle {
 /** 主控栏 / 大面板：模糊半径（按风格分档） */
 val GlassPanelBlur: Dp = 22.dp
 private val GlassPanelBlurFrosted: Dp = 32.dp
-private val GlassPanelBlurGaussian: Dp = 80.dp
+
+/**
+ * v2.4.47（用户反馈「高斯模糊没生效」）：**80dp → 32dp**。
+ *
+ * 🔴 根因：系统的 `RenderEffect.createBlurEffect` 在**半径过大时会静默不绘制** ——
+ * 表现不是报错，而是「模糊完全没发生」（面板只剩那层 10% 提亮白，看起来像"没生效"）。
+ * 本项目 **v2.1.221 就已经踩过并记录过**这一点（见上面 Frosted 的注释：
+ * 「40dp 过大…降到 32dp（面板）/ 18dp（球体）实测可用」），
+ * 但 v2.1.232 新增高斯档时又把半径设成了 80dp/40dp —— **与自己的实测结论相矛盾**，
+ * 于是高斯档成了唯一「看不出模糊」的一档（液态 22dp / 磨砂 32dp 都正常）。
+ *
+ * 现收敛到**实测可用区间**：面板 32dp、球体 18dp。
+ * 与磨砂档的视觉差别不靠半径，而靠 **无颗粒 + 轻微提亮/去饱和**（见 Gaussian 分支）。
+ * ⚠️ 想再调大必须**真机验证**（不同 GPU/驱动能承受的上限不同）。
+ */
+private val GlassPanelBlurGaussian: Dp = 32.dp
 
 /** 悬浮球 / 小控件：模糊半径（按风格分档） */
 val GlassSmallBlur: Dp = 11.dp
 private val GlassSmallBlurFrosted: Dp = 18.dp
-private val GlassSmallBlurGaussian: Dp = 40.dp
+private val GlassSmallBlurGaussian: Dp = 18.dp
 
 /**
  * 玻璃面板（矩形/任意形状）。

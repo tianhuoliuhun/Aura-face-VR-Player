@@ -1719,6 +1719,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         bdPixels = null
         bdRow = null
         resetBackdropCapture()
+        // v2.4.47：把采样间隔暴露给设置页「玻璃诊断」（便于核对「30ms 一帧」是否生效）
+        VideoBackdrop.captureIntervalMs = bdCaptureIntervalMs
 
         GLES20.glClearColor(0.04f, 0.05f, 0.07f, 1.0f) // Dark night canvas background Hex #0a0c12
         GLES20.glDisable(GLES20.GL_DEPTH_TEST) // 2D or spherically projected mapping, depth test is unneeded
@@ -3504,6 +3506,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val bdRetryDelayMs = 30_000L
 
     /**
+     * v2.4.47（用户要求）：**背景采样间隔 = 30ms 一帧**（≈33fps）。
+     *
+     * 旧实现是「每 3 帧采一次」—— 节奏随屏幕刷新率漂移（120Hz 屏只有 25ms、60Hz 屏 50ms），
+     * 而且帧时间过短会让 backdrop 层频繁重录。改成固定 30ms 节流后节奏稳定、开销可控。
+     */
+    private val bdCaptureIntervalMs = 30L
+
+    /** 上次采样时刻（elapsedRealtime）—— 与 [bdCaptureIntervalMs] 配合做时间节流 */
+    private var bdLastCaptureMs = 0L
+
+    /**
      * v2.4.46（审查 #1）：记录一次采样失败 —— 写入诊断原因（设置页「玻璃诊断」会显示），
      * 按退避策略安排重试；**超过 [bdMaxRetries] 次才真正停用**（旧实现一次失败就永久停用）。
      */
@@ -3540,9 +3553,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val dh = displayHeight
         if (dw <= 0 || dh <= 0) return
 
-        // 每 3 帧采样一次：糊掉的背景不需要 60fps 的新鲜度，省掉绝大部分开销
+        // v2.4.47（用户要求）：**按时间节流 —— 30ms 一帧**（原来「每 3 帧」会随刷新率漂移：
+        //   120Hz 屏 25ms、60Hz 屏 50ms；帧时间过短还会让 backdrop 层频繁重录）。
+        //   糊掉的背景不需要更高新鲜度，30ms（≈33fps）足够。
         bdFrame++
-        if (bdFrame % 3 != 0) return
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        if (nowMs - bdLastCaptureMs < bdCaptureIntervalMs) return
+        bdLastCaptureMs = nowMs
 
         val tw = VideoBackdrop.TARGET_W
         val th = (tw * dh / dw).coerceIn(1, 256)
