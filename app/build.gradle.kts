@@ -653,15 +653,30 @@ dependencies {
 // 2) 配置缓存（configuration cache）默认开启：doLast 闭包里不能再引用 project / android /
 //    layout，否则会报 cannot serialize DefaultProject。因此路径与版本号必须在配置期
 //    先算成纯 String，闭包内只用这些字符串。
+// 🔴 v2.4.43：**flavor 化后原名改任务从未触发** —— 判据是 `name == "assembleRelease" /
+//    "assembleDebug"`，而本工程有 5 个 flavor（standard / huawei / pico / quest / all），
+//    实际发版命令是 **`assembleAllRelease`** → 一个都不匹配 → 产物始终是 AGP 默认的
+//    `app-all-release.apk`（**不含版本号**）。用户反馈「构建的 APK 忘改版本号」即此。
+//    现改为匹配 `assemble*Release` / `assemble*Debug`，并按 flavor 名定位输出目录
+//    （flavor 化的产物在 `outputs/apk/<flavor>/<type>/app-<flavor>-<type>.apk`）。
 afterEvaluate {
   val buildDirPath = layout.buildDirectory.asFile.get().absolutePath
   val ver = android.defaultConfig.versionName ?: "unknown"
-  tasks.matching { it.name == "assembleRelease" || it.name == "assembleDebug" }.configureEach {
-    val type = name.removePrefix("assemble").lowercase()
-    val suffix = if (type == "release") "" else "-debug"
-    val dirPath = "$buildDirPath/outputs/apk/$type"
-    val srcName = "app-$type.apk"
-    val dstName = "Aura-face-VR-Player-v$ver$suffix.apk"
+  tasks.matching { t ->
+    t.name.startsWith("assemble") &&
+      (t.name.endsWith("Release") || t.name.endsWith("Debug"))
+  }.configureEach {
+    val isRelease = name.endsWith("Release")
+    val suffix = if (isRelease) "" else "-debug"
+    val typeDir = if (isRelease) "release" else "debug"
+    // 去掉 assemble 前缀与 Release/Debug 后缀 → 剩下的即 flavor 名（无 flavor 时为空串）
+    val flavor = name.removePrefix("assemble")
+      .removeSuffix(if (isRelease) "Release" else "Debug").lowercase()
+    val dirPath = if (flavor.isEmpty()) "$buildDirPath/outputs/apk/$typeDir"
+    else "$buildDirPath/outputs/apk/$flavor/$typeDir"
+    val srcName = if (flavor.isEmpty()) "app-$typeDir.apk" else "app-$flavor-$typeDir.apk"
+    val dstName = if (flavor.isEmpty()) "Aura-face-VR-Player-v$ver$suffix.apk"
+    else "Aura-face-VR-Player-v$ver-$flavor$suffix.apk"
     doLast {
       val src = File(dirPath, srcName)
       val dst = File(dirPath, dstName)
@@ -672,6 +687,8 @@ afterEvaluate {
         } else {
           logger.warn("[apk-name] 重命名失败（仍为 $srcName）")
         }
+      } else if (dst.exists()) {
+        logger.lifecycle("[apk-name] 已是 $dstName（无需再改）")
       }
     }
   }

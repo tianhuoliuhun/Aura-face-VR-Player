@@ -61,7 +61,7 @@
 
 | 项目 | 说明 / Notes |
 |---|---|
-| 产物 | **单个 APK**（含内置 ASR 模型与解码内核；`all` 包文件名为 `app-all-release.apk`）/ Single APK with the ASR model & decoder kernels bundled (`app-all-release.apk` for the `all` build) |
+| 产物 | **单个 APK**（含内置 ASR 模型与解码内核）；文件名由 Gradle 任务**自动带版本号**：`Aura-face-VR-Player-v<版本>-<flavor>.apk`（发版用 `all`，如 `Aura-face-VR-Player-v2.4.42-all.apk`）/ Single APK with the ASR model & decoder kernels bundled; the Gradle rename task stamps the version into the file name: `Aura-face-VR-Player-v<version>-<flavor>.apk` (`all` for releases) |
 | 体积 | 约 **210MB**（`all` 全兼容包；其中内置 Dolphin ASR 模型约 99MB、原生解码 / 推理库约 43MB）/ ~210MB (the `all` build; ~99MB Dolphin ASR model + ~43MB native decoder / inference libs) |
 | 包含 ABI | **仅 `arm64-v8a`**（v2.4.10 起）。闭源预编译库（旷视 Mars-Face / MediaPipe / VR SDK）只提供 arm64 / v7a，`CMakeLists.txt` 对缺失 ABI 是 `FATAL_ERROR`，故 **x86 / x86_64 物理上无法构建** / **`arm64-v8a` only** (since v2.4.10): the closed-source prebuilt libs ship only arm64 / v7a and CMake fails hard on a missing ABI, so x86 / x86_64 cannot be built at all |
 | 安装 | 普通手机与 VR 眼镜均直接安装，系统自动选原生库 / Installs directly on both phones and VR glasses; the OS picks the native libs |
@@ -89,7 +89,7 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot"   # �
 # 1) 构建 —— ⚠️ 必须带 flavor，否则 assembleRelease 会把 5 个 flavor 全编一遍
 gradle.bat :app:assembleStandardRelease                     # 日常主线包（体积最小，不编 OpenXR）
 gradle.bat :app:assembleAllRelease -x lintVitalAllRelease   # 发版全兼容包
-# 产物：app\build\outputs\apk\all\release\app-all-release.apk（单 APK，arm64-v8a，含内置模型）
+# 产物：app\build\outputs\apk\all\release\Aura-face-VR-Player-v<版本>-all.apk（单 APK，arm64-v8a，含内置模型）
 
 # 可选：额外拉取 SenseVoice-Small（约 228MB，超 GitHub 单文件限制故不入 git）
 #       内置的 Dolphin 已随仓库提供，走「自动」语种无需此步
