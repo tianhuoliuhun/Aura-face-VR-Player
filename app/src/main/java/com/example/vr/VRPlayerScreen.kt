@@ -4795,7 +4795,7 @@ fun VRPlayerScreen(
                                     // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
                                     // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
                                     blurRadius = null,
-                                    onDrawSurface = { drawRect(ThemePanelBgColor.copy(alpha = 0.55f)) }
+                                    onDrawSurface = { drawRect(ThemePanelBgColor.copy(alpha = 0.1f)) }
                                 ) else Modifier
                             )
                     ) {
@@ -8370,7 +8370,7 @@ BatchTranscribeSection(
                             // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
                             // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
                             blurRadius = null,
-                            onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
+                            onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.1f)) }
                         ) else Modifier
                     )
                     .border(
@@ -8545,7 +8545,7 @@ BatchTranscribeSection(
                     backdrop = liquidBackdrop,
                     style = glassStyle,
                     blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.1f)) }
                 ) else Modifier,
                 // v2.1.231：记忆上次拖动到的位置
                 prefs = prefs,
@@ -8583,7 +8583,7 @@ BatchTranscribeSection(
                     // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
                     // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 32）。
                     blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.1f)) }
                 ) else Modifier,
                 // v2.1.231：记忆上次拖动到的位置
                 prefs = prefs,
@@ -8621,7 +8621,7 @@ BatchTranscribeSection(
                     // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
                     // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 32）。
                     blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.45f)) }
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.1f)) }
                 ) else Modifier,
                 // v2.1.231：记忆上次拖动到的位置
                 prefs = prefs,
