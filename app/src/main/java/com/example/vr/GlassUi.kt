@@ -160,8 +160,9 @@ fun Modifier.glassPanel(
                 effects = {
                     // 只在 backdrop 上做**纯高斯模糊**：无 lens、无 vibrancy、无颗粒
                     backdropBlur(blur.toPx())
-                    // 轻微提亮 + 去一点点饱和：让糊开后的画面显得「通透」而不是「发闷」
-                    colorControls(saturation = 0.95f, contrast = 1.0f, brightness = 1.08f)
+                    // v2.4.50：去掉提亮（1.08 → 1.0）—— 此前提亮把背景洗成奶白、发闷不像玻璃；
+                    // 中性化 colorControls，与磨砂同款「只糊不染色」，保留无颗粒的纯净感。
+                    colorControls(saturation = 1.0f, contrast = 1.0f, brightness = 1.0f)
                 },
             )
             .border(
@@ -270,11 +271,13 @@ fun Modifier.glassPanel(
                     //    RenderEffect SDF 能力，且库对 <33 **是抛异常**
                     //    （反编译可见 `LensKt.throwUnsupportedSDFException()`），不是静默降级。
                     if (Build.VERSION.SDK_INT >= 33) {
-                        // v2.1.218：采用 iOS 26 参数（折射更强、边缘更「厚玻璃聚光」）
-                        lens(refractionHeight = 18f, refractionAmount = 0.55f)
+                        // v2.4.50：折射 0.55 → 0.3（调轻，只留边缘轻微弯曲，不再「厚玻璃」）
+                        lens(refractionHeight = 18f, refractionAmount = 0.3f)
                     }
-                    vibrancy()
-                    colorControls(saturation = 1.45f, contrast = 1.06f, brightness = 1.05f)
+                    // v2.4.50：去掉 vibrancy + 中性化 colorControls（sat/对比/亮 全 1.0）。
+                    // 此前 sat1.45 + vibrancy + 对比 + 亮 给背景加了滤镜，像彩色厚玻璃、不透；
+                    // 现与磨砂同款「只糊不染色」，达到磨砂的干净通透感，仅保留轻折射边。
+                    colorControls(saturation = 1.0f, contrast = 1.0f, brightness = 1.0f)
                     backdropBlur(blur.toPx())
                 }.onFailure {
                     android.util.Log.w(
