@@ -4169,6 +4169,11 @@ fun VRPlayerScreen(
             onDispose { VideoBackdrop.release() }
         }
         val liquidBackdrop = rememberLayerBackdrop {
+            // 🔴 v2.4.46（模糊 UI 审查 #2）：**必须先读一下 `VideoBackdrop.tick`**。
+            //    `front` 与 `version` 都不在 Compose 的观察范围内 —— 不读它，GL 线程提交了新帧
+            //    也**不会**让本 lambda 重新执行，`rememberLayerBackdrop` 记录的还是旧内容
+            //    → 面板背后的画面永远停在「第一次采样」那一帧（模糊看起来「不生效」）。
+            VideoBackdrop.tick
             drawRect(ThemeBgColor)
             // v2.1.233：**把视频画面画进 backdrop** ——
             // 视频画在 SurfaceView 上，Compose 采样不到它（独立窗口、打洞），
@@ -4185,7 +4190,10 @@ fun VRPlayerScreen(
                         dstSize = androidx.compose.ui.unit.IntSize(
                             size.width.roundToInt(),
                             size.height.roundToInt()
-                        )
+                        ),
+                        // v2.4.46（审查 #2）：96px 位图要放大到整屏，用双线性（Low）即可 ——
+                        // 反正后面还要叠 22~80dp 高斯，高开销的滤波没有收益。
+                        filterQuality = androidx.compose.ui.graphics.FilterQuality.Low
                     )
                 }
             }
@@ -5806,6 +5814,29 @@ fun VRPlayerScreen(
                                         }
                                     }
                                 }
+                                // v2.4.46（模糊 UI 审查 #6）：**玻璃诊断**一行 ——
+                                // 现场排查「模糊没生效」时，一眼分辨是「没采样」还是「采样了但糊得不对」：
+                                //   模糊能力探测 / 采样开关 / tick / 有帧与否 + 尺寸 / 提交次数 / 距上次提交 / 失败原因。
+                                // 读 tick 是为了让这一行随采样刷新（version 等字段本身不在 Compose 观察范围内）。
+                                val bdTick = VideoBackdrop.tick
+                                Text(
+                                    text = buildString {
+                                        append("玻璃诊断：")
+                                        append(if (GlassCapability.supportsBlur) "模糊✓" else "模糊✗(降级)")
+                                        append(" · 采样=").append(if (VideoBackdrop.enabled) "开" else "关")
+                                        append(" · tick=").append(bdTick)
+                                        append(" · 帧=").append(VideoBackdrop.currentSize() ?: "无")
+                                        append(" · 提交=").append(VideoBackdrop.version)
+                                        if (VideoBackdrop.lastCommitAtMs > 0L) {
+                                            append(" · 上次=")
+                                                .append(android.os.SystemClock.elapsedRealtime() - VideoBackdrop.lastCommitAtMs)
+                                                .append("ms前")
+                                        }
+                                        VideoBackdrop.lastError?.let { append(" · 失败=").append(it) }
+                                    },
+                                    color = Color.White.copy(alpha = 0.45f),
+                                    fontSize = 9.sp
+                                )
                                 // v2.0.137：语言选择独立成块——原先塞在「主题名 … 玻璃模式」
                                 // 同一行的中间（内部还有 fillMaxWidth 的两行按钮），垂直居中后
                                 // 与左右内容互相叠压，表现为"语言选择叠在主题和玻璃效果上面"。

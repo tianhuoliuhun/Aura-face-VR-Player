@@ -1704,6 +1704,22 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        // 🔴 v2.4.46（模糊 UI 审查 #1）：**GL 上下文重建后，旧的 FBO/纹理句柄全部失效**。
+        //    此前只把 `bdDisabled` 之外的东西留着 → 退后台再回来（上下文丢失）后，
+        //    `ensureBackdropTarget` 会因为 `bdFboId != 0 && 尺寸相同` 而**直接 return**，
+        //    于是继续拿一个已失效的 FBO 去 blit → 必然报错 → 采样被永久停用
+        //    → 用户看到「模糊再也不跟着画面动」。
+        //    ⚠️ 只清 id、**不要 delete**：上下文已经丢了，对那些 id 调 glDelete* 无意义，
+        //       还可能污染错误状态。
+        bdFboId = 0
+        bdTexId = 0
+        bdW = 0
+        bdH = 0
+        bdBuffer = null
+        bdPixels = null
+        bdRow = null
+        resetBackdropCapture()
+
         GLES20.glClearColor(0.04f, 0.05f, 0.07f, 1.0f) // Dark night canvas background Hex #0a0c12
         GLES20.glDisable(GLES20.GL_DEPTH_TEST) // 2D or spherically projected mapping, depth test is unneeded
 
@@ -3155,8 +3171,19 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var bdPixels: IntArray? = null
     private var bdRow: IntArray? = null
     private var bdFrame = 0
-    /** 一旦失败就永久停用，避免每帧都抛异常刷日志 */
+    /**
+     * v2.4.46（模糊 UI 审查 #1）：失败**不再永久停用**。
+     *
+     * 旧实现任何一次 GL 错误就把 `bdDisabled` 永久置 true —— 一次偶发失败（切后台、
+     * 上下文短暂丢失、驱动抖动）之后，**本次会话的模糊就再也不更新**。
+     * 现改为：记失败次数 + 下次重试时刻，最多重试 [BD_MAX_RETRIES] 次、间隔 [BD_RETRY_DELAY_MS]。
+     */
     private var bdDisabled = false
+    private var bdFailCount = 0
+    private var bdRetryAtMs = 0L
+
+    /** 上一帧的采样开关状态（捕捉 false→true 跳变，用于重建采样资源） */
+    private var bdWasEnabled = false
 
     // =======================================================================
     // v2.2.0（P3）：AI 弹幕取帧
@@ -3470,9 +3497,45 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         bdRow = IntArray(w)
     }
 
+    /** v2.4.46（审查 #1）：采样失败最多重试次数 */
+    private val bdMaxRetries = 3
+
+    /** v2.4.46（审查 #1）：采样失败后的重试间隔（ms） */
+    private val bdRetryDelayMs = 30_000L
+
+    /**
+     * v2.4.46（审查 #1）：记录一次采样失败 —— 写入诊断原因（设置页「玻璃诊断」会显示），
+     * 按退避策略安排重试；**超过 [bdMaxRetries] 次才真正停用**（旧实现一次失败就永久停用）。
+     */
+    private fun bdFail(reason: String) {
+        bdFailCount++
+        bdDisabled = true
+        bdRetryAtMs = android.os.SystemClock.elapsedRealtime() + bdRetryDelayMs
+        VideoBackdrop.lastError = reason
+        Log.w(TAG, "backdrop 采样失败(${bdFailCount}/${bdMaxRetries})：$reason")
+    }
+
     /** 在本帧绘制完成后调用（见 [onDrawFrame] 末尾） */
     private fun captureBackdropIfNeeded() {
-        if (!VideoBackdrop.enabled || bdDisabled) return
+        // v2.4.46（审查 #1）：采样开关 false→true 时重建资源（用户切到玻璃档 / 从后台回来）
+        if (VideoBackdrop.enabled != bdWasEnabled) {
+            bdWasEnabled = VideoBackdrop.enabled
+            if (VideoBackdrop.enabled) {
+                bdFailCount = 0
+                bdRetryAtMs = 0L
+                resetBackdropCapture()
+                releaseBackdropTarget()
+            }
+        }
+        if (!VideoBackdrop.enabled) return
+        if (bdDisabled) {
+            // 次数用尽 → 本会话不再采样；否则等到重试时刻再清掉失效资源重来
+            if (bdFailCount >= bdMaxRetries) return
+            if (android.os.SystemClock.elapsedRealtime() < bdRetryAtMs) return
+            releaseBackdropTarget()
+            bdDisabled = false
+            Log.i(TAG, "backdrop 采样重试（第 ${bdFailCount + 1}/${bdMaxRetries} 次）")
+        }
         val dw = displayWidth
         val dh = displayHeight
         if (dw <= 0 || dh <= 0) return
@@ -3486,7 +3549,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         try {
             ensureBackdropTarget(tw, th)
             if (bdFboId == 0) {
-                bdDisabled = true
+                bdFail("离屏 FBO 创建失败")
                 return
             }
             // ⚠️ glReadPixels 只裁剪不缩放 —— 必须先用 glBlitFramebuffer 缩到小 FBO
@@ -3499,8 +3562,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             )
             val err1 = GLES20.glGetError()
             if (err1 != GLES20.GL_NO_ERROR) {
-                Log.w(TAG, "backdrop blit failed err=$err1，已停用背景采样")
-                bdDisabled = true
+                bdFail("blit 失败 err=$err1")
                 return
             }
             GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, bdFboId)
@@ -3510,8 +3572,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             val err2 = GLES20.glGetError()
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             if (err2 != GLES20.GL_NO_ERROR) {
-                Log.w(TAG, "backdrop readPixels failed err=$err2，已停用背景采样")
-                bdDisabled = true
+                bdFail("readPixels 失败 err=$err2")
                 return
             }
             // GL 的行序是自下而上，Bitmap 是自上而下 —— 必须翻转，否则背景是倒的
@@ -3537,8 +3598,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 Log.d(TAG, "backdrop 采样正常: " + tw + "x" + th + " <- 屏幕 " + dw + "x" + dh + " (version=" + VideoBackdrop.version + ")")
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "backdrop capture 异常，已停用：${t.message}")
-            bdDisabled = true
+            bdFail("异常：${t.message}")
         } finally {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
         }

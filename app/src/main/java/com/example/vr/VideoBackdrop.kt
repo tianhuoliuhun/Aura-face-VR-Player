@@ -1,6 +1,9 @@
 package com.example.vr
 
 import android.graphics.Bitmap
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.setValue
 
 /**
  * v2.1.233：**给 Compose 的玻璃效果提供「真实的背景内容」**。
@@ -46,6 +49,40 @@ object VideoBackdrop {
         private set
 
     /**
+     * v2.4.46（模糊 UI 审查 #2）：**驱动 Compose 重绘的 tick**。
+     *
+     * ## 为什么必须要有它
+     * `front` 是普通字段、`version` 也不在 Compose 的观察范围内 —— 所以 GL 线程提交了新帧，
+     * **背景层 lambda 不会被重新执行**，`rememberLayerBackdrop` 记录下来的还是旧内容
+     * → 面板背后的画面「卡在第一次采样的那一帧」。
+     * 把它做成 `mutableLongStateOf`，并在背景层 lambda 里读一下，Compose 才会在它变化时
+     * 重新记录背景层。
+     *
+     * ⚠️ GL 线程写 Snapshot State 是允许的（会被标脏、由主线程统一重组）。
+     */
+    var tick by mutableLongStateOf(0L)
+        private set
+
+    /**
+     * v2.4.46（审查 #2 附带）：面板隐藏/暂停时置 true —— 不再驱动重绘，
+     * 省掉 80dp 高斯模糊的反复重算。
+     */
+    @Volatile
+    var paused: Boolean = false
+
+    /**
+     * v2.4.46（审查 #1）：最近一次采样失败的原因（供设置页「玻璃诊断」显示）。
+     * `null` = 没失败过。
+     */
+    @Volatile
+    var lastError: String? = null
+
+    /** 最近一次成功提交的墙钟（ms），供诊断显示「距上次提交多久」 */
+    @Volatile
+    var lastCommitAtMs: Long = 0L
+        private set
+
+    /**
      * GL 线程调用：把一帧（已按 Bitmap 的**自上而下**顺序排好）提交为新的背景。
      *
      * @param pixels ARGB packed 且**行序已翻转**为自上而下（与 Bitmap 一致）
@@ -65,10 +102,18 @@ object VideoBackdrop {
             back = old ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         }
         version++
+        lastCommitAtMs = android.os.SystemClock.elapsedRealtime()
+        lastError = null
+        // v2.4.46（审查 #2）：每 2 次提交推进一次 tick（约 10Hz @ 每 3 帧采样一次 → 20fps 采样）
+        // —— 背景是糊的，不需要 60Hz 的新鲜度；但**必须推进**，否则背景层永不重绘。
+        if (!paused && version % 2L == 0L) tick = version
     }
 
     /** Compose 线程调用：当前可作为背景绘制的帧；不需要时返回 null */
     fun current(): Bitmap? = if (enabled) front else null
+
+    /** 供设置页「玻璃诊断」：当前 front 位图尺寸（`null` = 还没有帧） */
+    fun currentSize(): String? = front?.let { "${it.width}x${it.height}" }
 
     /** 关闭时释放，避免常驻两张 bitmap */
     fun release() {
