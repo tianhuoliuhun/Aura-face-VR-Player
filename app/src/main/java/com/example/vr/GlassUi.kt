@@ -119,8 +119,9 @@ fun Modifier.glassPanel(
         GlassStyle.Frosted -> GlassPanelBlurFrosted
         GlassStyle.Gaussian -> GlassPanelBlurGaussian
     }
-    // ⚠️ 只服务 Liquid 分支；磨砂的白底在它的分支里单独给。
-    // v2.4.49：白蒙层 0.05 → 0.03（用户反馈「不够透」，降低表面反射白雾、更透出背后画面）
+    // ⚠️ 只服务 Liquid 分支：v2.4.51 起正常（有模糊）路径已**不再画这层白**（用户要求「去除白色遮罩」），
+    // 背后视频直接透出；本变量现仅用于下方的「不支持模糊降级」分支（无 backdrop 时需一点白底撑出面板）。
+    // （v2.4.49 曾把 0.05 → 0.03，但只要有白蒙层就永远不透，故 v2.4.51 直接去掉正常路径的白。）
     val overlay = tint ?: Color.White.copy(alpha = 0.03f)
 
     // ============ 磨砂：**纯毛玻璃** ============
@@ -137,13 +138,10 @@ fun Modifier.glassPanel(
     //   Frosted  = 模糊 + 噪点颗粒 + 淡白 —— 模拟粗糙表面漫射，手感「涩」
     //   Gaussian = 只有模糊 + 轻微提亮 —— 不模拟材质，观感干净通透
     if (style == GlassStyle.Gaussian) {
+        // v2.4.51：去掉白蒙层（用户要求「去除白色遮罩」）—— 高斯档改为纯模糊，
+        // 背后视频直接透出，不再蒙白雾（无颗粒、保留纯净感）。
         val gaussianSurface: DrawScope.() -> Unit = {
             onDrawSurface()
-            // 极淡的提亮，让面板与背后的**同色**区域区分得出来 ——
-            // 背景是纯色时（详见下面 Frosted 分支里「backdrop 采不到 SurfaceView」的说明），
-            // 模糊本身是看不出来的，这点提亮 + 边框就是用户能感知到的全部。
-            // v2.4.49：高斯档白蒙层 0.10 → 0.06（更透）
-            drawRect(Color.White.copy(alpha = 0.06f))
         }
         if (!GlassCapability.supportsBlur) {
             // 降级：给一个「看起来干净通透」的半透明底，不至于点了没反应
@@ -190,11 +188,11 @@ fun Modifier.glassPanel(
         //   2) 再叠一层**不依赖背景内容的磨砂质感**：淡白底 + 细颗粒噪点。
         //      噪点是磨砂玻璃最本质的视觉特征（光线在粗糙表面漫射形成的颗粒感），
         //      即使底下是纯色也能一眼看出"这是一块磨砂玻璃"。
+        // v2.4.51：去掉白蒙层（用户要求「去除白色遮罩」）—— 磨砂档改为「纯模糊 + 颗粒」，
+        // 不再蒙白雾；颗粒保留（那是磨砂玻璃的质感、也是用户觉得磨砂好看的原因）。
         val frostedSurface: DrawScope.() -> Unit = {
             // 调用方原本铺的底色（面板/球体各自的主题底）
             onDrawSurface()
-            // 淡白：给磨砂玻璃一点实体感（v2.4.49：0.14 → 0.08，更透）
-            drawRect(Color.White.copy(alpha = 0.08f))
             // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35，更轻、更透）
             drawRect(
                 brush = ShaderBrush(
@@ -302,10 +300,9 @@ fun Modifier.glassPanel(
                     end = androidx.compose.ui.geometry.Offset.Infinite,
                 ),
             ),
-            shape = shape(),
+            shape = shape(            ),
         )
-        .drawWithContentOverlay(overlay)
-}
+    }
 
 /**
  * 玻璃球体（悬浮球等圆形控件）。
