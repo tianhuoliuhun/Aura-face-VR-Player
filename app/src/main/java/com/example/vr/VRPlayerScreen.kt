@@ -1980,6 +1980,14 @@ fun VRPlayerScreen(
         // 首次稍作等待，避免刚进页面就抓一帧（可能还是黑帧/加载图）
         delay(FIRST_CAPTURE_DELAY_MS)
         while (true) {
+            // v2.4.40（弹幕审查 #2）：**暂停时不请求模型**。
+            // 旧实现暂停期间仍每 periodMs 抓帧 → 请求 → 入队：白耗 API 与电量，
+            // 且入队用的是墙钟时刻、与画面脱节（与 #1 叠加后还会在恢复时整体偏移）。
+            // ⚠️ 与下方导入循环同款写法：直接读 state 取当前值，无需把它加进 LaunchedEffect key。
+            if (!isVideoPlaying) {
+                delay(periodMs)
+                continue
+            }
             try {
                 // ① 取画面
                 // ⚠️ v2.4.13：本地 LLM 模式下 `needsImage` 恒为 false（它不知道运行时
@@ -2172,31 +2180,14 @@ fun VRPlayerScreen(
 
     // ===== v2.4.0（P6）：弹幕与播放状态的联动 =====
 
-    /** 进入暂停的时刻（0 = 未暂停）。暂停/恢复与 seek 都要用它，故先声明。 */
-    var danmuPausedAtMs by remember { mutableLongStateOf(0L) }
-
     /** 上一次观察到的播放位置，用于识别 seek 突跳。 */
     var danmuLastPosMs by remember { mutableLongStateOf(0L) }
 
-    // ① 暂停/恢复：暂停时弹幕必须**冻结**，否则视频停了弹幕还在飘。
-    //
-    // 做法：记录进入暂停的时刻；恢复时把已存活弹幕的出生时间整体后移「暂停时长」，
-    // 位置公式 `x = W - (now - born) * speed` 于是自然保持连续（引擎的 shiftBornTime 正是为此设计）。
-    // ⚠️ 只在**暂停→播放**这一次跳变时平移；播放中反复重组不能重复平移（会越推越远）。
-    LaunchedEffect(isVideoPlaying, danmuConfig.isEnabled) {
-        if (!danmuConfig.isEnabled) return@LaunchedEffect
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (!isVideoPlaying) {
-            // 刚进入暂停：记下时刻（若已在暂停则不覆盖，避免跳变基准漂移）
-            if (danmuPausedAtMs == 0L) danmuPausedAtMs = now
-        } else {
-            // 恢复播放：把暂停时长补给所有弹幕
-            if (danmuPausedAtMs != 0L) {
-                danmuEngine.shiftBornTime(now - danmuPausedAtMs)
-                danmuPausedAtMs = 0L
-            }
-        }
-    }
+    // ① 暂停/恢复：v2.4.40（弹幕审查 #1）起**改由渲染层用虚拟时钟冻结**弹幕 ——
+    //    上层不再记录暂停时刻、也不再平移 bornMs。
+    //    ⚠️ 旧做法是「渲染层暂停期间照走时钟」+「恢复时 shiftBornTime(暂停时长)」，
+    //       两者互相抵消 → 用户看到「暂停还在动、恢复向右跳一下」。两处已一并移除。
+    //    现在暂停由 `DanmuOverlay(isPaused = !isVideoPlaying)` 直接冻结，位置天然连续。
 
     // ② seek 后清空弹幕。
     //
@@ -2217,8 +2208,6 @@ fun VRPlayerScreen(
             if (jumped) {
                 // clear 保留去重窗口：跳转后模型很可能给出相似内容，继续压制能避免刷屏
                 danmuEngine.clear()
-                // 跳转同时重置暂停基准，否则恢复播放时会补一段错误时长
-                danmuPausedAtMs = 0L
                 // v2.4.7：导入模式下还要把**投递游标**对齐到跳转后的位置。
                 // ⚠️ 不重置的话：向前跳会把中间几十分钟的弹幕一次性补投（几千条）；
                 //    向后跳则所有弹幕都判为"已投过"、再也不出现。
@@ -4287,6 +4276,9 @@ fun VRPlayerScreen(
             engine = danmuEngine,
             config = danmuConfig,
             isSplitScreenVR = isSplitScreenVR,
+            // v2.4.40（弹幕审查 #1）：暂停时让渲染层冻结弹幕（虚拟时钟），
+            // 不再靠上层平移 bornMs —— 那样会出现「暂停还在动、恢复向右跳」。
+            isPaused = !isVideoPlaying,
             modifier = Modifier.fillMaxSize()
         )
 

@@ -68,6 +68,11 @@ fun DanmuOverlay(
     engine: DanmuEngine,
     config: DanmuConfig,
     isSplitScreenVR: Boolean = false,
+    /**
+     * v2.4.40（弹幕审查 #1）：播放是否**暂停**。
+     * 暂停时渲染层用「虚拟时钟」冻结弹幕（不推进、不 prune），恢复后自然续走。
+     */
+    isPaused: Boolean = false,
     areaHeightRatio: Float = DEFAULT_AREA_HEIGHT_RATIO,
     modifier: Modifier = Modifier
 ) {
@@ -76,11 +81,35 @@ fun DanmuOverlay(
     // 每帧重新读一次「现在几毫秒」，驱动弹幕移动。
     // ⚠️ 不能用 LaunchedEffect + delay(16) 自建定时器：那样与 VSync 不同步，
     //    会出现抖动；withFrameNanos 直接挂在合成器的帧回调上，天然对齐。
+    //
+    // ===== v2.4.40（弹幕审查 #1）：暂停时**冻结**弹幕 =====
+    // 旧实现每帧无条件 `frameTimeMs = elapsedRealtime()`：暂停期间时钟照走 → 弹幕继续往左飞；
+    // 而上层在**恢复时**又给 `bornMs` 平移「暂停时长」把位置拉回 → 用户看到
+    // 「暂停还在动、恢复向右跳一下」。
+    //
+    // 现改为**虚拟时钟**（`elapsedRealtime − 累计暂停时长`）：
+    //   · 暂停中：不推进时钟、也不 prune → 位置与存活集完全冻结；
+    //   · 恢复后：用减去累计暂停的虚拟时刻续走 → 暂停前后位置天然连续。
+    // 因此**上层不再需要平移 bornMs**（原先的 `shiftBornTime` 调用已随之移除）。
     var frameTimeMs by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    LaunchedEffect(Unit) {
+    /** 累计暂停时长（毫秒）；虚拟时钟 = 实时钟 − 本值。 */
+    var pauseAccumMs by remember { mutableLongStateOf(0L) }
+    /** 本次暂停的起始（实时钟）；0 = 当前未暂停。 */
+    var pauseStartedAtMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(isPaused) {
+        if (isPaused) {
+            pauseStartedAtMs = SystemClock.elapsedRealtime()
+        } else if (pauseStartedAtMs != 0L) {
+            pauseAccumMs += SystemClock.elapsedRealtime() - pauseStartedAtMs
+            pauseStartedAtMs = 0L
+        }
+    }
+    LaunchedEffect(isPaused) {
         while (true) {
             withFrameNanos { /* 仅用于等待下一帧 */ }
-            val t = SystemClock.elapsedRealtime()
+            // 暂停：既不推进时钟也不 prune → 弹幕原地冻结
+            if (isPaused) continue
+            val t = SystemClock.elapsedRealtime() - pauseAccumMs
             frameTimeMs = t
             // ⚠️ prune 必须在这里（effect 的挂起点）调用，**不能放进 Canvas 的 draw 块**：
             //    draw 阶段应是纯绘制、无副作用；在绘制中删列表元素属于改状态，
@@ -89,7 +118,7 @@ fun DanmuOverlay(
         }
     }
 
-    // 引擎的时间基准与这里必须一致（都用 elapsedRealtime），否则位置会跳。
+    // 引擎的时间基准与这里必须一致（都用「实时钟 − 累计暂停」），否则位置会跳。
     val nowMs = frameTimeMs
 
     // 画面高度比例 → 实际 dp。用 BoxWithConstraints 拿到真实可用高度。
