@@ -4,18 +4,12 @@ import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.ImageShader
-import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -119,10 +113,10 @@ fun Modifier.glassPanel(
         GlassStyle.Frosted -> GlassPanelBlurFrosted
         GlassStyle.Gaussian -> GlassPanelBlurGaussian
     }
-    // ⚠️ 只服务 Liquid 分支：v2.4.51 起正常（有模糊）路径已**不再画这层白**（用户要求「去除白色遮罩」），
-    // 背后视频直接透出；本变量现仅用于下方的「不支持模糊降级」分支（无 backdrop 时需一点白底撑出面板）。
-    // （v2.4.49 曾把 0.05 → 0.03，但只要有白蒙层就永远不透，故 v2.4.51 直接去掉正常路径的白。）
-    val overlay = tint ?: Color.White.copy(alpha = 0.03f)
+    // ⚠️ 只服务 Liquid 分支：降级分支用它撑出半透明白底；正常（有模糊）路径在末尾
+    //    `.drawWithContentOverlay(overlay)` 再盖一层 5% 白（v2.4.45 行为：彩色厚玻璃观感）。
+    // （v2.4.49 曾把 0.05 → 0.03，v2.4.56 回退液态/高斯到 2.4.45 时 Liquid 恢复 0.05。）
+    val overlay = tint ?: Color.White.copy(alpha = 0.05f)
 
     // ============ 磨砂：**纯毛玻璃** ============
     // v2.1.220 用户反馈「UI 没有了只剩模糊」——根因是层级用错了：
@@ -138,31 +132,19 @@ fun Modifier.glassPanel(
     //   Frosted  = 模糊 + 噪点颗粒 + 淡白 —— 模拟粗糙表面漫射，手感「涩」
     //   Gaussian = 只有模糊 + 轻微提亮 —— 不模拟材质，观感干净通透
     if (style == GlassStyle.Gaussian) {
-        // v2.4.51：去掉白蒙层（用户要求「去除白色遮罩」）—— 高斯档改为纯模糊，
-        // 背后视频直接透出，不再蒙白雾（无颗粒、保留纯净感）。
-        //
-        // 🔴 v2.4.54（用户反馈「液态玻璃和高斯模糊都是惨白一片」+ 截图实证）：
-        //    磨砂、高斯、液态三档用的是**同一张 96px 降采样背景位图 + 同一个调用方
-        //    面板底色透明度**（见 VRPlayerScreen.kt 的 onDrawSurface，三档不区分 style）。
-        //    三档在结构上唯一的差异就是磨砂多画了一层颗粒噪点（frostedSurface）。
-        //    降采样 + 模糊后画面局部对比度损失很大，结果本来就偏向整屏的平均色调——
-        //    磨砂的颗粒把这片平滑的淡色打碎成「看起来像玻璃」，高斯/液态没有任何纹理，
-        //    淡色就直接暴露成一片平滑惨白。补一层**更轻**的颗粒（0.15，磨砂是 0.35）：
-        //    足够打散平滑感，又不会盖掉「无颗粒、纯净」这个高斯档本该有的观感。
+        // v2.4.56：整体回退到 v2.4.45 行为（用户指定）——
+        //   极淡白提亮 + 轻去饱和/提亮；撤销 v2.4.50~55 的「中性化/加颗粒」尝试。
         val gaussianSurface: DrawScope.() -> Unit = {
             onDrawSurface()
-            drawRect(
-                brush = ShaderBrush(
-                    ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
-                ),
-                alpha = 0.35f,
-            )
+            // 极淡的提亮，让面板与背后的**同色**区域区分得出来 ——
+            // 背景是纯色时（详见下面 Frosted 分支里「backdrop 采不到 SurfaceView」的说明），
+            // 模糊本身是看不出来的，这点提亮 + 边框就是用户能感知到的全部。
+            drawRect(Color.White.copy(alpha = 0.10f))
         }
         if (!GlassCapability.supportsBlur) {
             // 降级：给一个「看起来干净通透」的半透明底，不至于点了没反应
             return this
-                // v2.4.49：高斯档降级白底 0.12 → 0.08（与正常档一致更透）
-                .background(Color.White.copy(alpha = 0.08f), shape = shape())
+                .background(Color.White.copy(alpha = 0.12f), shape = shape())
                 .border(width = 1.dp, color = Color.White.copy(alpha = 0.28f), shape = shape())
         }
         return this
@@ -173,9 +155,8 @@ fun Modifier.glassPanel(
                 effects = {
                     // 只在 backdrop 上做**纯高斯模糊**：无 lens、无 vibrancy、无颗粒
                     backdropBlur(blur.toPx())
-                    // v2.4.50：去掉提亮（1.08 → 1.0）—— 此前提亮把背景洗成奶白、发闷不像玻璃；
-                    // 中性化 colorControls，与磨砂同款「只糊不染色」，保留无颗粒的纯净感。
-                    colorControls(saturation = 1.0f, contrast = 1.0f, brightness = 1.0f)
+                    // 轻微提亮 + 去一点点饱和：让糊开后的画面显得「通透」而不是「发闷」
+                    colorControls(saturation = 0.95f, contrast = 1.0f, brightness = 1.08f)
                 },
             )
             .border(
@@ -186,70 +167,8 @@ fun Modifier.glassPanel(
     }
 
     if (style == GlassStyle.Frosted) {
-        // ============ v2.1.231：磨砂为什么"看起来没模糊" ============
-        // 根因不是参数没调对，而是 **backdrop 里根本没有可被模糊的内容**：
-        //   播放页的视频是 `VRGLSurfaceView extends GLSurfaceView extends SurfaceView`。
-        //   SurfaceView 在 Android 合成器里是**独立窗口、打洞（punch hole）**的，
-        //   Compose 的 layer backdrop 采样的是 Compose 自己的绘制层 —— **采不到 SurfaceView
-        //   的内容**。于是 backdrop 里实际只有 `drawRect(ThemeBgColor)` 那一层纯色。
-        //   **对纯色做高斯模糊，结果还是同一片纯色** —— 所以无论把半径调到多大，
-        //   磨砂档在主界面上永远"看不出任何变化"。
-        //   （液态玻璃反而看得出：它有半透明白底 + 高光渐变描边 + lens 边缘折射，
-        //    这些在纯色底上照样可见，所以用户从没抱怨过液态档。）
-        //
-        // 修法：**模糊与质感解耦** ——
-        //   1) 系统 backdrop blur **照常保留**（背景确实有 Compose 内容的场合，
-        //      例如设置面板叠在主控栏上时，能拿到真正的模糊）；
-        //   2) 再叠一层**不依赖背景内容的磨砂质感**：淡白底 + 细颗粒噪点。
-        //      噪点是磨砂玻璃最本质的视觉特征（光线在粗糙表面漫射形成的颗粒感），
-        //      即使底下是纯色也能一眼看出"这是一块磨砂玻璃"。
-        // v2.4.51：去掉白蒙层（用户要求「去除白色遮罩」）—— 磨砂档改为「纯模糊 + 颗粒」，
-        // 不再蒙白雾；颗粒保留（那是磨砂玻璃的质感、也是用户觉得磨砂好看的原因）。
-        val frostedSurface: DrawScope.() -> Unit = {
-            // 调用方原本铺的底色（面板/球体各自的主题底）
-            onDrawSurface()
-            // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35，更轻、更透）
-            drawRect(
-                brush = ShaderBrush(
-                    ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
-                ),
-                alpha = 0.35f,
-            )
-        }
-
-        // v2.1.229：**澎湃 OS / MIUI 降级**。
-        // HyperOS 对实时模糊有硬件分级：被屏蔽的机型上 RenderEffect 会失效或抛异常
-        // （社区实测报 "nativePtr is null"），表现就是「选了磨砂但什么都没发生」。
-        // 探测到不可用时**跳过系统模糊**，只保留上面那层质感 ——
-        // 观感上仍然是磨砂玻璃，而不是「点了没反应」。
-        if (!GlassCapability.supportsBlur) {
-            return this
-                // v2.4.49：磨砂档降级白底 0.16 → 0.10（与正常档一致更透）
-                .background(Color.White.copy(alpha = 0.10f), shape = shape())
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = 0.22f),
-                    shape = shape(),
-                )
-                // clip 是为了把颗粒裁成面板/球体的形状（颗粒本身是整块矩形平铺）
-                .clip(shape())
-                .drawGrainOverlay()
-        }
-        return this
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = shape,
-                onDrawSurface = frostedSurface,
-                effects = {
-                    // 只做高斯模糊，**无 lens / vibrancy / colorControls** —— 纯毛玻璃
-                    backdropBlur(blur.toPx())
-                },
-            )
-            .border(
-                width = 1.dp,
-                color = Color.White.copy(alpha = 0.22f),
-                shape = shape(),
-            )
+        // v2.4.56：磨砂档（标杆）独立到 FrostedGlass.kt，单独维护，避免被液态/高斯的改动误伤。
+        return this.glassFrosted(backdrop = backdrop, shape = shape, onDrawSurface = onDrawSurface, blur = blur)
     }
 
     // ============ Liquid Glass：折射 + 增饱和 + 边缘高光 ============
@@ -260,6 +179,10 @@ fun Modifier.glassPanel(
     //    上，`drawBackdrop` 内部创建 `RenderEffect` 会抛 `nativePtr is null`；
     //    而 `drawBackdrop` 在**绘制阶段**执行，异常无法在业务层 catch → **直接闪退**。
     //    探测失败时降级为「半透明白底 + 高光描边」（与磨砂档同款策略），不再崩。
+    // v2.4.56：整个分支回退到 v2.4.45 行为（用户指定）——
+    //    恢复 lens(0.55) 强折射 + vibrancy + colorControls(1.45/1.06/1.05) 彩色厚玻璃观感，
+    //    末尾恢复 `.drawWithContentOverlay(overlay)`（5% 白蒙层）；
+    //    v2.4.50~55 的「调轻折射/去 vibrancy/加颗粒」尝试全部撤销。
     if (!GlassCapability.supportsBlur) {
         return this
             .background(overlay, shape = shape())
@@ -269,25 +192,11 @@ fun Modifier.glassPanel(
                 shape = shape(),
             )
     }
-    // 🔴 v2.4.54（用户反馈「液态玻璃和高斯模糊都是惨白一片，但磨砂正常」+ 截图实证）：
-    //    与 Gaussian 分支同一根因——液态档原先直接把调用方的 onDrawSurface 传给
-    //    drawBackdrop，没有任何纹理打散模糊后的平滑淡色。补一层比高斯更淡的颗粒
-    //    （0.1）：液态档本就靠 lens 折射 + 渐变高光边营造立体感，颗粒只需要点到为止，
-    //    不能抢了折射边的通透感。
-    val liquidSurface: DrawScope.() -> Unit = {
-        onDrawSurface()
-            drawRect(
-                brush = ShaderBrush(
-                    ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
-                ),
-                alpha = 0.35f,
-            )
-    }
     return this
         .drawBackdrop(
             backdrop = backdrop,
             shape = shape,
-            onDrawSurface = liquidSurface,
+            onDrawSurface = onDrawSurface,
             effects = {
                 // 🔴 v2.4.45：再包一层 `runCatching`。`GlassCapability.supportsBlur` 只是**弱探测**
                 //    （建一个 1px 半径成功 ≠ 绘制时一定成功；切档时动态改半径更易触发）。
@@ -298,13 +207,11 @@ fun Modifier.glassPanel(
                     //    RenderEffect SDF 能力，且库对 <33 **是抛异常**
                     //    （反编译可见 `LensKt.throwUnsupportedSDFException()`），不是静默降级。
                     if (Build.VERSION.SDK_INT >= 33) {
-                        // v2.4.50：折射 0.55 → 0.3（调轻，只留边缘轻微弯曲，不再「厚玻璃」）
-                        lens(refractionHeight = 18f, refractionAmount = 0.3f)
+                        // v2.1.218：采用 iOS 26 参数（折射更强、边缘更「厚玻璃聚光」）
+                        lens(refractionHeight = 18f, refractionAmount = 0.55f)
                     }
-                    // v2.4.50：去掉 vibrancy + 中性化 colorControls（sat/对比/亮 全 1.0）。
-                    // 此前 sat1.45 + vibrancy + 对比 + 亮 给背景加了滤镜，像彩色厚玻璃、不透；
-                    // 现与磨砂同款「只糊不染色」，达到磨砂的干净通透感，仅保留轻折射边。
-                    colorControls(saturation = 1.0f, contrast = 1.0f, brightness = 1.0f)
+                    vibrancy()
+                    colorControls(saturation = 1.45f, contrast = 1.06f, brightness = 1.05f)
                     backdropBlur(blur.toPx())
                 }.onFailure {
                     android.util.Log.w(
@@ -329,8 +236,9 @@ fun Modifier.glassPanel(
                     end = androidx.compose.ui.geometry.Offset.Infinite,
                 ),
             ),
-            shape = shape(            ),
+            shape = shape(),
         )
+        .drawWithContentOverlay(overlay)
     }
 
 /**
@@ -372,51 +280,6 @@ private fun Modifier.drawWithContentOverlay(color: Color): Modifier =
     else this.drawWithContent {
         drawContent()
         drawRect(color)
-    }
-
-/**
- * v2.1.231：**磨砂颗粒（噪点）图**。
- *
- * 磨砂玻璃区别于「普通半透明板」的本质，是表面粗糙导致光线漫射形成的**细颗粒感**。
- * 这层颗粒是**不依赖背景内容**的 —— 即便底下是一片纯色（见 [glassPanel] 里
- * 「backdrop 采不到 SurfaceView」的说明），颗粒依然清晰可见，
- * 用户就能明确看出「这是一块磨砂玻璃」。
- *
- * 实现：128×128 的随机白点图（alpha 0~34，很淡），用 [ImageShader] + [TileMode.Repeated]
- * 平铺 —— 1:1 像素平铺不会被拉伸成大块，绘制成本就是一次 `drawRect`。
- */
-object FrostedGrain {
-    private const val SIZE = 128
-
-    /** 只生成一次（16384 个像素，实测 < 5ms），全进程共用 */
-    val bitmap: ImageBitmap by lazy { generate() }
-
-    private fun generate(): ImageBitmap {
-        val bmp = android.graphics.Bitmap.createBitmap(
-            SIZE, SIZE, android.graphics.Bitmap.Config.ARGB_8888
-        )
-        val rnd = java.util.Random(20261004)
-        val px = IntArray(SIZE * SIZE)
-        for (i in px.indices) {
-            // 白点，alpha 随机 0~34（约 13%）—— 淡到只形成颗粒、不形成白雾
-            px[i] = (rnd.nextInt(35) shl 24) or 0x00FFFFFF
-        }
-        bmp.setPixels(px, 0, SIZE, 0, 0, SIZE, SIZE)
-        return bmp.asImageBitmap()
-    }
-}
-
-/** 在内容之上平铺一层磨砂颗粒（降级分支用 —— 此时没有 backdrop 可用） */
-private fun Modifier.drawGrainOverlay(): Modifier =
-    this.drawWithContent {
-        drawContent()
-        drawRect(
-            brush = ShaderBrush(
-                ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
-            ),
-            // v2.4.49：降级磨砂颗粒 0.5 → 0.35，更轻
-            alpha = 0.35f,
-        )
     }
 
 /**
