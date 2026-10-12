@@ -21,8 +21,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -93,52 +91,27 @@ fun GeneralBeautySection(
             accentColor = accentColor
         )
 
-        // 曝光：值域 -0.3~0.3，显示带正负号，故未复用 BeautySliderItem
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(stringResource(R.string.beauty_brightness), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                Text(
-                    if (brightnessLevel >= 0) "+${(brightnessLevel * 100).toInt()}" else "${(brightnessLevel * 100).toInt()}",
-                    color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold
-                )
-            }
-            Slider(
-                value = brightnessLevel,
-                onValueChange = onBrightnessLevelChange,
-                valueRange = -0.3f..0.3f,
-                colors = SliderDefaults.colors(
-                    thumbColor = accentColor,
-                    activeTrackColor = accentColor,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                ),
-                modifier = Modifier.height(26.dp)
-            )
-        }
+        // v2.4.42（美颜面板统一）：曝光/对比度此前各自手写「11sp 标题 + 10sp 数值 +（对比度还是白色）滑块」，
+        //   与 BeautySliderItem 的「标题 14sp / 数值 accent 11sp 加粗」不一致 → 收敛复用。
+        // 曝光：值域 -0.3~0.3，数值带正负号 → 用 valueText 自定义文案
+        BeautySliderItem(
+            label = stringResource(R.string.beauty_brightness),
+            value = brightnessLevel,
+            onValueChange = onBrightnessLevelChange,
+            valueRange = -0.3f..0.3f,
+            accentColor = accentColor,
+            valueText = if (brightnessLevel >= 0) "+${(brightnessLevel * 100).toInt()}"
+            else "${(brightnessLevel * 100).toInt()}"
+        )
 
-        // 对比度：值域 0.7~1.3（以 1.0 为中性），显示为百分比
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(stringResource(R.string.beauty_contrast), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                Text("${(contrastLevel * 100).toInt()}%", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-            Slider(
-                value = contrastLevel,
-                onValueChange = onContrastLevelChange,
-                valueRange = 0.7f..1.3f,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                ),
-                modifier = Modifier.height(26.dp)
-            )
-        }
+        // 对比度：值域 0.7~1.3（以 1.0 为中性），数值默认显示为百分比
+        BeautySliderItem(
+            label = stringResource(R.string.beauty_contrast),
+            value = contrastLevel,
+            onValueChange = onContrastLevelChange,
+            valueRange = 0.7f..1.3f,
+            accentColor = accentColor
+        )
 
         BeautySliderItem(stringResource(R.string.beauty_whitening), whiteningLevel, onWhiteningLevelChange, accentColor = accentColor)
     }
@@ -264,26 +237,14 @@ fun LutFilterSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(stringResource(R.string.lut_intensity), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                    Text("${(lutMix * 100).toInt()}%", color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-                Slider(
-                    value = lutMix,
-                    onValueChange = onLutMixChange,
-                    valueRange = 0f..1f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = accentColor,
-                        activeTrackColor = accentColor,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                    ),
-                    modifier = Modifier.height(26.dp)
-                )
-            }
+            // v2.4.42（美颜面板统一）：LUT 强度也复用 BeautySliderItem（原为手写的 11sp/10sp 版本）
+            BeautySliderItem(
+                label = stringResource(R.string.lut_intensity),
+                value = lutMix,
+                onValueChange = onLutMixChange,
+                accentColor = accentColor,
+                modifier = Modifier.weight(1f)
+            )
             Spacer(modifier = Modifier.width(10.dp))
             Surface(
                 color = if (isLutLoading) Color.White.copy(alpha = 0.10f) else accentColor,
@@ -297,9 +258,10 @@ fun LutFilterSection(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
+                    // v2.4.42（美颜面板统一）：行内图标统一 16dp（原 12dp/14dp 混用）
                     if (isLutLoading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(12.dp),
+                            modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
                             color = accentColor
                         )
@@ -308,7 +270,7 @@ fun LutFilterSection(
                             imageVector = Icons.Default.Add,
                             contentDescription = null,
                             tint = Color(0xFF1A1A2E),
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(4.dp))

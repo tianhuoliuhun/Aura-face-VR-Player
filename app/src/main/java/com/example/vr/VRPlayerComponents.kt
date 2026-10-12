@@ -103,7 +103,14 @@ fun AuraSwitch(
     )
 }
 
-/** 带百分比读数的滑杆行（美颜/人像精修参数统一组件） */
+/**
+ * 带数值读数的滑杆行 —— 美颜 / 人像精修 / LUT 强度的**唯一实现**。
+ *
+ * v2.4.42：增加 [valueText] 与 [modifier]，把此前「手写 `Row(标题+数值)` + `Slider`」的三处
+ * （曝光 / 对比度 / LUT 强度）也收敛进来 —— 那三处各自写着 11sp 标题、10sp 数值、
+ * 甚至**白色**滑块，与这里的「标题 14sp / 数值 accent 11sp 加粗」不一致
+ * （即设置面板布局审查 v2.4.37 定下的统一规则）。
+ */
 @Composable
 fun BeautySliderItem(
     label: String,
@@ -112,9 +119,12 @@ fun BeautySliderItem(
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
     accentColor: Color = Color(0xFFD0BCFF),
     enabled: Boolean = true,
-    badge: String? = null
+    badge: String? = null,
+    /** 自定义数值文案；null = 默认「值%」（曝光需要显示正负号，故留此口子） */
+    valueText: String? = null,
+    modifier: Modifier = Modifier
 ) {
-    Column(modifier = if (enabled) Modifier else Modifier.alpha(0.35f)) {
+    Column(modifier = modifier.then(if (enabled) Modifier else Modifier.alpha(0.35f))) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
@@ -124,7 +134,12 @@ fun BeautySliderItem(
                 if (badge != null) {
                     Text(badge, color = Color(0xFFE8A33D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("${(value * 100).toInt()}%", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = valueText ?: "${(value * 100).toInt()}%",
+                    color = accentColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
         Slider(
