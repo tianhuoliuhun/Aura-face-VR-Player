@@ -64,7 +64,8 @@ fun LocalModelSection(
         Text(
             text = stringResource(R.string.local_model_title),
             color = Color.White,
-            fontSize = 13.sp,
+            // v2.4.44：区块标题对齐设置面板的 12sp（原 13sp 介于两级之间，不属任何一档）
+            fontSize = 12.sp,
             fontWeight = FontWeight.Medium
         )
         Text(
@@ -78,7 +79,8 @@ fun LocalModelSection(
         Text(
             text = "${model.displayName} · ${model.sizeBytes / 1048576}MB",
             color = Color.White.copy(alpha = 0.8f),
-            fontSize = 12.sp
+            // v2.4.44：这行是「次要信息」，归入说明档 11sp（原 12sp）
+            fontSize = 11.sp
         )
 
         // ===== v2.4.16：**推理状态反馈** =====
@@ -208,7 +210,8 @@ fun LocalModelSection(
             Text(
                 text = stringResource(R.string.local_model_mmproj_title),
                 color = Color.White,
-                fontSize = 13.sp,
+                // v2.4.44：同「本地模型」标题，对齐 12sp
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(

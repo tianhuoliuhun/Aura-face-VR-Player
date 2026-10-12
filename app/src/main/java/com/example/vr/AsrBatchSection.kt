@@ -34,6 +34,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
+ * v2.4.44：ASR 区块内「文本 ↔ 右侧按钮/状态」之间的**固定间距**。
+ *
+ * ## 为什么需要（与美颜面板 v2.4.43 同款问题）
+ * 本区块会出现在**设置面板的窄列**里。区块内的两行（模型状态卡、SenseVoice 快捷块）原本写作
+ * `Row(fillMaxWidth, SpaceBetween) { Column { 标题; 说明 }; 按钮 }` —— **文本列没有 `weight(1f)`**，
+ * 而模型名可能是很长的原始 dirName（`dolphin-base-ctc-multi-lang-int8`），
+ * 于是 `Row` 先把整行宽度给了无约束的文本列，末尾的「下载 / 更新 / 已就绪」被压成 0 宽（不可见）。
+ *
+ * 修法：文本列 `weight(1f)` + 文本 `maxLines`/省略号 + 本固定间距。
+ */
+private val ASR_ROW_GAP = 8.dp
+
+/**
  * 「实时字幕」的引擎与模型区块（设置面板、主界面字幕快捷面板共用）。
  *
  * v120 拆分自 VRPlayerScreen.kt；v127 起只保留 SenseVoice-Small（CPU）一条路线，
@@ -129,18 +142,26 @@ fun BatchTranscribeSection(
                     .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
+                // v2.4.44：**文本列必须 `weight(1f)`** —— 见 ASR_ROW_GAP 的说明。
+                //   模型名可能是很长的原始 dirName（如 `dolphin-base-ctc-multi-lang-int8`），
+                //   没有 weight 时它会把末端的「下载 / 更新」按钮挤出可视区。
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(ASR_ROW_GAP)
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
                         Text(
                             // v2.0.145：模型名随所选语言变化（扩展语言是独立模型）
                             SherpaAsrManager.modelInfoFor(context, sherpaLangCode).first,
                             color = Color.White,
                             fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             // v2.0.127：模型内置，这里显示实际生效来源（下载版优先于内置版）
@@ -151,7 +172,9 @@ fun BatchTranscribeSection(
                             else stringResource(R.string.asr_model_unavailable),
                             color = if (modelReady) accentColor.copy(alpha = 0.9f)
                             else Color(0xFFFFB74D),
-                            fontSize = 8.sp
+                            fontSize = 8.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     if (!isDownloading) {
@@ -292,22 +315,30 @@ private fun SenseVoiceQuickBlock(
             .padding(horizontal = 10.dp, vertical = 7.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
+        // v2.4.44：同「模型状态卡」—— 文本列 `weight(1f)`，保证「已就绪 / 下载模型」按钮完整可见
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(ASR_ROW_GAP)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
                 Text(
                     stringResource(R.string.asr_sv_quick_title),
                     color = Color.White,
                     fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     stringResource(R.string.asr_sv_quick_sub),
                     color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 8.sp
+                    fontSize = 8.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             if (ready) {
