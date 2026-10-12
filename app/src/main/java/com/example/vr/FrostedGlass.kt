@@ -1,10 +1,7 @@
 package com.example.vr
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
@@ -13,29 +10,27 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur as backdropBlur
 
 /**
  * 磨砂玻璃（Frosted，iOS 11 风格）—— v2.4.56 从 GlassUi.kt 独立出来的「标杆档」。
  *
  * 用户明确要求：磨砂是三档里观感最好的基准，独立成文件单独维护，
  * 避免被液态/高斯档的反复调整误伤。本文件包含：
- *   - [glassFrosted]：磨砂档的全部绘制逻辑（正常路径 + 降级路径）
+ *   - [glassFrosted]：磨砂档的全部绘制逻辑
  *   - [FrostedGrain]：磨砂颗粒噪点图（128×128 随机白点平铺）
- *   - [drawGrainOverlay]：降级路径（无 backdrop 时）的颗粒平铺
  *
- * ⚠️ 除新增的本文件级说明与函数签名外，逻辑与 v2.4.55 的磨砂分支逐字一致
- *    （原样搬运，未调任何参数）。磨砂档引用的 [GlassCapability] 探测器仍在 GlassUi.kt。
+ * v2.4.57：**去掉模糊层**（用户指定「玻璃不再模糊背景」）——
+ * 磨砂不再对背景做 RenderEffect 高斯模糊，视频从面板下清晰透出，
+ * 只保留 surface 层的颗粒质感 + 边框；HyperOS 模糊降级分支与 drawGrainOverlay
+ * 一并移除（无任何 RenderEffect 特效，清晰透出全平台可用）。
  */
 internal fun Modifier.glassFrosted(
     backdrop: Backdrop,
     shape: () -> Shape,
     onDrawSurface: DrawScope.() -> Unit,
-    blur: Dp,
 ): Modifier {
     // ============ v2.1.231：磨砂为什么"看起来没模糊" ============
     // 根因不是参数没调对，而是 **backdrop 里根本没有可被模糊的内容**：
@@ -68,33 +63,13 @@ internal fun Modifier.glassFrosted(
         )
     }
 
-    // v2.1.229：**澎湃 OS / MIUI 降级**。
-    // HyperOS 对实时模糊有硬件分级：被屏蔽的机型上 RenderEffect 会失效或抛异常
-    // （社区实测报 "nativePtr is null"），表现就是「选了磨砂但什么都没发生」。
-    // 探测到不可用时**跳过系统模糊**，只保留上面那层质感 ——
-    // 观感上仍然是磨砂玻璃，而不是「点了没反应」。
-    if (!GlassCapability.supportsBlur) {
-        return this
-            // v2.4.49：磨砂档降级白底 0.16 → 0.10（与正常档一致更透）
-            .background(Color.White.copy(alpha = 0.10f), shape = shape())
-            .border(
-                width = 1.dp,
-                color = Color.White.copy(alpha = 0.22f),
-                shape = shape(),
-            )
-            // clip 是为了把颗粒裁成面板/球体的形状（颗粒本身是整块矩形平铺）
-            .clip(shape())
-            .drawGrainOverlay()
-    }
     return this
         .drawBackdrop(
             backdrop = backdrop,
             shape = shape,
             onDrawSurface = frostedSurface,
-            effects = {
-                // 只做高斯模糊，**无 lens / vibrancy / colorControls** —— 纯毛玻璃
-                backdropBlur(blur.toPx())
-            },
+            // v2.4.57：去掉模糊层——无任何 RenderEffect 特效，背景清晰透出
+            effects = {},
         )
         .border(
             width = 1.dp,
@@ -135,15 +110,3 @@ object FrostedGrain {
     }
 }
 
-/** 在内容之上平铺一层磨砂颗粒（降级分支用 —— 此时没有 backdrop 可用） */
-private fun Modifier.drawGrainOverlay(): Modifier =
-    this.drawWithContent {
-        drawContent()
-        drawRect(
-            brush = ShaderBrush(
-                ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
-            ),
-            // v2.4.49：降级磨砂颗粒 0.5 → 0.35，更轻
-            alpha = 0.35f,
-        )
-    }

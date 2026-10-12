@@ -4174,13 +4174,18 @@ fun VRPlayerScreen(
             //    也**不会**让本 lambda 重新执行，`rememberLayerBackdrop` 记录的还是旧内容
             //    → 面板背后的画面永远停在「第一次采样」那一帧（模糊看起来「不生效」）。
             VideoBackdrop.tick
-            drawRect(ThemeBgColor)
+            // v2.4.57（记录层减负）：视频帧就绪后**跳过全屏纯色填充** ——
+            // 位图 dst 铺满整屏且不透明，此前每帧先画的 drawRect(ThemeBgColor) 会被完全盖住，
+            // 纯属过度绘制；仅帧未就绪时用它兜底。
+            val frame = VideoBackdrop.current()
+            if (frame == null) {
+                drawRect(ThemeBgColor)
+            }
             // v2.1.233：**把视频画面画进 backdrop** ——
             // 视频画在 SurfaceView 上，Compose 采样不到它（独立窗口、打洞），
-            // 于是此前 backdrop 里只有上面那层纯色，而「模糊纯色」= 什么都没发生，
-            // 这就是磨砂/高斯模糊一直「看不出效果」的根因。
-            // 现在由 VRGLRenderer 每 3 帧降采样一帧送过来，糊的就是真画面。
-            VideoBackdrop.current()?.let { bmp ->
+            // 于是 backdrop 里只有纯色，而「模糊纯色」= 什么都没发生。
+            // 现在由 VRGLRenderer 降采样一帧送过来，玻璃里透出的就是真实画面。
+            frame?.let { bmp ->
                 runCatching {
                     drawImage(
                         image = bmp.asImageBitmap(),
@@ -4191,8 +4196,7 @@ fun VRPlayerScreen(
                             size.width.roundToInt(),
                             size.height.roundToInt()
                         ),
-                        // v2.4.46（审查 #2）：96px 位图要放大到整屏，用双线性（Low）即可 ——
-                        // 反正后面还要叠 22~80dp 高斯，高开销的滤波没有收益。
+                        // v2.4.46（审查 #2）：96px 位图要放大到整屏，用双线性（Low）即可。
                         filterQuality = androidx.compose.ui.graphics.FilterQuality.Low
                     )
                 }.onFailure {
@@ -4202,18 +4206,18 @@ fun VRPlayerScreen(
                     )
                 }
             }
+            // v2.4.57：挂载点是空 Box，本 drawContent() 为空操作；保留以维持 record 契约
             drawContent()
         }
 
-        // 🔴 v2.4.48（用户反馈「模糊生效但层级不对」）：**backdrop 必须挂在「装得下视频 + 全部 UI」
-        //    的容器层**上，而**不是**挂在 AndroidView 自己身上。
-        //    旧写法把 `.layerBackdrop(liquidBackdrop)` 挂在 AndroidView 上 —— AndroidView 是
-        //    **SurfaceView 宿主**，Compose 根本不往它的图层里画东西（SurfaceView 在合成器里是
-        //    独立窗口、打洞）→ 被记录下来的图层是**空的** → 玻璃面板取样拿到空层
+        // 🔴 v2.4.48（用户反馈「模糊生效但层级不对」）：backdrop **不能挂在 AndroidView 自己身上**。
+        //    AndroidView 是 **SurfaceView 宿主**，Compose 根本不往它的图层里画东西（SurfaceView
+        //    在合成器里是独立窗口、打洞）→ 被记录下来的图层是**空的** → 玻璃面板取样拿到空层
         //    → 模糊「不生效」（这正是用户说的"层级不对"）。
         //    现在改为**第一个全屏子 Box** 承载 layerBackdrop：它是真实 Compose 图层，
-        //    record 块里的 `drawRect(ThemeBgColor)` + `VideoBackdrop` 位图才会真的被记进去，
-        //    后面（同层级的）玻璃面板才有东西可糊。
+        //    record 块里的 `ThemeBgColor` 底色 + `VideoBackdrop` 位图才会真的被记进去。
+        //    v2.4.57 注：本 Box 是**空容器**——backdrop 内容全部来自 record 块、不含其余 UI
+        //    （`.layerBackdrop()` 记录的是「本节点子树 + record 块」，故 drawContent() 为空操作）。
         Box(
             modifier = Modifier
                 .fillMaxSize()

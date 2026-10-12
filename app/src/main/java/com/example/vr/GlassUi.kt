@@ -15,10 +15,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur as backdropBlur
-import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
 
 /**
  * v2.1.217：**玻璃效果的统一实现**，支持两种风格。
@@ -64,7 +61,11 @@ enum class GlassStyle {
     Liquid,
 }
 
-/** 主控栏 / 大面板：模糊半径（按风格分档） */
+/**
+ * 主控栏 / 大面板：模糊半径（按风格分档）。
+ * v2.4.57：玻璃已**去掉模糊层**（不再对背景做 RenderEffect 高斯模糊），
+ * 半径常量保留仅为 API 兼容，实际不再使用。
+ */
 val GlassPanelBlur: Dp = 22.dp
 private val GlassPanelBlurFrosted: Dp = 32.dp
 
@@ -93,9 +94,8 @@ private val GlassSmallBlurGaussian: Dp = 18.dp
  * 玻璃面板（矩形/任意形状）。
  *
  * @param style 玻璃风格。[GlassStyle.Liquid] 通透立体；[GlassStyle.Frosted] 柔和磨砂。
- * @param blurRadius 模糊半径；传 null 则用该风格的推荐值。
- *        ⚠️ 半径越大 GPU 开销越高（backdrop 采样 + RenderEffect）；
- *        帧率吃紧时应优先降这个值，而不是去掉 lens。
+ * @param blurRadius （v2.4.57 起已不使用）模糊半径；保留参数仅为调用方兼容。
+ *        v2.4.57 玻璃去掉模糊层后，帧率开销主要来自 backdrop 采样本身。
  */
 fun Modifier.glassPanel(
     backdrop: Backdrop,
@@ -106,18 +106,12 @@ fun Modifier.glassPanel(
     /** 在 backdrop 之上、border 之下再画一层（原本各调用点用它铺面板底色）。 */
     onDrawSurface: DrawScope.() -> Unit = {}
 ): Modifier {
-    val blur = blurRadius ?: when (style) {
-        GlassStyle.Liquid -> GlassPanelBlur
-        // v2.1.221：40dp 过大。系统的 RenderEffect.createBlurEffect 在半径过大时
-        // 可能直接不绘制，表现为「模糊完全没生效」。降到 32dp（面板）/ 18dp（球体）实测可用。
-        GlassStyle.Frosted -> GlassPanelBlurFrosted
-        GlassStyle.Gaussian -> GlassPanelBlurGaussian
-    }
-    // ⚠️ 只服务 Liquid 分支：降级分支用它撑出半透明白底；正常（有模糊）路径在末尾
+    // ⚠️ 只服务 Liquid 分支：降级分支用它撑出半透明白底；正常路径在末尾
     //    `.drawWithContentOverlay(overlay)` 再盖一层 5% 白（v2.4.45 行为：彩色厚玻璃观感）。
     // （v2.4.49 曾把 0.05 → 0.03，v2.4.56 回退液态/高斯到 2.4.45 时 Liquid 恢复 0.05。）
     val overlay = tint ?: Color.White.copy(alpha = 0.05f)
 
+    // v2.4.57：三档均已**去掉模糊层**（不再 RenderEffect 高斯模糊），以下历史说明保留供参考。
     // ============ 磨砂：**纯毛玻璃** ============
     // v2.1.220 用户反馈「UI 没有了只剩模糊」——根因是层级用错了：
     // `Modifier.blur` 渲染在**离屏层**上，作用范围是它之后的**整棵子树**，
@@ -132,32 +126,21 @@ fun Modifier.glassPanel(
     //   Frosted  = 模糊 + 噪点颗粒 + 淡白 —— 模拟粗糙表面漫射，手感「涩」
     //   Gaussian = 只有模糊 + 轻微提亮 —— 不模拟材质，观感干净通透
     if (style == GlassStyle.Gaussian) {
-        // v2.4.56：整体回退到 v2.4.45 行为（用户指定）——
-        //   极淡白提亮 + 轻去饱和/提亮；撤销 v2.4.50~55 的「中性化/加颗粒」尝试。
+        // v2.4.57：**去掉模糊层**（用户指定「玻璃不再模糊背景」）——
+        //   高斯档不再对背景做 RenderEffect 高斯模糊，视频从面板下清晰透出；
+        //   只保留 surface 层的极淡白提亮 + 边框。无任何 RenderEffect 特效，
+        //   HyperOS 模糊降级分支一并移除（清晰透出全平台可用）。
         val gaussianSurface: DrawScope.() -> Unit = {
             onDrawSurface()
-            // 极淡的提亮，让面板与背后的**同色**区域区分得出来 ——
-            // 背景是纯色时（详见下面 Frosted 分支里「backdrop 采不到 SurfaceView」的说明），
-            // 模糊本身是看不出来的，这点提亮 + 边框就是用户能感知到的全部。
+            // 极淡的提亮，让面板与背后的背景区分得出来
             drawRect(Color.White.copy(alpha = 0.10f))
-        }
-        if (!GlassCapability.supportsBlur) {
-            // 降级：给一个「看起来干净通透」的半透明底，不至于点了没反应
-            return this
-                .background(Color.White.copy(alpha = 0.12f), shape = shape())
-                .border(width = 1.dp, color = Color.White.copy(alpha = 0.28f), shape = shape())
         }
         return this
             .drawBackdrop(
                 backdrop = backdrop,
                 shape = shape,
                 onDrawSurface = gaussianSurface,
-                effects = {
-                    // 只在 backdrop 上做**纯高斯模糊**：无 lens、无 vibrancy、无颗粒
-                    backdropBlur(blur.toPx())
-                    // 轻微提亮 + 去一点点饱和：让糊开后的画面显得「通透」而不是「发闷」
-                    colorControls(saturation = 0.95f, contrast = 1.0f, brightness = 1.08f)
-                },
+                effects = {},
             )
             .border(
                 width = 1.dp,
@@ -168,21 +151,21 @@ fun Modifier.glassPanel(
 
     if (style == GlassStyle.Frosted) {
         // v2.4.56：磨砂档（标杆）独立到 FrostedGlass.kt，单独维护，避免被液态/高斯的改动误伤。
-        return this.glassFrosted(backdrop = backdrop, shape = shape, onDrawSurface = onDrawSurface, blur = blur)
+        return this.glassFrosted(backdrop = backdrop, shape = shape, onDrawSurface = onDrawSurface)
     }
 
-    // ============ Liquid Glass：折射 + 增饱和 + 边缘高光 ============
+    // ============ Liquid Glass：折射 + 边缘高光 ============
     //
     // 🔴 v2.4.45（修「液态玻璃在 Android 12 闪退」）：**必须与 Frosted / Gaussian 一样先过
     //    `GlassCapability.supportsBlur`**。此前只有那两档做了探测降级，**Liquid 档漏了** ——
     //    于是在「系统 / 厂商 ROM 屏蔽实时模糊」的 Android 12 设备（典型：MIUI 13 基于 Android 12）
     //    上，`drawBackdrop` 内部创建 `RenderEffect` 会抛 `nativePtr is null`；
     //    而 `drawBackdrop` 在**绘制阶段**执行，异常无法在业务层 catch → **直接闪退**。
-    //    探测失败时降级为「半透明白底 + 高光描边」（与磨砂档同款策略），不再崩。
-    // v2.4.56：整个分支回退到 v2.4.45 行为（用户指定）——
-    //    恢复 lens(0.55) 强折射 + vibrancy + colorControls(1.45/1.06/1.05) 彩色厚玻璃观感，
-    //    末尾恢复 `.drawWithContentOverlay(overlay)`（5% 白蒙层）；
-    //    v2.4.50~55 的「调轻折射/去 vibrancy/加颗粒」尝试全部撤销。
+    //    探测失败时降级为「半透明白底 + 高光描边」，不再崩。
+    // v2.4.56：整个分支回退到 v2.4.45 行为（用户指定）。
+    // v2.4.57：**去掉模糊层**（用户指定「玻璃不再模糊背景」）——
+    //    撤掉 backdropBlur / vibrancy / colorControls，只保留 `lens()` 折射；
+    //    supportsBlur 降级分支保留（lens 仍是 RenderEffect 特效，需兜底）。
     if (!GlassCapability.supportsBlur) {
         return this
             .background(overlay, shape = shape())
@@ -198,10 +181,8 @@ fun Modifier.glassPanel(
             shape = shape,
             onDrawSurface = onDrawSurface,
             effects = {
-                // 🔴 v2.4.45：再包一层 `runCatching`。`GlassCapability.supportsBlur` 只是**弱探测**
-                //    （建一个 1px 半径成功 ≠ 绘制时一定成功；切档时动态改半径更易触发）。
-                //    库的各个 effect 是在**本 lambda 内**创建 RenderEffect 的，所以这里 catch 得到：
-                //    一旦抛异常就退化为「只采样背景、不加特效」—— 优先保证不闪退。
+                // 🔴 v2.4.57：去掉模糊层后液态档只保留 `lens()` 折射。
+                //    仍包 `runCatching`：lens 属 RenderEffect 特效，异常时退化为「无特效 backdrop」。
                 runCatching {
                     // ⚠️ 必须保留 SDK>=33 的版本保护：`lens()` 依赖 Android 13(API 33) 才有的
                     //    RenderEffect SDF 能力，且库对 <33 **是抛异常**
@@ -210,9 +191,6 @@ fun Modifier.glassPanel(
                         // v2.1.218：采用 iOS 26 参数（折射更强、边缘更「厚玻璃聚光」）
                         lens(refractionHeight = 18f, refractionAmount = 0.55f)
                     }
-                    vibrancy()
-                    colorControls(saturation = 1.45f, contrast = 1.06f, brightness = 1.05f)
-                    backdropBlur(blur.toPx())
                 }.onFailure {
                     android.util.Log.w(
                         "GlassUi",
@@ -300,6 +278,8 @@ private fun Modifier.drawWithContentOverlay(color: Color): Modifier =
  * ## 降级策略
  * 不支持模糊时，磨砂档退化为**半透明白 + 轻微描边**（而不是什么都不做），
  * 至少让用户看到「这里有一层玻璃」，而不是「点了没反应」。
+ * v2.4.57：玻璃去掉模糊层后，磨砂/高斯不再依赖本探测（已无 RenderEffect 特效）；
+ * 仅液态档的 `lens()` 折射仍用它兜底。
  */
 object GlassCapability {
 
