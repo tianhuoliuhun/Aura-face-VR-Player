@@ -5718,18 +5718,29 @@ fun VRPlayerScreen(
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                                // v2.4.45（主题选择界面布局优化）：
+                                // ① `spacedBy(10.dp)` → `SpaceBetween`：6 个色点均匀铺满整行，
+                                //    窄列下不再全部挤在左侧、右侧留一大片空；
+                                // ② **选中不再改变尺寸**（原先选中 30dp / 未选 24dp）—— 那会让整行其余
+                                //    色点跟着位移，每次换主题都「抖」一下。改为固定 26dp + 选中加粗白环。
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     UiThemes.list.forEach { t ->
                                         val selected = uiThemeId == t.id
                                         Box(
                                             modifier = Modifier
-                                                .size(if (selected) 30.dp else 24.dp)
+                                                .size(26.dp)
                                                 .clip(CircleShape)
                                                 .background(t.accent)
-                                                .border(if (selected) 2.dp else 1.dp, if (selected) Color.White else Color.White.copy(alpha = 0.3f), CircleShape)
+                                                .border(
+                                                    width = if (selected) 2.dp else 1.dp,
+                                                    color = if (selected) Color.White
+                                                    else Color.White.copy(alpha = 0.3f),
+                                                    shape = CircleShape
+                                                )
                                                 .clickable {
                                                     uiThemeId = t.id
                                                     prefs.edit().putInt("ui_theme_id", t.id).apply()
@@ -5739,46 +5750,58 @@ fun VRPlayerScreen(
                                         )
                                     }
                                 }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = stringResource(UiThemes.byId(uiThemeId).nameRes),
-                                        color = AccentColor,
-                                        fontSize = 12.sp
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        listOf(
-                                            0 to stringResource(R.string.theme_solid),
-                                            1 to stringResource(R.string.theme_liquid_glass),
-                                            // v2.1.218：v2.1.217 的 4 档并回 3 档 ——
-                                            // Liquid 与 Liquid26 观感接近、选择意义不大，
-                                            // 已合并为一档并采用 iOS 26 的增强参数。
-                                            // v2.1.232：再加一档「高斯模糊」—— 与「磨砂」的区别是
-                                            // 只有纯模糊 + 轻微提亮（无噪点颗粒），且半径更大。
-                                            2 to stringResource(R.string.theme_frosted_glass),
-                                            3 to stringResource(R.string.theme_gaussian_blur),
-                                        ).forEach { (m, label) ->
-                                            val sel = glassMode == m
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(50))
-                                                    .background(if (sel) AccentColor else TranslucentWhite10)
-                                                    .clickable {
-                                                        glassMode = m
-                                                        prefs.edit().putInt("ui_glass_mode", m).apply()
-                                                        keepUiAlight()
-                                                    }
-                                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                                                    .testTag("glass_mode_$m")
-                                            ) {
-                                                Text(
-                                                    text = label,
-                                                    color = if (sel) AccentOnColor else Color.White,
-                                                    fontSize = 10.sp
-                                                )
+                                // v2.4.45（主题选择界面布局优化）：
+                                // 原先「主题名 + 4 个玻璃档 chip」硬塞在**同一行**（SpaceBetween，
+                                // 且 chip 行**没有 weight**）—— 4 个中文 chip（实色 / 液体玻璃 / 磨砂 /
+                                // 高斯模糊）合计约 220dp，加上主题名远超设置面板**窄列**的可用宽度
+                                // → chip 被压扁、文字截断，甚至与左侧主题名互相叠压。
+                                // 现改为**独立成块 + 两列两行**（与下方「界面语言」块同款：`chunked` +
+                                // `weight(1f)` 等宽）—— 任何列宽下都不溢出，点击区也更大。
+                                Text(
+                                    text = stringResource(UiThemes.byId(uiThemeId).nameRes),
+                                    color = AccentColor,
+                                    fontSize = 12.sp
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    listOf(
+                                        0 to stringResource(R.string.theme_solid),
+                                        1 to stringResource(R.string.theme_liquid_glass),
+                                        // v2.1.218：v2.1.217 的 4 档并回 3 档 ——
+                                        // Liquid 与 Liquid26 观感接近、选择意义不大，
+                                        // 已合并为一档并采用 iOS 26 的增强参数。
+                                        // v2.1.232：再加一档「高斯模糊」—— 与「磨砂」的区别是
+                                        // 只有纯模糊 + 轻微提亮（无噪点颗粒），且半径更大。
+                                        2 to stringResource(R.string.theme_frosted_glass),
+                                        3 to stringResource(R.string.theme_gaussian_blur),
+                                    ).chunked(2).forEach { rowModes ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            rowModes.forEach { (m, label) ->
+                                                val sel = glassMode == m
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(50))
+                                                        .background(if (sel) AccentColor else TranslucentWhite10)
+                                                        .clickable {
+                                                            glassMode = m
+                                                            prefs.edit().putInt("ui_glass_mode", m).apply()
+                                                            keepUiAlight()
+                                                        }
+                                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                                        .testTag("glass_mode_$m"),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = label,
+                                                        color = if (sel) AccentOnColor else Color.White,
+                                                        fontSize = 10.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                         }
                                     }

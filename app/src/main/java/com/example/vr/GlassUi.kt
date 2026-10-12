@@ -220,22 +220,49 @@ fun Modifier.glassPanel(
     }
 
     // ============ Liquid Glass：折射 + 增饱和 + 边缘高光 ============
+    //
+    // 🔴 v2.4.45（修「液态玻璃在 Android 12 闪退」）：**必须与 Frosted / Gaussian 一样先过
+    //    `GlassCapability.supportsBlur`**。此前只有那两档做了探测降级，**Liquid 档漏了** ——
+    //    于是在「系统 / 厂商 ROM 屏蔽实时模糊」的 Android 12 设备（典型：MIUI 13 基于 Android 12）
+    //    上，`drawBackdrop` 内部创建 `RenderEffect` 会抛 `nativePtr is null`；
+    //    而 `drawBackdrop` 在**绘制阶段**执行，异常无法在业务层 catch → **直接闪退**。
+    //    探测失败时降级为「半透明白底 + 高光描边」（与磨砂档同款策略），不再崩。
+    if (!GlassCapability.supportsBlur) {
+        return this
+            .background(overlay, shape = shape())
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.22f),
+                shape = shape(),
+            )
+    }
     return this
         .drawBackdrop(
             backdrop = backdrop,
             shape = shape,
             onDrawSurface = onDrawSurface,
             effects = {
-                // ⚠️ 必须保留 SDK>=33 的版本保护：lens() 依赖 Android 13(API 33) 才有的
-                //    RenderEffect SDF 能力，低版本直接调会崩。项目原本就有这个保护，
-                //    抽到工厂时**不能丢**。
-                if (Build.VERSION.SDK_INT >= 33) {
-                    // v2.1.218：采用 iOS 26 参数（折射更强、边缘更「厚玻璃聚光」）
-                    lens(refractionHeight = 18f, refractionAmount = 0.55f)
+                // 🔴 v2.4.45：再包一层 `runCatching`。`GlassCapability.supportsBlur` 只是**弱探测**
+                //    （建一个 1px 半径成功 ≠ 绘制时一定成功；切档时动态改半径更易触发）。
+                //    库的各个 effect 是在**本 lambda 内**创建 RenderEffect 的，所以这里 catch 得到：
+                //    一旦抛异常就退化为「只采样背景、不加特效」—— 优先保证不闪退。
+                runCatching {
+                    // ⚠️ 必须保留 SDK>=33 的版本保护：`lens()` 依赖 Android 13(API 33) 才有的
+                    //    RenderEffect SDF 能力，且库对 <33 **是抛异常**
+                    //    （反编译可见 `LensKt.throwUnsupportedSDFException()`），不是静默降级。
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        // v2.1.218：采用 iOS 26 参数（折射更强、边缘更「厚玻璃聚光」）
+                        lens(refractionHeight = 18f, refractionAmount = 0.55f)
+                    }
+                    vibrancy()
+                    colorControls(saturation = 1.45f, contrast = 1.06f, brightness = 1.05f)
+                    backdropBlur(blur.toPx())
+                }.onFailure {
+                    android.util.Log.w(
+                        "GlassUi",
+                        "Liquid 特效应用失败，已降级为「无特效 backdrop」：${it.message}"
+                    )
                 }
-                vibrancy()
-                colorControls(saturation = 1.45f, contrast = 1.06f, brightness = 1.05f)
-                backdropBlur(blur.toPx())
             },
         )
         .border(
