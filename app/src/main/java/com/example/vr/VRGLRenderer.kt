@@ -3612,7 +3612,21 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // 「看不出效果」的根因就是这条链路没内容可糊（backdrop 只有一层纯色）。
             // 保留它是为了让下次排查能一眼分辨「没采样」与「采样了但糊得不对」。
             if (bdFrame % 360 == 0) {
-                Log.d(TAG, "backdrop 采样正常: " + tw + "x" + th + " <- 屏幕 " + dw + "x" + dh + " (version=" + VideoBackdrop.version + ")")
+                // v2.4.53 诊断：顺带统计采样帧的平均亮度，用于区分「玻璃惨白」的两类根因——
+                // 若平均RGB 接近 255 说明喂给玻璃的视频帧本身就是白的（需靠面板薄遮罩压住）；
+                // 若平均RGB 偏暗但玻璃仍白，则问题在合成层而非视频帧。
+                var sr = 0L; var sg = 0L; var sb = 0L
+                val n = tw * th
+                var bi = 0
+                while (bi < n) {
+                    sr += (px[bi * 4].toInt() and 0xFF)
+                    sg += (px[bi * 4 + 1].toInt() and 0xFF)
+                    sb += (px[bi * 4 + 2].toInt() and 0xFF)
+                    bi++
+                }
+                val ar = (sr / n).toInt(); val ag = (sg / n).toInt(); val ab = (sb / n).toInt()
+                val whiteFlag = if (ar > 200 && ag > 200 && ab > 200) " ⚠️帧偏白" else ""
+                Log.d(TAG, "backdrop 采样正常: " + tw + "x" + th + " <- 屏幕 " + dw + "x" + dh + " (version=" + VideoBackdrop.version + ") 平均RGB=" + ar + "," + ag + "," + ab + whiteFlag)
             }
         } catch (t: Throwable) {
             bdFail("异常：${t.message}")
