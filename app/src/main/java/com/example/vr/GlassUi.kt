@@ -120,7 +120,8 @@ fun Modifier.glassPanel(
         GlassStyle.Gaussian -> GlassPanelBlurGaussian
     }
     // ⚠️ 只服务 Liquid 分支；磨砂的白底在它的分支里单独给。
-    val overlay = tint ?: Color.White.copy(alpha = 0.05f)
+    // v2.4.49：白蒙层 0.05 → 0.03（用户反馈「不够透」，降低表面反射白雾、更透出背后画面）
+    val overlay = tint ?: Color.White.copy(alpha = 0.03f)
 
     // ============ 磨砂：**纯毛玻璃** ============
     // v2.1.220 用户反馈「UI 没有了只剩模糊」——根因是层级用错了：
@@ -141,12 +142,14 @@ fun Modifier.glassPanel(
             // 极淡的提亮，让面板与背后的**同色**区域区分得出来 ——
             // 背景是纯色时（详见下面 Frosted 分支里「backdrop 采不到 SurfaceView」的说明），
             // 模糊本身是看不出来的，这点提亮 + 边框就是用户能感知到的全部。
-            drawRect(Color.White.copy(alpha = 0.10f))
+            // v2.4.49：高斯档白蒙层 0.10 → 0.06（更透）
+            drawRect(Color.White.copy(alpha = 0.06f))
         }
         if (!GlassCapability.supportsBlur) {
             // 降级：给一个「看起来干净通透」的半透明底，不至于点了没反应
             return this
-                .background(Color.White.copy(alpha = 0.12f), shape = shape())
+                // v2.4.49：高斯档降级白底 0.12 → 0.08（与正常档一致更透）
+                .background(Color.White.copy(alpha = 0.08f), shape = shape())
                 .border(width = 1.dp, color = Color.White.copy(alpha = 0.28f), shape = shape())
         }
         return this
@@ -189,14 +192,14 @@ fun Modifier.glassPanel(
         val frostedSurface: DrawScope.() -> Unit = {
             // 调用方原本铺的底色（面板/球体各自的主题底）
             onDrawSurface()
-            // 淡白：给磨砂玻璃一点实体感（0.14 —— 很淡，不会盖住真的模糊）
-            drawRect(Color.White.copy(alpha = 0.14f))
-            // 细颗粒：平铺噪点
+            // 淡白：给磨砂玻璃一点实体感（v2.4.49：0.14 → 0.08，更透）
+            drawRect(Color.White.copy(alpha = 0.08f))
+            // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35，更轻、更透）
             drawRect(
                 brush = ShaderBrush(
                     ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
                 ),
-                alpha = 0.55f,
+                alpha = 0.35f,
             )
         }
 
@@ -207,7 +210,8 @@ fun Modifier.glassPanel(
         // 观感上仍然是磨砂玻璃，而不是「点了没反应」。
         if (!GlassCapability.supportsBlur) {
             return this
-                .background(Color.White.copy(alpha = 0.16f), shape = shape())
+                // v2.4.49：磨砂档降级白底 0.16 → 0.10（与正常档一致更透）
+                .background(Color.White.copy(alpha = 0.10f), shape = shape())
                 .border(
                     width = 1.dp,
                     color = Color.White.copy(alpha = 0.22f),
@@ -381,7 +385,8 @@ private fun Modifier.drawGrainOverlay(): Modifier =
             brush = ShaderBrush(
                 ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
             ),
-            alpha = 0.5f,
+            // v2.4.49：降级磨砂颗粒 0.5 → 0.35，更轻
+            alpha = 0.35f,
         )
     }
 
