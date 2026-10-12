@@ -140,8 +140,23 @@ fun Modifier.glassPanel(
     if (style == GlassStyle.Gaussian) {
         // v2.4.51：去掉白蒙层（用户要求「去除白色遮罩」）—— 高斯档改为纯模糊，
         // 背后视频直接透出，不再蒙白雾（无颗粒、保留纯净感）。
+        //
+        // 🔴 v2.4.54（用户反馈「液态玻璃和高斯模糊都是惨白一片」+ 截图实证）：
+        //    磨砂、高斯、液态三档用的是**同一张 96px 降采样背景位图 + 同一个调用方
+        //    面板底色透明度**（见 VRPlayerScreen.kt 的 onDrawSurface，三档不区分 style）。
+        //    三档在结构上唯一的差异就是磨砂多画了一层颗粒噪点（frostedSurface）。
+        //    降采样 + 模糊后画面局部对比度损失很大，结果本来就偏向整屏的平均色调——
+        //    磨砂的颗粒把这片平滑的淡色打碎成「看起来像玻璃」，高斯/液态没有任何纹理，
+        //    淡色就直接暴露成一片平滑惨白。补一层**更轻**的颗粒（0.15，磨砂是 0.35）：
+        //    足够打散平滑感，又不会盖掉「无颗粒、纯净」这个高斯档本该有的观感。
         val gaussianSurface: DrawScope.() -> Unit = {
             onDrawSurface()
+            drawRect(
+                brush = ShaderBrush(
+                    ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
+                ),
+                alpha = 0.15f,
+            )
         }
         if (!GlassCapability.supportsBlur) {
             // 降级：给一个「看起来干净通透」的半透明底，不至于点了没反应
@@ -254,11 +269,25 @@ fun Modifier.glassPanel(
                 shape = shape(),
             )
     }
+    // 🔴 v2.4.54（用户反馈「液态玻璃和高斯模糊都是惨白一片，但磨砂正常」+ 截图实证）：
+    //    与 Gaussian 分支同一根因——液态档原先直接把调用方的 onDrawSurface 传给
+    //    drawBackdrop，没有任何纹理打散模糊后的平滑淡色。补一层比高斯更淡的颗粒
+    //    （0.1）：液态档本就靠 lens 折射 + 渐变高光边营造立体感，颗粒只需要点到为止，
+    //    不能抢了折射边的通透感。
+    val liquidSurface: DrawScope.() -> Unit = {
+        onDrawSurface()
+        drawRect(
+            brush = ShaderBrush(
+                ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
+            ),
+            alpha = 0.1f,
+        )
+    }
     return this
         .drawBackdrop(
             backdrop = backdrop,
             shape = shape,
-            onDrawSurface = onDrawSurface,
+            onDrawSurface = liquidSurface,
             effects = {
                 // 🔴 v2.4.45：再包一层 `runCatching`。`GlassCapability.supportsBlur` 只是**弱探测**
                 //    （建一个 1px 半径成功 ≠ 绘制时一定成功；切档时动态改半径更易触发）。

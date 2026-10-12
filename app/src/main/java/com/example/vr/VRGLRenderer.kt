@@ -3615,18 +3615,34 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 // v2.4.53 诊断：顺带统计采样帧的平均亮度，用于区分「玻璃惨白」的两类根因——
                 // 若平均RGB 接近 255 说明喂给玻璃的视频帧本身就是白的（需靠面板薄遮罩压住）；
                 // 若平均RGB 偏暗但玻璃仍白，则问题在合成层而非视频帧。
-                var sr = 0L; var sg = 0L; var sb = 0L
-                val n = tw * th
-                var bi = 0
-                while (bi < n) {
-                    sr += (px[bi * 4].toInt() and 0xFF)
-                    sg += (px[bi * 4 + 1].toInt() and 0xFF)
-                    sb += (px[bi * 4 + 2].toInt() and 0xFF)
-                    bi++
+                //
+                // 🔴 v2.4.54：修「数组越界」—— px 是 IntArray(tw*th)，每个 Int 已经是一个
+                //    打包好的像素（与 VideoBackdrop.commit() 直接喂给 Bitmap.setPixels 的格式
+                //    一致，即 ARGB：R 在第 16~23 位、G 在第 8~15 位、B 在第 0~7 位）。
+                //    旧代码按「每像素 4 个数组元素」访问 px[bi*4]/[bi*4+1]/[bi*4+2]，而循环条件
+                //    只写了 bi<n（n=tw*th，没有再除以 4）—— bi 超过约 n/4 时 bi*4+2 必然越界，
+                //    每次执行这段代码都 100% 抛 ArrayIndexOutOfBoundsException，异常被下面的
+                //    catch 吞掉后当成一次采样失败计入 bdFail()，连续 3 次就把整条采样链路
+                //    永久停用。这段诊断代码本身从未成功打印过一行「平均RGB=」日志，
+                //    也从未真正验证过「视频帧偏白」这个判断（本段注释上面那句话落空了）。
+                //    包裹一层独立 try/catch：这段纯诊断代码出错不该拖垮采样本身。
+                try {
+                    var sr = 0L; var sg = 0L; var sb = 0L
+                    val n = tw * th
+                    var bi = 0
+                    while (bi < n) {
+                        val p = px[bi]
+                        sr += (p ushr 16) and 0xFF
+                        sg += (p ushr 8) and 0xFF
+                        sb += p and 0xFF
+                        bi++
+                    }
+                    val ar = (sr / n).toInt(); val ag = (sg / n).toInt(); val ab = (sb / n).toInt()
+                    val whiteFlag = if (ar > 200 && ag > 200 && ab > 200) " ⚠️帧偏白" else ""
+                    Log.d(TAG, "backdrop 采样正常: " + tw + "x" + th + " <- 屏幕 " + dw + "x" + dh + " (version=" + VideoBackdrop.version + ") 平均RGB=" + ar + "," + ag + "," + ab + whiteFlag)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "backdrop 诊断统计出错（不影响采样本身）：${t.message}")
                 }
-                val ar = (sr / n).toInt(); val ag = (sg / n).toInt(); val ab = (sb / n).toInt()
-                val whiteFlag = if (ar > 200 && ag > 200 && ab > 200) " ⚠️帧偏白" else ""
-                Log.d(TAG, "backdrop 采样正常: " + tw + "x" + th + " <- 屏幕 " + dw + "x" + dh + " (version=" + VideoBackdrop.version + ") 平均RGB=" + ar + "," + ag + "," + ab + whiteFlag)
             }
         } catch (t: Throwable) {
             bdFail("异常：${t.message}")
