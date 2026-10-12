@@ -5205,19 +5205,29 @@ fun VRPlayerScreen(
                         }
 
                         // v94：翻译开关（字幕翻译 / 双语对照）
+                        // v2.4.43：**文本列加 `weight(1f)` + 文本 `maxLines`/省略号** —— 与美颜面板同款修复。
+                        //   本行说明文字含「引擎名 → 目标语言」，比标题长得多；没有 weight 时它会吃满整行，
+                        //   把末尾的 `AuraSwitch` 压成 0 宽（开关被截断/与文字遮挡）。
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
                                 Text(
                                     stringResource(R.string.subtitle_translate_title),
                                     color = Color.White,
                                     fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     text = if (subtitleTranslator.config.isEnabled)
                                         "${stringResource(subtitleTranslator.config.engine.displayNameResId)} → ${stringResource(subtitleTranslator.config.targetLanguage.nameResId)}"
                                     else stringResource(R.string.subtitle_translate_off),

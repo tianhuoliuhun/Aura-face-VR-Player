@@ -35,11 +35,35 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/**
+ * v2.4.43：**开关行「文本 ↔ 开关」之间的固定间距**。
+ *
+ * ## 为什么必须给它、而不是只靠 `Arrangement.SpaceBetween`
+ * 美颜面板整块位于设置面板的**右列**（`Row` 内两个 `Modifier.weight(1.3f)` 的列，列距 20dp），
+ * 即列宽 ≈（面板内容宽 − 20dp）/ 2 —— 手机竖屏/窄屏时可能只有 150~180dp。
+ *
+ * 开关行原本写作：
+ * ```
+ * Row(fillMaxWidth, SpaceBetween) {
+ *     Column { 标题 14sp; 说明 11sp }     // ⚠️ **没有 weight(1f)**、文本也没 maxLines
+ *     AuraSwitch(...)                     // 最后一个子项
+ * }
+ * ```
+ * `Row` 先按「剩余宽度」量前面的子项 —— 文本列没有任何约束，会**先把整行宽度吃满**，
+ * 于是最后面的 `AuraSwitch` 只能拿到 **0 宽**（被裁成不可见 / 只剩一条），
+ * 而文本省略号又会贴到开关位置上 → 表现为「开关被截断 / 与文字相互遮挡」。
+ *
+ * 修法（与 v2.4.37 修好的 MEMC / FSR 行同款）：**文本列 `weight(1f)` + 文本 `maxLines` + 省略号**，
+ * 再配本固定间距 —— 文本只能在自己的列里换行/省略，开关永远保有完整宽度。
+ */
+private val SWITCH_ROW_GAP = 8.dp
 
 /**
  * v119 拆分：从 VRPlayerScreen.kt 设置面板右列抽出的三大美颜区块。
@@ -543,22 +567,30 @@ fun BeautyEngineSection(
             BeautySliderItem(stringResource(R.string.beauty_big_eyes), gpEyeZoom, onGpEyeZoomChange, accentColor = accentColor)
 
             // v2.0.160（P3）：VR 视频人脸美颜 —— 屏幕空间后处理，默认关
+            // v2.4.43：**文本列必须 `weight(1f)`**，否则窄列下文本吃满整行、开关被压成 0 宽（详见 SWITCH_ROW_GAP 注释）
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(SWITCH_ROW_GAP)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
                         stringResource(R.string.beauty_gp_vr_face),
                         color = Color.White,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         stringResource(R.string.beauty_gp_vr_face_desc),
                         color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 AuraSwitch(
@@ -570,22 +602,30 @@ fun BeautyEngineSection(
 
             // v2.0.187：GPUPixel 专属「半分辨率美颜」开关（GLSL 半分辨率磨皮 pass 始终开启、无独立开关）。
             // v2.4.35（#14）：标签已显式标注 GPUPixel，澄清该开关仅作用于 GPUPixel 引擎。
+            // v2.4.43：同上一行 —— 文本列 `weight(1f)` + `maxLines`/省略号，保证开关完整可见
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(SWITCH_ROW_GAP)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     Text(
                         stringResource(R.string.beauty_gp_half_res),
                         color = Color.White,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         stringResource(R.string.beauty_gp_half_res_desc),
                         color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 AuraSwitch(
@@ -633,14 +673,31 @@ fun BeautyCompareSwitch(
     accentOnColor: Color,
     modifier: Modifier = Modifier
 ) {
+    // v2.4.43：文本列 `weight(1f)` + `maxLines`/省略号 —— 见 SWITCH_ROW_GAP 的说明
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(SWITCH_ROW_GAP)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(stringResource(R.string.beauty_compare_original), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(stringResource(R.string.beauty_compare_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                stringResource(R.string.beauty_compare_original),
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                stringResource(R.string.beauty_compare_desc),
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         AuraSwitch(
             checked = checked,
