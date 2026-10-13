@@ -955,4 +955,10 @@
     <string name="danmu_time_jitter">Time jitter</string>
     <string name="danmu_time_jitter_hint">A batch would appear all at once; this spreads their timestamps with a normal distribution around the batch time. 0 = off (all at once).</string>
     <string name="danmu_time_jitter_off">Off</string>
+    <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->
+    <string name="cast_receiver_title">Cast Receiver</string>
+    <string name="cast_receiver_on">On · Find this device in the phone cast list on the same Wi-Fi</string>
+    <string name="cast_receiver_off">Off</string>
+    <string name="media_cast_video">Casted video</string>
+    <string name="media_cast_desc">Imported via DLNA cast receiver</string>
 </resources>

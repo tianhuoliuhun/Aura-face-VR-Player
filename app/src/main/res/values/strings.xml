@@ -948,4 +948,10 @@
     <string name="danmu_time_jitter">时间抖动</string>
     <string name="danmu_time_jitter_hint">同一批弹幕原本同时出现，这里以批次时刻为中心做正态分布抖动，让它们疏密自然地错开。0 = 关闭（同时出场）。</string>
     <string name="danmu_time_jitter_off">关闭</string>
+    <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->
+    <string name="cast_receiver_title">投屏接收</string>
+    <string name="cast_receiver_on">已开启 · 同一 Wi-Fi 下可在手机投屏列表中找到本机</string>
+    <string name="cast_receiver_off">已关闭</string>
+    <string name="media_cast_video">投屏视频</string>
+    <string name="media_cast_desc">由投屏接收（DLNA）导入</string>
 </resources>

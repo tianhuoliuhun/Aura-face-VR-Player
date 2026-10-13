@@ -53,7 +53,7 @@
 **Platform**: Android **smartphone/tablet** app (not iOS / desktop / web)
 
 **支持安卓版本 / Android Versions**：
-- **minSdk 24（Android 7.0 Nougat）** — 最低支持 Android 7.0
+- **minSdk 26（Android 8.0 Oreo）** — 最低支持 Android 8.0（v2.4.58 起：DLNA 投屏接收所依赖的 Jetty 需要 `java.lang.invoke`，系统要求 API 26+）
 - **targetSdk 36（Android 16）** — 针对最新系统适配
 - 推荐 Android 10+ / Android 10+ recommended
 

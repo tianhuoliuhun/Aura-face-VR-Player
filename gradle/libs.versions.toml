@@ -40,6 +40,12 @@ firebaseBom = "34.12.0"
 secretsGradlePlugin = "2.0.1"
 mediapipe = "0.10.14"
 backdrop = "1.0.6"
+# v2.4.58：DLNA/UPnP-AV 接收端（投屏）——jUPnP 3.x + Jetty 9（"jUPnP on Android" 官方要求）
+jupnp = "3.0.4"
+# ⚠️ v2.4.58：Jetty 9.x 使用 java.lang.invoke.MethodHandle，D8 要求 minSdk>=26
+# —— 为此本项目 minSdk 由 24 提到 26（见 app/build.gradle.kts）。
+jetty = "9.4.53.v20231009"
+slf4j = "2.0.11"  # 必须与 jUPnP 传递来的 slf4j-api 一致（1.7 的 binding 在 2.x 下不生效）
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -91,6 +97,15 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-ai = { group = "com.google.firebase", name = "firebase-ai" }
 mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipe" }
 backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
+# v2.4.58：投屏接收端（DLNA MediaRenderer）—— jUPnP 3.x 三模块 + Jetty 9 传输 + slf4j
+jupnp-core = { group = "org.jupnp", name = "org.jupnp", version.ref = "jupnp" }
+jupnp-android = { group = "org.jupnp", name = "org.jupnp.android", version.ref = "jupnp" }
+jupnp-support = { group = "org.jupnp", name = "org.jupnp.support", version.ref = "jupnp" }
+jetty-server = { group = "org.eclipse.jetty", name = "jetty-server", version.ref = "jetty" }
+jetty-servlet = { group = "org.eclipse.jetty", name = "jetty-servlet", version.ref = "jetty" }
+jetty-client = { group = "org.eclipse.jetty", name = "jetty-client", version.ref = "jetty" }
+slf4j-api = { group = "org.slf4j", name = "slf4j-api", version.ref = "slf4j" }
+slf4j-jdk14 = { group = "org.slf4j", name = "slf4j-jdk14", version.ref = "slf4j" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

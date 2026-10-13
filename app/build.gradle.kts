@@ -14,10 +14,14 @@ android {
 
   defaultConfig {
     applicationId = "com.aistudio.vrplayer.vrmjpy"
-    minSdk = 24
+    // ⚠️ v2.4.58：**24 → 26** —— DLNA 投屏接收引入的 Jetty 9.x 内部使用
+    // java.lang.invoke.MethodHandle，D8 在 minSdk<26 时直接拒绝（"only supported starting
+    // with Android O"），core library desugaring 也覆盖不到该 API。
+    // 代价：不再支持 Android 7.x（7.0/7.1）。已与用户确认。
+    minSdk = 26
     targetSdk = 36
-    versionCode = 308
-    versionName = "2.4.57"
+    versionCode = 309
+    versionName = "2.4.58"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -81,6 +85,19 @@ android {
       //    **不需要也不应**再加 excludes。
       //    `MpvLibLoader` 已相应改成"优先 System.loadLibrary"（见该类注释）。
       // ======================================================================
+    }
+
+    // v2.4.58：jUPnP / Jetty 9 会带入一批同名 META-INF 资源，AGP 会报
+    // 「More than one file was found with OS independent path ...」→ 预先排除。
+    resources {
+      excludes += listOf(
+        "META-INF/DEPENDENCIES",
+        "META-INF/LICENSE",
+        "META-INF/LICENSE.txt",
+        "META-INF/NOTICE",
+        "META-INF/NOTICE.txt",
+        "META-INF/INDEX.LIST",
+      )
     }
   }
 
@@ -448,6 +465,24 @@ dependencies {
   implementation(libs.mediapipe.tasks.vision)
   // Liquid Glass effect (Android 12+ RenderEffect backdrop; uses androidx compose 1.10.3)
   implementation(libs.backdrop)
+
+  // ========================================================================
+  // v2.4.58：「投屏接收」—— DLNA/UPnP-AV MediaRenderer（jUPnP 3.x）
+  // ------------------------------------------------------------------------
+  // 让本机在局域网内可见为一台「可投屏设备」，接收其他 App 推送的视频 URL。
+  // 选型依据见 docs/CAST_RECEIVER_SURVEY_2026-10-13.md（jUPnP 活跃维护、纯 Java、
+  // CDDL-1.0 可闭源商用，且拿到 URL 后可直接复用本项目播放管线）。
+  // ⚠️ "jUPnP on Android" 官方要求显式引入 Jetty 9 传输层与 slf4j。
+  // ⚠️ 这些库会带入 META-INF 资源 → 见 packaging.resources.excludes。
+  // ========================================================================
+  implementation(libs.jupnp.core)
+  implementation(libs.jupnp.android)
+  implementation(libs.jupnp.support)
+  implementation(libs.jetty.server)
+  implementation(libs.jetty.servlet)
+  implementation(libs.jetty.client)
+  implementation(libs.slf4j.api)
+  implementation(libs.slf4j.jdk14)
   implementation("androidx.media3:media3-exoplayer:1.7.1")
   implementation("androidx.media3:media3-common:1.7.1")
   implementation("androidx.media3:media3-transformer:1.7.1")

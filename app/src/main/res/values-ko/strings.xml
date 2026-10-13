@@ -915,4 +915,10 @@
     <string name="danmu_time_jitter">시간 흩뿌리기</string>
     <string name="danmu_time_jitter_hint">같은 배치의 탄막은 원래 동시에 나옵니다. 배치 시각을 중심으로 정규분포로 흩뿌려 자연스럽게 엇갈리게 합니다. 0 = 끄기(동시).</string>
     <string name="danmu_time_jitter_off">끄기</string>
+    <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->
+    <string name="cast_receiver_title">캐스트 수신</string>
+    <string name="cast_receiver_on">켬 · 같은 Wi-Fi에서 휴대폰 캐스트 목록에 표시됩니다</string>
+    <string name="cast_receiver_off">끔</string>
+    <string name="media_cast_video">캐스트 동영상</string>
+    <string name="media_cast_desc">DLNA 캐스트 수신으로 가져옴</string>
 </resources>

@@ -74,6 +74,22 @@
             因找不到 loader 而失败 —— 比「不出现 VR 库」更糟。等 loader 就绪后再开启。
          ==================================================================== -->
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+
+    <!-- ========================================================================
+         v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer）
+         ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE：读取网络状态（jUPnP 需要）
+         CHANGE_WIFI_MULTICAST_STATE：**必须** —— 不申请就收不到 SSDP 组播，
+             表现是「手机搜不到这台设备」（MulticastLock 依赖该权限）
+         FOREGROUND_SERVICE(+_MEDIA_PLAYBACK)：接收端必须常驻前台服务，
+             否则后台被冻结 → SSDP 心跳中断、投屏掉线
+         POST_NOTIFICATIONS：Android 13+ 前台服务通知；未授权时服务仍可运行
+         ======================================================================== -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- v2.1.222：移除 OPENXR_SYSTEM
          它是**系统级签名权限**（normal 应用无法获得、申请了也无效），
          属于 OpenXR 规范里给「系统级 XR 运行时」用的。普通第三方应用只需要
@@ -293,6 +309,20 @@
             android:exported="true"
             android:label="PocSharedContext"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|density|uiMode" />
+        <!-- ====================================================================
+             v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer）前台服务
+             —— 设置页「投屏接收」开关打开时启动，注册一台局域网可见的
+             MediaRenderer:1 设备，接收其他 App 推送的视频 URL。
+
+             ⚠️ foregroundServiceType 必须与 CastReceiverService 里
+                ServiceCompat.startForeground(...) 传入的类型一致，
+                否则 Android 14+ 会抛 MissingForegroundServiceTypeException。
+             ==================================================================== -->
+        <service
+            android:name="com.example.vr.cast.CastReceiverService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
     </application>
 
 </manifest>

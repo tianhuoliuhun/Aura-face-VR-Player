@@ -915,4 +915,10 @@
     <string name="danmu_time_jitter">時間のばらつき</string>
     <string name="danmu_time_jitter_hint">同じバッチの弾幕は本来同時に出ます。ここではバッチ時刻を中心に正規分布でばらけさせ、自然な粗密を作ります。0 で無効（同時）。</string>
     <string name="danmu_time_jitter_off">オフ</string>
+    <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->
+    <string name="cast_receiver_title">キャスト受信</string>
+    <string name="cast_receiver_on">オン · 同じ Wi-Fi のスマホのキャスト一覧に表示されます</string>
+    <string name="cast_receiver_off">オフ</string>
+    <string name="media_cast_video">キャスト動画</string>
+    <string name="media_cast_desc">DLNA キャスト受信で読み込み</string>
 </resources>

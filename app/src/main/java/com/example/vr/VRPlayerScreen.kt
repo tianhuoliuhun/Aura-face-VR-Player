@@ -89,6 +89,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import com.example.vr.cast.CastCommand
+import com.example.vr.cast.CastMediaBus
+import com.example.vr.cast.CastReceiverService
 import java.io.InputStream
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -117,6 +120,11 @@ fun VRPlayerScreen(
     // Load local SharedPreferences & memory mode flag
     val prefs = remember { context.getSharedPreferences("vr_player_prefs", android.content.Context.MODE_PRIVATE) }
     var isMemoryModeEnabled by remember { mutableStateOf(prefs.getBoolean("is_memory_mode_enabled", true)) }
+    // v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer）开关 —— 开启后本机在局域网内
+    // 作为一台「可投屏设备」出现，接收其他 App 推送的视频 URL 并播放。
+    var castReceiverEnabled by remember {
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("cast_receiver_enabled", false) else false)
+    }
 
     // Screen Layout orientation states (Lock to Landscape manually as requested)
     var isLandscape by remember { mutableStateOf(true) }
@@ -1265,7 +1273,9 @@ fun VRPlayerScreen(
         downscaleOutputEnabled,
         addCodecParamsEnabled,
         autoFallbackSoftEnabled,
-        beautyPreset
+        beautyPreset,
+        // v2.4.58：投屏接收开关（漏加进 key 列表 → 改了不落盘，重启即丢）
+        castReceiverEnabled
     ) {
         // v2.0.144：美颜预设按稳定 id 落盘（本地化名只用于显示与匹配）。
         // 名称无法识别（如切语言后残留旧语言名）时返回 -1，此时**不改动已存值**，
@@ -1304,6 +1314,7 @@ fun VRPlayerScreen(
             putFloat("beauty_small_head", beautySmallHead)
             if (beautyPresetId >= 0) putInt("beauty_preset_id", beautyPresetId)
             if (isMemoryModeEnabled) {
+                putBoolean("cast_receiver_enabled", castReceiverEnabled)
                 putInt("projection_mode", projectionMode.id)
                 // v2.1.211：鱼眼视场角（与投影模式同组持久化）
                 putInt("fisheye_fov_deg", fisheyeFovDeg)
@@ -1597,6 +1608,48 @@ fun VRPlayerScreen(
         }
     }
 
+    // ==================================================================================
+    // v2.4.58：**投屏接收（DLNA/UPnP-AV MediaRenderer）** 与应用播放链路的对接
+    // ----------------------------------------------------------------------------------
+    // 三条链路（全部走 CastMediaBus，见 com.example.vr.cast.CastMediaBus）：
+    //  1) 收到投屏 URL → 复用「外部视频意图」同一条链路（构造 MediaItem 赋给 selectedMediaItem）
+    //  2) DMC 下发的 Play/Pause/Stop/Seek → 作用于现有播放器门面 playerInstance
+    //  3) 播放进度回写 → 供 DMC 轮询 GetPositionInfo 显示进度
+    // 好处：投影模式、字幕、美颜、VR 渲染等全部**自动继承**，无需为投屏单独写播放逻辑。
+    // ==================================================================================
+    LaunchedEffect(Unit) {
+        CastMediaBus.requests.collect { req ->
+            android.util.Log.i("CastReceiver", "收到投屏请求：${req.uri}")
+            val name = req.title?.takeIf { it.isNotBlank() }
+                ?: Uri.parse(req.uri).lastPathSegment
+                    ?.substringAfterLast('/')
+                    ?.substringBeforeLast('.')
+                    ?.takeIf { it.isNotBlank() }
+                ?: context.getString(R.string.media_cast_video)
+            selectedMediaItem = MediaItem(
+                id = "cast_" + System.currentTimeMillis(),
+                title = name,
+                uri = req.uri,
+                isVideo = true,
+                isDemo = false,
+                description = context.getString(R.string.media_cast_desc),
+            )
+            // 与「外部视频意图」一致：先按普通 2D 平面播（投过来的绝大多数是普通视频）
+            projectionMode = ProjectionMode.STANDARD
+            stereoMode = StereoMode.MONO
+            photoReloadTrigger++
+            keepUiAlight()
+        }
+    }
+
+    // ⚠️ 「DMC 指令 → 播放器」与「进度回写」两个 effect **必须放在 playerInstance 声明之后**
+    //    （Kotlin 局部变量先声明后使用），因此移到下方 `var playerInstance` 附近，见 v2.4.58 段。
+
+    // v2.4.58：随开关状态启停投屏接收前台服务（应用启动时若开关已开，自动恢复服务）
+    LaunchedEffect(castReceiverEnabled) {
+        if (castReceiverEnabled) CastReceiverService.start(context) else CastReceiverService.stop(context)
+    }
+
     // ===== v2.0.180：拖动预览缩略图（性能优化版）=====
     //
     // 优化前的问题：
@@ -1811,6 +1864,37 @@ fun VRPlayerScreen(
     // 门面刻意复刻了 ExoPlayer 的方法名与签名（play/pause/seekTo/currentPosition/
     // duration/isPlaying/setPlaybackSpeed/release），因此下面 20 多处调用点无需改动。
     var playerInstance by remember { mutableStateOf<VrPlayerBackend?>(null) }
+
+    // ==================================================================================
+    // v2.4.58：投屏接收 —— DMC 遥控与进度回写（**必须放在 playerInstance 声明之后**）
+    //   1) DMC 下发的 Play/Pause/Stop/Seek → 作用于现有播放器门面
+    //   2) 播放进度回写 → 供 DMC 轮询 GetPositionInfo 显示进度
+    // ==================================================================================
+    LaunchedEffect(Unit) {
+        CastMediaBus.commands.collect { cmd ->
+            when (cmd.type) {
+                CastCommand.Type.PLAY -> playerInstance?.play()
+                CastCommand.Type.PAUSE -> playerInstance?.pause()
+                CastCommand.Type.STOP -> {
+                    playerInstance?.pause()
+                    playerInstance?.seekTo(0L)
+                }
+                CastCommand.Type.SEEK -> playerInstance?.seekTo(cmd.positionMs)
+            }
+        }
+    }
+
+    LaunchedEffect(playerInstance) {
+        while (true) {
+            val p = playerInstance
+            CastMediaBus.reportProgress(
+                positionMs = p?.currentPosition ?: 0L,
+                durationMs = (p?.duration ?: 0L).coerceAtLeast(0L),
+                currentUri = p?.currentUri?.toString() ?: "",
+            )
+            delay(1000L)
+        }
+    }
     // 审查 #13：每次 setupVideoPlayer 都会 new 一个 Surface，旧的不释放会累积泄漏。
     // 用 AtomicReference（remember 一次，跨重组保留）记录当前绑定到播放器的 Surface，
     // 新建前先 release 旧的；不用 State 以免触发重组或后台线程写快照。
@@ -5272,6 +5356,52 @@ fun VRPlayerScreen(
                                 onCheckedChange = {
                                     subtitleTranslator.config = subtitleTranslator.config.copy(isEnabled = it)
                                     if (isMemoryModeEnabled) prefs.edit().putBoolean("translation_enabled", it).apply()
+                                    keepUiAlight()
+                                },
+                                accentColor = AccentColor,
+                                accentOnColor = AccentOnColor
+                            )
+                        }
+
+                        // ============ v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer）============
+                        // 开启后本机在局域网内作为一台「可投屏设备」出现：手机视频 App 的
+                        // 投屏列表里能看到本机，点投屏后把视频地址推过来由本应用播放。
+                        // ⚠️ 仅支持「URL 推送式」投屏（DLNA）；不支持手机屏幕镜像（系统权限限制）。
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    stringResource(R.string.cast_receiver_title),
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    text = stringResource(
+                                        if (castReceiverEnabled) R.string.cast_receiver_on
+                                        else R.string.cast_receiver_off
+                                    ),
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                            AuraSwitch(
+                                checked = castReceiverEnabled,
+                                onCheckedChange = {
+                                    castReceiverEnabled = it
+                                    if (isMemoryModeEnabled) {
+                                        prefs.edit().putBoolean("cast_receiver_enabled", it).apply()
+                                    }
                                     keepUiAlight()
                                 },
                                 accentColor = AccentColor,
