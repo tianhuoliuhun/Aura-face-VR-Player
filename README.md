@@ -13,7 +13,7 @@
 > ASR 扩展至 **87 项语言与方言** 并把 **Dolphin 内置进 APK**（开箱即用），新增时间标记悬浮球与语言选择多级收纳；
 > 后期（v2.1.24x）把播放内核扩到 **四个**（EXO / IJK / MPV / 系统解码），
 > **MPV 内置进 APK** 作为 WMV·ASF·RM·RMVB 的兜底内核，并用**容器白名单**做内核自动路由；
-> **v2.2–v2.4** 引入 **AI 弹幕**（画面 / 台词驱动、上屏渲染、颜色与行距、时间抖动、外部弹幕导入）与**端侧本地大模型**（Qwen 系，一次性下载后**离线**翻译与弹幕生成）；新增 **VR 眼镜支持**（华为 VR Glass / Pico / Quest，按 flavor 分包），并完成多轮代码审查修复（美颜双引擎 / 本地 AI / 设置面板）。
+> **v2.2–v2.4** 引入 **AI 弹幕**（画面 / 台词驱动、上屏渲染、颜色与行距、时间抖动、外部弹幕导入）与**端侧本地大模型**（Qwen 系，一次性下载后**离线**翻译与弹幕生成）；新增 **VR 眼镜支持**（华为 VR Glass / Pico / Quest，按 flavor 分包），完成多轮代码审查修复（美颜双引擎 / 本地 AI / 设置面板），并在 **v2.4.58** 加入**投屏接收**（本机作为标准 DLNA 渲染器，接收手机视频 App 推送的 URL 并播放）。
 >
 > **v1.0** delivered the core VR playback (projection / stereo / gyro / LUT) ·
 > **v2.0** delivered AI speech recognition & translation (realtime subtitles, offline ASR, online translation, dual-engine beauty) ·
@@ -21,7 +21,7 @@
 > later (v2.1.24x) expanded to **four playback kernels** (EXO / IJK / MPV / system) with **MPV bundled in-APK** as the fallback for WMV/ASF/RM/RMVB, plus container-based auto-routing;
 > **v2.2–v2.4** added **AI danmaku** (frame / subtitle-line driven, on-screen rendering, colors, adaptive spacing, timestamp jitter, external import) and an **on-device local LLM** (Qwen family; offline translation & danmaku generation after a one-time download); introduced **VR glasses support** (Huawei VR Glass / Pico / Quest via per-flavor packaging) plus several rounds of code-review fixes (beauty engines / local AI / settings panels).
 
-![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
+![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
 ---
 
@@ -40,6 +40,7 @@
 | 🌐 **字幕在线翻译**<br>Online Translation | **10 种引擎**（4 个免密/免费：必应 / Google 免密 / MyMemory / LibreTranslate）；本地词库缓存（LRU + TTL + 按语言分文件）<br>10 engines including 4 keyless/free, with a local per-language translation memory |
 | 🧠 **端侧本地大模型**<br>On-device LLM | 下载一次后**全程离线**：本地 AI 翻译 + 本地弹幕生成（**Qwen3.5 0.8B Q4_K_M** + 自建 llama.cpp / libmtmd JNI；主权重约 574MB，可选视觉编码器 mmproj 约 207MB）；单 worker 推理调度 + **优先级队列**（实时字幕 > 弹幕 > 远期预翻译），超时与失败原因如实回传；不联网、不上传内容<br>One-time download then fully offline: local AI translation and danmaku generation (Qwen3.5 0.8B Q4_K_M with a self-built llama.cpp / libmtmd JNI; ~574MB main weights, optional ~207MB mmproj); single-worker scheduler with a **priority queue** (live subtitles > danmaku > far-ahead pre-translation), timeouts and real failure reasons surfaced |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
+| 📺 **投屏接收（DLNA）**<br>Cast Receiver | **v2.4.58**：设置里一个开关，本机即以标准 **DLNA 渲染器（`MediaRenderer:1`）** 出现在手机视频 App 的投屏列表中；手机把视频 **URL** 推过来后，**复用整条播放链路**（投影 / 字幕与 ASR / AI 弹幕 / 美颜 / 画质增强 / VR 渲染，四内核自动路由），并支持手机端遥控播放与进度回读。⚠️ 仅「URL 推送式」投屏，**不支持屏幕镜像**<br>**v2.4.58** DLNA renderer: flip one switch and phone video apps can cast to this device; the pushed URL **reuses the entire playback pipeline** with remote play/pause/seek. URL-push only — no screen mirroring |
 | ⏩ **进度条拖动**<br>Seeking | **松手才定位**（拖动中只更新预览，不堆积 seek）—— **AVI / AV1 也能顺畅拖动**；容器不支持定位时**不重新编码**地自动重封装修复；AVI 内嵌 AV1 明确提示改用 MPV 内核<br>Seek-on-release keeps AVI/AV1 dragging smooth; auto remux (no re-encode) when a file cannot seek |
 | 🎞️ **多内核与格式兼容**<br>Multi-kernel & Formats | **四个内核可选**（EXO / IJK / MPV / 系统解码）+ 自动路由：打开 **WMV / ASF / RM / RMVB / ISO / VOB** 等片源时**本次自动切换**到能吃它的内核（不改写你的设置）。**MPV 已内置进 APK**，无需下载即可播放上述格式<br>Four selectable kernels with container-based auto-routing; **MPV is bundled in-APK** so WMV/ASF/RM/RMVB/ISO/VOB play out of the box |
 | 📄 **字幕格式**<br>Subtitle Formats | 外挂 **SRT / VTT / ASS / SSA**（按内容自动识别）；**MKV 内挂 ASS/SRT 字幕轨**也可切换；字幕文件**编码自动探测**（BOM / UTF-8 / GBK / Big5），中文老字幕不再乱码<br>External **SRT / VTT / ASS / SSA** (auto-detected), **embedded ASS/SRT in MKV**, and charset auto-detection (BOM / UTF-8 / GBK / Big5) |

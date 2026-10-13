@@ -366,6 +366,36 @@
 
 ---
 
+## 📺 投屏接收（DLNA / UPnP-AV）/ Cast Receiver（v2.4.58 起）
+- **设置里一个开关，本机即成为可投屏设备**：开启后本机在局域网内以标准 **DLNA 渲染器
+  （`urn:schemas-upnp-org:device:MediaRenderer:1`）** 身份出现，手机视频 App
+  （腾讯视频 / 爱奇艺 / 优酷 / B 站等）的「投屏」列表中能直接看到它
+  - One toggle makes this device a standard DLNA renderer visible in phone cast lists
+- **手机上点投屏后，播放全部复用现有能力**：手机端通过 `SetAVTransportURI` 把视频**地址**
+  推过来，本应用**自己去拉流播放** —— 因此投影模式、字幕（含实时 ASR 与翻译）、AI 弹幕、
+  美颜、画质增强、VR 渲染**全部自动继承**；四套解码内核（EXO / IJK / MPV / 系统）
+  也照常按容器自动路由
+  - The phone pushes a media **URL**; playback reuses the whole existing pipeline
+- **手机端可遥控**：`Play / Pause / Stop / Seek` 作用于当前播放器；进度经 `GetPositionInfo`
+  回读（手机端能显示进度条）；音量 / 静音经 `RenderingControl` 桥接到系统媒体音量
+  - DMC remote control (play / pause / stop / seek), progress read-back and volume bridging
+- **实现**：`com.example.vr.cast` 包 —— jUPnP 3.0.4 的**注解式三服务**
+  （`AVTransport:1` / `ConnectionManager:1` / `RenderingControl:1`）+ **前台服务**
+  （`foregroundServiceType=mediaPlayback`，常驻通知保活）+ **`MulticastLock`**
+  （不申请就收不到 SSDP 组播，表现为「手机搜不到设备」）
+  - Implemented in `com.example.vr.cast` with jUPnP 3.0.4 annotation services,
+    a foreground service and a MulticastLock
+- ⚠️ **只支持「URL 推送式」投屏**：**不支持手机屏幕镜像** —— Miracast 的接收端（WFD Sink）
+  需要系统签名权限 `CONFIGURE_WIFI_DISPLAY`，AirPlay 接收端则有 GPLv3 与 DRM 双重限制，
+  均不适合第三方应用集成。选型调研见 `docs/CAST_RECEIVER_SURVEY_2026-10-13.md`
+  - URL-push casting only; screen mirroring (Miracast/AirPlay sink) is not feasible
+    for third-party apps — see the survey doc for the full comparison
+- ⚠️ **模拟器收不到 SSDP 组播**：设备发现类功能请用**真机**验证
+  （MuMu 等模拟器的网络桥接通常不转发组播报文）
+  - Emulators cannot receive SSDP multicast — verify discovery on a real device
+
+---
+
 ## ⏩ 进度条拖动 / Seeking
 - **拖动只在松手时定位一次**（v2.1.247）：拖动过程中仅更新预览缩略图与时间文字，
   松手才发出一次 seek —— 避免逐帧 seek 堆积导致 AVI 等格式卡死
