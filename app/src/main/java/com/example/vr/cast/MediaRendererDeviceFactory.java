@@ -3,6 +3,8 @@ package com.example.vr.cast;
 import org.jupnp.binding.LocalServiceBinder;
 import org.jupnp.binding.annotations.AnnotationLocalServiceBinder;
 import org.jupnp.model.DefaultServiceManager;
+import org.jupnp.support.avtransport.lastchange.AVTransportLastChangeParser;
+import org.jupnp.support.lastchange.LastChangeAwareServiceManager;
 import org.jupnp.model.ValidationException;
 import org.jupnp.model.meta.DeviceDetails;
 import org.jupnp.model.meta.DeviceIdentity;
@@ -54,7 +56,10 @@ public final class MediaRendererDeviceFactory {
         @SuppressWarnings("unchecked")
         LocalService<AvTransportService> avTransport =
                 (LocalService<AvTransportService>) binder.read(AvTransportService.class);
-        avTransport.setManager(new DefaultServiceManager<>(avTransport, AvTransportService.class));
+        // AVTransport 用 **LastChangeAwareServiceManager**（而非 DefaultServiceManager）：
+        // 它知道 LastChange 是唯一的事件化变量，订阅时会提供正确的初值（v2.4.59 GENA 事件推送）。
+        avTransport.setManager(new LastChangeAwareServiceManager<>(
+                avTransport, AvTransportService.class, new AVTransportLastChangeParser()));
 
         @SuppressWarnings("unchecked")
         LocalService<ConnectionManagerService> connectionManager =

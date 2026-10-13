@@ -9,7 +9,17 @@ import org.jupnp.binding.annotations.UpnpService;
 import org.jupnp.binding.annotations.UpnpServiceId;
 import org.jupnp.binding.annotations.UpnpServiceType;
 import org.jupnp.binding.annotations.UpnpStateVariable;
+import org.jupnp.internal.compat.java.beans.PropertyChangeSupport;
 import org.jupnp.model.types.UnsignedIntegerFourBytes;
+import org.jupnp.support.avtransport.lastchange.AVTransportLastChangeParser;
+import org.jupnp.support.avtransport.lastchange.AVTransportVariable;
+import org.jupnp.support.lastchange.EventedValue;
+import org.jupnp.support.lastchange.LastChange;
+import org.jupnp.support.lastchange.LastChangeDelegator;
+import org.jupnp.support.model.TransportState;
+import org.jupnp.support.model.TransportStatus;
+
+import java.net.URI;
 
 /**
  * v2.4.58：**DLNA / UPnP-AV 的 `AVTransport:1` 服务（DMR 接收端的核心）**。
@@ -27,17 +37,21 @@ import org.jupnp.model.types.UnsignedIntegerFourBytes;
  * `AnnotationLocalServiceBinder.read(AvTransportService.class)` 在运行时生成
  * `LocalService`（含 action/state variable 定义与调用绑定），**无需手写 XML**。
  *
- * ## 两处刻意的简化（P1）
- * 1. **所有状态变量 `sendEvents = false`** —— 不做 GENA 事件推送，DMC 靠轮询
- *    `GetTransportInfo/GetPositionInfo` 刷新进度。手机端 DLNA 投屏普遍如此，够用且更稳。
- * 2. **多输出的 action 返回一个 JavaBean**，由 `@UpnpOutputArgument(getterName=...)` 取字段
- *    （jUPnP 3.x 没有 Cling 时代的 `*Holder` 类，这是官方推荐的多输出写法）。
+ * ## 事件推送（GENA，v2.4.59 起）
+ * 按 UPnP AV / DLNA 规范，本服务**只把 `LastChange` 声明为事件化变量**：播放状态变化时
+ * 用 `LastChange.fire(...)` 生成 AVT 命名空间的 XML 并推给订阅者（`NOTIFY`），
+ * DMC 因此能**实时**看到 Play/Pause/Stop/换源，而不必轮询。
+ * 其余状态变量保持 `sendEvents = false`（规范如此，也避免多余事件流量）。
+ *
+ * ## 一处刻意的简化
+ * **多输出的 action 返回一个 JavaBean**，由 `@UpnpOutputArgument(getterName=...)` 取字段
+ * （jUPnP 3.x 没有 Cling 时代的 `*Holder` 类，这是官方推荐的多输出写法）。
  */
 @UpnpService(
         serviceId = @UpnpServiceId("AVTransport"),
         serviceType = @UpnpServiceType(value = "AVTransport", version = 1)
 )
-public class AvTransportService {
+public class AvTransportService implements LastChangeDelegator {
 
     private static final String TAG = "CastAvTransport";
 
@@ -130,6 +144,76 @@ public class AvTransportService {
     @UpnpStateVariable(name = "A_ARG_TYPE_InstanceID", datatype = "ui4", defaultValue = "0", sendEvents = false)
     private UnsignedIntegerFourBytes aArgTypeInstanceId = new UnsignedIntegerFourBytes(0L);
 
+    /**
+     * **唯一的事件化状态变量**（GENA）。
+     *
+     * 按 UPnP AV / DLNA 规范，`AVTransport:1` 只 evented `LastChange` —— 其值是
+     * `urn:schemas-upnp-org:metadata-1-0/AVT/` 命名空间的 XML，列出「本次变化的变量」。
+     * DMC 订阅后即可实时收到播放状态变化。
+     */
+    @UpnpStateVariable(name = "LastChange", sendEvents = true)
+    private String lastChangeValue = "";
+
+    /** GENA 事件通道：jUPnP 通过它把 `LastChange` 的变化推给所有订阅者 */
+    private final PropertyChangeSupport propertyChangeSupport = new PropertyChangeSupport(this);
+
+    private final LastChange lastChange = new LastChange(new AVTransportLastChangeParser());
+
+    public PropertyChangeSupport getPropertyChangeSupport() {
+        return propertyChangeSupport;
+    }
+
+    @Override
+    public LastChange getLastChange() {
+        return lastChange;
+    }
+
+    @Override
+    public UnsignedIntegerFourBytes[] getCurrentInstanceIds() {
+        return new UnsignedIntegerFourBytes[]{ new UnsignedIntegerFourBytes(0L) };
+    }
+
+    /** 当前状态的完整快照（订阅时的初值、重订阅时用） */
+    @Override
+    public void appendCurrentState(LastChange lc, UnsignedIntegerFourBytes instanceId) {
+        // 用 UnsignedIntegerFourBytes 重载（setEventedValue(int, …) 不接受 Long）
+        lc.setEventedValue(instanceId,
+                new AVTransportVariable.TransportState(safeState()),
+                new AVTransportVariable.TransportStatus(TransportStatus.OK),
+                new AVTransportVariable.AVTransportURI(safeUri(avTransportURI)),
+                new AVTransportVariable.CurrentTrackURI(safeUri(currentTrackURI)),
+                new AVTransportVariable.CurrentTrackDuration(currentTrackDuration),
+                new AVTransportVariable.CurrentTrackMetaData(currentTrackMetaData));
+    }
+
+    /**
+     * 把「本次变化的变量」写入 LastChange 并**立即推送**给所有订阅者（GENA `NOTIFY`）。
+     */
+    private void fireLastChange(EventedValue<?>... changes) {
+        if (changes.length > 0) {
+            lastChange.setEventedValue(0, changes);
+        }
+        lastChangeValue = lastChange.toString();
+        lastChange.fire(propertyChangeSupport);
+    }
+
+    private TransportState safeState() {
+        try {
+            return TransportState.valueOf(transportState);
+        } catch (Exception e) {
+            return TransportState.NO_MEDIA_PRESENT;
+        }
+    }
+
+    /** `EventedValueURI` 要求合法 URI；投屏地址可能含特殊字符，这里兜底为空 URI（不抛异常）。 */
+    private static URI safeUri(String s) {
+        try {
+            return URI.create(s == null ? "" : s.trim());
+        } catch (Exception e) {
+            return URI.create("");
+        }
+    }
+
     // ==================================================================== Actions
 
     /** **核心**：DMC 把要播放的地址交过来 —— 这里通过总线转交给应用播放器。 */
@@ -153,6 +237,12 @@ public class AvTransportService {
         String title = extractTitle(currentURIMetaData);
         Log.i(TAG, "SetAVTransportURI: " + this.avTransportURI + " title=" + title);
         CastMediaBus.onSetUri(this.avTransportURI, title);
+        fireLastChange(
+                new AVTransportVariable.TransportState(TransportState.STOPPED),
+                new AVTransportVariable.TransportStatus(TransportStatus.OK),
+                new AVTransportVariable.AVTransportURI(safeUri(this.avTransportURI)),
+                new AVTransportVariable.CurrentTrackURI(safeUri(this.currentTrackURI)),
+                new AVTransportVariable.CurrentTrackMetaData(this.avTransportURIMetaData));
     }
 
     @UpnpAction(name = "SetNextAVTransportURI")
@@ -248,6 +338,9 @@ public class AvTransportService {
             UnsignedIntegerFourBytes instanceId) {
         transportState = "STOPPED";
         CastMediaBus.onCommand(CastCommand.Type.STOP, 0L);
+        fireLastChange(
+                new AVTransportVariable.TransportState(TransportState.STOPPED),
+                new AVTransportVariable.TransportStatus(TransportStatus.OK));
     }
 
     @UpnpAction(name = "Play")
@@ -261,6 +354,9 @@ public class AvTransportService {
             transportPlaySpeed = speed;
         }
         CastMediaBus.onCommand(CastCommand.Type.PLAY, 0L);
+        fireLastChange(
+                new AVTransportVariable.TransportState(TransportState.PLAYING),
+                new AVTransportVariable.TransportStatus(TransportStatus.OK));
     }
 
     @UpnpAction(name = "Pause")
@@ -269,6 +365,9 @@ public class AvTransportService {
             UnsignedIntegerFourBytes instanceId) {
         transportState = "PAUSED_PLAYBACK";
         CastMediaBus.onCommand(CastCommand.Type.PAUSE, 0L);
+        fireLastChange(
+                new AVTransportVariable.TransportState(TransportState.PAUSED_PLAYBACK),
+                new AVTransportVariable.TransportStatus(TransportStatus.OK));
     }
 
     @UpnpAction(name = "Record")
