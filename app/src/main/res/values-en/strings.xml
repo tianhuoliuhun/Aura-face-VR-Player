@@ -961,4 +961,17 @@
     <string name="cast_receiver_off">Off</string>
     <string name="media_cast_video">Casted video</string>
     <string name="media_cast_desc">Imported via DLNA cast receiver</string>
+    <!-- v2.4.64：音频性别分析（实验，离线） -->
+    <string name="audio_gender_title">Audio gender analysis (experimental)</string>
+    <string name="audio_gender_desc">Detects which time ranges are male / female speech (pitch-based). This build only verifies detection - playback is untouched.</string>
+    <string name="audio_gender_models_ready">Models ready (%1$d MB)</string>
+    <string name="audio_gender_models_need">Models to download: ~%1$d MB</string>
+    <string name="audio_gender_download">Download models</string>
+    <string name="audio_gender_download_failed">Model download failed (see AudioGenderModels log)</string>
+    <string name="audio_gender_analyze">Analyze current video</string>
+    <string name="audio_gender_no_media">Open a video first</string>
+    <string name="audio_gender_stage_extract">Extracting audio</string>
+    <string name="audio_gender_stage_separate">Separating speakers</string>
+    <string name="audio_gender_extract_failed">Audio extraction failed (no audio track?)</string>
+    <string name="audio_gender_analyze_failed">Analysis failed (see AudioGenderAnalyzer log)</string>
 </resources>

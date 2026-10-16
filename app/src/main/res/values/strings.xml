@@ -954,4 +954,17 @@
     <string name="cast_receiver_off">已关闭</string>
     <string name="media_cast_video">投屏视频</string>
     <string name="media_cast_desc">由投屏接收（DLNA）导入</string>
+    <!-- v2.4.64：音频性别分析（实验，离线） -->
+    <string name="audio_gender_title">音频性别分析（实验）</string>
+    <string name="audio_gender_desc">检测视频里哪些时间段是男声 / 女声（按基频判定）。本版只做识别验证，不改动播放。</string>
+    <string name="audio_gender_models_ready">模型已就绪（%1$d MB）</string>
+    <string name="audio_gender_models_need">需下载模型：约 %1$d MB</string>
+    <string name="audio_gender_download">下载模型</string>
+    <string name="audio_gender_download_failed">模型下载失败（详见日志 AudioGenderModels）</string>
+    <string name="audio_gender_analyze">开始分析当前视频</string>
+    <string name="audio_gender_no_media">请先打开一个视频</string>
+    <string name="audio_gender_stage_extract">抽取音轨</string>
+    <string name="audio_gender_stage_separate">分离说话人并判性别</string>
+    <string name="audio_gender_extract_failed">抽取音轨失败（该媒体可能没有音轨）</string>
+    <string name="audio_gender_analyze_failed">分析失败（详见日志 AudioGenderAnalyzer）</string>
 </resources>

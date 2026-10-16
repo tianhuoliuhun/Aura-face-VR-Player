@@ -921,4 +921,17 @@
     <string name="cast_receiver_off">끔</string>
     <string name="media_cast_video">캐스트 동영상</string>
     <string name="media_cast_desc">DLNA 캐스트 수신으로 가져옴</string>
+    <!-- v2.4.64：音频性别分析（实验，离线） -->
+    <string name="audio_gender_title">오디오 성별 분석(실험)</string>
+    <string name="audio_gender_desc">어느 구간이 남성/여성 음성인지 기본 주파수로 판정합니다. 이 버전은 인식 검증만 하며 재생은 건드리지 않습니다.</string>
+    <string name="audio_gender_models_ready">모델 준비 완료(%1$d MB)</string>
+    <string name="audio_gender_models_need">다운로드 필요: 약 %1$d MB</string>
+    <string name="audio_gender_download">모델 다운로드</string>
+    <string name="audio_gender_download_failed">모델 다운로드 실패(AudioGenderModels 로그 참조)</string>
+    <string name="audio_gender_analyze">현재 동영상 분석</string>
+    <string name="audio_gender_no_media">먼저 동영상을 여세요</string>
+    <string name="audio_gender_stage_extract">오디오 추출 중</string>
+    <string name="audio_gender_stage_separate">화자 분리 중</string>
+    <string name="audio_gender_extract_failed">오디오 추출 실패(오디오 트랙 없음)</string>
+    <string name="audio_gender_analyze_failed">분석 실패(AudioGenderAnalyzer 로그 참조)</string>
 </resources>

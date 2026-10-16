@@ -123,6 +123,8 @@ fun SubtitleSettingsPanel(
     vrIpdOffsetRatio: Float,
     onVrIpdOffsetRatioChange: (Float) -> Unit,
     maxLines: Int = 2,
+    // v2.4.64：音频性别分析要分析的媒体（默认 null = 面板单独预览时无媒体）
+    audioGenderMediaUri: String? = null,
     onMaxLinesChange: (Int) -> Unit = {},
     subtitleSearchApiKey: String = "",
     onSubtitleSearchApiKeyChange: (String) -> Unit = {},
@@ -804,6 +806,13 @@ fun SubtitleSettingsPanel(
                     if (translator.config.engine == TranslationEngine.LOCAL_LLM) {
                         LocalModelSection(accentColor = accentColor)
                     }
+
+                    // v2.4.64：**音频性别分析（实验）** —— 同为「模型下载 + 长耗时任务」型区块，
+                    // 放在本地模型之后；它只做识别验证，不参与播放链路。
+                    AudioGenderSection(
+                        accentColor = accentColor,
+                        mediaUri = audioGenderMediaUri,
+                    )
 
                     // API Key & Base URL Inputs for engines that require a key.
                     // 另外 LibreTranslate 允许自托管，因此也展示（用于填私有实例地址 / key）。

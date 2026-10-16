@@ -921,4 +921,17 @@
     <string name="cast_receiver_off">オフ</string>
     <string name="media_cast_video">キャスト動画</string>
     <string name="media_cast_desc">DLNA キャスト受信で読み込み</string>
+    <!-- v2.4.64：音频性别分析（实验，离线） -->
+    <string name="audio_gender_title">音声の性別分析（実験）</string>
+    <string name="audio_gender_desc">どの区間が男性／女性の音声かを基本周波数で判定します。この版は識別の検証のみで、再生は変更しません。</string>
+    <string name="audio_gender_models_ready">モデル準備完了（%1$d MB）</string>
+    <string name="audio_gender_models_need">ダウンロードが必要：約 %1$d MB</string>
+    <string name="audio_gender_download">モデルをダウンロード</string>
+    <string name="audio_gender_download_failed">モデルのダウンロードに失敗（AudioGenderModels ログ参照）</string>
+    <string name="audio_gender_analyze">現在の動画を分析</string>
+    <string name="audio_gender_no_media">先に動画を開いてください</string>
+    <string name="audio_gender_stage_extract">音声を抽出中</string>
+    <string name="audio_gender_stage_separate">話者を分離中</string>
+    <string name="audio_gender_extract_failed">音声の抽出に失敗（音声トラックがない可能性）</string>
+    <string name="audio_gender_analyze_failed">分析に失敗（AudioGenderAnalyzer ログ参照）</string>
 </resources>

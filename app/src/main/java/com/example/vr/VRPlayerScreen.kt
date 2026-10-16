@@ -7508,6 +7508,7 @@ fun VRPlayerScreen(
                                 // 现已在左列以顶级分组 `SettingsGroup(group_title_danmu)` 与字幕并列。
 
                                 SubtitleSettingsPanel(
+                                    audioGenderMediaUri = selectedMediaItem.uri,
                                     isSubtitleEnabled = isSubtitleEnabled,
                                     onSubtitleEnabledChange = {
                                         isSubtitleEnabled = it
