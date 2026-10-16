@@ -933,5 +933,6 @@
     <string name="audio_gender_stage_extract">오디오 추출 중</string>
     <string name="audio_gender_stage_separate">화자 분리 중</string>
     <string name="audio_gender_extract_failed">오디오 추출 실패(오디오 트랙 없음)</string>
+    <string name="audio_gender_truncated">(오디오가 길어 앞부분만 분석했습니다)</string>
     <string name="audio_gender_analyze_failed">분석 실패(AudioGenderAnalyzer 로그 참조)</string>
 </resources>

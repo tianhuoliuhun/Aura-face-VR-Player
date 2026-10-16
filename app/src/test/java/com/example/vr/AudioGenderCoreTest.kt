@@ -138,4 +138,32 @@ class AudioGenderCoreTest {
         assertTrue("VAD 与嵌入不应走解压路径",
             all.filter { it.id != "segmentation" }.none { it.archive })
     }
+
+    // ------------------------------------------------------------ 内存预检（v2.4.65 防 OOM）
+
+    @Test
+    fun `safeMaxSeconds caps an enormous request within heap budget`() {
+        // v2.4.65：v2.4.64 的「抽取音轨失败」实为 OOM（ArrayList<Float> 装箱）。
+        // 现在上限必须被**可用堆的一半**封顶（结果按 16kHz × 4B 计）。
+        val huge = Int.MAX_VALUE / 4
+        val sec = AudioPcmExtractor.safeMaxSeconds(huge)
+        val bytes = sec.toLong() * AudioPcmExtractor.TARGET_SAMPLE_RATE * 4L
+        val budget = Runtime.getRuntime().maxMemory() / 2
+        assertTrue(
+            "上限 $sec 秒（$bytes 字节）应 ≤ 堆预算 $budget 字节",
+            bytes <= budget + AudioPcmExtractor.TARGET_SAMPLE_RATE * 4L,
+        )
+        assertTrue("至少应给出 60 秒", sec >= 60)
+    }
+
+    @Test
+    fun `safeMaxSeconds keeps a modest request unchanged`() {
+        // 10 分钟远小于任何设备的堆预算 → 不应被下调
+        assertEquals(600, AudioPcmExtractor.safeMaxSeconds(600))
+    }
+
+    @Test
+    fun `default max seconds is 15 minutes`() {
+        assertEquals(15 * 60, AudioPcmExtractor.DEFAULT_MAX_SECONDS)
+    }
 }

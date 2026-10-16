@@ -973,5 +973,6 @@
     <string name="audio_gender_stage_extract">Extracting audio</string>
     <string name="audio_gender_stage_separate">Separating speakers</string>
     <string name="audio_gender_extract_failed">Audio extraction failed (no audio track?)</string>
+    <string name="audio_gender_truncated">(Audio is long - only the beginning was analyzed)</string>
     <string name="audio_gender_analyze_failed">Analysis failed (see AudioGenderAnalyzer log)</string>
 </resources>

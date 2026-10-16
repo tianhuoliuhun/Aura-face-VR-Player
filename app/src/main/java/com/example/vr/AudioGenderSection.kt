@@ -79,6 +79,7 @@ fun AudioGenderSection(
     val textStageSeparate = stringResource(R.string.audio_gender_stage_separate)
     val textExtractFailed = stringResource(R.string.audio_gender_extract_failed)
     val textAnalyzeFailed = stringResource(R.string.audio_gender_analyze_failed)
+    val textTruncated = stringResource(R.string.audio_gender_truncated)
 
     Column(
         modifier = modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -151,16 +152,20 @@ fun AudioGenderSection(
                 resultText = ""
                 try {
                     stage = textStageExtract
-                    val pcm = AudioPcmExtractor.extract(context, Uri.parse(mediaUri)) { progress = it / 2 }
-                    if (pcm == null) {
-                        // 失败必带原因（项目约定：不塌缩成静默空结果）
-                        resultText = textExtractFailed
-                        return@launch
+                    // v2.4.65：抽取改为返回「成功 / 失败(带原因)」，失败原因**直接显示给用户**
+                    //   —— v2.4.64 只显示一句笼统文案，导致「抽取失败」时无法分辨
+                    //      是「没有音轨」「来源不支持」还是「内存不足」。
+                    when (val ex = AudioPcmExtractor.extract(context, Uri.parse(mediaUri)) { progress = it / 2 }) {
+                        is AudioPcmExtractor.ExtractResult.Fail -> {
+                            resultText = ex.reason.ifBlank { textExtractFailed }
+                        }
+                        is AudioPcmExtractor.ExtractResult.Ok -> {
+                            stage = textStageSeparate
+                            val result = AudioGenderAnalyzer.analyze(context, ex.samples) { progress = 50 + it / 2 }
+                            val head = if (ex.truncated) textTruncated + "\n" else ""
+                            resultText = head + (result?.summary() ?: textAnalyzeFailed)
+                        }
                     }
-                    stage = textStageSeparate
-                    val result = AudioGenderAnalyzer.analyze(context, pcm) { progress = 50 + it / 2 }
-                    resultText = result?.summary()
-                        ?: textAnalyzeFailed
                 } finally {
                     analyzing = false
                 }

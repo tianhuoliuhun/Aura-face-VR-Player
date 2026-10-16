@@ -933,5 +933,6 @@
     <string name="audio_gender_stage_extract">音声を抽出中</string>
     <string name="audio_gender_stage_separate">話者を分離中</string>
     <string name="audio_gender_extract_failed">音声の抽出に失敗（音声トラックがない可能性）</string>
+    <string name="audio_gender_truncated">（音声が長いため、先頭部分のみを分析しました）</string>
     <string name="audio_gender_analyze_failed">分析に失敗（AudioGenderAnalyzer ログ参照）</string>
 </resources>

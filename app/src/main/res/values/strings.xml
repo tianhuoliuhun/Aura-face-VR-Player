@@ -966,5 +966,6 @@
     <string name="audio_gender_stage_extract">抽取音轨</string>
     <string name="audio_gender_stage_separate">分离说话人并判性别</string>
     <string name="audio_gender_extract_failed">抽取音轨失败（该媒体可能没有音轨）</string>
+    <string name="audio_gender_truncated">（音频较长，仅分析了前面一段）</string>
     <string name="audio_gender_analyze_failed">分析失败（详见日志 AudioGenderAnalyzer）</string>
 </resources>
