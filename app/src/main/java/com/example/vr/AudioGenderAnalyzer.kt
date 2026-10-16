@@ -122,6 +122,19 @@ object AudioGenderAnalyzer {
             Log.w(TAG, "模型未就绪，缺失: ${AudioGenderModels.missing(context).map { it.displayName }}")
             return@withContext null
         }
+        // 🔴 v2.4.66：把路径交给 native 之前的**最后一道闸**。
+        //    sherpa-onnx 读到「不完整 / 不可读」的模型文件会打 `F` 日志后 **abort()** ——
+        //    进程直接闪退，Java 的 try/catch **抓不到**（v2.4.66 就是这么闪退的）。
+        //    所以只能在这里提前拦下：下载被截断、解压只出来半个文件、文件不可读。
+        val bad = AudioGenderModels.ALL.filterNot { AudioGenderModels.isUsable(context, it) }
+        if (bad.isNotEmpty()) {
+            Log.w(
+                TAG,
+                "模型文件不合格（过小/不可读），已拦下以免 native abort：" +
+                    bad.joinToString { "${it.displayName}(${AudioGenderModels.fileOf(context, it).length()}B)" },
+            )
+            return@withContext null
+        }
 
         var diarization: OfflineSpeakerDiarization? = null
         try {
@@ -142,7 +155,17 @@ object AudioGenderAnalyzer {
                 ),
             )
             onProgress(5)
-            diarization = OfflineSpeakerDiarization(context.assets, cfg)
+            // 🔴 v2.4.66：**AssetManager 必须传 null**。
+            //    sherpa-onnx 的 C++ 侧规则：assetManager **非 null** 时会把 model 路径当
+            //    **assets 相对路径**解析。我们的模型是下载到 filesDir 的**绝对路径**，于是它去 assets 里找
+            //    这个绝对路径 → 找不到 → 打一行 `F sherpa-onnx: Read binary file: Load '...' failed`
+            //    然后 **abort()** —— 进程直接闪退（native abort，Java 的 try/catch **抓不到**）。
+            //    实测日志：
+            //      W sherpa-onnx: You are using an absolute path '...', but assetManager is NOT set to null
+            //      F sherpa-onnx: Read binary file: Load '.../pyannote-segmentation-3-0.onnx' failed
+            //      I ActivityManager: Process ... has died: fg TOP
+            //    → 传 null 表示「按普通文件系统路径读」。
+            diarization = OfflineSpeakerDiarization(null, cfg)
 
             // 模型要求的采样率（pyannote/WeSpeaker 均为 16k，这里做一次校验式重采样兜底）
             val needed = diarization.sampleRate()

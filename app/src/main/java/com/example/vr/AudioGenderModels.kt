@@ -63,6 +63,13 @@ object AudioGenderModels {
         val archive: Boolean,
         val fileName: String,
         val approxMb: Int,
+        /**
+         * 最小合理字节数：**低于它视为下载/解压不完整**。
+         *
+         * 🔴 为什么必须有：sherpa-onnx 的 native 侧读到坏文件会打 `F` 级日志后 **abort()**，
+         * 进程直接闪退 —— Java 的 try/catch **抓不到**（v2.4.66 实测）。只能在**调用前**拦下。
+         */
+        val minBytes: Long,
     )
 
     val VAD = ModelSpec(
@@ -72,6 +79,7 @@ object AudioGenderModels {
         archive = false,
         fileName = "silero_vad.onnx",
         approxMb = 1,
+        minBytes = 100_000L,
     )
 
     val SEGMENTATION = ModelSpec(
@@ -81,6 +89,7 @@ object AudioGenderModels {
         archive = true,
         fileName = "pyannote-segmentation-3-0.onnx",
         approxMb = 7,
+        minBytes = 500_000L,
     )
 
     val EMBEDDING = ModelSpec(
@@ -90,6 +99,7 @@ object AudioGenderModels {
         archive = false,
         fileName = "wespeaker_en_voxceleb_resnet34.onnx",
         approxMb = 26,
+        minBytes = 5_000_000L,
     )
 
     val ALL: List<ModelSpec> = listOf(VAD, SEGMENTATION, EMBEDDING)
@@ -102,6 +112,18 @@ object AudioGenderModels {
 
     fun isReady(context: Context, spec: ModelSpec): Boolean =
         fileOf(context, spec).let { it.isFile && it.length() > 0L }
+
+    /**
+     * 文件是否**可用**（存在、足够大、可读）—— 比 [isReady] 更严格。
+     *
+     * 专用于「即将把路径交给 native 之前」的最后一道闸：sherpa-onnx 读到不完整的模型会
+     * **abort()**（进程闪退，Java 抓不到），所以这里要挡住「下载被截断」「解压只出来半个文件」
+     * 「文件不可读」这几种情况。
+     */
+    fun isUsable(context: Context, spec: ModelSpec): Boolean {
+        val f = fileOf(context, spec)
+        return f.isFile && f.length() >= spec.minBytes && f.canRead()
+    }
 
     fun allReady(context: Context): Boolean = ALL.all { isReady(context, it) }
 
