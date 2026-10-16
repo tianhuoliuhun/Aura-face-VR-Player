@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,8 @@ fun LocalModelSection(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // v2.4.59：启动本面板时清理已被替换的旧模型文件（幂等，重复执行无副作用）
+    LaunchedEffect(Unit) { LocalLlmManager.deleteLegacyModelFiles(context) }
     val model = LocalLlmManager.MODELS.firstOrNull() ?: return
 
     // 文件是否就绪属于「磁盘状态」，不在 Compose 的观察范围内 →
@@ -84,7 +87,7 @@ fun LocalModelSection(
         )
 
         // ===== v2.4.16：**推理状态反馈** =====
-        // ⚠️ 本地推理跑在 CPU 上（0.8B），单条实测要**几十秒**（模拟器转译下更慢）。
+        // ⚠️ 本地推理跑在 CPU 上（MiniCPM-V 4.7 1B），单条实测要**几十秒**（模拟器转译下更慢）。
         //    此前 UI 在这里**毫无反馈** —— 用户只看到「译文一直不出现」，
         //    很自然会判定成「本地 AI 无法执行 / 功能坏了」。
         //    所以这里显式给出「进行中」与「上次耗时」，让"慢"变得可预期。

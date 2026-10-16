@@ -390,6 +390,29 @@ object LocalLlmManager {
     /** 已下载的模型（没有则 null）。 */
     fun readyModel(context: Context): LocalLlmModel? = MODELS.firstOrNull { isReady(context, it) }
 
+    /**
+     * v2.4.59：清理已被替换的旧模型（Qwen3.5 0.8B）的文件。
+     *
+     * 旧文件已不再被任何代码识别，留着只会永久占用约 0.8GB 存储。
+     * 与 [deleteModel] 一样持 [engineLock]，避免与加载并发。
+     */
+    fun deleteLegacyModelFiles(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            engineLock.withLock {
+                LEGACY_FILE_NAMES.forEach { name ->
+                    runCatching { File(dir(context), name).delete() }
+                }
+            }
+        }
+    }
+
+    private val LEGACY_FILE_NAMES = listOf(
+        "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+        "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf.part",
+        "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
+        "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf.part"
+    )
+
     /** 已下载体积（MB），供 UI 显示。 */
     fun downloadedMb(context: Context, model: LocalLlmModel): Long =
         fileOf(context, model).let { if (it.isFile) it.length() / 1048576 else 0L }

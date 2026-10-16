@@ -6,7 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * **本地 LLM 弹幕生成**（v2.4.12）—— 端侧 llama.cpp + Qwen3.5-0.8B。
+ * **本地 LLM 弹幕生成**（v2.4.12，v2.4.59 起模型为 MiniCPM-V 4.7 1B）—— 端侧 llama.cpp。
  *
  * ## ⚠️ 与云端视觉模型（[DanmuVisionClient]）的本质差别
  * | | 云端视觉模型 | 本地 LLM |
