@@ -54,12 +54,16 @@ internal fun Modifier.glassFrosted(
     val frostedSurface: DrawScope.() -> Unit = {
         // 调用方原本铺的底色（面板/球体各自的主题底）
         onDrawSurface()
-        // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35，更轻、更透）
+        // 淡白蒙层（v2.4.51 去掉后，v2.4.58 恢复：增强磨砂与高斯的对比）
+        // 磨砂需要 12% 白底来"实现质感"，高斯 18% 会更清爽
+        drawRect(Color.White.copy(alpha = 0.12f))
+        // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35；v2.4.58：强化到 0.42）
+        // 颗粒更明显，磨砂感更突出
         drawRect(
             brush = ShaderBrush(
                 ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
             ),
-            alpha = 0.35f,
+            alpha = 0.42f,
         )
     }
 
@@ -73,7 +77,8 @@ internal fun Modifier.glassFrosted(
         )
         .border(
             width = 1.dp,
-            color = Color.White.copy(alpha = 0.22f),
+            // v2.4.58：边框调整为 0.16（比高斯的 0.35 更暗），强化"质感 vs 清爽"的对比
+            color = Color.White.copy(alpha = 0.16f),
             shape = shape(),
         )
 }

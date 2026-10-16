@@ -130,10 +130,13 @@ fun Modifier.glassPanel(
         //   高斯档不再对背景做 RenderEffect 高斯模糊，视频从面板下清晰透出；
         //   只保留 surface 层的极淡白提亮 + 边框。无任何 RenderEffect 特效，
         //   HyperOS 模糊降级分支一并移除（清晰透出全平台可用）。
+        // v2.4.58：**增强高斯与磨砂的视觉差异** ——
+        //   高斯档提升到 18% 提亮（比磨砂的 12% 更透亮），边框加亮到 0.35（更明显），
+        //   给用户明确的"干净清爽"感觉（无颗粒）vs "质感磨砂"（有颗粒）。
         val gaussianSurface: DrawScope.() -> Unit = {
             onDrawSurface()
-            // 极淡的提亮，让面板与背后的背景区分得出来
-            drawRect(Color.White.copy(alpha = 0.10f))
+            // 相比磨砂更强的提亮：0.12% → 0.18%，强化干净通透的观感
+            drawRect(Color.White.copy(alpha = 0.18f))
         }
         return this
             .drawBackdrop(
@@ -144,7 +147,8 @@ fun Modifier.glassPanel(
             )
             .border(
                 width = 1.dp,
-                color = Color.White.copy(alpha = 0.28f),
+                // 相比磨砂更亮的边框：0.28 → 0.35，强化"玻璃感"
+                color = Color.White.copy(alpha = 0.35f),
                 shape = shape(),
             )
     }
@@ -171,7 +175,8 @@ fun Modifier.glassPanel(
             .background(overlay, shape = shape())
             .border(
                 width = 1.dp,
-                color = Color.White.copy(alpha = 0.22f),
+                // v2.4.58：降级分支也用强边框 0.28，保持视觉一致性
+                color = Color.White.copy(alpha = 0.28f),
                 shape = shape(),
             )
     }
