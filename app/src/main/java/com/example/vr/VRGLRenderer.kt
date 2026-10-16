@@ -3596,6 +3596,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             buf.position(0)
             val px = bdPixels!!
             buf.get(px)
+            // 🔴 v2.4.62：**补红蓝交换** —— 与 danmu 回读路径（见上方 `swapRedBlueInPlace` 调用）保持一致。
+            //    `glReadPixels` 按 **R,G,B,A** 字节序写入；`IntBuffer`（小端）逐元素取出后是 **ABGR**。
+            //    而 `VideoBackdrop.commit` 的契约是 **ARGB**（它直接 `Bitmap.setPixels` 进
+            //    `ARGB_8888` 位图）—— 漏掉这一步，玻璃/模糊面板背后的画面会**红蓝颠倒**：
+            //    低饱和/灰调画面下潜伏（看不出来），高饱和画面（如红色场景）会明显偏蓝。
+            //    ⚠️ 这正是 v2.4.54 那段诊断统计「把 B 当 R 打」的原因（它假设 px 已是 ARGB）。
+            ImageScale.swapRedBlueInPlace(px, tw * th)
             val row = bdRow!!
             var y = 0
             while (y < th / 2) {
@@ -3617,8 +3624,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 // 若平均RGB 偏暗但玻璃仍白，则问题在合成层而非视频帧。
                 //
                 // 🔴 v2.4.54：修「数组越界」—— px 是 IntArray(tw*th)，每个 Int 已经是一个
-                //    打包好的像素（与 VideoBackdrop.commit() 直接喂给 Bitmap.setPixels 的格式
-                //    一致，即 ARGB：R 在第 16~23 位、G 在第 8~15 位、B 在第 0~7 位）。
+                //    打包好的像素（与 VideoBackdrop.commit() 直接喂给 Bitmap.setPixels 的格式一致）。
+                //    ⚠️ v2.4.62 更正：这里原写「即 ARGB：R 在第 16~23 位…」是**错的** ——
+                //    在补上上方 `swapRedBlueInPlace` 之前，px 实际是 GL 回读的 **ABGR**，
+                //    所以当时打印出来的「平均RGB」把 B 当成了 R。补齐交换后，下面的
+                //    `ushr 16 / ushr 8 / and 0xFF` 才真正对应 R / G / B。
                 //    旧代码按「每像素 4 个数组元素」访问 px[bi*4]/[bi*4+1]/[bi*4+2]，而循环条件
                 //    只写了 bi<n（n=tw*th，没有再除以 4）—— bi 超过约 n/4 时 bi*4+2 必然越界，
                 //    每次执行这段代码都 100% 抛 ArrayIndexOutOfBoundsException，异常被下面的
