@@ -127,51 +127,42 @@ object LocalLlmManager {
     // v2.4.36 审查 #12：模型下载 URL **锁定到具体 commit hash**，不再用 `resolve/main`。
     // 上游 main 一旦更新同名文件（或主模型与 mmproj 不配套），`resolve/main` 会静默换成新内容；
     // 锁到 commit 可保证「下载即确定」，与已落盘的模型完全可复现。
-    // 该 commit 即当前 main HEAD（bartowski/Qwen_Qwen3.5-0.8B-GGUF）。
-    private const val MODEL_REPO = "bartowski/Qwen_Qwen3.5-0.8B-GGUF"
-    private const val MODEL_REPO_COMMIT = "f36b1ea49a332ede8fe5f389bbf5b3575ef71f48"
-
-    const val MODEL_ID_QWEN35_08B = "qwen35-0.8b-q4km"
+    // v2.4.59：主模型换为 MiniCPM-V 4.7 1B（openbmb 官方 GGUF，Apache 2.0）。
+    // 文件名与 commit 均经 HF 仓库目录页核实；下载 URL 锁定到该 commit（与原 Qwen 做法一致）。
+    const val MODEL_ID_MINICPMV_47_1B = "minicpmv-4.7-1b-q4km"
+    private const val MODEL_REPO_MINICPM = "openbmb/MiniCPM-V-4.7-1B-gguf"
+    private const val MODEL_REPO_MINICPM_COMMIT = "6ceac0238408005c4a1bbc779d9beb235ba71c57"
 
     /**
      * 已登记的本地模型。
      *
-     * ⚠️ 只登记**一个**：本地 LLM 的价值在"离线可用"，多份权重只是纯占存储；
-     *    确实需要第二个时再往这里加（UI 会自动多出一行）。
+     * ⚠️ 只登记**一个**（与 [LocalModelSection] 的单模型界面一致；`MODELS.firstOrNull()` 是它的前提）。
+     *    v2.4.59 由 Qwen3.5 0.8B 替换为 MiniCPM-V 4.7 1B。若将来要支持多个，需先把 UI 改成模型选择器。
      */
     val MODELS: List<LocalLlmModel> = listOf(
         LocalLlmModel(
-            id = MODEL_ID_QWEN35_08B,
-            displayName = "Qwen3.5 0.8B（Q4_K_M）",
-            fileName = "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
-            sizeBytes = 574_000_000L,
+            id = MODEL_ID_MINICPMV_47_1B,
+            displayName = "MiniCPM-V 4.7 1B（Q4_K_M）",
+            fileName = "MiniCPM-V-4_7-1B-Q4_K_M.gguf",
+            sizeBytes = 672_000_000L,
             urls = listOf(
-                // 主源：Hugging Face 官方（v2.4.36 审查 #12：锁定到具体 commit，不再用 resolve/main）
-                "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
-                // 兜底：镜像（⚠️ 历史上「按文件下载」在真机曾返回 401，故放最后且允许失败）
-                "https://hf-mirror.com/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf"
+                // 主源：Hugging Face 官方 openbmb 仓库（锁定 commit）
+                "https://huggingface.co/$MODEL_REPO_MINICPM/resolve/$MODEL_REPO_MINICPM_COMMIT/MiniCPM-V-4_7-1B-Q4_K_M.gguf",
+                // 兜底：镜像（允许失败）
+                "https://hf-mirror.com/$MODEL_REPO_MINICPM/resolve/$MODEL_REPO_MINICPM_COMMIT/MiniCPM-V-4_7-1B-Q4_K_M.gguf"
             ),
-            // ⚠️ v2.4.14：4096 → **2048**。
-            //    翻译与弹幕都是**短文本**任务，4096 纯属浪费 —— 而 KV cache 大小
-            //    与 n_ctx 成正比（每 1024 约 96MB），4096 要多吃约 190MB。
-            //    在「VR 播放器本身已占大量内存」的前提下，这 190MB 往往就是
-            //    「加载成功」与「native 分配失败 → abort → 闪退」的分界线。
-            //    视觉路径靠 native 侧的 image_max_tokens=768 保证单张图不撑爆它。
+            // 上下文保守取 2048（沿用原值）：该模型的 KV cache 参数未核实，
+            // 真机上需实测后再调整；estimateNeedMb 中的 KV 系数是按 Qwen 量级估的。
             contextSize = 2048,
-            description = "阿里 Qwen3.5 最轻量档（Apache 2.0）。中英双语翻译与短文本生成，" +
-                "约 0.57GB，纯 CPU 推理",
-            // v2.4.13：**可选的视觉编码器**。
-            // ⚠️ 主权重是纯文本的 —— 不下这个文件，本地模型就「看不到画面」，
-            //    只能靠台词生成弹幕；下载后才有视觉能力（需自建 libmtmd，已具备）。
-            // ⚠️ 该仓库**只提供 f16 / bf16 两档 mmproj**（没有 q8_0）——
-            //    所以取 f16（207MB）。文件名与主权重一样带 `Qwen_` 前缀，
-            //    且**前缀顺序不同**（主权重是 `Qwen_Qwen3.5-...`，mmproj 是 `mmproj-Qwen_Qwen3.5-...`），
-            //    手写 URL 时极易搞错 —— 本次就是因为漏了 `Qwen_` 而全部 404。
-            mmprojFileName = "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
-            mmprojSizeBytes = 207_000_000L,
+            description = "OpenBMB 发布的 MiniCPM-V 4.7 1B（Apache 2.0，约 1.55B 参数，支持图像/视频理解）。" +
+                "Q4_K_M 量化约 672MB，纯 CPU 推理。",
+            // 视觉编码器：官方仓库 mmproj-model-f16.gguf（1.11GB，体积较大，**可选**）。
+            // ⚠️ 不下载则纯文本可用；mmproj 与主权重的配套性未在真机验证。
+            mmprojFileName = "mmproj-model-f16.gguf",
+            mmprojSizeBytes = 1_110_000_000L,
             mmprojUrls = listOf(
-                "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
-                "https://hf-mirror.com/$MODEL_REPO/resolve/$MODEL_REPO_COMMIT/mmproj-Qwen_Qwen3.5-0.8B-f16.gguf"
+                "https://huggingface.co/$MODEL_REPO_MINICPM/resolve/$MODEL_REPO_MINICPM_COMMIT/mmproj-model-f16.gguf",
+                "https://hf-mirror.com/$MODEL_REPO_MINICPM/resolve/$MODEL_REPO_MINICPM_COMMIT/mmproj-model-f16.gguf"
             )
         )
     )
@@ -398,6 +389,29 @@ object LocalLlmManager {
 
     /** 已下载的模型（没有则 null）。 */
     fun readyModel(context: Context): LocalLlmModel? = MODELS.firstOrNull { isReady(context, it) }
+
+    /**
+     * v2.4.59：清理已被替换的旧模型（Qwen3.5 0.8B）的文件。
+     *
+     * 旧文件已不再被任何代码识别，留着只会永久占用约 0.8GB 存储。
+     * 与 [deleteModel] 一样持 [engineLock]，避免与加载并发。
+     */
+    fun deleteLegacyModelFiles(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            engineLock.withLock {
+                LEGACY_FILE_NAMES.forEach { name ->
+                    runCatching { File(dir(context), name).delete() }
+                }
+            }
+        }
+    }
+
+    private val LEGACY_FILE_NAMES = listOf(
+        "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+        "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf.part",
+        "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf",
+        "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf.part"
+    )
 
     /** 已下载体积（MB），供 UI 显示。 */
     fun downloadedMb(context: Context, model: LocalLlmModel): Long =

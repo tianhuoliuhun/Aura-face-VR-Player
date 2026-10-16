@@ -113,7 +113,7 @@ enum class TranslationEngine(
         requiresApiKey = false
     ),
     /**
-     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + Qwen3.5-0.8B）。
+     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + MiniCPM-V 4.7 1B）。
      *
      * ## 为什么不复用 [QWEN]
      * [QWEN] 是**阿里云 DashScope 的在线接口**（要 API Key、按量计费）；
@@ -1669,7 +1669,7 @@ class SubtitleTranslator(private val context: Context) {
      * （另一常见端点 `translate.googleapis.com/translate_a/single?client=gtx` 在同环境返回 429，故不采用。）
      */
     /**
-     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + Qwen3.5-0.8B）。
+     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + MiniCPM-V 4.7 1B）。
      *
      * ## 与其它引擎的差别
      * 不走 HTTP、不需要 Key，但**需要模型已下载**。

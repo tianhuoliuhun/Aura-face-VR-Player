@@ -197,7 +197,7 @@ data class DanmuConfig(
     val sourceTypeId: Int = DanmuSourceType.AI.id,
 
     /**
-     * v2.4.12：**用本地 LLM 生成弹幕**（端侧 llama.cpp + Qwen3.5-0.8B）。
+     * v2.4.12：**用本地 LLM 生成弹幕**（端侧 llama.cpp + MiniCPM-V 4.7 1B）。
      *
      * ## ⚠️ 与云端视觉模型的本质差别：**本地模型看不到画面**
      * 我们下载的是 GGUF **主权重**（纯文本）。视觉编码器（`mmproj`，另有 116~207MB）
