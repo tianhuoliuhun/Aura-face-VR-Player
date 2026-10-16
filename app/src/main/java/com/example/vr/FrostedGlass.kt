@@ -43,10 +43,10 @@ internal fun Modifier.glassFrosted(
     //   （液态玻璃反而看得出：它有半透明白底 + 高光渐变描边 + lens 边缘折射，
     //    这些在纯色底上照样可见，所以用户从没抱怨过液态档。）
     //
-    // 修法：**模糊与质感解耦** ——
-    //   1) 系统 backdrop blur **照常保留**（背景确实有 Compose 内容的场合，
-    //      例如设置面板叠在主控栏上时，能拿到真正的模糊）；
-    //   2) 再叠一层**不依赖背景内容的磨砂质感**：淡白底 + 细颗粒噪点。
+    // 修法（v2.4.57 之后）：**不再模糊背景**（用户明确要求）。磨砂的质感完全由 surface 层提供：
+    //   1) 淡白底 + 细颗粒噪点（不依赖背景内容，纯色底上也可见）；
+    //   2) 边框。
+    //   （下面 drawBackdrop 的 effects 为空，即没有任何 RenderEffect 模糊。）
     //      噪点是磨砂玻璃最本质的视觉特征（光线在粗糙表面漫射形成的颗粒感），
     //      即使底下是纯色也能一眼看出"这是一块磨砂玻璃"。
     // v2.4.51：去掉白蒙层（用户要求「去除白色遮罩」）—— 磨砂档改为「纯模糊 + 颗粒」，
@@ -54,12 +54,16 @@ internal fun Modifier.glassFrosted(
     val frostedSurface: DrawScope.() -> Unit = {
         // 调用方原本铺的底色（面板/球体各自的主题底）
         onDrawSurface()
-        // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35，更轻、更透）
+        // 淡白蒙层（v2.4.51 去掉后，v2.4.58 恢复：增强磨砂与高斯的对比）
+        // 磨砂需要 12% 白底来"实现质感"，高斯 18% 会更清爽
+        drawRect(Color.White.copy(alpha = 0.12f))
+        // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35；v2.4.58：强化到 0.42）
+        // 颗粒更明显，磨砂感更突出
         drawRect(
             brush = ShaderBrush(
                 ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
             ),
-            alpha = 0.35f,
+            alpha = 0.42f,
         )
     }
 
@@ -73,7 +77,8 @@ internal fun Modifier.glassFrosted(
         )
         .border(
             width = 1.dp,
-            color = Color.White.copy(alpha = 0.22f),
+            // v2.4.58：边框调整为 0.16（比高斯的 0.35 更暗），强化"质感 vs 清爽"的对比
+            color = Color.White.copy(alpha = 0.16f),
             shape = shape(),
         )
 }
@@ -102,8 +107,11 @@ object FrostedGrain {
         val rnd = java.util.Random(20261004)
         val px = IntArray(SIZE * SIZE)
         for (i in px.indices) {
-            // 白点，alpha 随机 0~34（约 13%）—— 淡到只形成颗粒、不形成白雾
-            px[i] = (rnd.nextInt(35) shl 24) or 0x00FFFFFF
+            // 白点，alpha 随机 0~34（约 13%）—— 淡到只形成颗粒、不形成白雾。
+            // ⚠️ Android 位图默认是**预乘 alpha**：颜色通道必须 ≤ alpha。
+            //    白色预乘后 = (a, a, a, a)；若写成 (a, 255, 255, 255) 属非法值，渲染会偏亮/失真。
+            val a = rnd.nextInt(35)
+            px[i] = (a shl 24) or (a shl 16) or (a shl 8) or a
         }
         bmp.setPixels(px, 0, SIZE, 0, 0, SIZE, SIZE)
         return bmp.asImageBitmap()
