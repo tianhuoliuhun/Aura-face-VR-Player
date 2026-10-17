@@ -320,3 +320,57 @@ fun separateVocals(pcm16k: FloatArray, sr: Int = 16000): FloatArray {
 > **声学环节（VAD / 分离 / 源分离）天然支持日语；性别分类的现成模型是英语训练的，对日语大概率可用但必须实测。**
 > 落地做法：用 **JVS**（49 男 / 51 女 + 手工 F0 标注 + 假声子集）做准确率验收与阈值校准；
 > 若 F0 法在假声上失分严重，就上 **ECAPA-TDNN 的 q8 ONNX（16 MB, MIT）**。
+
+---
+
+## 8. 档 2 选型更新（2026-10-17，基于两个已核实的参考实现）
+
+> 本节**取代** §2.2 与 §3「档 2」里关于「Spleeter vs HT-Demucs」的取舍建议。
+
+### 8.1 两个参考实现（均已核实存在）
+
+| 项目 | 语言 / 许可 | 方案 | 关键事实 |
+|---|---|---|---|
+| **`demixr/demixr-app`**（**93 stars**，2026-10 仍在更新） | Dart(Flutter) / **MIT** | **htdemucs**，两种后端：**ExecuTorch**（Android=Vulkan，Apple=CoreML）或 **ONNX Runtime CPU** | **decode / 分块 overlap-add / 逆 STFT 都在 Dart 里做**，只有 conv+transformer 跑模型运行时；ONNX 模型托管在 HF **`StemSplitio`**（正是我此前检索到的那批 htdemucs 导出，互相印证）；模型不打进 APK，首次使用下载；实测 macOS GPU 比 CPU 快 8.4×、iPhone 快 2.5× |
+| **`WluhWluh/BoomingSS`**（4 stars） | Kotlin / **GPL-3.0** ⚠️ | **UVR MDX-Net + ONNX Runtime** | 仓库里有 **84KB 的 `docs/source-separation-roadmap.md`**，写明了模型名、SHA-256、**真机实测性能**、DSP 约束与许可风险 |
+
+⚠️ **GPL-3.0 只能参考「思路与参数」，不能复制其代码**（会污染许可）。下面的做法与参数属方法层面，可安全借鉴。
+
+### 8.2 结论：档 2 改用 **`UVR_MDXNET_9482.onnx`（28.3MB）**
+
+**已亲自验证**（HEAD，HTTP 200）：
+- URL：`https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/UVR_MDXNET_9482.onnx`
+- 体积：**29,704,738 字节（28.3MB）** —— 与 BoomingSS 文档记录**分毫不差**
+- SHA-256（其文档给出，可用于校验）：`9d78f8566fa8198065214ab628be1de966a500c57786695aa4b13e2b27a7727d`
+- 同一 release 里还有：`UVR_MDXNET_KARA`(28.3MB)、`UVR_MDXNET_1_9703 / 2_9682 / 3_9662`(均 28.3MB)、
+  `UVR-MDX-NET-Inst_HQ_3` 等 HQ 型号(63.7MB)、`sherpa-onnx-spleeter-2stems*`(33.6/46.4/71.2MB)、以及 **`checksum.txt`**
+
+**为什么换掉原方案**：
+
+| 方案 | 体积 | 实测依据 | 评价 |
+|---|---|---|---|
+| **UVR MDX-Net 9482** | **28.3MB** | BoomingSS 在 **Samsung S25** 上实测：完整一首歌约「**1/4 时长**」，质量「够用」 | ✅ **首选**（最小、质量优于 Spleeter） |
+| Spleeter 2stems | 33.6(fp16) / 71.2MB | — | 备选（许可最清晰） |
+| htdemucs vocals-only | 316MB（量化 ~75MB） | demixr：CPU 慢，GPU（ExecuTorch/Vulkan）才实用 | 体积/算力都不划算 |
+
+### 8.3 实现约束（BoomingSS roadmap 的实战经验，**必须遵守**）
+
+1. **输入格式**：MDX-Net 管线要求 **44.1 kHz 立体声 PCM**，并在客户端做 **STFT / ISTFT**。
+   → 我们现有的 `AudioPcmExtractor` 只产出 **16k 单声道**（为 sherpa 准备），**不能直接复用**；
+   档 2 要单开一条 **44.1k 立体声**的路径。
+2. **窗口拼接方式与我原先的设计相反** ⚠️：模型**内部已含 overlap 与 trim**
+   → 每窗**只取「稳定中心区」**，相邻段**按精确帧索引拼接，默认不要交叉淡化**。
+3. **不要全量解码进内存**（对方自己也承认这是待改进点）→ 改为**流式**：解码一块 → STFT → ONNX → ISTFT → 写 WAV，内存恒定。
+   （44.1k 立体声 float 存 15 分钟 ≈ **317MB**，全量必然 OOM。）
+4. **输出 WAV only**（MP3 编码会因编码器延迟造成对齐漂移）。
+5. **缓存 key 必须包含模型 SHA-256**（换模型不能复用旧缓存）。
+6. **需要 FFT**：可用项目已有的 **FFmpeg**（libavfilter / swresample）或自写 radix-2 FFT，**不必**再引入 JTransforms。
+
+### 8.4 ⚠️ 许可：模型**不能打进 APK**
+
+BoomingSS 的调研结论（比我原来的判断更明确）：
+- `sherpa-onnx` 仓库是 Apache-2.0，但其 `source-separation-models` release 里的 **UVR 模型是从 TRvlvr 的公开 UVR 模型 release 转换**而来；
+- **TRvlvr 的模型仓库没有单独的开源许可**；UVR GUI 仓库是 MIT，并要求「使用其模型的第三方应用**致谢 UVR 及其开发者**」；
+- → **最安全做法：不打包模型权重**，改为**应用内下载到私有目录** + **界面致谢 UVR** + **显示 SHA-256 供用户核对**。
+
+这与 BoomingSS 的最终形态一致：**移除 APK 内置模型 → 预设 URL 下载 / 自定义 URL / 本地导入**。
