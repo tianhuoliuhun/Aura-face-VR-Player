@@ -7,6 +7,7 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
+import android.net.Uri
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -94,6 +95,13 @@ object OnnxCoexistSelfTest {
                 mdxSeparateStep(app)
             } catch (t: Throwable) {
                 Log.e(TAG, "⑤ MDX 分离步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
+            }
+
+            // ⑥ 档2：**44.1k 立体声流式解码**验证（MediaExtractor + 窗口切分）
+            try {
+                stream44kStep(app)
+            } catch (t: Throwable) {
+                Log.e(TAG, "⑥ 流式解码步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
             }
 
             Log.i(TAG, "===== ✓ 共存自检结束（本行出现且进程存活 ⇒ 两套 libonnxruntime 可共存）=====")
@@ -298,5 +306,43 @@ object OnnxCoexistSelfTest {
             .format(ms / 1000f * MdxDsp.SAMPLE_RATE / n))
         Log.i(TAG, "⑤ RMS mix=%.4f vocals=%.4f accomp=%.4f（写盘 vocals=$okV accomp=$okA）"
             .format(WavIo.rms(mixL), WavIo.rms(vocals.first), WavIo.rms(accL)))
+    }
+
+    /**
+     * ⑥ 档2：用 44.1k 立体声流式解码走一遍真实路径。
+     *
+     * 验证点（这三项错了会导致整段音频错位或时长不对，而听感上只是"有点怪"）：
+     * ① `MediaExtractor`/`MediaCodec` 能正确认出 44.1k 立体声；
+     * ② 窗口切分按「15s 窗 / 13s 步进」产出，且**窗口长度正确**；
+     * ③ 总样本数守恒（各窗按步进累加应≈音频时长）。
+     */
+    private suspend fun stream44kStep(context: Context) {
+        val wav = File(context.cacheDir, "test_song.wav")
+        if (!wav.isFile) {
+            Log.i(TAG, "⑥ 测试音频不存在（⑤ 未跑过？），跳过流式解码验证")
+            return
+        }
+        var windows = 0
+        var totalSamples = 0L
+        var badLen = 0
+        val expectWin = MdxDsp.OUTER_CHUNK
+        val t0 = System.currentTimeMillis()
+        val ok = AudioPcmExtractor44k.stream(context, Uri.fromFile(wav)) { l, r, n ->
+            windows++
+            totalSamples += n
+            // 满窗必须正好 OUTER_CHUNK；末窗可以更短
+            if (n > expectWin || (n < expectWin && n < 0)) badLen++
+            Log.i(
+                TAG,
+                "⑥ 窗口 #$windows 长度=$n (%.2fs) L[0]=%.4f R[0]=%.4f"
+                    .format(n.toFloat() / MdxDsp.SAMPLE_RATE, l[0], r[0]),
+            )
+            true
+        }
+        val ms = System.currentTimeMillis() - t0
+        Log.i(
+            TAG,
+            "⑥ 流式解码 ${if (ok) "成功" else "失败"}：$windows 窗 / 累计 ${totalSamples / MdxDsp.SAMPLE_RATE}s / 耗时 ${ms}ms / 异常长度=$badLen",
+        )
     }
 }

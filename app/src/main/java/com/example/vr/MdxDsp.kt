@@ -48,6 +48,20 @@ object MdxDsp {
     /** ISTFT 输出长度（overlap-add 后的完整长度，裁两端 TRIM 后正好是 CHUNK_SIZE） */
     val ISTFT_FULL = (DIM_T - 1) * HOP + N_FFT
 
+    // ------------------------------------------------------------------ 外层分块（单一来源）
+    // ⚠️ 这三个值同时被 MdxSeparator（处理）与 AudioPcmExtractor44k（流式产出）使用，
+    //    必须**只有一处定义** —— 否则改一边忘另一边就是「同一份数据两处登记」那个老坑。
+
+    /** 外层块时长（秒）—— sherpa 的 `num_chunks` 默认 15 */
+    const val OUTER_CHUNK_SEC = 15
+
+    /** 外层块间重叠时长（秒）—— `margin = sample_rate` ⇒ 1 秒；两头各裁 1 秒 ⇒ 重叠 2 秒 */
+    const val OUTER_OVERLAP_SEC = 2
+
+    val OUTER_CHUNK = OUTER_CHUNK_SEC * SAMPLE_RATE
+
+    val OUTER_STEP = (OUTER_CHUNK_SEC - OUTER_OVERLAP_SEC) * SAMPLE_RATE
+
     /** periodic Hann 窗（与 `torch.hann_window` 默认一致） */
     private val window: FloatArray = FloatArray(N_FFT) { i ->
         (0.5 - 0.5 * cos(2.0 * PI * i / N_FFT)).toFloat()

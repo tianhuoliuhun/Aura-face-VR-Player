@@ -40,12 +40,10 @@ object MdxSeparator {
 
     private const val TAG = "MdxSeparator"
 
-    /** sherpa 的 `num_chunks` 默认值（metadata 外的预配置常量） */
-    private const val NUM_CHUNKS = 15
-
-    private val OUTER_CHUNK = NUM_CHUNKS * MdxDsp.SAMPLE_RATE        // 661500 ≈ 15s
-    private val OUTER_MARGIN = MdxDsp.SAMPLE_RATE                    // 44100 = 1s
-    private val OUTER_STEP = OUTER_CHUNK - 2 * OUTER_MARGIN          // 573300 ≈ 13s
+    // 外层分块参数统一来自 MdxDsp（单一来源，勿在此重复定义）
+    private val OUTER_CHUNK = MdxDsp.OUTER_CHUNK                     // 661500 ≈ 15s
+    private val OUTER_MARGIN = MdxDsp.SAMPLE_RATE                    // 44100 = 1s（每头各裁 1s）
+    private val OUTER_STEP = MdxDsp.OUTER_STEP                       // 573300 ≈ 13s
 
     /** 内存内整段处理的上限（秒）。44.1k 立体声 float 约 353KB/s → 90s ≈ 31MB */
     const val MAX_INLINE_SECONDS = 90
