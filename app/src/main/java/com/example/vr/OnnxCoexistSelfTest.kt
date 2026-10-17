@@ -104,6 +104,14 @@ object OnnxCoexistSelfTest {
                 Log.e(TAG, "⑥ 流式解码步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
             }
 
+            // ⑦ 档2：**说话人分离冒烟** —— 专门覆盖 v2.4.68 修掉的崩溃路径
+            //    （diarization.processWithCallback 的 Kotlin lambda 签名不兼容 → JNI abort）
+            try {
+                diarizeSmokeStep(app)
+            } catch (t: Throwable) {
+                Log.e(TAG, "⑦ diarization 步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
+            }
+
             Log.i(TAG, "===== ✓ 共存自检结束（本行出现且进程存活 ⇒ 两套 libonnxruntime 可共存）=====")
         }
     }
@@ -344,5 +352,40 @@ object OnnxCoexistSelfTest {
             TAG,
             "⑥ 流式解码 ${if (ok) "成功" else "失败"}：$windows 窗 / 累计 ${totalSamples / MdxDsp.SAMPLE_RATE}s / 耗时 ${ms}ms / 异常长度=$badLen",
         )
+    }
+
+    /**
+     * ⑦ 档2：**说话人分离冒烟**（覆盖性验证）。
+     *
+     * 为什么专门加这一步：`AudioGenderAnalyzer` 里的 diarization 是真正的崩溃点
+     * （`processWithCallback` 的 Kotlin lambda 与 sherpa JNI 的特化签名不匹配 → JNI abort）。
+     * 之前自检只覆盖了 VAD / 性别模型 / MDX，唯独没跑 diarization，导致这个 bug 从 v2.4.64
+     * 一直潜伏到用户真正点「分析」才暴露。**自检必须覆盖真实执行路径。**
+     */
+    private suspend fun diarizeSmokeStep(context: Context) {
+        val wav = File(context.cacheDir, "test_song.wav")
+        if (!wav.isFile) {
+            Log.i(TAG, "⑦ 无测试音频（⑤ 未跑过？），跳过 diarization 冒烟")
+            return
+        }
+        val pcm = WavIo.readPcm16(wav) ?: run { Log.e(TAG, "⑦ WAV 解析失败"); return }
+        val n = minOf(pcm.left.size, 30 * MdxDsp.SAMPLE_RATE) // 30 秒足够覆盖调用链
+        val mono = FloatArray(n) { (pcm.left[it] + pcm.right[it]) * 0.5f }
+        val p16 = AudioPcmExtractor.resampleLinear(mono, MdxDsp.SAMPLE_RATE, AudioPcmExtractor.TARGET_SAMPLE_RATE)
+        Log.i(TAG, "⑦ diarization 冒烟：${p16.size} 采样 / ${p16.size / AudioPcmExtractor.TARGET_SAMPLE_RATE}s")
+        val t0 = System.currentTimeMillis()
+        val r = AudioGenderAnalyzer.analyze(context, p16, AudioPcmExtractor.TARGET_SAMPLE_RATE) { p ->
+            if (p == 100 || p % 25 == 0) Log.i(TAG, "⑦ 分析进度 $p%")
+        }
+        val ms = System.currentTimeMillis() - t0
+        if (r == null) {
+            Log.e(TAG, "⑦ 分析返回 null（模型缺失或失败，见上面 AudioGenderAnalyzer 报错）")
+        } else {
+            Log.i(
+                TAG,
+                "⑦ 分析 OK（${ms}ms）：${r.speakers.size} 个说话人 / 判定来源=${r.genderSource} / " +
+                    "男${r.maleMs / 1000}s 女${r.femaleMs / 1000}s 未知${r.unknownMs / 1000}s",
+            )
+        }
     }
 }

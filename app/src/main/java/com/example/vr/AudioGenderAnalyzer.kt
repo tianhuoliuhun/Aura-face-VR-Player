@@ -191,18 +191,21 @@ object AudioGenderAnalyzer {
             val totalMs = samples.size * 1000L / useRate
             Log.i(TAG, "开始说话人分离：${samples.size} 采样 / ${totalMs}ms")
 
-            // 分离本身可能耗时较久；用带回调的版本把进度透出去
-            // ⚠️ 回调签名：(numProcessedChunks, numTotalChunks, 耗时ms) -> 是否继续
-            val raw = try {
-                diarization.processWithCallback(samples, { done, total, _ ->
-                    if (total > 0) onProgress(5 + (done * 55 / total))
-                    0
-                }, 0L)
-            } catch (t: Throwable) {
-                // 回调版本在个别机型/版本上可能不可用 → 退回同步版本
-                Log.w(TAG, "processWithCallback 失败，退回 process(): ${t.message}")
-                diarization.process(samples)
-            }
+            // 🔴 **只用同步的 `process()`，绝不要用 `processWithCallback`。**
+            //    sherpa 的 JNI 按**特化签名** `invoke(IIJ)L...` 去查 `Function3.invoke`，
+            //    而 Kotlin lambda 只会生成**桥接签名**
+            //    `invoke(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;`
+            //    → `NoSuchMethodError` → JNI 发现 pending exception → **abort()（SIGABRT）→ 闪退**。
+            //    实测栈：
+            //      JNI DETECTED ERROR IN APPLICATION: JNI GetObjectClass called with pending exception
+            //      java.lang.NoSuchMethodError: no non-static method "...ExternalSyntheticLambda1;.invoke(IIJ)L..."
+            //      at AudioGenderAnalyzer$analyze$3.invokeSuspend(AudioGenderAnalyzer.kt:197)
+            //      F libc: Fatal signal 6 (SIGABRT) → Process has died
+            //    ⚠️ 这是 sherpa Java API 与 Kotlin 的兼容性问题（**Java 调用方**才有特化方法），
+            //       属于「native 崩溃 Java 抓不到」那一类，只能靠避开该 API。
+            //    代价：分离阶段没有细粒度进度（可接受）。
+            val raw = diarization.process(samples)
+            onProgress(60)
             Log.i(TAG, "分离完成：${raw.size} 段")
             onProgress(65)
 
