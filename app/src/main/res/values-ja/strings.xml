@@ -774,7 +774,6 @@
     <!-- v2.1.217：玻璃风格 4 档 -->
     <string name="theme_frosted_glass">フ ロ ス ト</string>
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
-    <string name="theme_gaussian_blur">ガウスぼかし</string>
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV の再生に失敗したため EXO に戻しました</string>
     <string name="toast_exo_fallback_mpv">このファイルは EXO で解析できないため、今回 MPV に切り替えました</string>

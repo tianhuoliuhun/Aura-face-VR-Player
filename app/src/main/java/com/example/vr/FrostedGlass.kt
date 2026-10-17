@@ -10,9 +10,11 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur as backdropBlur
 
 /**
  * 磨砂玻璃（Frosted，iOS 11 风格）—— v2.4.56 从 GlassUi.kt 独立出来的「标杆档」。
@@ -31,6 +33,9 @@ internal fun Modifier.glassFrosted(
     backdrop: Backdrop,
     shape: () -> Shape,
     onDrawSurface: DrawScope.() -> Unit,
+    blurRadius: Dp? = null,
+    /** v2.4.68：`true` = 圆形（悬浮球）→ 体感层走 drawCircle，避免 Path 描边出现多边形 */
+    isCircle: Boolean = false,
 ): Modifier {
     // ============ v2.1.231：磨砂为什么"看起来没模糊" ============
     // 根因不是参数没调对，而是 **backdrop 里根本没有可被模糊的内容**：
@@ -54,17 +59,12 @@ internal fun Modifier.glassFrosted(
     val frostedSurface: DrawScope.() -> Unit = {
         // 调用方原本铺的底色（面板/球体各自的主题底）
         onDrawSurface()
-        // 淡白蒙层（v2.4.51 去掉后，v2.4.58 恢复：增强磨砂与高斯的对比）
-        // 磨砂需要 12% 白底来"实现质感"，高斯 18% 会更清爽
+        // 淡白蒙层（v2.4.51 去掉后，v2.4.58 恢复：增强磨砂的"实体感"）
+        // 磨砂需要 12% 白底来"实现质感"
         drawRect(Color.White.copy(alpha = 0.12f))
         // 细颗粒：平铺噪点（v2.4.49：颗粒 alpha 0.55 → 0.35；v2.4.58：强化到 0.42）
-        // 颗粒更明显，磨砂感更突出
-        drawRect(
-            brush = ShaderBrush(
-                ImageShader(FrostedGrain.bitmap, TileMode.Repeated, TileMode.Repeated)
-            ),
-            alpha = 0.42f,
-        )
+        // v2.4.68：改用共用 brush 单例（此前每帧 new 一次 ShaderBrush/ImageShader）
+        drawRect(brush = FrostedGrain.brush, alpha = 0.42f)
     }
 
     return this
@@ -72,15 +72,33 @@ internal fun Modifier.glassFrosted(
             backdrop = backdrop,
             shape = shape,
             onDrawSurface = frostedSurface,
-            // v2.4.57：去掉模糊层——无任何 RenderEffect 特效，背景清晰透出
-            effects = {},
+            // 🔴 v2.4.68：**恢复模糊层** —— 磨砂玻璃的本质是「背后内容被漫射掉」，
+            //    没有模糊层就只是"带噪点的半透明板"。
+            //    这是 96px 降采样帧**唯一还被允许的用途**：它的分辨率低、放大后本就糊，
+            //    再叠 20dp 模糊 + 颗粒，观感连贯且省 GL 读回开销。
+            //    ⚠️ 半径必须留在实测可用区间（v2.1.221 实测 40dp 会静默不绘制）：
+            //    面板 32dp / 球 18dp。
+            effects = {
+                runCatching {
+                    // `toPx()` 必须在 DrawScope 作用域内调（effects 的 receiver 就是 DrawScope）
+                    backdropBlur((blurRadius ?: GlassPanelBlurFrosted).toPx())
+                }.onFailure {
+                    android.util.Log.w(
+                        "FrostedGlass",
+                        "磨砂模糊层应用失败，退化为「只有颗粒的磨砂」：${it.message}"
+                    )
+                }
+            },
         )
         .border(
             width = 1.dp,
-            // v2.4.58：边框调整为 0.16（比高斯的 0.35 更暗），强化"质感 vs 清爽"的对比
+            // v2.4.58：边框调整为 0.16（比液态档的镜面高光边更暗），强化"质感"而非"透亮"
             color = Color.White.copy(alpha = 0.16f),
             shape = shape(),
         )
+        // v2.4.68：体感层（sheen=0，磨砂表面漫射不应出现镜面反光）——
+        // 让磨砂与液态共用同一套「顶部受光 + 内侧厚度 + 棱边」语言，两档切换时边缘过渡自然。
+        .glassBody(shape, GlassBody.Frosted, isCircle)
 }
 
 /**
@@ -99,6 +117,18 @@ object FrostedGrain {
 
     /** 只生成一次（16384 个像素，实测 < 5ms），全进程共用 */
     val bitmap: ImageBitmap by lazy { generate() }
+
+    /**
+     * v2.4.68：**全进程共用一份平铺 brush**。
+     *
+     * 面板的 `frostedSurface` 是 DrawScope lambda（每帧执行），此前每帧都 new 一个
+     * `ShaderBrush` + `ImageShader`；球的颗粒层也要用它 —— 统一成单例，既不重复分配，
+     * 也保证**面板与球的颗粒密度完全一致**（同一份 128×128 位图 1:1 平铺），
+     * 切换档位/看球与看面板时颗粒不会"一大一小"。
+     */
+    val brush: ShaderBrush by lazy {
+        ShaderBrush(ImageShader(bitmap, TileMode.Repeated, TileMode.Repeated))
+    }
 
     private fun generate(): ImageBitmap {
         val bmp = android.graphics.Bitmap.createBitmap(

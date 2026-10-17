@@ -6,6 +6,9 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+// ⚠️ 本项目 MainActivity 在 `com.example` 包，而自检类在 `com.example.vr` —— **不同包**，
+//    必须显式 import（与 `R` 类那条同型的坑：漏了就是 Unresolved reference）。
+import com.example.vr.OnnxCoexistSelfTest
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -75,6 +78,12 @@ class MainActivity : ComponentActivity(), LanguageManager.LanguageHost {
 
         handleIncomingIntent(intent)
         appLanguageTag = LanguageManager.getTag(this)
+
+        // v2.4.67：**一次性 native 共存自检**（阶段 A 验证）——
+        // onnxruntime-android 与 sherpa-onnx 都带 libonnxruntime.so，打包用 pickFirsts 去重后，
+        // 两份 Java 层能否共用同一份 native 库**只能同进程实测**（native 崩了 Java 抓不到）。
+        // 异步 + 延后 5 秒 + 只跑一次，结果看 logcat 的 `OnnxCoexist` 标签。详见 OnnxCoexistSelfTest。
+        OnnxCoexistSelfTest.runOnce(this)
 
         // v107：统计隐私同意检查 —— 默认不采集，用户同意后才初始化统计 SDK
         if (!AnalyticsManager.hasConsent(this)) {

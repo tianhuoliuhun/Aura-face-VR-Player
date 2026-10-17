@@ -161,10 +161,10 @@ fun SeekFloatingBall(
                 spotColor = if (pressed) accentColor else Color.Black
             )
             .background(
-                // v2.0.165 修正：玻璃主题下底色必须是**半透明白**（与加速球完全一致）——
-                // 之前漏了这一支，导致玻璃模式下小球是深色底，观感与倍速球对不上
                 brush = if (isLiquidGlass) {
-                    Brush.radialGradient(colors = listOf(Color(0x66FFFFFF), Color(0x33FFFFFF)))
+                    // 玻璃档：球材质来自 glassModifier（就是面板那份 glassBall / glassPanel），
+                    // 这里的底色会被 backdrop 位图盖住，保持透明即可。
+                    Brush.radialGradient(colors = listOf(Color.Transparent, Color.Transparent))
                 } else if (pressed) {
                     Brush.radialGradient(colors = listOf(accentColor, Color(0xFF9A82DB)))
                 } else {

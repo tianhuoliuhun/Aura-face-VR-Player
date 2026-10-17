@@ -4255,16 +4255,22 @@ fun VRPlayerScreen(
     ) {
         // Liquid glass backdrop：捕获视频层 + 主题底色，供玻璃面板绘制（Backdrop 库，Android 12+）
         val isLiquidGlass = glassMode > 0 && Build.VERSION.SDK_INT >= 31
-        // v2.1.232：0=纯色(无 backdrop) / 1=Liquid(iOS26) / 2=磨砂 / 3=高斯模糊
+        // v2.4.68：0=纯色(无 backdrop) / 1=Liquid(真半透明，透出全分辨率视频) / 2=磨砂(采样+模糊)
+        // （原 3=高斯模糊 已按用户要求删除，见 UiThemes.MAX_GLASS_MODE）
         val glassStyle: GlassStyle = when (glassMode) {
             2 -> GlassStyle.Frosted
-            3 -> GlassStyle.Gaussian
             else -> GlassStyle.Liquid
         }
-        // v2.1.233：背景采样只在「玻璃/模糊」档位开着时才做（纯色档不需要，白白费电）
-        LaunchedEffect(isLiquidGlass) {
-            VideoBackdrop.enabled = isLiquidGlass
-            if (!isLiquidGlass) VideoBackdrop.release()
+        // 🔴 v2.4.68（用户要求「移除那张 96px 小模糊图」）：
+        // **只有磨砂档才需要 VideoBackdrop 采样**。
+        //   · 液态档改成真半透明后，透出的是 SurfaceView 的全分辨率视频 —— 不再需要那张降采样帧；
+        //   · 磨砂档要用它做"被漫射掉的背后内容"（模糊层作用于它）。
+        // 副作用：液态档不再有 GL 线程每 30ms 的 blit + glReadPixels，省一份持续开销。
+        val needsBackdrop = glassMode == 2 && Build.VERSION.SDK_INT >= 31
+        // v2.1.233：背景采样只在需要的档位开着时才做（纯色/液态档不需要，白白费电）
+        LaunchedEffect(needsBackdrop) {
+            VideoBackdrop.enabled = needsBackdrop
+            if (!needsBackdrop) VideoBackdrop.release()
         }
         DisposableEffect(Unit) {
             onDispose { VideoBackdrop.release() }
@@ -4325,6 +4331,26 @@ fun VRPlayerScreen(
                 .layerBackdrop(liquidBackdrop)
                 .testTag("liquid_backdrop_host")
         )
+
+        // 🔴 v2.4.68（用户要求「球的材质要跟面板一致」）：
+        // 球**直接复用面板的那一份实现**（`glassBall` 就是 `glassPanel` + CircleShape），
+        // 不再为球单独定义任何配色/颗粒/透明度。
+        // 于是：
+        //   · 液态档 → 与面板同一套「真半透明 + 体感层」；
+        //   · 磨砂档 → 与面板同一套「backdrop 采样 + 模糊层 + 12% 白 + 同一份颗粒 + 体感层」；
+        //   · 纯色档 → 与面板一致（平色，不加额外材质）。
+        // 这样面板改什么、球就跟着变什么，不会出现"面板磨砂、球光滑"这类不一致。
+        // 6 处调用点收敛到这里（此前各写一遍，是"多副本不同步"的老来源）。
+        val ballMaterialModifier: Modifier = if (isLiquidGlass) {
+            Modifier.glassBall(
+                backdrop = liquidBackdrop,
+                style = glassStyle,
+                blurRadius = null,
+                onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.33f)) }
+            )
+        } else {
+            Modifier
+        }
 
         // 1. OpenGL standard and VR view (Always on full bleed)
         AndroidView(
@@ -5948,10 +5974,9 @@ fun VRPlayerScreen(
                                         // v2.1.218：v2.1.217 的 4 档并回 3 档 ——
                                         // Liquid 与 Liquid26 观感接近、选择意义不大，
                                         // 已合并为一档并采用 iOS 26 的增强参数。
-                                        // v2.1.232：再加一档「高斯模糊」—— 与「磨砂」的区别是
-                                        // 只有纯模糊 + 轻微提亮（无噪点颗粒），且半径更大。
+                                        // v2.4.68：**删掉「高斯模糊」档**（用户要求）——
+                                        // 它与磨砂的差别只有"无颗粒 + 更白"，观感几乎分不出来。
                                         2 to stringResource(R.string.theme_frosted_glass),
-                                        3 to stringResource(R.string.theme_gaussian_blur),
                                     ).chunked(2).forEach { rowModes ->
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -5981,6 +6006,11 @@ fun VRPlayerScreen(
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                 }
+                                            }
+                                            // v2.4.68：档位从 4 个减到 3 个 → 第二行只剩「磨砂」一个，
+                                            // 若不给它右边补一个等宽占位，它会拉满整行、与上一行错位。
+                                            if (rowModes.size < 2) {
+                                                Spacer(modifier = Modifier.weight(1f))
                                             }
                                         }
                                     }
@@ -8518,9 +8548,10 @@ fun VRPlayerScreen(
                     )
                     .background(
                         brush = if (isLiquidGlass) {
-                            // 玻璃主题：半透明白底，配合下方 drawBackdrop 呈现液态玻璃
+                            // v2.4.68：玻璃档的球底色统一由 ballMaterialModifier 里的 glassBallFill
+                            // 提供（球不再采样 backdrop）。这里保持透明，不再叠 40% 白雾。
                             Brush.radialGradient(
-                                colors = listOf(Color(0x66FFFFFF), Color(0x33FFFFFF))
+                                colors = listOf(Color.Transparent, Color.Transparent)
                             )
                         } else if (isFloatingBallPressed) {
                             Brush.radialGradient(
@@ -8533,18 +8564,8 @@ fun VRPlayerScreen(
                         },
                         shape = CircleShape
                     )
-                    .then(
-                        // v88：玻璃主题（glassMode=1 且 Android 12+）下悬浮球使用液态玻璃材质
-                        if (isLiquidGlass) Modifier.glassBall(
-                            backdrop = liquidBackdrop,
-                            style = glassStyle,
-                            // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
-                            // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
-                            // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
-                            blurRadius = null,
-                            onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
-                        ) else Modifier
-                    )
+                    // v88 / v2.4.68：悬浮球材质（玻璃档＝深色半透明+体感层；纯色档＝体感层）
+                    .then(ballMaterialModifier)
                     .border(
                         width = if (isFloatingBallPressed) 2.dp else 1.5.dp,
                         brush = if (isFloatingBallPressed) {
@@ -8713,12 +8734,7 @@ fun VRPlayerScreen(
                 initialYRatio = 0.5f,
                 isLiquidGlass = isLiquidGlass,
                 // v2.1.231：与快进/后退球一致的玻璃材质（此前漏传，玻璃主题下标记球没有 backdrop）
-                glassModifier = if (isLiquidGlass) Modifier.glassBall(
-                    backdrop = liquidBackdrop,
-                    style = glassStyle,
-                    blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
-                ) else Modifier,
+                glassModifier = ballMaterialModifier,
                 // v2.1.231：记忆上次拖动到的位置
                 prefs = prefs,
                 rememberPosition = isMemoryModeEnabled
@@ -8740,12 +8756,7 @@ fun VRPlayerScreen(
                 initialXRatio = 0f,
                 initialYRatio = 0.10f,
                 isLiquidGlass = isLiquidGlass,
-                glassModifier = if (isLiquidGlass) Modifier.glassBall(
-                    backdrop = liquidBackdrop,
-                    style = glassStyle,
-                    blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
-                ) else Modifier,
+                glassModifier = ballMaterialModifier,
                 prefs = prefs,
                 ballId = FloatingBallPositions.CLOCK,
                 rememberPosition = isMemoryModeEnabled
@@ -8763,12 +8774,7 @@ fun VRPlayerScreen(
                 initialXRatio = 1f,
                 initialYRatio = 0.10f,
                 isLiquidGlass = isLiquidGlass,
-                glassModifier = if (isLiquidGlass) Modifier.glassBall(
-                    backdrop = liquidBackdrop,
-                    style = glassStyle,
-                    blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
-                ) else Modifier,
+                glassModifier = ballMaterialModifier,
                 prefs = prefs,
                 ballId = FloatingBallPositions.BATTERY,
                 rememberPosition = isMemoryModeEnabled
@@ -8798,15 +8804,7 @@ fun VRPlayerScreen(
                 },
                 onFeedback = { seekHudText = it },
                 isLiquidGlass = isLiquidGlass,
-                glassModifier = if (isLiquidGlass) Modifier.glassBall(
-                    backdrop = liquidBackdrop,
-                    style = glassStyle,
-                    // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
-                    // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
-                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 32）。
-                    blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
-                ) else Modifier,
+                glassModifier = ballMaterialModifier,
                 // v2.1.231：记忆上次拖动到的位置
                 prefs = prefs,
                 ballId = FloatingBallPositions.SEEK_FWD,
@@ -8836,15 +8834,7 @@ fun VRPlayerScreen(
                 },
                 onFeedback = { seekHudText = it },
                 isLiquidGlass = isLiquidGlass,
-                glassModifier = if (isLiquidGlass) Modifier.glassBall(
-                    backdrop = liquidBackdrop,
-                    style = glassStyle,
-                    // v2.1.218：不传 blurRadius —— 显式传值会**覆盖风格的默认值**，
-                    // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
-                    // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 32）。
-                    blurRadius = null,
-                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
-                ) else Modifier,
+                glassModifier = ballMaterialModifier,
                 // v2.1.231：记忆上次拖动到的位置
                 prefs = prefs,
                 ballId = FloatingBallPositions.SEEK_BWD,

@@ -145,7 +145,9 @@ fun MarkerFloatingBall(
             )
             .background(
                 brush = if (isLiquidGlass) {
-                    Brush.radialGradient(colors = listOf(Color(0x66FFFFFF), Color(0x33FFFFFF)))
+                    // 玻璃档：球材质来自 glassModifier（就是面板那份 glassBall / glassPanel），
+                    // 这里的底色会被 backdrop 位图盖住，保持透明即可。
+                    Brush.radialGradient(colors = listOf(Color.Transparent, Color.Transparent))
                 } else if (pressed) {
                     Brush.radialGradient(colors = listOf(accentColor, Color(0xFF9A82DB)))
                 } else {

@@ -806,7 +806,6 @@
     <!-- v2.1.217：玻璃风格 4 档 -->
     <string name="theme_frosted_glass">磨砂</string>
 <!-- v2.1.232：高斯模糊主题 / ijk 解码器 / 模型无需下载 -->
-    <string name="theme_gaussian_blur">高斯模糊</string>
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV 解码失败，已切回 EXO 解码器</string>
     <string name="toast_exo_fallback_mpv">该文件 EXO 无法解析，本次已改用 MPV 内核</string>
