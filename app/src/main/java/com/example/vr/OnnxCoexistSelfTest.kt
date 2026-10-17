@@ -7,6 +7,7 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -85,6 +86,14 @@ object OnnxCoexistSelfTest {
                 mdxProbeStep(app)
             } catch (t: Throwable) {
                 Log.e(TAG, "④ MDX 探测步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
+            }
+
+            // ⑤ 档2：**真实歌曲端到端分离冒烟** —— 下载官方自带样例（41s / 44.1k / stereo）
+            //    → 跑完整分离 → 把 vocals / accompaniment 写成 WAV 落盘，供拉回本地做频谱对比。
+            try {
+                mdxSeparateStep(app)
+            } catch (t: Throwable) {
+                Log.e(TAG, "⑤ MDX 分离步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
             }
 
             Log.i(TAG, "===== ✓ 共存自检结束（本行出现且进程存活 ⇒ 两套 libonnxruntime 可共存）=====")
@@ -228,5 +237,66 @@ object OnnxCoexistSelfTest {
             }
         }
         runCatching { opts.close() }
+    }
+
+    /**
+     * ⑤ 档2 端到端：用 sherpa 官方自带的一首**真实歌曲**（41s / 44.1kHz / 立体声）
+     * 跑一次完整分离，输出 WAV。
+     *
+     * 为什么用真实歌曲而不是合成音：源分离的"对不对"只能用真实人声+伴奏来判断；
+     * 合成正弦分离出来是什么都无法判读。落盘的两个文件（vocals / accomp）可以拉回本地，
+     * 用频谱能量占比来定量判断分离是否真的起作用。
+     */
+    private suspend fun mdxSeparateStep(context: Context) {
+        val wav = File(context.cacheDir, "test_song.wav")
+        if (!wav.isFile || wav.length() < 1_000_000) {
+            Log.i(TAG, "⑤ 下载测试音频（约 6.9MB）…")
+            try {
+                val url = java.net.URL(
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
+                        "source-separation-models/piao-yang-guo-hai-lai-kan-ni.wav",
+                )
+                url.openStream().use { input ->
+                    java.io.FileOutputStream(wav).use { out -> input.copyTo(out) }
+                }
+                Log.i(TAG, "⑤ 下载完成: ${wav.length() / 1048576}MB")
+            } catch (t: Throwable) {
+                Log.e(TAG, "⑤ 下载失败: ${t.message}")
+                return
+            }
+        }
+        val pcm = WavIo.readPcm16(wav)
+        if (pcm == null) {
+            Log.e(TAG, "⑤ WAV 解析失败")
+            return
+        }
+        Log.i(TAG, "⑤ WAV: ${pcm.sampleRate}Hz ch=${pcm.channels} frames=${pcm.left.size}")
+        if (pcm.sampleRate != MdxDsp.SAMPLE_RATE) {
+            Log.e(TAG, "⑤ 样例采样率 ${pcm.sampleRate} != ${MdxDsp.SAMPLE_RATE}，跳过")
+            return
+        }
+        val n = minOf(pcm.left.size, MdxSeparator.MAX_INLINE_SECONDS * MdxDsp.SAMPLE_RATE)
+        val mixL = pcm.left.copyOf(n)
+        val mixR = pcm.right.copyOf(n)
+
+        val t0 = System.currentTimeMillis()
+        val vocals = MdxSeparator.separate(context, mixL, mixR) { p ->
+            if (p == 100 || p % 25 == 0) Log.i(TAG, "⑤ 分离进度 $p%")
+        }
+        if (vocals == null) {
+            Log.e(TAG, "⑤ 分离失败（看上面 MdxSeparator 的报错）")
+            return
+        }
+        val ms = System.currentTimeMillis() - t0
+        val accL = FloatArray(n) { mixL[it] - vocals.first[it] }
+        val accR = FloatArray(n) { mixR[it] - vocals.second[it] }
+
+        val okV = WavIo.writeStereo16(File(context.cacheDir, "mdx_vocals.wav"), vocals.first, vocals.second, MdxDsp.SAMPLE_RATE)
+        val okA = WavIo.writeStereo16(File(context.cacheDir, "mdx_accomp.wav"), accL, accR, MdxDsp.SAMPLE_RATE)
+
+        Log.i(TAG, "⑤ 分离完成 ${ms}ms / ${n / MdxDsp.SAMPLE_RATE}s 音频 → RTF=%.2f"
+            .format(ms / 1000f * MdxDsp.SAMPLE_RATE / n))
+        Log.i(TAG, "⑤ RMS mix=%.4f vocals=%.4f accomp=%.4f（写盘 vocals=$okV accomp=$okA）"
+            .format(WavIo.rms(mixL), WavIo.rms(vocals.first), WavIo.rms(accL)))
     }
 }
