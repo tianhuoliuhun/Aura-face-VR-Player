@@ -97,10 +97,22 @@ object WavIo {
         }
     }
 
-    /** 写 16-bit 立体声 WAV（44.1k 由调用方保证语义一致）。 */
-    fun writeStereo16(file: File, left: FloatArray, right: FloatArray, sampleRate: Int): Boolean {
+    /**
+     * 写 16-bit 立体声 WAV（44.1k 由调用方保证语义一致）。
+     *
+     * @param length 有效帧数；<=0 表示 min(left.size, right.size)。
+     *   存在的理由：调用方常按上限预分配缓冲（如 90s），有效数据只有前 N 帧；
+     *   若不截断就会把**整段静音尾巴**写进文件。
+     */
+    fun writeStereo16(
+        file: File,
+        left: FloatArray,
+        right: FloatArray,
+        sampleRate: Int,
+        length: Int = -1,
+    ): Boolean {
         return try {
-            val n = minOf(left.size, right.size)
+            val n = if (length > 0) minOf(length, left.size, right.size) else minOf(left.size, right.size)
             val dataLen = n * 4
             RandomAccessFile(file, "rw").use { raf ->
                 raf.setLength(0)

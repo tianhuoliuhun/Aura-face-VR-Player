@@ -45,8 +45,50 @@ object MdxSeparator {
     private val OUTER_MARGIN = MdxDsp.SAMPLE_RATE                    // 44100 = 1s（每头各裁 1s）
     private val OUTER_STEP = MdxDsp.OUTER_STEP                       // 573300 ≈ 13s
 
-    /** 内存内整段处理的上限（秒）。44.1k 立体声 float 约 353KB/s → 90s ≈ 31MB */
+    /** 内存内整段处理的上限（秒）。44.1k 立体声 float 约 353KB/s → 90s ≈ 31MB（**单份**） */
     const val MAX_INLINE_SECONDS = 90
+
+    /** 低于这个秒数就不值得做了（调用方会提示"片段太短"） */
+    const val MIN_INLINE_SECONDS = 15
+
+    /**
+     * 每个采样点在整个链路里的**峰值**字节估算（实测校准，非理论值）：
+     * - 混音 L/R：8B
+     * - 人声 L/R：8B
+     * - 区间权重图 `w`：4B
+     * - STFT/张量临时与其它：~8B
+     * 合计 28B/样本 ≈ 1.18 MB/秒（44.1k）。
+     */
+    private const val BYTES_PER_SAMPLE_EST = 28
+
+    /**
+     * 堆预算占比。
+     *
+     * ⚠️ 这个值是被**实测打脸**后调低的（原来 0.45）：
+     * 在 maxHeap=192MB 的模拟器上，0.45 算出 85s → 分离要满载约 150s，
+     * 结果**整个模拟器被拖死**（adb shell 全部超时，只能重启），而不是我们进程单独崩。
+     * 长时满载在低配/转译环境下会连带把宿主拖垮，所以宁可更保守。
+     */
+    private const val HEAP_BUDGET_RATIO = 0.25
+
+    /**
+     * 按**可用堆预算**算出这次最多能内联处理多少秒。
+     *
+     * 存在的理由：实测某些设备 `maxMemory` 只有 **192MB**（MuMu 模拟器），
+     * 固定 90s 的峰值约 150MB → 一旦叠加就 OOM。
+     * 宁可少处理一段，也不要崩。
+     *
+     * @param maxHeapBytes 通常是 `Runtime.getRuntime().maxMemory()`；显式传入便于单测。
+     */
+    fun safeInlineSeconds(maxHeapBytes: Long): Int {
+        val budget = (maxHeapBytes * HEAP_BUDGET_RATIO).toLong()
+        val perSecond = MdxDsp.SAMPLE_RATE.toLong() * BYTES_PER_SAMPLE_EST
+        if (perSecond <= 0L) return MIN_INLINE_SECONDS
+        return (budget / perSecond).toInt().coerceIn(MIN_INLINE_SECONDS, MAX_INLINE_SECONDS)
+    }
+
+    /** 用真实堆上限算（调用方一般用这个）。 */
+    fun safeInlineSeconds(): Int = safeInlineSeconds(Runtime.getRuntime().maxMemory())
 
     private val lock = Any()
     private var env: OrtEnvironment? = null
@@ -93,9 +135,16 @@ object MdxSeparator {
         context: Context,
         left: FloatArray,
         right: FloatArray,
+        /**
+         * 有效样本数；<=0 表示用 min(left.size, right.size)。
+         *
+         * 存在的理由：调用方常按上限预分配整段缓冲（如 90s），实际只填了 [length] 个。
+         * 若为了长度对齐去 copyOf 一份，就会多出整段内存（90s 立体声 = 32MB）。
+         */
+        length: Int = -1,
         onProgress: (Int) -> Unit = {},
     ): Pair<FloatArray, FloatArray>? {
-        val n = min(left.size, right.size)
+        val n = if (length > 0) min(length, min(left.size, right.size)) else min(left.size, right.size)
         if (n == 0) return null
         val maxSamples = MAX_INLINE_SECONDS * MdxDsp.SAMPLE_RATE
         if (n > maxSamples) {

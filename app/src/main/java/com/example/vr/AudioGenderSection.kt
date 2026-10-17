@@ -30,7 +30,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 // R 类在 `com.example` 包下（namespace），本文件在 `com.example.vr` —— 必须显式 import
 import com.example.R
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.min
 
@@ -285,9 +287,21 @@ fun AudioGenderSection(
                         processPct = 0
                         resultText = ""
                         try {
+                          // 必须切到 IO：MDX 推理对 90s 音频在模拟器上要 3 分钟量级，
+                          // 留在 Main 上会把主线程完全堵死 -> 系统判 ANR 杀界面（现象上等同闪退）。
+                          // 自检能过、UI 会崩，差别就在这里：自检本来就在 IO 线程。
+                          withContext(Dispatchers.IO) {
                             // ① 44.1k 立体声流式解码 → 只取前 MAX_INLINE_SECONDS 秒（分离的内存上限）
                             processStage = textGProcessing
-                            val maxSamples = MdxSeparator.MAX_INLINE_SECONDS * MdxDsp.SAMPLE_RATE
+                            // 按**堆预算**决定这次最多处理多少秒：实测某些设备 maxMemory 只有 192MB，
+                            // 固定 90s 的峰值约 150MB 会 OOM → 宁可少处理一段，也不要崩。
+                            val inlineSec = MdxSeparator.safeInlineSeconds()
+                            val maxSamples = inlineSec * MdxDsp.SAMPLE_RATE
+                            android.util.Log.i(
+                                "AudioGenderSection",
+                                "应用: 本次内联时长上限 ${inlineSec}s（maxHeap=${
+                                    Runtime.getRuntime().maxMemory() / 1048576}MB）",
+                            )
                             val mixL = FloatArray(maxSamples)
                             val mixR = FloatArray(maxSamples)
                             var filled = 0
@@ -301,35 +315,36 @@ fun AudioGenderSection(
                             }
                             if (filled <= 0) {
                                 resultText = textGMdxFail
-                                return@launch
+                                return@withContext
                             }
-                            val mL = mixL.copyOf(filled)
-                            val mR = mixR.copyOf(filled)
-
+                            // 不做 copyOf：按 filled 作为有效长度直接传下去（省两份整段缓冲 = 32MB）
                             // ② 分离人声
-                            val vocals = MdxSeparator.separate(context, mL, mR) { processPct = 15 + it * 70 / 100 }
+                            val vocals = MdxSeparator.separate(context, mixL, mixR, filled) {
+                                processPct = 15 + it * 70 / 100
+                            }
                             if (vocals == null) {
                                 resultText = textGMdxFail
-                                return@launch
+                                return@withContext
                             }
 
                             // ③ 按勾选的说话人重组（区间换伴奏 + 边界淡化）
                             processStage = textGProcessing
                             val out = MdxReprocessor.apply(
-                                mL, mR, vocals.first, vocals.second,
+                                mixL, mixR, vocals.first, vocals.second,
                                 segments = segments,
                                 selected = selected,
                             )
 
                             // ④ 写出 WAV
                             val file = File(context.cacheDir, "audio_gender_processed.wav")
-                            val okW = WavIo.writeStereo16(file, out.first, out.second, MdxDsp.SAMPLE_RATE)
+                            val okW = WavIo.writeStereo16(file, out.first, out.second, MdxDsp.SAMPLE_RATE, filled)
                             processPct = 100
                             resultText = if (okW) {
                                 textGDone.format(file.absolutePath, filled / MdxDsp.SAMPLE_RATE)
                             } else {
                                 textGMdxFail
                             }
+                          }  // withContext(Dispatchers.IO)
                         } finally {
                             processing = false
                         }

@@ -99,4 +99,26 @@ class MdxDspTest {
         assertEquals(MdxDsp.GEN_SIZE - 1, MdxDsp.computePad(MdxDsp.GEN_SIZE + 1))
         assertEquals(MdxDsp.GEN_SIZE - 10, MdxDsp.computePad(10))
     }
+
+    @Test
+    fun `safeInlineSeconds scales with heap and clamps to bounds`() {
+        val mb = 1024L * 1024L
+
+        // 192MB 的堆（MuMu 实测值）：预算 25% ≈ 48MB，每样本 28B → 约 40s
+        // ⚠️ 原本用 45% 预算算出 85s，实测会把整个模拟器拖死 → 已调低（见 MdxSeparator 注释）
+        assertEquals(40, MdxSeparator.safeInlineSeconds(192L * mb))
+
+        // 512MB 的堆：算出来超过上限 → 夹到 90（真机常见情形）
+        assertEquals(MdxSeparator.MAX_INLINE_SECONDS, MdxSeparator.safeInlineSeconds(512L * mb))
+
+        // 极小堆：夹到下限，避免"0 秒"这种无意义结果
+        assertEquals(MdxSeparator.MIN_INLINE_SECONDS, MdxSeparator.safeInlineSeconds(32L * mb))
+
+        // 真机/模拟器上都应落在合法区间（防止估算常数被改坏）
+        val real = MdxSeparator.safeInlineSeconds()
+        assertTrue(
+            "safeInlineSeconds() 应落在 [${MdxSeparator.MIN_INLINE_SECONDS}, ${MdxSeparator.MAX_INLINE_SECONDS}]，实际 $real",
+            real in MdxSeparator.MIN_INLINE_SECONDS..MdxSeparator.MAX_INLINE_SECONDS,
+        )
+    }
 }

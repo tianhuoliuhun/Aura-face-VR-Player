@@ -46,13 +46,14 @@ object MdxReprocessor {
         val n = minOf(mixL.size, mixR.size, vocalL.size, vocalR.size)
         if (n <= 0) return FloatArray(0) to FloatArray(0)
 
-        val outL = mixL.copyOf(n)
-        val outR = mixR.copyOf(n)
+        // 内存：不复制混音。90s 立体声一份 15.9MB，复制两份 = 额外 32MB；
+        // 而调用方（UI）持有的是本次处理专用的临时缓冲，可安全原地复用。
+        val outL = mixL
+        val outR = mixR
         if (selected.isEmpty() || segments.isEmpty()) return outL to outR
 
-        // 伴奏 = 混音 − 人声（UVR 的一贯做法）
-        val accL = FloatArray(n) { mixL[it] - vocalL[it] }
-        val accR = FloatArray(n) { mixR[it] - vocalR[it] }
+        // 也不单独算「伴奏」缓冲：out = mix*(1-k) + (mix-vocal)*k = mix - vocal*k，
+        // 代数化简后完全等价，省掉 accL/accR 两份整段缓冲（再 32MB）。
 
         // 权重图：0 = 保留原音，1 = 完全换成伴奏
         val w = FloatArray(n)
@@ -74,11 +75,12 @@ object MdxReprocessor {
         }
         if (!touched) return outL to outR
 
+        // 注意 outL === mixL，但此处先读后写同一位置，读到的仍是原值 -> 安全。
         for (i in 0 until n) {
             val k = w[i]
             if (k > 0f) {
-                outL[i] = mixL[i] * (1f - k) + accL[i] * k
-                outR[i] = mixR[i] * (1f - k) + accR[i] * k
+                outL[i] = mixL[i] - vocalL[i] * k
+                outR[i] = mixR[i] - vocalR[i] * k
             }
         }
         return outL to outR

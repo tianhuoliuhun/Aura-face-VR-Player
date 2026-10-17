@@ -112,6 +112,14 @@ object OnnxCoexistSelfTest {
                 Log.e(TAG, "⑦ diarization 步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
             }
 
+            // ⑧ 档2：**「应用」全链路**（解码 → 分离 → 按说话人重组 → 写 WAV）
+            //    专门覆盖 UI「应用」按钮的调用序列：此前自检只到分离，重组与写盘从未被跑过。
+            try {
+                applyChainStep(app)
+            } catch (t: Throwable) {
+                Log.e(TAG, "⑧ 应用链路步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
+            }
+
             Log.i(TAG, "===== ✓ 共存自检结束（本行出现且进程存活 ⇒ 两套 libonnxruntime 可共存）=====")
         }
     }
@@ -387,5 +395,88 @@ object OnnxCoexistSelfTest {
                     "男${r.maleMs / 1000}s 女${r.femaleMs / 1000}s 未知${r.unknownMs / 1000}s",
             )
         }
+    }
+
+    /**
+     * ⑧ 档2：**「应用」全链路**（44.1k 解码 → MDX 分离 → 按说话人重组 → 写 WAV）。
+     *
+     * 覆盖 UI「应用」按钮的调用序列。此前自检只到「分离」，**重组与写盘从未被执行过**
+     * —— 而这两步正是最容易出内存问题的地方（整段 stereo float 各 15.9MB/90s）。
+     *
+     * ⚠️ 本函数本身在 IO 线程跑；**UI 里同一段调用必须显式 `withContext(Dispatchers.IO)`**，
+     *    否则 MDX 推理会把主线程堵死 → ANR（现象等同闪退）。
+     */
+    private suspend fun applyChainStep(context: Context) {
+        if (!MdxSeparator.isModelReady(context)) {
+            Log.i(TAG, "⑧ MDX 模型未就位 → 跳过")
+            return
+        }
+        val wav = File(context.cacheDir, "test_song.wav")
+        if (!wav.isFile) {
+            Log.i(TAG, "⑧ 样例 WAV 不存在（⑤ 会下载）→ 跳过")
+            return
+        }
+        val sr = MdxDsp.SAMPLE_RATE
+        // 与 UI 完全一致：按堆预算决定上限（192MB 堆上会低于硬上限 90s）
+        val inlineSec = MdxSeparator.safeInlineSeconds()
+        val cap = inlineSec * sr
+        Log.i(
+            TAG,
+            "⑧ 内联上限 ${inlineSec}s（maxHeap=${Runtime.getRuntime().maxMemory() / 1048576}MB，" +
+                "硬上限 ${MdxSeparator.MAX_INLINE_SECONDS}s）",
+        )
+        val mixL = FloatArray(cap)
+        val mixR = FloatArray(cap)
+        var filled = 0
+        val t0 = System.currentTimeMillis()
+        AudioPcmExtractor44k.stream(context, Uri.fromFile(wav)) { l, r, n ->
+            val take = minOf(n, cap - filled)
+            System.arraycopy(l, 0, mixL, filled, take)
+            System.arraycopy(r, 0, mixR, filled, take)
+            filled += take
+            filled < cap
+        }
+        Log.i(TAG, "⑧ 解码: ${filled / sr}s，耗时 ${System.currentTimeMillis() - t0}ms")
+        if (filled <= 0) {
+            Log.e(TAG, "⑧ 解码失败（0 样本）")
+            return
+        }
+
+        val t1 = System.currentTimeMillis()
+        val vocals = MdxSeparator.separate(context, mixL, mixR, filled) ?: run {
+            Log.e(TAG, "⑧ 分离失败（见上面 MdxSeparator 报错）")
+            return
+        }
+        Log.i(TAG, "⑧ 分离 OK: ${System.currentTimeMillis() - t1}ms / vocals=${vocals.first.size} 样本")
+
+        // 造一段「男声 0..5s」，只验证「替换真的发生」，不与真实分析结果耦合
+        val segs = listOf(
+            AudioGenderAnalyzer.SpeakerSegment(
+                startMs = 0L,
+                endMs = 5_000L,
+                speakerId = 7,
+                f0Hz = 120f,
+                gender = AudioGenderAnalyzer.Gender.MALE,
+            ),
+        )
+        val rmsBefore = WavIo.rms(mixL)
+        val out = MdxReprocessor.apply(
+            mixL, mixR, vocals.first, vocals.second,
+            segments = segs,
+            selected = setOf(7),
+        )
+        val rmsAfter = WavIo.rms(out.first)
+        Log.i(TAG, "⑧ 重组 OK: rms %.4f -> %.4f（男声段换成伴奏，应略有下降）".format(rmsBefore, rmsAfter))
+
+        val f = File(context.cacheDir, "selftest_apply.wav")
+        val okW = WavIo.writeStereo16(f, out.first, out.second, sr, filled)
+        val expectKb = filled * 4 / 1024
+        Log.i(
+            TAG,
+            "⑧ 写 WAV ${if (okW) "OK" else "失败"}: ${f.length() / 1024}KB / ${filled / sr}s " +
+                "（期望 ≈${expectKb}KB —— 若远大于它说明没按 length 截断，尾部会是静音）",
+        )
+        val rt = Runtime.getRuntime()
+        Log.i(TAG, "⑧ 堆: max=${rt.maxMemory() / 1048576}MB used=${(rt.totalMemory() - rt.freeMemory()) / 1048576}MB")
     }
 }
