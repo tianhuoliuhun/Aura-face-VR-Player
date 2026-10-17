@@ -1,7 +1,8 @@
 # Audio Gender Filter Design Document
 
 **Date:** 2026-10-16  
-**Status:** Design Proposal  
+**Status:** 🚧 **未完成 / Work in progress**（本文是设计提案；离线分析面板与单段处理已跑通，
+长片流式处理与效果验收仍未完成，暂不作为正式功能）  
 **Audience:** Audio Processing Team
 
 ## Objective

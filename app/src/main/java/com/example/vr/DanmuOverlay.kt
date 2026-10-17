@@ -163,6 +163,7 @@ fun DanmuOverlay(
                 bgAlpha = bgOption.alpha,
                 alpha = alpha,
                 fontSizeSp = fontSizeSp,
+                speedPxPerSec = config.speedPxPerSec,
                 areaHeightRatio = areaHeightRatio,
                 modifier = Modifier
                     .weight(1f)
@@ -177,6 +178,7 @@ fun DanmuOverlay(
                 bgAlpha = bgOption.alpha,
                 alpha = alpha,
                 fontSizeSp = fontSizeSp,
+                speedPxPerSec = config.speedPxPerSec,
                 areaHeightRatio = areaHeightRatio,
                 modifier = Modifier
                     .weight(1f)
@@ -193,6 +195,7 @@ fun DanmuOverlay(
             bgAlpha = bgOption.alpha,
             alpha = alpha,
             fontSizeSp = fontSizeSp,
+            speedPxPerSec = config.speedPxPerSec,
             areaHeightRatio = areaHeightRatio,
             modifier = modifier.fillMaxSize()
         )
@@ -218,6 +221,8 @@ private fun DanmuEye(
     bgAlpha: Float,
     alpha: Float,
     fontSizeSp: Int,
+    /** v2.6.1：设置里的滚动速度（px/s，**以 1080px 屏宽为基准**，见 DanmuEye 内的归一化）。 */
+    speedPxPerSec: Int,
     areaHeightRatio: Float,
     modifier: Modifier = Modifier
 ) {
@@ -295,6 +300,18 @@ private fun DanmuEye(
             engine.visibleTrackCount = trackCount
         }
 
+        // 🔴 v2.6.1：**修「速度设置无效」+ 按屏宽归一化**。
+        //    ① 此前引擎的 `speedPxPerSec` **从未被渲染层同步过** —— 它一直停在默认 220，
+        //       用户拖动设置里的速度滑条只改了 config / prefs，画面上毫无变化。
+        //    ② 速度是绝对 px/s：1080p 屏穿屏 ≈4.9s，2K/平板（2560px）要 ≈11.6s，
+        //       拖着同样的滑条在大屏上明显偏慢。这里以 **1080px 屏宽**为基准做等比缩放，
+        //       让「穿屏时间」在各分辨率 / 分屏单眼之间基本一致。
+        LaunchedEffect(speedPxPerSec, widthPx) {
+            engine.speedPxPerSec = (speedPxPerSec * (widthPx / REFERENCE_SCREEN_WIDTH_PX))
+                .toInt()
+                .coerceAtLeast(MIN_SPEED_PX_PER_SEC)
+        }
+
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -319,13 +336,19 @@ private fun DanmuEye(
                         style = itemStyle,
                         colorKey = item.color
                     )
-                    if (item.widthPx <= 0f && layout.size.width > 0) {
-                        item.widthPx = layout.size.width.toFloat()
+                    // v2.6.1：**每次测量后都同步宽度**（原来只在 widthPx==0 时回填）。
+                    // 用户中途调字号时 layout 宽度会变，若宽度停在旧值，轨道避让（`pickTrack`
+                    // 用 widthPx 算上一条的尾巴）就会按错宽度判断 → 长弹幕可能重叠。
+                    val measuredW = layout.size.width.toFloat()
+                    if (measuredW > 0f && item.widthPx != measuredW) {
+                        item.widthPx = measuredW
                     }
 
                     val x = item.currentX(nowMs, widthPx, engine.speedPxPerSec)
                     // 整条已在右侧屏外（还没进来）或左侧屏外（已走完）→ 不画（已测量过，无妨）
-                    if (x > widthPx) continue
+                    // v2.6.1：`>` 改 `>=` —— `currentX` 保证 x ≤ widthPx，
+                    //          x == widthPx 表示"正好贴在右缘外"，整条仍在屏外，不必走绘制。
+                    if (x >= widthPx) continue
                     if (x + item.widthPx < 0f) continue
 
                     val top = item.track * trackHeightPx
@@ -438,6 +461,17 @@ private const val PAD_X_PX = 6f
 private const val PAD_Y_PX = 2f
 
 private const val LAYOUT_CACHE_SIZE = 256
+
+/**
+ * v2.6.1：速度归一化的**基准屏宽**（px）。
+ *
+ * 设置里的速度是绝对 px/s，但穿屏时间 = 屏宽 ÷ 速度 —— 同一档速度在 1080p 屏 ≈4.9s，
+ * 在 2K/平板（2560px）要 ≈11.6s。以 1080px 为基准等比缩放后，各分辨率穿屏时间基本一致。
+ */
+private const val REFERENCE_SCREEN_WIDTH_PX = 1080f
+
+/** 归一化后的速度下限：避免窄屏（如分屏单眼）把速度压到几乎不动。 */
+private const val MIN_SPEED_PX_PER_SEC = 60
 
 /** 8 方向描边偏移（单位向量，实际偏移量再乘半个描边宽） */
 private val DANMU_STROKE_OFFSETS = listOf(

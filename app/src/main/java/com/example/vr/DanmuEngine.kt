@@ -33,7 +33,15 @@ data class DanmuItem(
      * - 暂停/恢复只需平移 [bornMs]，不必逐条改状态
      */
     fun currentX(nowMs: Long, screenW: Float, speedPxPerSec: Int): Float {
-        val elapsedSec = (nowMs - bornMs) / 1000f
+        // 🔴 v2.6.1（用户要求「弹幕只能从屏幕右侧飞入」）：
+        //    `bornMs` 带正态抖动，可能**早于**当前时刻（负抖动）——
+        //    按原公式算出来的已播时间是正的，弹幕一出生就已经在屏幕**内部**，
+        //    表现为「凭空从画面中间冒出来」，而不是从右缘飞入。
+        //    这里把**已播时间夹到 ≥ 0**：出生时刻之前的那段"负时间"不计入位移，
+        //    于是每条弹幕都从右缘起步。
+        //    （配合 `enqueue` 里「抖动只向未来」，既保证从右侧飞入，
+        //      又不会让几条叠在右缘同时冒出。）
+        val elapsedSec = (nowMs - bornMs).coerceAtLeast(0L) / 1000f
         return screenW - elapsedSec * speedPxPerSec
     }
 
@@ -234,12 +242,20 @@ class DanmuEngine {
         // ② 给需要抖动的条目统一掷一组正态抖动（升序 → 保持原顺序）
         if (jitterIndices.isNotEmpty()) {
             val spread = spreadBornTimes(jitterIndices.size, nowMs, timeJitterMs, randomProvider)
+            // 🔴 v2.6.1：抖动**只向未来**（取 |jitter| 再排序）。
+            //    旧做法是对称抖动：负的那一半出生时刻早于 `nowMs` → 弹幕"一出生就在屏幕内部"
+            //    （用户反馈「不是从右侧飞入」的直接原因）。改成只延后之后：
+            //      · 所有条目 `bornMs ≥ nowMs` → 一律从右缘飞入；
+            //      · |jitter| 升序后按原下标取用 → AI 输出顺序仍严格单调；
+            //      · 分布是半正态，错落感保留（只是不再有"提前出生"）。
+            //    ⚠️ 绝对上限 [MAX_BIRTH_DELAY_MS]：σ 调得很大时不能把弹幕推迟到十几秒后。
+            val delays = LongArray(spread.size) { k ->
+                val d = spread[k] - nowMs
+                (if (d < 0L) -d else d).coerceAtMost(MAX_BIRTH_DELAY_MS)
+            }
+            delays.sort()
             for ((k, ci) in jitterIndices.withIndex()) {
-                // ⚠️ 非负钳位放在**这里**而不是 spreadBornTimes 内部：
-                //    spreadBornTimes 是纯数学函数，钳位会破坏分布形态（见其注释）；
-                //    而 bornMs 参与位置公式 `x = W - (now-born)*speed`，负值会让弹幕瞬移。
-                //    真实调用方传的是 elapsedRealtime（远大于抖动上限），此处只是兜底。
-                candidates[ci].bornMs = spread[k].coerceAtLeast(0L)
+                candidates[ci].bornMs = nowMs + delays[k]
             }
         }
 
@@ -513,7 +529,29 @@ class DanmuEngine {
         }
 
         // 间距足够才允许复用该轨道
-        return if (bestTrack >= 0 && bestGap >= minGapPx()) bestTrack else null
+        if (bestTrack >= 0 && bestGap >= minGapPx()) return bestTrack
+
+        // v2.6.1（行列优化）：本批已经把「未被本批占用」的轨道用尽（或间距不够）时，
+        // **允许回头复用本批已占用的轨道**（只要与上一条的间距真的够）。
+        // 旧行为是直接返回 null → 候选进 `unplaced` 被丢弃：
+        // 一批 6 条而屏上只有 4 行时，最后 2 条就白白丢了（用户看到"AI 说了 6 条、屏上只有 4 条"）。
+        // `lastOnTrack` 是按 `items` 现算的，本批刚 `items.add` 的条目也在其中，
+        // 所以这里的间距判断是对着"真实上一条"做的，不会造出追尾。
+        if (usedTracks.isNotEmpty()) {
+            var fallbackTrack = -1
+            var fallbackGap = Float.NEGATIVE_INFINITY
+            for (t in 0 until trackCount) {
+                val last = lastOnTrack[t] ?: continue
+                val lastX = last.currentX(nowMs, screenWidthPx, speedPxPerSec)
+                val gap = screenWidthPx - (lastX + last.widthPx)
+                if (gap > fallbackGap) {
+                    fallbackGap = gap
+                    fallbackTrack = t
+                }
+            }
+            if (fallbackTrack >= 0 && fallbackGap >= minGapPx()) return fallbackTrack
+        }
+        return null
     }
 
     /**
@@ -736,6 +774,16 @@ class DanmuEngine {
          *    实际截断 = min([SPREAD_SIGMA_LIMIT] × σ, 本值)，见 [spreadBornTimes]。
          */
         const val SPREAD_MAX_ABS_MS = 25_000L
+
+        /**
+         * v2.6.1：**出生时刻最多延后多久**（毫秒）。
+         *
+         * 抖动已改为「只向未来」（见 [enqueue]）：负抖动取绝对值后变成延迟，
+         * 这样弹幕一律从屏幕右侧飞入。但 σ 被调得很大时（用户可调到几秒），
+         * 延迟会大到「弹幕比画面晚十几秒才出现」—— 完全失去意义。
+         * 这里兜一个 2.5 秒的绝对上限：σ 再大，最多晚 2.5 秒。
+         */
+        const val MAX_BIRTH_DELAY_MS = 2_500L
 
         /**
          * 截断倍率：单条抖动不超过 **±2.5σ**。

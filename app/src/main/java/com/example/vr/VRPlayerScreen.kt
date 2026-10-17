@@ -5107,58 +5107,63 @@ fun VRPlayerScreen(
                                                 //    MPV / IJK 的 seek 由 libavformat 负责，本来正常；
                                                 //    对它们触发重封装只会白等（实测对一条 9113s 的
                                                 //    MPV 视频重封装了 2.5 分钟、还因丢包导致播不了）。
-                                                val engineIsExo = playerInstance?.engine == DecoderEngine.EXO
                                                 scope.launch {
-                                                    if (seekIssuedFlag && aviNeedsRebuild && engineIsExo &&
-                                                        !seekUnsupported && !isRemuxing &&
-                                                        selectedMediaItem.isVideo
-                                                    ) {
-                                                        Log.i(
-                                                            "VRPlayerScreen",
-                                                            "该 AVI 无 idx1 索引 → 直接重建索引（不重编码），" +
-                                                                "目标 ${seekTarget / 1000}s"
-                                                        )
-                                                        startRemuxFix()
-                                                        return@launch
-                                                    }
-
-                                                    delay(1500L)
+                                                    // 🔴 v2.6.1：**必须先在"什么都不假设"的前提下观察，再决定修不修**。
+                                                    //    旧实现有两处会"没问题也修"，用户反馈"有时候没问题也修复"：
+                                                    //      ① `aviNeedsRebuild` 是**文件属性**（该 AVI 无 idx1），
+                                                    //         它一旦为 true 就**不做任何验证**直接重建索引 →
+                                                    //         同一个文件每次拖动都重建一次；
+                                                    //      ② `stuckAtStart` 只等 1.5s，慢设备 / 网络源 / 大文件上
+                                                    //         seek 还没落地（位置仍停在片头）就被判成"容器吞了 seek"。
+                                                    //    现在统一为：等 2.5s → 收集证据 → 只有**证明 seek 真的坏了**才修。
+                                                    delay(2500L)
                                                     if (!seekIssuedFlag || seekTarget <= 3000L) return@launch
                                                     val inst = playerInstance ?: return@launch
                                                     // v2.4.28：非 EXO（MPV/IJK/系统）不参与容器修复判定
                                                     if (inst.engine != DecoderEngine.EXO) return@launch
+                                                    if (seekUnsupported || isRemuxing || !selectedMediaItem.isVideo) return@launch
+                                                    // 仍在缓冲：位置不推进是正常的，本次不判定（下次拖动再观察）
+                                                    if (inst.exo?.playbackState == Player.STATE_BUFFERING) return@launch
+
                                                     val posA = inst.currentPosition
-                                                    val moved = kotlin.math.abs(posA - seekTarget)
+                                                    // ① seek **没落地**：位置仍停在片头附近，而目标很远
                                                     val stuckAtStart = posA < 2000L && seekTarget > 5000L
 
-                                                    // 位置已到目标 → 再观察 1 秒，看播放是否真的在推进
+                                                    // ② seek **落地但卡死**：位置已在目标附近，
+                                                    //    连续 3 次 × 500ms 采样都不再推进（且未缓冲、确实在播）。
+                                                    //    ⚠️ 用"多次采样"而不是单次 —— 单次 1s 采样遇到
+                                                    //    解码器 flush / 刚 seek 完的短暂停顿就会误判。
+                                                    //    ⚠️ 排除暂停：用户 seek 后立刻暂停时 isPlaying=false，
+                                                    //    此时不推进是正常的，不累计 stall。
                                                     var frozen = false
-                                                    if (moved <= 3000L) {
-                                                        delay(1000L)
-                                                        val posB = inst.currentPosition
-                                                        val buffering =
-                                                            inst.exo?.playbackState == Player.STATE_BUFFERING
-                                                        frozen = !buffering && inst.isPlaying && (posB - posA) <= 0L
+                                                    if (!stuckAtStart && kotlin.math.abs(posA - seekTarget) <= 5000L) {
+                                                        var prev = posA
+                                                        var stalls = 0
+                                                        repeat(3) {
+                                                            delay(500L)
+                                                            val cur = inst.currentPosition
+                                                            val buffering =
+                                                                inst.exo?.playbackState == Player.STATE_BUFFERING
+                                                            if (!buffering && inst.isPlaying) {
+                                                                if (cur - prev <= 0L) stalls++ else stalls = 0
+                                                            } else {
+                                                                stalls = 0
+                                                            }
+                                                            prev = cur
+                                                        }
+                                                        // 3 次里连续 2 次无推进才算卡死（留一次容错）
+                                                        frozen = stalls >= 2
                                                     }
 
-                                                    // ⚠️ v2.4.28：判据收紧 —— 只认两种**明确故障**：
-                                                    //    ① `stuckAtStart`：位置停在片头（≈0）而目标很远
-                                                    //       —— 容器确实把 seek 吞掉了；
-                                                    //    ② `frozen`：位置到了但播放冻住。
-                                                    //    **去掉 `moved > 5000`**：长视频/关键帧级 seek
-                                                    //    本来就可能偏离几秒~几十秒，用它判「失败」会误伤
-                                                    //    （实测把一条播放正常的 9113s 视频误判成需修复）。
-                                                    if ((stuckAtStart || frozen) &&
-                                                        !seekUnsupported && !isRemuxing &&
-                                                        selectedMediaItem.isVideo
-                                                    ) {
-                                                        Log.i(
-                                                            "VRPlayerScreen",
-                                                            "seek 异常（stuckAtStart=$stuckAtStart " +
-                                                                "moved=$moved frozen=$frozen）→ 重建索引"
-                                                        )
-                                                        startRemuxFix()
-                                                    }
+                                                    if (!stuckAtStart && !frozen) return@launch
+
+                                                    Log.i(
+                                                        "VRPlayerScreen",
+                                                        "seek 异常（stuckAtStart=$stuckAtStart frozen=$frozen " +
+                                                            "pos=${posA / 1000}s target=${seekTarget / 1000}s " +
+                                                            "aviNoIdx1=$aviNeedsRebuild）→ 重建索引"
+                                                    )
+                                                    startRemuxFix()
                                                 }
                                                 scope.launch {
                                                     delay(2500L)
