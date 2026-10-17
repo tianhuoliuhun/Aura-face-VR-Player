@@ -977,4 +977,17 @@
     <string name="audio_gender_extract_failed">抽取音軌失敗（該媒體可能沒有音軌）</string>
     <string name="audio_gender_truncated">（音訊較長，僅分析了前面一段）</string>
     <string name="audio_gender_analyze_failed">分析失敗（詳見日誌 AudioGenderAnalyzer）</string>
+    <!-- v2.4.68：按说话人开关 + 去人声 -->
+    <string name="audio_gender_speakers_title">說話者（勾選 = 從音軌中移除）</string>
+    <string name="audio_gender_spk_row">#%1$d %2$s · %3$d Hz · %4$d 秒 / %5$d 段</string>
+    <string name="audio_gender_g_male">男聲</string>
+    <string name="audio_gender_g_female">女聲</string>
+    <string name="audio_gender_g_unknown">不確定</string>
+    <string name="audio_gender_need_mdx">還需下載人聲分離模型（約 %1$d MB）</string>
+    <string name="audio_gender_mdx_download">下載人聲分離模型</string>
+    <string name="audio_gender_processing">分離並處理</string>
+    <string name="audio_gender_processed">已產生：%1$s（前 %2$d 秒）</string>
+    <string name="audio_gender_mdx_failed">人聲分離失敗（詳見日誌 MdxSeparator）</string>
+    <string name="audio_gender_apply">套用（移除勾選的說話者）</string>
+    <string name="audio_gender_credit_uvr">人聲分離模型來自 UVR（Ultimate Vocal Remover），感謝其作者</string>
 </resources>

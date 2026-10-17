@@ -935,4 +935,17 @@
     <string name="audio_gender_extract_failed">오디오 추출 실패(오디오 트랙 없음)</string>
     <string name="audio_gender_truncated">(오디오가 길어 앞부분만 분석했습니다)</string>
     <string name="audio_gender_analyze_failed">분석 실패(AudioGenderAnalyzer 로그 참조)</string>
+    <!-- v2.4.68：按说话人开关 + 去人声 -->
+    <string name="audio_gender_speakers_title">화자(체크 = 트랙에서 제거)</string>
+    <string name="audio_gender_spk_row">#%1$d %2$s · %3$d Hz · %4$d초 / %5$d 구간</string>
+    <string name="audio_gender_g_male">남성</string>
+    <string name="audio_gender_g_female">여성</string>
+    <string name="audio_gender_g_unknown">불명</string>
+    <string name="audio_gender_need_mdx">음성 분리 모델 필요(약 %1$d MB)</string>
+    <string name="audio_gender_mdx_download">음성 분리 모델 다운로드</string>
+    <string name="audio_gender_processing">분리 및 처리 중</string>
+    <string name="audio_gender_processed">생성됨: %1$s(앞 %2$d초)</string>
+    <string name="audio_gender_mdx_failed">음성 분리 실패(MdxSeparator 로그 참조)</string>
+    <string name="audio_gender_apply">적용(체크한 화자 제거)</string>
+    <string name="audio_gender_credit_uvr">음성 분리 모델은 UVR(Ultimate Vocal Remover) 제공. 제작자에게 감사드립니다</string>
 </resources>

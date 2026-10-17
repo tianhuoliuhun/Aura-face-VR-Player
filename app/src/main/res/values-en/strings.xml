@@ -975,4 +975,17 @@
     <string name="audio_gender_extract_failed">Audio extraction failed (no audio track?)</string>
     <string name="audio_gender_truncated">(Audio is long - only the beginning was analyzed)</string>
     <string name="audio_gender_analyze_failed">Analysis failed (see AudioGenderAnalyzer log)</string>
+    <!-- v2.4.68：按说话人开关 + 去人声 -->
+    <string name="audio_gender_speakers_title">Speakers (checked = removed from the track)</string>
+    <string name="audio_gender_spk_row">#%1$d %2$s · %3$d Hz · %4$ds / %5$d segs</string>
+    <string name="audio_gender_g_male">male</string>
+    <string name="audio_gender_g_female">female</string>
+    <string name="audio_gender_g_unknown">unknown</string>
+    <string name="audio_gender_need_mdx">Vocal-separation model still needed (~%1$d MB)</string>
+    <string name="audio_gender_mdx_download">Download separation model</string>
+    <string name="audio_gender_processing">Separating &amp; processing</string>
+    <string name="audio_gender_processed">Saved: %1$s (first %2$ds)</string>
+    <string name="audio_gender_mdx_failed">Separation failed (see MdxSeparator log)</string>
+    <string name="audio_gender_apply">Apply (remove checked speakers)</string>
+    <string name="audio_gender_credit_uvr">Separation model from UVR (Ultimate Vocal Remover) - thanks to its authors</string>
 </resources>

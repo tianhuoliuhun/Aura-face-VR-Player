@@ -935,4 +935,17 @@
     <string name="audio_gender_extract_failed">音声の抽出に失敗（音声トラックがない可能性）</string>
     <string name="audio_gender_truncated">（音声が長いため、先頭部分のみを分析しました）</string>
     <string name="audio_gender_analyze_failed">分析に失敗（AudioGenderAnalyzer ログ参照）</string>
+    <!-- v2.4.68：按说话人开关 + 去人声 -->
+    <string name="audio_gender_speakers_title">話者（チェック＝音声から除去）</string>
+    <string name="audio_gender_spk_row">#%1$d %2$s・%3$d Hz・%4$d 秒 / %5$d 区間</string>
+    <string name="audio_gender_g_male">男性</string>
+    <string name="audio_gender_g_female">女性</string>
+    <string name="audio_gender_g_unknown">不明</string>
+    <string name="audio_gender_need_mdx">音声分離モデルのダウンロードが必要（約 %1$d MB）</string>
+    <string name="audio_gender_mdx_download">音声分離モデルをダウンロード</string>
+    <string name="audio_gender_processing">分離・処理中</string>
+    <string name="audio_gender_processed">生成しました：%1$s（先頭 %2$d 秒）</string>
+    <string name="audio_gender_mdx_failed">音声分離に失敗（MdxSeparator ログ参照）</string>
+    <string name="audio_gender_apply">適用（チェックした話者を除去）</string>
+    <string name="audio_gender_credit_uvr">音声分離モデルは UVR（Ultimate Vocal Remover）提供。作者に感謝します</string>
 </resources>
