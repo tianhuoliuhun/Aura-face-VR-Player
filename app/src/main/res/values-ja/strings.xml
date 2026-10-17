@@ -740,6 +740,17 @@
 
 <!-- v2.1.208：时间标记球 -->
     <string name="marker_ball_enable">タイムマーカー</string>
+    <string name="info_ball_clock_enable">時計バブル</string>
+    <string name="info_ball_clock_desc">現在時刻を表示。タップで 12/24 時間制、ダブルタップで秒表示を切替</string>
+    <string name="info_ball_battery_enable">バッテリーバブル</string>
+    <string name="info_ball_battery_desc">残量と充電状態を表示。タップで更新、ダブルタップで %/電圧を切替</string>
+    <string name="info_ball_hud_clock_12h">時計：12 時間制</string>
+    <string name="info_ball_hud_clock_24h">時計：24 時間制</string>
+    <string name="info_ball_hud_clock_sec_on">時計：秒を表示</string>
+    <string name="info_ball_hud_clock_sec_off">時計：秒を非表示</string>
+    <string name="info_ball_hud_battery_refresh">バッテリー：更新しました</string>
+    <string name="info_ball_hud_battery_volt">バッテリー：電圧表示</string>
+    <string name="info_ball_hud_battery_pct">バッテリー：% 表示</string>
     <string name="marker_ball_desc">タップでマーカーへ · ダブルタップで設定 · ドラッグで移動 · 現在との差を表示</string>
 
     <string name="proj_eac">EAC キューブマップ</string>

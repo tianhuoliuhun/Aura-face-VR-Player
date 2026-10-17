@@ -471,6 +471,18 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("is_marker_ball_enabled", false) else false
         )
     }
+    // v2.4.67：**信息悬浮球（时钟 / 电量）** —— 与标记球同属「悬浮球」设置组，默认**关**。
+    // 数据源与更新方式见 InfoFloatingBall 的注释（时钟定时器 / 电量系统广播）。
+    var isClockBallEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_clock_ball_enabled", false) else false
+        )
+    }
+    var isBatteryBallEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_battery_ball_enabled", false) else false
+        )
+    }
     // 步长（秒），双击循环 5 → 10 → 15 → 30
     var seekForwardStep by remember {
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("seek_forward_step", 5) else 5)
@@ -1231,6 +1243,9 @@ fun VRPlayerScreen(
         isSeekForwardBallEnabled,
         isSeekBackwardBallEnabled,
         isMarkerBallEnabled,
+        // v2.4.67：信息球开关 ⚠️ 必须进 key 列表，否则切换后 prefs 永不落盘（本项目头号坑）
+        isClockBallEnabled,
+        isBatteryBallEnabled,
         seekForwardStep,
         seekBackwardStep,
         floatingBallSpeed,
@@ -1341,6 +1356,8 @@ fun VRPlayerScreen(
                 // ⚠️ 新增持久化项必须**同时**改三处：key 列表 + 这里的 put + else 分支的 remove。
                 //    漏了 key 会导致永不落盘（本项目头号坑）。
                 putBoolean("is_marker_ball_enabled", isMarkerBallEnabled)
+                putBoolean("is_clock_ball_enabled", isClockBallEnabled)
+                putBoolean("is_battery_ball_enabled", isBatteryBallEnabled)
                 putInt("seek_forward_step", seekForwardStep)
                 putInt("seek_backward_step", seekBackwardStep)
                 putFloat("floating_ball_speed", floatingBallSpeed)
@@ -6848,6 +6865,21 @@ fun VRPlayerScreen(
                                         onChange = { isMarkerBallEnabled = it },
                                         tag = "marker_ball_switch"
                                     )
+                                    // v2.4.67：信息球（时钟 / 电量）—— 同组、同一行样式组件
+                                    BallSwitchRow(
+                                        title = stringResource(R.string.info_ball_clock_enable),
+                                        desc = stringResource(R.string.info_ball_clock_desc),
+                                        checked = isClockBallEnabled,
+                                        onChange = { isClockBallEnabled = it },
+                                        tag = "clock_ball_switch"
+                                    )
+                                    BallSwitchRow(
+                                        title = stringResource(R.string.info_ball_battery_enable),
+                                        desc = stringResource(R.string.info_ball_battery_desc),
+                                        checked = isBatteryBallEnabled,
+                                        onChange = { isBatteryBallEnabled = it },
+                                        tag = "battery_ball_switch"
+                                    )
 
                                     if (isFloatingBallEnabled) {
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -8689,6 +8721,56 @@ fun VRPlayerScreen(
                 ) else Modifier,
                 // v2.1.231：记忆上次拖动到的位置
                 prefs = prefs,
+                rememberPosition = isMemoryModeEnabled
+            )
+        }
+
+        // 13c. v2.4.67：**信息球（时钟 / 电量）**
+        // 底层与标记球/快进球完全一致（floatingBallGesture + FloatingBallPositions + 玻璃材质），
+        // 只有显示内容不同。默认贴**两侧上方**：时钟左上、电量右上，
+        // 与「标记球（左中）/ 快进球（右 28%）/ 后退球（右 72%）」初始位置都不重叠。
+        if (isClockBallEnabled) {
+            InfoFloatingBall(
+                kind = InfoBallKind.CLOCK,
+                maxX = seekMaxX,
+                maxY = seekMaxY,
+                accentColor = AccentColor,
+                accentOnColor = AccentOnColor,
+                onFeedback = { seekHudText = it },
+                initialXRatio = 0f,
+                initialYRatio = 0.10f,
+                isLiquidGlass = isLiquidGlass,
+                glassModifier = if (isLiquidGlass) Modifier.glassBall(
+                    backdrop = liquidBackdrop,
+                    style = glassStyle,
+                    blurRadius = null,
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
+                ) else Modifier,
+                prefs = prefs,
+                ballId = FloatingBallPositions.CLOCK,
+                rememberPosition = isMemoryModeEnabled
+            )
+        }
+
+        if (isBatteryBallEnabled) {
+            InfoFloatingBall(
+                kind = InfoBallKind.BATTERY,
+                maxX = seekMaxX,
+                maxY = seekMaxY,
+                accentColor = AccentColor,
+                accentOnColor = AccentOnColor,
+                onFeedback = { seekHudText = it },
+                initialXRatio = 1f,
+                initialYRatio = 0.10f,
+                isLiquidGlass = isLiquidGlass,
+                glassModifier = if (isLiquidGlass) Modifier.glassBall(
+                    backdrop = liquidBackdrop,
+                    style = glassStyle,
+                    blurRadius = null,
+                    onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.30f)) }
+                ) else Modifier,
+                prefs = prefs,
+                ballId = FloatingBallPositions.BATTERY,
                 rememberPosition = isMemoryModeEnabled
             )
         }

@@ -740,6 +740,17 @@
 
 <!-- v2.1.208：时间标记球 -->
     <string name="marker_ball_enable">시간 마커</string>
+    <string name="info_ball_clock_enable">시계 버블</string>
+    <string name="info_ball_clock_desc">현재 시간 표시. 탭하면 12/24시간제, 두 번 탭하면 초 표시 전환</string>
+    <string name="info_ball_battery_enable">배터리 버블</string>
+    <string name="info_ball_battery_desc">배터리 잔량과 충전 상태 표시. 탭하면 새로고침, 두 번 탭하면 %/전압 전환</string>
+    <string name="info_ball_hud_clock_12h">시계: 12시간제</string>
+    <string name="info_ball_hud_clock_24h">시계: 24시간제</string>
+    <string name="info_ball_hud_clock_sec_on">시계: 초 표시</string>
+    <string name="info_ball_hud_clock_sec_off">시계: 초 숨김</string>
+    <string name="info_ball_hud_battery_refresh">배터리: 새로고침됨</string>
+    <string name="info_ball_hud_battery_volt">배터리: 전압 표시</string>
+    <string name="info_ball_hud_battery_pct">배터리: % 표시</string>
     <string name="marker_ball_desc">탭하여 마커로 이동 · 더블탭으로 설정 · 드래그로 이동 · 현재 재생 시간과의 차이 표시</string>
 
     <string name="proj_eac">EAC 큐브맵</string>

@@ -772,6 +772,17 @@
 
 <!-- v2.1.208：时间标记球 -->
     <string name="marker_ball_enable">时间标记球</string>
+    <string name="info_ball_clock_enable">时钟悬浮球</string>
+    <string name="info_ball_clock_desc">显示当前时间；单击切 12/24 小时制，双击切显示秒</string>
+    <string name="info_ball_battery_enable">电量悬浮球</string>
+    <string name="info_ball_battery_desc">显示电量与充电状态；单击刷新，双击切百分比/电压</string>
+    <string name="info_ball_hud_clock_12h">时钟：12 小时制</string>
+    <string name="info_ball_hud_clock_24h">时钟：24 小时制</string>
+    <string name="info_ball_hud_clock_sec_on">时钟：显示秒</string>
+    <string name="info_ball_hud_clock_sec_off">时钟：隐藏秒</string>
+    <string name="info_ball_hud_battery_refresh">电量：已刷新</string>
+    <string name="info_ball_hud_battery_volt">电量：显示电压</string>
+    <string name="info_ball_hud_battery_pct">电量：显示百分比</string>
     <string name="marker_ball_desc">单击跳回标记 · 双击设标记 · 拖动移位 · 球面显示与当前播放时间的差值</string>
 
     <string name="proj_eac">EAC 立方体贴图</string>

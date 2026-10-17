@@ -20,8 +20,8 @@ android {
     // 代价：不再支持 Android 7.x（7.0/7.1）。已与用户确认。
     minSdk = 26
     targetSdk = 36
-    versionCode = 317
-    versionName = "2.4.66"
+    versionCode = 318
+    versionName = "2.4.67"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -48,7 +48,15 @@ android {
       //    若真机出现 C++ 符号缺失类崩溃，再改成
       //    「下载 AAR → 删掉它内部的 libc++_shared → 放 libs/ 当本地 AAR」。
       // ======================================================================
-      pickFirsts += listOf("**/libc++_shared.so")
+      pickFirsts += listOf(
+        "**/libc++_shared.so",
+        // v2.4.67：onnxruntime-android 与 sherpa-onnx **都带** libonnxruntime.so。
+        // 已实测 sherpa 1.13.6 内嵌的是 **1.27.1**（so 里的 `VERS_1.27.1` /
+        // `ORT_API_VERSION ... 1.27.1`），而选用的 onnxruntime-android 是 **1.27.0**
+        // —— 同一 minor，取哪一份都基本等价，ABI 风险很低。
+        // ⚠️ 仍必须做同进程实测：native 崩溃 Java 抓不到（见 OnnxCoexistSelfTest）。
+        "**/libonnxruntime.so",
+      )
 
       // ======================================================================
       // v2.4.20：**排除 libggml-vulkan.so**（GPU 卸载已停用）
@@ -550,7 +558,23 @@ dependencies {
   implementation("com.google.firebase:firebase-analytics")
 
   // v110：sherpa-onnx 离线 ASR（Qwen3-ASR 等，29 语言 + 20 种中文方言）
-  implementation(files("libs/sherpa-onnx-1.13.6.aar"))
+  // v2.4.67：改用**去掉内嵌 libonnxruntime.so** 的 AAR ——
+  //   实测 pickFirsts 保留的是 sherpa 那份 ORT，而它**未导出 C API**（`OrtGetApiBase` 缺失）
+  //   → onnxruntime-android 的 JNI 加载失败（UnsatisfiedLinkError）。
+  //   标准 ORT（1.27.0）是 sherpa 所需符号的超集，故只留标准那份；
+  //   生成脚本与依据见 docs/AUDIO_GENDER_FILTER_TECH_STACK.md 与当日日志。
+  //   ⚠️ 换回原来的 AAR 即可回退（两文件都在 libs/ 下）。
+  // 🔴 v2.4.67：sherpa 用 **v1.13.4**，为了与 onnxruntime-android 的**符号版本对齐**。
+  //   实测：sherpa 1.13.6 内嵌 ORT **1.27.1**（so 里符号版本标签 `VERS_1.27.1`），
+  //   而 Maven 上 onnxruntime-android 只有 **1.27.0**（无 1.27.1）→ 两者符号名相同但版本标签不同，
+  //   linker 判定「找不到符号」（`cannot locate symbol "OrtGetApiBase"`）→ 无法共存。
+  //   sherpa 1.13.4 内嵌的正是 **ORT 1.27.0**（`VERS_1.27.0`），且项目所需的 17 个 API 类齐全 → 对齐成功。
+  //   回退：改回 libs/sherpa-onnx-1.13.6.aar 并同步降/换 onnxruntime 版本即可。
+  implementation(files("libs/sherpa-onnx-1.13.4.aar"))
+  // v2.4.67：ONNX Runtime（Android）—— 用于「性别分类」与「源分离」两个自定义 ONNX 模型。
+  // ⚠️ 版本必须与 sherpa 内嵌的 ORT **完全一致**（当前 sherpa 1.13.4 → ORT 1.27.0）。
+  //    差一个 patch 号（如 1.27.1）就会因符号版本标签不匹配而 dlopen 失败。
+  implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
 
   // ==========================================================================
   // v2.1.234：ijkplayer —— 换用**新源码构建**的 AAR（debugly/ijkplayer k0.8.9）
