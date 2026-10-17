@@ -14,6 +14,10 @@ import kotlin.math.sqrt
 /**
  * v2.4.64：**音频性别分析（离线，第一段）** —— VAD / 说话人分离 + 基频判性别。
  *
+ * ## v2.4.67（档 1）：性别判定升级为 **ECAPA-TDNN 模型**（F0 降级为回退）
+ * 段级与说话人级都**优先**用 [GenderClassifier]（ONNX Runtime + 16MB q8 模型）判性别；
+ * 模型缺失 / session 失败 / 推理抛错时**自动回退**到下面的 F0 判据，并在结果里标注走的是哪条路。
+ *
  * ## 这一版做到哪、没做到哪（务实说明）
  * `docs/AUDIO_GENDER_FILTER_DESIGN.md` 的完整流水线是：
  * VAD → 说话人分离 → **性别分类** → **源分离（Spleeter）** → 拼接 → 缓存。
@@ -64,6 +68,10 @@ object AudioGenderAnalyzer {
         /** 该段估计出的基频中位数；0 = 该段太短/无有效帧 */
         val f0Hz: Float,
         val gender: Gender,
+        /** v2.4.67：该段的 ML 概率（male）；**<0 表示未跑 ML**（模型不可用 / 段太短） */
+        val mlMale: Float = -1f,
+        /** v2.4.67：该段的 ML 概率（female）；<0 表示未跑 ML */
+        val mlFemale: Float = -1f,
     )
 
     /** 每个说话人的汇总 */
@@ -83,6 +91,8 @@ object AudioGenderAnalyzer {
         val maleMs: Long,
         val femaleMs: Long,
         val unknownMs: Long,
+        /** v2.4.67：本次性别判定实际走了哪条路（"ML 模型" / "F0 回退"）——便于用户确认效果来源 */
+        val genderSource: String = "F0 回退",
     ) {
         /** 一行摘要，供日志/UI 直接显示 */
         fun summary(): String {
@@ -97,6 +107,7 @@ object AudioGenderAnalyzer {
                 sb.append("\n  #${s.id} $label  F0≈${s.f0MedianHz.toInt()}Hz  语音 ${s.speechMs / 1000}s / ${s.segmentCount} 段")
             }
             sb.append("\n合计：男声 ${maleMs / 1000}s · 女声 ${femaleMs / 1000}s · 不确定 ${unknownMs / 1000}s")
+            sb.append("\n判定来源：").append(genderSource)
             return sb.toString()
         }
     }
@@ -202,25 +213,39 @@ object AudioGenderAnalyzer {
                 val endMs = (s.end * 1000f).toLong()
                 val slice = slicePcm(samples, useRate, s.start, s.end)
                 val f0 = estimateF0Median(slice, useRate)
+                // v2.4.67（档 1）：段级优先用 ECAPA-TDNN 模型；不可用/推理失败则回退 F0。
+                val ml = GenderClassifier.classifySegment(context, slice, useRate)
+                val mlGender = GenderClassifier.genderOf(ml)
                 segs.add(
                     SpeakerSegment(
                         startMs = startMs,
                         endMs = endMs,
                         speakerId = s.speaker,
                         f0Hz = f0,
-                        gender = genderOf(f0),
+                        gender = if (mlGender == Gender.UNKNOWN) genderOf(f0) else mlGender,
+                        mlMale = ml?.first ?: -1f,
+                        mlFemale = ml?.second ?: -1f,
                     )
                 )
                 if (raw.isNotEmpty()) onProgress(65 + (idx * 25 / raw.size))
             }
 
             // ---- 按说话人聚合（用「语音时长加权」的中位数，避免长段被短段稀释）----
+            val mlUsed = segs.any { it.mlMale >= 0f }
             val speakers = segs.groupBy { it.speakerId }.map { (id, list) ->
-                val weighted = weightedMedianF0(list)
+                val weightedF0 = weightedMedianF0(list)
+                // v2.4.67：说话人级优先用**时长加权的 ML 概率均值**（比段级更稳）；
+                //    完全没有 ML 结果时才回退到 F0 中位数。
+                val avgMl = weightedAvgMl(list)
+                val g = if (avgMl != null) {
+                    GenderClassifier.genderOf(avgMl).let { if (it == Gender.UNKNOWN) genderOf(weightedF0) else it }
+                } else {
+                    genderOf(weightedF0)
+                }
                 SpeakerInfo(
                     id = id,
-                    gender = genderOf(weighted),
-                    f0MedianHz = weighted,
+                    gender = g,
+                    f0MedianHz = weightedF0,
                     speechMs = list.sumOf { it.endMs - it.startMs },
                     segmentCount = list.size,
                 )
@@ -243,6 +268,7 @@ object AudioGenderAnalyzer {
                 maleMs = maleMs,
                 femaleMs = femaleMs,
                 unknownMs = unknownMs,
+                genderSource = if (mlUsed) "ML 模型（ECAPA-TDNN）" else "F0 回退",
             )
         } catch (t: Throwable) {
             // 与项目既有 AI 模块一致：失败**如实带回原因**，不静默吞
@@ -332,6 +358,21 @@ object AudioGenderAnalyzer {
         if (f0s.isEmpty()) return 0f
         f0s.sort()
         return f0s[f0s.size / 2]
+    }
+
+    /** v2.4.67：按语音时长加权的 ML 概率平均；没有任何 ML 结果时返回 null（→ 调用方回退 F0）。 */
+    private fun weightedAvgMl(segs: List<SpeakerSegment>): Pair<Float, Float>? {
+        var wm = 0f
+        var wf = 0f
+        var wsum = 0f
+        for (s in segs) {
+            if (s.mlMale < 0f) continue
+            val w = (s.endMs - s.startMs).coerceAtLeast(1L).toFloat()
+            wm += s.mlMale * w
+            wf += s.mlFemale * w
+            wsum += w
+        }
+        return if (wsum > 0f) (wm / wsum) to (wf / wsum) else null
     }
 
     /** 按语音时长加权的 F0 中位数（F0<=0 的段不参与）。 */

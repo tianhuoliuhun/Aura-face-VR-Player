@@ -71,6 +71,13 @@ object OnnxCoexistSelfTest {
                 Log.e(TAG, "② sherpa 步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
             }
 
+            // ③ 档1：性别分类模型（ECAPA-TDNN）冒烟 —— 用合成音频跑一次真实推理
+            try {
+                genderStep(app)
+            } catch (t: Throwable) {
+                Log.e(TAG, "③ 性别模型步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
+            }
+
             Log.i(TAG, "===== ✓ 共存自检结束（本行出现且进程存活 ⇒ 两套 libonnxruntime 可共存）=====")
         }
     }
@@ -107,8 +114,7 @@ object OnnxCoexistSelfTest {
         }
     }
 
-    /** ② sherpa-onnx：构造一个最轻的 VAD 并真跑一次（会加载 sherpa 的 jni + 它依赖的 onnxruntime）。 */
-    private fun sherpaStep(context: Context) {
+    /** ② sherpa-onnx：构造一个最轻的 VAD 并真跑一次（会加载 sherpa 的 jni + 它依赖的 onnxruntime）。 */    private fun sherpaStep(context: Context) {
         val vadFile = AudioGenderModels.fileOf(context, AudioGenderModels.VAD)
         if (!vadFile.isFile) {
             Log.i(TAG, "② sherpa：VAD 模型未下载，跳过（无法在此步骤加载 sherpa native）")
@@ -129,6 +135,40 @@ object OnnxCoexistSelfTest {
             Log.i(TAG, "② sherpa Vad OK（已接受一次波形并 flush）")
         } finally {
             runCatching { vad?.release() }
+        }
+    }
+
+    /**
+     * ③ 档1 冒烟：性别分类模型（ECAPA-TDNN）—— 用 1.5 s **合成正弦**跑一次真实推理。
+     *
+     * ⚠️ 这里**只验证链路**（模型能加载、输入输出形状对、能算出概率），
+     * **不校验判定结果** —— 合成单音本来就不是人声，男/女都无意义。
+     * 真正的准确率要用日语语料（JVS）验收，见 docs/AUDIO_GENDER_FILTER_TECH_STACK.md。
+     */
+    private suspend fun genderStep(context: Context) {
+        if (!GenderClassifier.isAvailable(context)) {
+            // 缺失 → 走**应用自己的下载逻辑**补齐（顺便验证真实下载链路 + URL 正确性）
+            Log.i(TAG, "③ 性别模型缺失 → 开始下载（约 16MB，走 AudioGenderModels 的真实路径）")
+            val ok = AudioGenderModels.download(context, AudioGenderModels.GENDER) { pct ->
+                if (pct == 100 || pct % 25 == 0) Log.i(TAG, "③ 下载进度 $pct%")
+            }
+            if (!ok) {
+                Log.e(TAG, "③ 性别模型下载失败 → 跳过冒烟（判定将回退 F0；检查网络/URL）")
+                return
+            }
+            Log.i(TAG, "③ 性别模型下载完成: ${AudioGenderModels.fileOf(context, AudioGenderModels.GENDER).length() / 1048576}MB")
+        }
+        val sr = 16000
+        val pcm = FloatArray(sr * 3 / 2) { i ->
+            (0.3f * kotlin.math.sin(2.0 * Math.PI * 180.0 * i / sr)).toFloat()
+        }
+        val t0 = System.currentTimeMillis()
+        val prob = GenderClassifier.predictWindow(context, pcm)
+        val ms = System.currentTimeMillis() - t0
+        if (prob == null) {
+            Log.e(TAG, "③ 性别模型推理**失败**（返回 null，将回退 F0）—— 见上面 GenderClassifier 报错")
+        } else {
+            Log.i(TAG, "③ 性别模型推理 OK（${ms}ms）: male=%.3f female=%.3f".format(prob.first, prob.second))
         }
     }
 }

@@ -125,10 +125,18 @@ class AudioGenderCoreTest {
     @Test
     fun `model urls are pinned and unique`() {
         val all = AudioGenderModels.ALL
-        assertEquals("登记了 3 个模型（VAD / 分割 / 嵌入）", 3, all.size)
+        // v2.4.67 档1 起多了「性别分类」（ECAPA-TDNN q8）→ 共 4 个
+        assertEquals("登记了 4 个模型（VAD / 分割 / 嵌入 / 性别分类）", 4, all.size)
         assertEquals("URL 不应重复", all.size, all.map { it.url }.toSet().size)
-        assertTrue("应全部指向 sherpa-onnx 官方 release",
-            all.all { it.url.startsWith("https://github.com/k2-fsa/sherpa-onnx/releases/download/") })
+        // 来源必须是**可信、可复现**的地址：sherpa 官方 release 或 Hugging Face
+        // （v2.4.67 新增的性别分类模型托管在 HF，所以不能只断言 sherpa release）
+        assertTrue(
+            "模型 URL 应全部来自 sherpa 官方 release 或 Hugging Face，实际=${all.map { it.url }}",
+            all.all {
+                it.url.startsWith("https://github.com/k2-fsa/sherpa-onnx/releases/download/") ||
+                    it.url.startsWith("https://huggingface.co/")
+            },
+        )
         // ⚠️ 嵌入模型所在 tag 是上游的**拼写笔误**（recongition）—— 写错就 404，这里锁住
         assertTrue("嵌入模型 URL 必须使用上游的 recongition 拼写",
             all.any { it.url.contains("speaker-recongition-models") })
@@ -165,5 +173,49 @@ class AudioGenderCoreTest {
     @Test
     fun `default max seconds is 15 minutes`() {
         assertEquals(15 * 60, AudioPcmExtractor.DEFAULT_MAX_SECONDS)
+    }
+
+    // ------------------------------------------------------------ 档1：ML 性别分类的概率后处理
+
+    @Test
+    fun `softmax2 returns a normalized probability pair`() {
+        val (m, f) = GenderClassifier.softmax2(2f, 0f)
+        assertTrue("男声 logit 更大 → 男声概率应更高（m=$m f=$f）", m > f)
+        assertTrue("两类概率之和应为 1（误差 1e-4）", abs(m + f - 1f) < 1e-4f)
+    }
+
+    @Test
+    fun `softmax2 of equal logits is a coin flip`() {
+        val (m, f) = GenderClassifier.softmax2(0f, 0f)
+        assertEquals(0.5f, m, 1e-6f)
+        assertEquals(0.5f, f, 1e-6f)
+    }
+
+    @Test
+    fun `softmax2 is numerically stable for extreme logits`() {
+        // 大 logit 直接 exp 会溢出 → 必须做减最大值的稳定化
+        val (m, f) = GenderClassifier.softmax2(1000f, -1000f)
+        assertTrue("不应出现 NaN/Inf（m=$m f=$f）", m.isFinite() && f.isFinite())
+        assertTrue("应为接近 (1,0)", m > 0.999f && f < 0.001f)
+    }
+
+    @Test
+    fun `genderOf maps probability to gender with a margin`() {
+        assertEquals(AudioGenderAnalyzer.Gender.MALE, GenderClassifier.genderOf(0.9f to 0.1f))
+        assertEquals(AudioGenderAnalyzer.Gender.FEMALE, GenderClassifier.genderOf(0.1f to 0.9f))
+        // 概率接近 → 刻意留 UNKNOWN（不硬猜）
+        assertEquals(AudioGenderAnalyzer.Gender.UNKNOWN, GenderClassifier.genderOf(0.52f to 0.48f))
+        // 模型不可用（null）→ UNKNOWN，由调用方回退 F0
+        assertEquals(AudioGenderAnalyzer.Gender.UNKNOWN, GenderClassifier.genderOf(null))
+    }
+
+    @Test
+    fun `gender model spec points at hugging face and is registered`() {
+        val g = AudioGenderModels.GENDER
+        assertTrue("性别模型应登记在 ALL 里（否则 UI 不会提示下载）",
+            AudioGenderModels.ALL.any { it.id == "gender" })
+        assertTrue("URL 应指向 Hugging Face", g.url.startsWith("https://huggingface.co/"))
+        assertTrue("该模型不是压缩包（直接 .onnx）", !g.archive)
+        assertTrue("minBytes 应能挡住半截下载", g.minBytes > 1_000_000L)
     }
 }

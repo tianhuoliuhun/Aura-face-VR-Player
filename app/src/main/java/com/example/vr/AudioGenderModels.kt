@@ -102,7 +102,27 @@ object AudioGenderModels {
         minBytes = 5_000_000L,
     )
 
-    val ALL: List<ModelSpec> = listOf(VAD, SEGMENTATION, EMBEDDING)
+    /**
+     * **性别分类**（档 1，v2.4.67）—— ECAPA-TDNN + 线性二分类，int8 动态量化，**MIT**。
+     *
+     * ⚠️ 远端路径**带子目录**（`onnx/model_quantized.onnx`），本地落盘用扁平文件名。
+     * 输入 = 16 kHz raw 单声道波形、输出 = logits(2) = `{0: male, 1: female}`，
+     * **log-mel 预处理已内嵌进 ONNX 图**（App 侧不要再做音频归一化）—— 详见 [GenderClassifier]。
+     *
+     * 该模型在 Hillenbrand 语料上男女准确率 100%（v1 全量量化只有 95.6%，v2 排除一个注意力 matmul 节点后恢复）。
+     */
+    val GENDER = ModelSpec(
+        id = "gender",
+        displayName = "ECAPA-TDNN 性别分类（q8）",
+        url = "https://huggingface.co/Alice-Sabrina-Ivy/voice-gender-classifier-onnx-q8-v2" +
+            "/resolve/main/onnx/model_quantized.onnx",
+        archive = false,
+        fileName = "voice-gender-classifier-q8.onnx",
+        approxMb = 16,
+        minBytes = 5_000_000L,
+    )
+
+    val ALL: List<ModelSpec> = listOf(VAD, SEGMENTATION, EMBEDDING, GENDER)
 
     // ------------------------------------------------------------------ 路径
 
