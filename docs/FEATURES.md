@@ -396,6 +396,39 @@
 
 ---
 
+## 🧊 界面材质（玻璃 UI）/ Glass UI（v2.6.0 起）
+
+- **三档可切换**（Android 12+）：**纯色 / 液态玻璃 / 磨砂玻璃**，设置里一行 chip 直接选，选择自动记忆
+  - Three switchable styles (Solid / Liquid / Frosted) on Android 12+, remembered across sessions
+- **液态档是「真半透明」**：不采样任何位图，把极淡中性色（18%）叠在视频图层之上；
+  Compose 的半透明内容会与下方 `SurfaceView` 图层**在窗口合成阶段混合**，
+  因此透出的是**全分辨率**画面（不是降采样图的放大），并保留顶部受光与棱边高光
+  - Liquid is truly translucent: a light 18% tint composited over the video layer through window
+    composition, so the **full-resolution** frame shows through with a top highlight and rim light
+- **磨砂档 = 降采样帧 + 高斯模糊 + 颗粒**：采样画面到 **96px** 宽（GL 线程 30ms 一次）、
+  叠 **32dp** 高斯模糊（`RenderEffect`；球 18dp）+ 12% 白 + 128×128 平铺颗粒噪点，
+  背后内容被真正漫射掉
+  - Frosted samples a 96px-wide frame (every 30ms on the GL thread), applies a 32dp blur plus
+    12% white and a tiled 128×128 grain overlay
+- **两档共用一套 Canvas 体感层**（`GlassBody`，v2.6.0）：顶部双层受光（贴顶窄高光带 + 宽柔光）、
+  内侧厚度（多层等 alpha 递增宽度描边近似 inset-shadow，厚度按短边纯比例）、棱边高光、斜向光泽；
+  **零 RenderEffect、零离屏层** → 被 ROM 屏蔽实时模糊的设备上一样有效
+  - Both styles share one canvas-based body layer (top lighting, inner thickness, rim light and
+    sheen) with zero RenderEffect, so it works even where the ROM blocks real-time blur
+- **悬浮球与面板同源**：`glassBall` 就是 `glassPanel` + `CircleShape`，材质天然一致；
+  圆形走 `drawCircle` 原生路径（多层 Path 描边会在球面三角化成多边形棱面）；
+  液态球的底色单独加深到 **88%** —— 54dp 的球若只有 18%，画面里的高对比色块会整块穿过球体
+  - Floating balls reuse the panel implementation (`glassBall` = `glassPanel` + `CircleShape`);
+    circles draw with native `drawCircle` to avoid polygon faceting; the Liquid ball uses a
+    deeper 88% tint so a high-contrast patch of the scene cannot shine through a 54dp disc
+- ⚠️ **模糊半径有实测上限**：`RenderEffect.createBlurEffect` 半径过大会**静默不绘制**
+  （v2.1.221 实测 40dp 就「完全没模糊」），面板 32dp / 球 18dp 是验证过的区间
+  - Blur radius has a real ceiling — too large and the effect is silently skipped
+- ⚠️ **「高斯模糊」档已在 v2.6.0 移除**：与磨砂档观感差异过小；老设置里存的高斯档会自动回落纯色
+  - The Gaussian style was removed in v2.6.0 for being too close to Frosted
+
+---
+
 ## ⏩ 进度条拖动 / Seeking
 - **拖动只在松手时定位一次**（v2.1.247）：拖动过程中仅更新预览缩略图与时间文字，
   松手才发出一次 seek —— 避免逐帧 seek 堆积导致 AVI 等格式卡死
