@@ -122,6 +122,31 @@ object AudioGenderModels {
         minBytes = 5_000_000L,
     )
 
+    /**
+     * **人声分离**（档 2，v2.4.68）—— UVR MDX-Net（`UVR_MDXNET_9482`），**28.3MB**。
+     *
+     * ## ⚠️ 许可（重要，必读）
+     * 该模型由 sherpa-onnx 官方 release 提供，但**转换自 TRvlvr 的公开 UVR 模型 release**；
+     * TRvlvr 的仓库**没有单独的开源许可**；UVR GUI 是 MIT，但要求「使用其模型的第三方应用**致谢 UVR 及其开发者**」。
+     * → **绝不能把权重打进 APK**（只允许应用内下载到私有目录），且**界面需致谢 UVR**。
+     *
+     * ## 用途与技术约束（来自 BoomingSS 的真机实测经验）
+     * - 2-stem（vocals / instrumental）；我们只用它做「**男声段换成伴奏**」；
+     * - 管线要求 **44.1 kHz 立体声**，且需客户端做 **STFT / ISTFT**；
+     * - 模型**内部已含 overlap 与 trim** → 每窗只取**稳定中心区**，相邻段**按精确帧索引拼接、不要交叉淡化**。
+     *
+     * ⚠️ 刻意**不放进 [ALL]**：体积大且属「档 2」功能，等实装完成后才在 UI 提示下载。
+     */
+    val MDX = ModelSpec(
+        id = "mdx",
+        displayName = "UVR MDX-Net 9482（人声分离）",
+        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/UVR_MDXNET_9482.onnx",
+        archive = false,
+        fileName = "UVR_MDXNET_9482.onnx",
+        approxMb = 28,
+        minBytes = 20_000_000L,
+    )
+
     val ALL: List<ModelSpec> = listOf(VAD, SEGMENTATION, EMBEDDING, GENDER)
 
     // ------------------------------------------------------------------ 路径

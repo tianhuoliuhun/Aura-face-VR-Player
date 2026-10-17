@@ -78,6 +78,15 @@ object OnnxCoexistSelfTest {
                 Log.e(TAG, "③ 性别模型步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
             }
 
+            // ④ 档2：MDX-Net 源分离模型的**签名探测**（输入/输出的名字、类型、形状）
+            //    这一步只把「模型契约」打出来 —— 拿到它才能确定 STFT 参数与张量布局，
+            //    否则 DSP 只能靠猜。
+            try {
+                mdxProbeStep(app)
+            } catch (t: Throwable) {
+                Log.e(TAG, "④ MDX 探测步骤抛 Java 异常：${t.javaClass.simpleName}: ${t.message}", t)
+            }
+
             Log.i(TAG, "===== ✓ 共存自检结束（本行出现且进程存活 ⇒ 两套 libonnxruntime 可共存）=====")
         }
     }
@@ -170,5 +179,54 @@ object OnnxCoexistSelfTest {
         } else {
             Log.i(TAG, "③ 性别模型推理 OK（${ms}ms）: male=%.3f female=%.3f".format(prob.first, prob.second))
         }
+    }
+
+    /**
+     * ④ 档2：**MDX-Net 模型签名探测**（只读，不推理）。
+     *
+     * 为什么先做这一步：MDX-Net 的输入布局（是波形？还是复数 STFT 的 real/imag 四通道？）
+     * 与频率/时间维的顺序**因导出而异**。猜错的话 DSP 与推理全错，而且很难从结果倒推。
+     * 这里把 `inputInfo` / `outputInfo` 的**名字、类型、形状**原样打出来，作为实现的唯一依据。
+     */
+    private suspend fun mdxProbeStep(context: Context) {
+        val spec = AudioGenderModels.MDX
+        if (!AudioGenderModels.isUsable(context, spec)) {
+            Log.i(TAG, "④ MDX 模型未就位 → 开始下载（约 ${spec.approxMb}MB，仅用于签名探测）")
+            val ok = AudioGenderModels.download(context, spec) { pct ->
+                if (pct == 100 || pct % 25 == 0) Log.i(TAG, "④ 下载进度 $pct%")
+            }
+            if (!ok) {
+                Log.e(TAG, "④ MDX 下载失败 → 跳过签名探测")
+                return
+            }
+            Log.i(
+                TAG,
+                "④ MDX 下载完成: ${AudioGenderModels.fileOf(context, spec).length() / 1048576}MB",
+            )
+        }
+        val env = OrtEnvironment.getEnvironment()
+        val opts = OrtSession.SessionOptions().apply { setIntraOpNumThreads(2) }
+        env.createSession(AudioGenderModels.fileOf(context, spec).absolutePath, opts).use { s ->
+            Log.i(TAG, "④ MDX session OK（模型已加载）")
+            // ⚠️ 不调用 NodeInfo 的具体 getter（跨 ORT 版本可能变化），直接 toString ——
+            //    它包含 name / type / shape，正是我们要的契约信息。
+            for ((name, info) in s.inputInfo) {
+                Log.i(TAG, "④ MDX INPUT  $name -> $info")
+            }
+            for ((name, info) in s.outputInfo) {
+                Log.i(TAG, "④ MDX OUTPUT $name -> $info")
+            }
+            // 🔴 关键：**DSP 参数就存在 ONNX 模型的 metadata 里**
+            //    （sherpa-onnx 的 C++ 实现 `offline-source-separation-uvr-model.cc` 就是从这读的：
+            //     n_fft / hop_length / win_length / dim_f / dim_t / dim_c / sample_rate /
+            //     window_type / center / stems）
+            //    → **绝对不要硬编码猜测**，按模型自带参数走。
+            val md = s.metadata
+            Log.i(TAG, "④ MDX metadata: producer=${md.producerName} graph=${md.graphName} ver=${md.version}")
+            for ((k, v) in md.customMetadata) {
+                Log.i(TAG, "④ MDX meta  $k = $v")
+            }
+        }
+        runCatching { opts.close() }
     }
 }
