@@ -250,6 +250,14 @@
     <string name="danmu_err_url_no_host">엔드포인트 주소에 호스트 이름이 없습니다. 슬래시 위치를 확인하세요(예: https://api.xiaomimimo.com/v1)</string>
     <string name="group_title_enhance">화질 향상</string>
     <string name="group_title_about">정보와 오픈소스 라이선스</string>
+    <string name="licenses_group_disclaimer">고지</string>
+    <string name="licenses_group_decoders">디코더(LGPL)</string>
+    <string name="licenses_group_engines">오픈소스 엔진</string>
+    <string name="licenses_group_models">AI 모델</string>
+    <string name="licenses_group_fonts">글꼴</string>
+    <string name="licenses_group_luts">LUT 프리셋</string>
+    <string name="licenses_group_maven">기타 의존성(Maven)</string>
+    <string name="licenses_lgpl_notice">위 LGPL 구성 요소는 별도의 동적 라이브러리로 사용되며 소스를 수정하지 않았습니다. 항목을 누르면 업스트림 저장소(소스 코드 및 라이선스 전문)가 열립니다. 이 라이브러리는 직접 교체할 수 있습니다.</string>
     <string name="licenses_title">오픈소스 라이선스</string>
     <string name="licenses_desc">이 앱이 사용한 오픈소스, 폰트, 모델을 확인할 수 있습니다</string>
     <string name="action_view">보기</string>
@@ -502,6 +510,7 @@
     <string name="engine_custom">사용자 지정 LLM / API</string>
     <string name="engine_mymemory">MyMemory 번역</string>
     <string name="engine_libretranslate">LibreTranslate</string>
+    <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google 번역(키 불필요)</string>
     <string name="engine_local_llm">로컬 AI 번역(오프라인)</string>
     <string name="translate_mymemory_cooldown">MyMemory 무료 한도를 초과했습니다. 약 %1$d분 후 재시도합니다</string>

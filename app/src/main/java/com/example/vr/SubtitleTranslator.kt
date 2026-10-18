@@ -133,6 +133,27 @@ enum class TranslationEngine(
         defaultBaseUrl = "",
         defaultModel = "",
         requiresApiKey = false
+    ),
+
+    /**
+     * v2.6.3：**DeepL 官方 API**（Free / Pro 共用同一套协议）。
+     *
+     * ## 为什么加它
+     * 现有引擎里，免密的 `BING` / `GOOGLE_FREE` 都是**网页端点的非官方调用**
+     * （存在服务条款风险，见 `docs/CONTENT_AND_SERVICE_DISCLAIMER.md`）；
+     * DeepL 是**官方接口、有明确条款**，且只需**一个 Key**，与现有的单 Key 输入框天然契合。
+     * 免费档每月 50 万字符，够个人用户看几十部片。
+     *
+     * ⚠️ [defaultBaseUrl] 故意留空：Free 档的 Key 以 `:fx` 结尾、必须打 `api-free.deepl.com`，
+     *    Pro 档打 `api.deepl.com` —— 由 [translateViaDeepl] 按 Key 后缀自动选择，
+     *    用户也可以手填 Base URL 覆盖。
+     */
+    DEEPL(
+        id = 11,
+        displayNameResId = R.string.engine_deepl,
+        defaultBaseUrl = "",
+        defaultModel = "",
+        requiresApiKey = true
     )
 }
 
@@ -1280,6 +1301,7 @@ class SubtitleTranslator(private val context: Context) {
                     // ⚠️ 若漏了这一行，它会落进下面的 `else` 被当成 OpenAI 兼容请求，
                     //    而本地引擎没有 baseUrl/Key → 必然失败且报错信息完全误导。
                     TranslationEngine.LOCAL_LLM -> translateViaLocalLlm(text, targetLangCode, priority)
+                    TranslationEngine.DEEPL -> translateViaDeepl(text, targetLangCode)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -1520,6 +1542,90 @@ class SubtitleTranslator(private val context: Context) {
      *  ② 识别错误文案（配额/限流/参数）判为失败，不写缓存；
      *  ③ 命中配额类错误后进入冷却期（[MYMEMORY_COOLDOWN_MS]），期内直接跳过不再打接口。
      */
+    /**
+     * v2.6.3：**DeepL 官方 API** 翻译。
+     *
+     * 请求：`POST {base}/v2/translate`，表单 `text` / `target_lang`，
+     * 认证走 Header `Authorization: DeepL-Auth-Key <key>`（不带 Bearer，容易写错）。
+     *
+     * ⚠️ **端点选择**：Free 档 Key 以 `:fx` 结尾 → `api-free.deepl.com`；Pro 档 → `api.deepl.com`。
+     *    用错端点的表现是 **403**，而报错信息不会告诉你"你该用另一个域名"，所以这里自动判断。
+     *    用户手填了 baseUrl 则以其为准（自建反代 / 企业内部代理的场景）。
+     *
+     * ⚠️ DeepL 单次请求有字符上限（Free 50k/次，实际字幕一行远低于此，不做前置裁剪）。
+     */
+    private suspend fun translateViaDeepl(text: String, targetLangCode: String): String {
+        val key = config.apiKey.trim()
+        if (key.isEmpty()) {
+            withContext(Dispatchers.Main) {
+                statusMessage = context.getString(
+                    R.string.translate_please_set_api_key,
+                    context.getString(config.engine.displayNameResId)
+                )
+            }
+            return ""
+        }
+        // 空 baseUrl 时按 Key 后缀自动选端点（见 KDoc）
+        val base = getActiveBaseUrl().trim().trimEnd('/').ifBlank {
+            if (key.endsWith(":fx")) "https://api-free.deepl.com" else "https://api.deepl.com"
+        }
+        val url = "$base/v2/translate"
+        val body = FormBody.Builder()
+            .add("text", text)
+            .add("target_lang", mapDeeplLang(targetLangCode))
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("Authorization", "DeepL-Auth-Key $key")
+                    .post(body)
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e(
+                            "SubtitleTranslator",
+                            "DeepL HTTP Error: ${response.code} (base=$base) ${response.body?.string()?.take(200)}"
+                        )
+                        withContext(Dispatchers.Main) {
+                            statusMessage = context.getString(R.string.subtitle_api_error, response.code)
+                        }
+                        return@withContext ""
+                    }
+                    val json = JSONObject(response.body?.string() ?: "")
+                    json.optJSONArray("translations")
+                        ?.optJSONObject(0)
+                        ?.optString("text")
+                        ?.trim()
+                        .orEmpty()
+                }
+            } catch (e: Exception) {
+                Log.e("SubtitleTranslator", "DeepL 请求失败: ${e.javaClass.simpleName} ${e.message}")
+                ""
+            }
+        }
+    }
+
+    /**
+     * DeepL 的 `target_lang` 与项目内部语言码的差异：
+     * - **全大写**（`ja` → `JA`）；
+     * - 中文必须区分简繁（`zh` → `ZH-HANS`，`zh-TW` → `ZH-HANT`），不能只写 `ZH`（旧值，已不推荐）；
+     * - 英语建议给区域（`EN-US`），单写 `EN` 虽然也能通，但部分账户会回落到默认区域。
+     */
+    private fun mapDeeplLang(code: String): String = when (code.lowercase()) {
+        "zh", "zh-cn", "zh-hans" -> "ZH-HANS"
+        "zh-tw", "zh-hk", "zh-hant" -> "ZH-HANT"
+        "en" -> "EN-US"
+        "ja" -> "JA"
+        "ko" -> "KO"
+        "fr" -> "FR"
+        "de" -> "DE"
+        "es" -> "ES"
+        "ru" -> "RU"
+        else -> code.uppercase()
+    }
+
     private suspend fun translateViaMyMemory(text: String, targetLangCode: String): String {
         // ③ 冷却期内直接跳过，避免持续连打（配额耗尽后需要等一段时间才恢复）
         val nowMs = System.currentTimeMillis()

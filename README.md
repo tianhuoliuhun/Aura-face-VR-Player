@@ -180,6 +180,26 @@ The README keeps only the **overview and getting started**; everything else is s
 
 ---
 
+## ⚠️ 版权与免责声明 / Copyright & Disclaimer
+
+**播放内容**：本应用是**纯播放工具**，不提供、不内置、不分发任何音视频内容。所有播放内容
+（本地文件 / 网络地址 / SMB / DLNA 推送）均由用户自行选择或提供，**用户须确保其拥有合法权利，
+并自行承担因播放未授权内容产生的责任**。字幕转写、翻译、AI 弹幕、截图与录制等衍生内容同样由用户负责。
+<br>**Played content**: this app is a pure playback tool — it ships no media. All content is provided by
+the user, who is responsible for having the rights to play it.
+
+**Bing 翻译**：「字幕在线翻译」的 Bing 引擎调用 **Bing 网页版翻译端点**（`cn.bing.com/ttranslatev3`），
+**不是 Microsoft 官方 API**。本项目与 Microsoft **无关联、未获授权与背书**（"Bing / Microsoft" 为微软商标，
+仅用于描述所调用的服务）。该端点面向浏览器设计，第三方程序自动化调用**可能不符合 Microsoft 服务条款**，
+可用性也可能随时变化 —— **商业分发建议改用有明确授权的官方接口**（如 Azure AI Translator）。
+启用该引擎时字幕文本会发送至该端点，请勿翻译敏感内容。
+<br>**Bing translation**: the Bing engine calls Bing's **web** endpoint, not an official Microsoft API.
+This project is not affiliated with or endorsed by Microsoft; automated use of that endpoint may not
+comply with Microsoft's terms — prefer an officially licensed API for commercial distribution.
+
+完整版见 **[内容与第三方服务声明](docs/CONTENT_AND_SERVICE_DISCLAIMER.md)**，
+第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [NOTICE](NOTICE)。
+
 ## 📄 许可声明 / License Notice
 
 本项目采用 **Apache License 2.0** 开源（见 [LICENSE](LICENSE)），Copyright © 2026 tianhuoliuhun。

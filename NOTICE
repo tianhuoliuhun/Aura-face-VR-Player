@@ -1,0 +1,64 @@
+Aura face VR Player
+Copyright 2026 Aura face VR Player contributors
+
+This product includes software developed by third parties. The complete list of
+components, their licenses, and how to obtain the corresponding source code are
+documented in:
+
+    THIRD_PARTY_NOTICES.md
+    (also shown in-app under Settings > About & Open-source licenses)
+
+Components requiring attribution:
+
+  GPUPixel
+    Copyright (c) PixPark
+    Apache License 2.0
+
+  libmpv / mpv
+    GNU Lesser General Public License v2.1 or later
+
+  FFmpeg
+    GNU Lesser General Public License v2.1 or later
+    (built without --enable-gpl; no GPL-only components are included)
+
+  ijkplayer
+    GNU Lesser General Public License v2.1
+    Copyright (c) Bilibili
+
+  MiSans
+    Xiaomi Inc. — free for commercial use under the MiSans font license
+
+  OPPO Sans
+    OPPO — free for commercial use under the OPPO Sans font license
+
+  llama.cpp / libmtmd
+    MIT License — Copyright (c) ggml contributors
+
+  sherpa-onnx
+    Apache License 2.0 — Copyright (c) k2-fsa
+
+  ONNX Runtime
+    MIT License — Copyright (c) Microsoft Corporation
+
+  MediaPipe (Face Landmarker)
+    Apache License 2.0 — Copyright (c) Google LLC
+
+  Silero VAD
+    MIT License — Copyright (c) Silero Team
+
+  Dolphin ASR
+    Apache License 2.0 — Copyright (c) Dataocean AI and Tsinghua University
+    (model weights converted to ONNX int8 for on-device inference)
+
+  MiniCPM-V 4.7 1B
+    Apache License 2.0 — Copyright (c) OpenBMB
+    (downloaded by the user at first use; not redistributed in this APK)
+
+Third-party trademarks (Huawei VR Glass, Pico, Quest, OpenAI, Bilibili and
+others) are the property of their respective owners and are used only to
+describe compatibility. This project is not affiliated with, endorsed by, or
+sponsored by any of them.
+
+Project source code:
+    https://github.com/tianhuoliuhun/Aura-face-VR-Player
+    Licensed under the Apache License, Version 2.0 (see LICENSE).

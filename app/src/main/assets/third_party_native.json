@@ -1,0 +1,168 @@
+{
+  "generated": "2026-10-18",
+  "groups": [
+    {
+      "titleKey": "licenses_group_disclaimer",
+      "items": [
+        {
+          "name": "播放内容的版权 / Copyright of played content",
+          "version": "",
+          "license": "由用户自行负责 / User's responsibility",
+          "url": "",
+          "note": "本应用是纯播放工具，不提供、不内置、不分发任何音视频内容。播放内容（本地文件 / 网络地址 / SMB / DLNA 推送）均由用户自行提供，用户须确保拥有合法权利并自行承担相应责任；字幕转写、翻译、AI 弹幕、截图与录制等衍生内容同样由用户负责。 / This app is a pure playback tool and ships no media. All content is supplied by the user, who must hold the rights to it and bears the corresponding responsibility; the same applies to subtitles, translations, AI danmaku and recordings derived from it."
+        },
+        {
+          "name": "Bing 翻译 / Bing translation",
+          "version": "",
+          "license": "非 Microsoft 官方 API / unofficial endpoint",
+          "url": "https://www.microsoft.com/servicesagreement",
+          "note": "字幕翻译的 Bing 引擎调用 Bing 网页版翻译端点（cn.bing.com/ttranslatev3），不是 Microsoft 官方 API；本应用与 Microsoft 无关联、未获授权与背书。该端点面向浏览器设计，第三方程序自动化调用可能不符合其服务条款，可用性亦可能随时变化——商业分发建议改用有明确授权的官方接口（如 Azure AI Translator）。启用时字幕文本会发送至该端点，请勿翻译敏感内容。 / The Bing engine uses Bing's web endpoint, not an official Microsoft API. This app is not affiliated with or endorsed by Microsoft; automated use of that endpoint may not comply with Microsoft's terms and its availability may change at any time. Subtitle text is sent to that endpoint — do not translate sensitive content."
+        }
+      ]
+    },
+    {
+      "titleKey": "licenses_group_decoders",
+      "items": [
+        {
+          "name": "libmpv (mpv-android)",
+          "version": "1.0.0",
+          "license": "LGPL-2.1-or-later",
+          "url": "https://github.com/mpv-player/mpv",
+          "note": "WMV / ASF / RM / RMVB 兜底解码内核；POM 声明的 MIT 仅覆盖 Java 封装层，libmpv.so 本体为 LGPL。可自行替换该 .so。"
+        },
+        {
+          "name": "FFmpeg",
+          "version": "libavcodec / libavformat / libavutil",
+          "license": "LGPL-2.1-or-later",
+          "url": "https://ffmpeg.org/legal.html",
+          "note": "容器解析、软解、无重编码转封装。构建未启用 --enable-gpl，不含 GPL-only 组件。"
+        },
+        {
+          "name": "ijkplayer",
+          "version": "k0.8.9",
+          "license": "LGPL-2.1",
+          "url": "https://github.com/bilibili/ijkplayer",
+          "note": "可选解码内核。"
+        }
+      ]
+    },
+    {
+      "titleKey": "licenses_group_engines",
+      "items": [
+        {
+          "name": "GPUPixel",
+          "version": "third_party/gpupixel",
+          "license": "Apache-2.0",
+          "url": "https://github.com/pixpark/gpupixel",
+          "note": "GPUPixel 美颜引擎（源码内嵌）。"
+        },
+        {
+          "name": "llama.cpp / libmtmd",
+          "version": "",
+          "license": "MIT",
+          "url": "https://github.com/ggml-org/llama.cpp",
+          "note": "端侧大模型推理。"
+        },
+        {
+          "name": "sherpa-onnx",
+          "version": "",
+          "license": "Apache-2.0",
+          "url": "https://github.com/k2-fsa/sherpa-onnx",
+          "note": "语音识别 / VAD / 说话人相关。"
+        },
+        {
+          "name": "ONNX Runtime",
+          "version": "",
+          "license": "MIT",
+          "url": "https://github.com/microsoft/onnxruntime",
+          "note": "性别分类 / 源分离等 ONNX 模型推理。"
+        }
+      ]
+    },
+    {
+      "titleKey": "licenses_group_models",
+      "items": [
+        {
+          "name": "Dolphin ASR (DataoceanAI)",
+          "version": "small · int8 ONNX",
+          "license": "Apache-2.0",
+          "url": "https://huggingface.co/DataoceanAI/dolphin-small",
+          "note": "随包内置；权重由上游 PyTorch 转换为 ONNX int8。允许商用（核实于 2026-10-18）。"
+        },
+        {
+          "name": "MiniCPM-V 4.7 1B (OpenBMB)",
+          "version": "Q4_K_M GGUF",
+          "license": "Apache-2.0",
+          "url": "https://huggingface.co/openbmb/MiniCPM-V-4.7-1B",
+          "note": "由用户首次使用时下载，不随包分发。允许商用、无额外登记（核实于 2026-10-18）。"
+        },
+        {
+          "name": "MediaPipe Face Landmarker",
+          "version": "",
+          "license": "Apache-2.0",
+          "url": "https://github.com/google-ai-edge/mediapipe",
+          "note": "478 点人脸关键点。"
+        },
+        {
+          "name": "Silero VAD",
+          "version": "",
+          "license": "MIT",
+          "url": "https://github.com/snakers4/silero-vad",
+          "note": "语音活动检测。"
+        }
+      ]
+    },
+    {
+      "titleKey": "licenses_group_fonts",
+      "items": [
+        {
+          "name": "MiSans",
+          "version": "variable",
+          "license": "小米 MiSans 字体授权（免费商用）",
+          "url": "https://hyperos.mi.com/font/",
+          "note": "可免费用于商业产品；不得修改字形、不得单独售卖字体。"
+        },
+        {
+          "name": "OPPO Sans",
+          "version": "4.0",
+          "license": "OPPO Sans 字体授权（免费商用）",
+          "url": "https://www.coloros.com/font/",
+          "note": "可免费用于商业产品；不得修改字形、不得单独售卖字体。"
+        }
+      ]
+    },
+    {
+      "titleKey": "licenses_group_luts",
+      "items": [
+        {
+          "name": "LUT 预设 · t0saki/lumix-original-looks",
+          "version": "18 个（编号 19-24、31-42）",
+          "license": "MIT",
+          "url": "https://github.com/t0saki/lumix-original-looks",
+          "note": "仅做格式规范化（重写 TITLE、统一换行与小数位），数值未改动。"
+        },
+        {
+          "name": "LUT 预设 · scernst13/HaldCLUT-Cube-Files",
+          "version": "6 个（编号 25-30）",
+          "license": "CC0-1.0",
+          "url": "https://github.com/scernst13/HaldCLUT-Cube-Files",
+          "note": "公共领域贡献，无署名义务。"
+        },
+        {
+          "name": "LUT 预设 · 本项目自研",
+          "version": "6 个（编号 43-48）",
+          "license": "Apache-2.0（随本项目）",
+          "url": "",
+          "note": "按美白诉求生成，不含第三方素材。"
+        },
+        {
+          "name": "LUT 预设 · 风格化 12 款",
+          "version": "编号 01-12",
+          "license": "来源待确认",
+          "url": "",
+          "note": "上线前需补登记来源，详见 docs/LUT_SOURCES.md。"
+        }
+      ]
+    }
+  ]
+}

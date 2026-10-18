@@ -276,6 +276,14 @@
     <string name="danmu_err_url_no_host">介面位址缺少主機名稱：請檢查斜線位置，例如 https://api.xiaomimimo.com/v1</string>
     <string name="group_title_enhance">畫質增強</string>
     <string name="group_title_about">關於與開源許可</string>
+    <string name="licenses_group_disclaimer">聲明</string>
+    <string name="licenses_group_decoders">解碼內核（LGPL）</string>
+    <string name="licenses_group_engines">開源引擎</string>
+    <string name="licenses_group_models">AI 模型</string>
+    <string name="licenses_group_fonts">字型</string>
+    <string name="licenses_group_luts">LUT 預設</string>
+    <string name="licenses_group_maven">其餘依賴（Maven）</string>
+    <string name="licenses_lgpl_notice">上述 LGPL 元件以獨立動態函式庫形式使用，未修改原始碼；點擊項目可開啟上游倉庫查看原始碼與授權全文。使用者可自行替換這些函式庫。</string>
     <string name="licenses_title">開源軟件許可</string>
     <string name="licenses_desc">查看本項目使用的開源組件、字體與模型</string>
     <string name="action_view">查看</string>
@@ -544,6 +552,7 @@
     <string name="engine_custom">自定義 LLM / API</string>
     <string name="engine_mymemory">MyMemory 翻譯</string>
     <string name="engine_libretranslate">LibreTranslate</string>
+    <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google 翻譯（免密）</string>
     <string name="engine_local_llm">本機 AI 翻譯（離線）</string>
     <string name="translate_mymemory_cooldown">MyMemory 已達免費額度，約 %1$d 分鐘後自動恢復</string>

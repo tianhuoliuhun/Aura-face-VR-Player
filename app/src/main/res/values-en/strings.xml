@@ -274,6 +274,14 @@
     <string name="danmu_err_url_no_host">Endpoint address is missing a host name — check the slashes, e.g. https://api.xiaomimimo.com/v1</string>
     <string name="group_title_enhance">Image enhancement</string>
     <string name="group_title_about">About &amp; open source licenses</string>
+    <string name="licenses_group_disclaimer">Notices</string>
+    <string name="licenses_group_decoders">Decoders (LGPL)</string>
+    <string name="licenses_group_engines">Open-source engines</string>
+    <string name="licenses_group_models">AI models</string>
+    <string name="licenses_group_fonts">Fonts</string>
+    <string name="licenses_group_luts">LUT presets</string>
+    <string name="licenses_group_maven">Other dependencies (Maven)</string>
+    <string name="licenses_lgpl_notice">The LGPL components above are used as separate dynamic libraries with no source modifications. Tap an entry to open its upstream repository for the source code and full license text. You may replace these libraries yourself.</string>
     <string name="licenses_title">Open source licenses</string>
     <string name="licenses_desc">Libraries, fonts and models used by this project</string>
     <string name="action_view">View</string>
@@ -542,6 +550,7 @@
     <string name="engine_custom">Custom LLM / API</string>
     <string name="engine_mymemory">MyMemory</string>
     <string name="engine_libretranslate">LibreTranslate</string>
+    <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google Translate (keyless)</string>
     <string name="engine_local_llm">On-device AI (offline)</string>
     <string name="translate_mymemory_cooldown">MyMemory free quota reached; will retry in about %1$d min</string>
