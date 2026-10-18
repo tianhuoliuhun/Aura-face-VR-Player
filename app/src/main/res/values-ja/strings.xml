@@ -891,9 +891,16 @@
     <string name="danmu_batch_size">每バッチ件数</string>
     <string name="danmu_section_display">表示効果</string>
     <string name="danmu_speed">スクロール速度</string>
+    <string name="danmu_speed_slow">遅い</string>
+    <string name="danmu_speed_standard">標準</string>
+    <string name="danmu_speed_fast">速い</string>
+    <string name="danmu_speed_very_fast">とても速い</string>
+    <string name="danmu_speed_fine">微調整</string>
+    <string name="danmu_speed_crossing">画面横断 ≈ %1$.1f 秒</string>
     <string name="danmu_max_tracks">レーン数</string>
     <string name="danmu_auto_tracks">行数の自動調整</string>
-    <string name="danmu_auto_tracks_desc">フォントサイズと使用可能な領域から行数を自動計算します。下の「最大トラック数」は上限になります</string>
+    <string name="danmu_auto_tracks_desc">フォントサイズと使用可能な領域から行数を自動計算します。オフにすると手動で指定できます</string>
+    <string name="danmu_auto_tracks_current">自動 · 現在 約 %1$d 行</string>
     <string name="danmu_opacity">不透明度</string>
     <string name="danmu_font_size">文字サイズ</string>
     <string name="danmu_privacy_hint">有効にすると画面が圧縮され、設定したサービスへ送信されます</string>
@@ -923,6 +930,10 @@
     <string name="danmu_status_imported">%1$d 件取り込み済み</string>
     <string name="danmu_status_import_source">ソース：ファイル読込</string>
     <string name="danmu_time_jitter">時間のばらつき</string>
+    <string name="danmu_jitter_weak">弱</string>
+    <string name="danmu_jitter_medium">中</string>
+    <string name="danmu_jitter_strong">強</string>
+    <string name="danmu_time_jitter_sigma">現在 σ = %1$d ms · 同じバッチの弾幕がずれて出る度合い</string>
     <string name="danmu_time_jitter_hint">同じバッチの弾幕は本来同時に出ます。ここではバッチ時刻を中心に正規分布でばらけさせ、自然な粗密を作ります。0 で無効（同時）。</string>
     <string name="danmu_time_jitter_off">オフ</string>
     <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->

@@ -154,6 +154,20 @@ class DanmuEngine {
     /** 轨道高度（px）。由渲染层按字号算好后同步。 */
     var trackHeightPx: Float = 0f
 
+    /**
+     * v2.6.2：字号折算出的像素高（渲染层用 `LocalDensity` 换算后同步）。
+     *
+     * ## 为什么引擎需要知道字号
+     * [pickTrack] 用「上一条的右边缘」判断同轨道能否复用，而 `DanmuItem.widthPx`
+     * 原来**只在渲染层第一次绘制时才回填**。刚 `items.add` 的条目在被绘制前
+     * `widthPx == 0f` → 上一条的尾巴被算成 `lastX + 0` → 间距偏大 →
+     * 判定「可以复用该轨道」→ **实际两条压在一起**（用户反馈的弹幕重叠）。
+     *
+     * 现在入队时就用 [estimateTextWidthPx] 估一个**偏保守**的宽度，
+     * 渲染层测到精确值后再覆盖（见 `DanmuOverlay`），避让判据不再依赖「是否已被画过」。
+     */
+    var fontSizePx: Float = DEFAULT_FONT_SIZE_PX
+
     // ---- v2.4.7：批次时间戳（正态分布抖动）----
 
     /**
@@ -162,6 +176,27 @@ class DanmuEngine {
      * 由调用方从 `DanmuConfig.timeJitterMs` 同步。详见 [spreadBornTimes] 的说明。
      */
     var timeJitterMs: Float = DEFAULT_TIME_JITTER_MS
+
+    /**
+     * v2.6.2：**抖动可观测性** —— 最近一批实际采用的出生延迟（ms，升序）。
+     *
+     * 抖动本身是统计行为，单看画面很难判断「σ 改了到底有没有生效」。
+     * 这里保留一份最近一批的延迟序列，供单测断言 / 调试面板展示：
+     * - 全部为 0 → 本批没有错开（σ=0，或只有 1 条）；
+     * - 末项 > 0 → 本批最大延迟，即「第 N 条比第 1 条晚多久出现」。
+     *
+     * ⚠️ 只保留**最近一批**（覆盖写），不累积 —— 避免长跑页面持有无界数组。
+     */
+    var lastBatchDelaysMs: LongArray = LongArray(0)
+        private set
+
+    /**
+     * v2.6.2：可选的调试输出口（默认 null = 零开销）。
+     *
+     * 引擎不依赖 Android `Log`（要保持纯 JVM 可单测），需要日志时由调用方注入。
+     * 测试里也用它断言「抖动链路真的走到了」。
+     */
+    var debugSink: ((String) -> Unit)? = null
 
     /** 队列上限：防止模型高频返回时无限堆积（参考 DanmuAI 的 300） */
     var maxPending: Int = MAX_PENDING_DEFAULT
@@ -208,9 +243,30 @@ class DanmuEngine {
      *
      *   给「外部导入弹幕」用 —— 导入的弹幕带自己的时间戳，不该再被随机抖动打散。
      *   传入时该条**直接采用该时刻**，并跳过正态抖动。
+     * @param floorMs     出生时刻的**硬下限**（默认为 [nowMs]）。
+     *
+     *   ## v2.6.2：为什么需要它（修「弹幕从屏幕中间冒出」）
+     *   调用方的 [nowMs] 是**内容基准时刻**，可能因为要"对齐截图那一刻的画面时间轴"
+     *   而早于真实渲染时刻（例如 `now - driftMs`）。引擎再对它做「只向未来」的抖动，
+     *   得到的 `bornMs` 仍可能早于渲染时钟 → 位置公式 `now - born > 0` → 弹幕一出生
+     *   就在屏幕内部。
+     *
+     *   把「内容基准时刻」与「渲染时钟下限」拆成两个参数后，调用方可以传
+     *   `enqueue(lines, contentBaseMs, floorMs = elapsedRealtime())`，
+     *   引擎保证 `bornMs >= floorMs` —— 从源头保证每条都从右缘飞入。
+     *
+     *   ⚠️ 只对**抖动出来的时刻**生效；[baseTimesMs] 里的显式时刻仍然**原样采用**
+     *   （导入弹幕的时间轴不能被改写）。
      * @return 实际入队条数
      */
-    fun enqueue(texts: List<String>, nowMs: Long, baseTimesMs: LongArray? = null): Int {
+    fun enqueue(
+        texts: List<String>,
+        nowMs: Long,
+        baseTimesMs: LongArray? = null,
+        floorMs: Long = nowMs
+    ): Int {
+        // 每批都重置统计，避免空批次/全被 maxPending 挡下时仍显示上一批的延迟。
+        lastBatchDelaysMs = LongArray(0)
         if (texts.isEmpty()) return 0
 
         // ① 先算好「本次要通过的文本+出生时刻」，再做轨道分配。
@@ -249,14 +305,29 @@ class DanmuEngine {
             //      · |jitter| 升序后按原下标取用 → AI 输出顺序仍严格单调；
             //      · 分布是半正态，错落感保留（只是不再有"提前出生"）。
             //    ⚠️ 绝对上限 [MAX_BIRTH_DELAY_MS]：σ 调得很大时不能把弹幕推迟到十几秒后。
+            //
+            // 🔴 v2.6.2：`delays.sort()` 后是**单调递增**的（第 k 条拿第 k 小的延迟），
+            //    按原下标分配 → 出生时刻严格单调不减，视觉上是"依次错落"而不是"挤成一团"。
+            //    旧的对称抖动排序后其实也是有序的，但其中一半是负数 → 那些条目一出生就在屏内，
+            //    看起来反而像"同一刻从中间冒出来"，掩盖了错落感。改成半正态后抖动才看得出来。
             val delays = LongArray(spread.size) { k ->
                 val d = spread[k] - nowMs
                 (if (d < 0L) -d else d).coerceAtMost(MAX_BIRTH_DELAY_MS)
             }
             delays.sort()
             for ((k, ci) in jitterIndices.withIndex()) {
-                candidates[ci].bornMs = nowMs + delays[k]
+                // floorMs：内容基准时刻可能早于真实渲染时钟（见 KDoc），这里兜住下限。
+                candidates[ci].bornMs = maxOf(nowMs + delays[k], floorMs)
             }
+            // 统计值按**实际出生时刻**记录（含 floorMs 校正），才是用户真正看到的错落量。
+            lastBatchDelaysMs = LongArray(jitterIndices.size) { k ->
+                candidates[jitterIndices[k]].bornMs - floorMs
+            }
+            // 可观测性：抖动到底是"没生效"还是"生效了但看不出"，靠这几个数区分。
+            debugSink?.invoke(
+                "danmu jitter: σ=${timeJitterMs}ms, count=${lastBatchDelaysMs.size}, " +
+                    "delays=${lastBatchDelaysMs.joinToString(",")}, floorMs=$floorMs"
+            )
         }
 
         // ③ 交给共用的插入流程（去重 + 轨道分配 + 上色）
@@ -352,7 +423,17 @@ class DanmuEngine {
             val specified = colorOf(ci)
             val color = specified ?: DanmuConfig.pickColor(colorMode, singleColor, randomProvider)
 
-            items.add(DanmuItem(text = c.text, track = track, bornMs = c.bornMs, color = color))
+            // v2.6.2：**入队时就给一个保守宽度估计**（见 fontSizePx 的说明）。
+            // 渲染层测到精确值后会覆盖；覆盖只发生在差异明显时，避免逐帧抖动。
+            items.add(
+                DanmuItem(
+                    text = c.text,
+                    track = track,
+                    bornMs = c.bornMs,
+                    widthPx = estimateTextWidthPx(c.text, fontSizePx),
+                    color = color
+                )
+            )
             usedTracks.add(track)
             recentTexts.addLast(c.text)
             while (recentTexts.size > DEDUP_WINDOW) recentTexts.removeFirst()
@@ -558,7 +639,12 @@ class DanmuEngine {
      * 最小安全间距。
      *
      * 与速度挂钩：速度越快，前后两条擦肩而过的时间越短，需要更大的空间间隔
-     * （否则视觉上会「粘」在一起）。经验值：速度(px/s) × 0.35 秒。
+     * （否则视觉上会「粘」在一起）。经验值：速度(px/s) × 0.45 秒。
+     *
+     * ## v2.6.2：0.35 → 0.45
+     * 默认速度 220px/s 时旧间距只有 77px（≈1.4 个汉字宽），同轨道两条前后脚擦过时
+     * 仍会觉得"贴着"。0.45 秒 = 99px，配合保守的宽度估计（[estimateTextWidthPx]），
+     * 肉眼可辨的间隙才稳定成立。
      */
     private fun minGapPx(): Float {
         val bySpeed = speedPxPerSec * TRACK_GAP_SECONDS
@@ -573,10 +659,25 @@ class DanmuEngine {
         const val DEDUP_WINDOW = 50
 
         /** 轨道最小间距下限（px） */
-        private const val GAP_PX_MIN = 48f
+        private const val GAP_PX_MIN = 64f
 
-        /** 轨道安全间隔（秒） */
-        private const val TRACK_GAP_SECONDS = 0.35f
+        /** 轨道安全间隔（秒）。v2.6.2：0.35 → 0.45（见 [minGapPx] 的实测说明）。 */
+        private const val TRACK_GAP_SECONDS = 0.45f
+
+        /**
+         * v2.6.2：默认字号像素高 = 18sp @ 3x 密度（与 [DanmuConfig.DEFAULT_FONT_SIZE_SP] 对应）。
+         *
+         * 仅作为渲染层同步前的兜底；生产环境 `DanmuOverlay` 每帧布局都会同步真实值。
+         */
+        const val DEFAULT_FONT_SIZE_PX = 54f
+
+        /**
+         * v2.6.2：文本宽度估计的**安全系数**。
+         *
+         * 估计值只用于「同轨道避让」，宁可偏大（多等一会儿）也不能偏小（重叠）。
+         * 1.08 覆盖字距 / 抗锯齿 / 中英文混排的额外宽度。
+         */
+        private const val WIDTH_SAFETY_FACTOR = 1.08f
 
         /**
          * 同批弹幕的出生时间错开量（ms）。—— **v2.4.7 起已被正态抖动取代**，
@@ -624,8 +725,19 @@ class DanmuEngine {
          * 也就是「行距自适应」在默认配置下会被区域封顶、**完全感受不到变化**。
          * 这正是本版把区域改为「随内容自适应」而非固定值的原因。
          * 0.45 给内容留出足够空间，同时仍把字幕区（通常在下半部）让出来。
+         *
+         * ## v2.6.2：0.45 → 0.60（修「设 8 行只出 6 行」）
+         * 0.45 是按「1080×2400 竖屏」验算的，但横屏播放（如 MuMu 1440px 高、
+         * 字号 18sp@3x=54px）只有 `1440 × 0.45 = 648px`，而 8 行需要
+         * `8 × 54 × 1.9 = 820.8px` → `autoTrackCount` 只算出 **6 行**：
+         * 用户明明把「轨道数」设成 8，屏幕上却最多 6 行。
+         * 0.60 在 1440px 高度下给到 864px，刚好容下 8 行（57% 屏高），
+         * 仍保留「弹幕区不超过屏高六成、不遮住整个画面」的防护。
+         *
+         * ⚠️ 该值只影响**自动模式**的区域上限；手动模式仍严格按用户设定的行数，
+         *    超出时由 [computeTrackHeightPx] 压缩行距（不会溢出屏幕）。
          */
-        const val AREA_HEIGHT_RATIO_MAX = 0.45f
+        const val AREA_HEIGHT_RATIO_MAX = 0.60f
 
         /**
          * v2.4.6：行距自适应 —— 计算**弹幕区高度**（px）。
@@ -691,6 +803,65 @@ class DanmuEngine {
             if (areaHeightPx <= 0f) return natural
             val fit = areaHeightPx / tracks
             return min(natural, fit)
+        }
+
+        /**
+         * v2.6.2：**纯计算**的文本宽度估计（px）。
+         *
+         * ## 为什么需要
+         * 轨道避让要比较「上一条的右边缘」与屏幕右缘的间距，而上一条的精确宽度
+         * 只有渲染层测量后才知道。若入队时宽度为 0，避让会**高估**可用间距 →
+         * 同一轨道前后两条重叠（见 [DanmuEngine.fontSizePx] 的说明）。
+         *
+         * 这里按字符类别估一个略偏大的宽度：
+         * - CJK / 假名 / 谚文 / 全角符号：**1.0×** 字号
+         * - ASCII（半角字母数字标点）：**0.55×** 字号
+         * - 其它（emoji、生僻文字等）：**0.8×** 字号
+         * - 最后统一乘 [WIDTH_SAFETY_FACTOR]（1.08）
+         *
+         * ⚠️ 这只是**避让用的保守估计**，不是排版结果；渲染层测到精确宽度后会覆盖。
+         * ⚠️ 保持纯函数（无 Android 依赖），便于单测。
+         *
+         * @param text        文本
+         * @param fontSizePx  字号像素高（<=0 或非法 → 返回 0）
+         * @return 估计宽度（px）
+         */
+        fun estimateTextWidthPx(text: String, fontSizePx: Float): Float {
+            if (text.isEmpty() || fontSizePx <= 0f || !fontSizePx.isFinite()) return 0f
+            var units = 0f
+            var i = 0
+            while (i < text.length) {
+                val cp = Character.codePointAt(text, i)
+                units += when {
+                    isFullWidthCodePoint(cp) -> 1.0f
+                    cp < 0x80 -> 0.55f
+                    else -> 0.8f
+                }
+                i += Character.charCount(cp)
+            }
+            return units * fontSizePx * WIDTH_SAFETY_FACTOR
+        }
+
+        /**
+         * 是否「全角宽」字符（CJK 汉字、假名、谚文、全角标点等）。
+         *
+         * 覆盖范围按 Unicode Block 粗分，不追求逐字符精确 —— 宽度估计只需要
+         * 「中日韩文字按 1em、ASCII 按 0.55em」这个量级正确。
+         */
+        private fun isFullWidthCodePoint(cp: Int): Boolean = when (cp) {
+            in 0x1100..0x115F,     // 谚文字母
+            in 0x2E80..0x303E,     // 部首 / 康熙字典 / CJK 符号标点
+            in 0x3041..0x33FF,     // 平假名 / 片假名 / 注音 / 兼容字符
+            in 0x3400..0x4DBF,     // CJK 扩展 A
+            in 0x4E00..0x9FFF,     // CJK 统一表意文字
+            in 0xA000..0xA4CF,     // 彝文
+            in 0xAC00..0xD7A3,     // 谚文音节
+            in 0xF900..0xFAFF,     // CJK 兼容表意文字
+            in 0xFE30..0xFE4F,     // CJK 兼容形式
+            in 0xFF00..0xFF60,     // 全角 ASCII / 全角标点
+            in 0xFFE0..0xFFE6,     // 全角符号
+            in 0x20000..0x3FFFD -> true   // CJK 扩展 B 及以后
+            else -> false
         }
 
         /**
@@ -782,6 +953,13 @@ class DanmuEngine {
          * 这样弹幕一律从屏幕右侧飞入。但 σ 被调得很大时（用户可调到几秒），
          * 延迟会大到「弹幕比画面晚十几秒才出现」—— 完全失去意义。
          * 这里兜一个 2.5 秒的绝对上限：σ 再大，最多晚 2.5 秒。
+         *
+         * ## v2.6.2：与新版 UI 的档位对齐
+         * 设置面板的抖动档位改为「关闭 / 弱 200 / 中 400 / 强 800」，
+         * 最大档 σ=800 的理论截断是 `2.5 × 800 = 2000ms < 2500ms` —— **不会被本上限压平**，
+         * 三档强弱在出生时刻上是**可区分**的（延迟极差约 0 / 0.5 / 1 / 2 秒）。
+         * 旧 prefs 里若残留更大的 σ（最长 10 秒），本上限仍会把它压到 2.5 秒，
+         * 这是刻意的防御：宁可控住滞后，也不让弹幕晚十几秒才出现。
          */
         const val MAX_BIRTH_DELAY_MS = 2_500L
 

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.os.SystemClock
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -281,6 +282,11 @@ private fun DanmuEye(
         } else {
             max(contentAreaPx, baseAreaPx).coerceAtMost(capAreaPx)
         }
+        // v2.6.2：三条线必须自洽 —— `trackCount × trackHeightPx ≈ areaHeightPx`。
+        // 自动模式下 trackCount 由 autoTrackCount 按同一个 cap 反算，所以内容高度
+        // 天然 ≤ cap（例如 1440px 高 × 0.60 = 864 ≥ 8 × 102.6 = 820.8），
+        // areaHeightPx == contentAreaPx → computeTrackHeightPx 取 natural，
+        // 行高**不会被二次压缩**。手动模式行数超过 cap 时才会压缩行距（防止溢出屏幕）。
         val trackHeightPx = DanmuEngine.computeTrackHeightPx(
             fontSizePx = fontSizePx,
             areaHeightPx = areaHeightPx,
@@ -291,9 +297,12 @@ private fun DanmuEye(
         //    轨道高度也在此同步（引擎的间距判据会用到）。
         // ⚠️ key 用 trackCount（实际生效值）而不是 engine.maxTracks ——
         //    开自适应时后者只是上限，用它做 key 会在「上限没变但算出的行数变了」时漏更新。
-        LaunchedEffect(widthPx, areaHeightPx, trackCount, trackHeightPx) {
+        LaunchedEffect(widthPx, areaHeightPx, trackCount, trackHeightPx, fontSizePx) {
             engine.screenWidthPx = widthPx
             engine.trackHeightPx = trackHeightPx
+            // v2.6.2：字号也要同步 —— 引擎在**入队时**用 estimateTextWidthPx 估宽度，
+            // 不再等渲染层第一次绘制才回填 widthPx（否则同轨道避让按 0 宽算 → 重叠）。
+            engine.fontSizePx = fontSizePx
             // ===== v2.4.41（弹幕审查 #3）：把**实际生效的轨道数**同步给引擎 =====
             // 引擎 `pickTrack` 之前只用 `maxTracks`（用户上限），而「行数自适应」算出的真实行数
             // （`trackCount`）只有渲染层知道 → 引擎会把弹幕分到区域外的行上，被 clipRect 裁掉。
@@ -339,8 +348,13 @@ private fun DanmuEye(
                     // v2.6.1：**每次测量后都同步宽度**（原来只在 widthPx==0 时回填）。
                     // 用户中途调字号时 layout 宽度会变，若宽度停在旧值，轨道避让（`pickTrack`
                     // 用 widthPx 算上一条的尾巴）就会按错宽度判断 → 长弹幕可能重叠。
+                    // v2.6.2：入队时已用 `estimateTextWidthPx` 给了保守估计，这里只在
+                    // **差异明显时**覆盖（>5% 且 >2px）—— 避免估算与实测的小差异每帧来回写，
+                    // 同时保证字号/字体变化后仍能纠正到精确值。
                     val measuredW = layout.size.width.toFloat()
-                    if (measuredW > 0f && item.widthPx != measuredW) {
+                    if (measuredW > 0f &&
+                        abs(measuredW - item.widthPx) > max(2f, item.widthPx * 0.05f)
+                    ) {
                         item.widthPx = measuredW
                     }
 
@@ -467,8 +481,11 @@ private const val LAYOUT_CACHE_SIZE = 256
  *
  * 设置里的速度是绝对 px/s，但穿屏时间 = 屏宽 ÷ 速度 —— 同一档速度在 1080p 屏 ≈4.9s，
  * 在 2K/平板（2560px）要 ≈11.6s。以 1080px 为基准等比缩放后，各分辨率穿屏时间基本一致。
+ *
+ * v2.6.2：改为 `internal`，供设置面板把速度换算成「穿屏 ≈ X.X 秒」的直观文案。
+ * 因为渲染层做了按屏宽归一化，穿屏时间恒为 `1080 / speed`，与设备分辨率无关。
  */
-private const val REFERENCE_SCREEN_WIDTH_PX = 1080f
+internal const val REFERENCE_SCREEN_WIDTH_PX = 1080f
 
 /** 归一化后的速度下限：避免窄屏（如分屏单眼）把速度压到几乎不动。 */
 private const val MIN_SPEED_PX_PER_SEC = 60

@@ -2223,9 +2223,15 @@ fun VRPlayerScreen(
                             "弹幕批丢弃：响应与截图位置相差 ${driftMs}ms（>${DANMU_LATE_DROP_MS}ms）"
                         )
                     } else {
-                        // 出生时刻按「截图位置」倒推（= now − 已过去的时长），
-                        // 于是弹幕在屏上的位置与该条对应的画面时间轴一致。
-                        val spawnBaseMs = now - driftMs.coerceAtLeast(0L)
+                        // 🔴 v2.6.2：**不再倒推出生时刻**。
+                        //    旧实现 `spawnBaseMs = now - driftMs` 是为了让弹幕位置"对齐截图那一刻的画面
+                        //    时间轴"，但代价是 bornMs 早于当前时刻 → 位置公式里 elapsed > 0 →
+                        //    弹幕一出生就已经在屏幕内部（用户反馈的「从屏幕中间冒出」）。
+                        //    「对齐时间轴」与「必须从右缘飞入」本质冲突，只能二选一 ——
+                        //    既然要求只能从右缘飞入，就不再补偿这段已过去的时长：
+                        //    偏离过大（> DANMU_LATE_DROP_MS）的批次上面已经整批丢弃，
+                        //    剩下的滞后在可接受范围内。
+                        val spawnBaseMs = now
                         val added = danmuEngine.enqueue(fetched.lines, spawnBaseMs)
                         danmuGeneratedCount += added
                         // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）

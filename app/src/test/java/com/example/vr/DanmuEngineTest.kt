@@ -29,6 +29,9 @@ class DanmuEngineTest {
         engine.screenWidthPx = 1000f
         engine.speedPxPerSec = 200
         engine.trackHeightPx = 40f
+        // v2.6.2：这些用例断言的是「轨道/生命周期」而非抖动，必须关掉随机抖动，
+        // 否则出生时刻会被随机推迟（最多 MAX_BIRTH_DELAY_MS），prune 的时机会随机失败。
+        engine.timeJitterMs = 0f
         return engine to clock
     }
 

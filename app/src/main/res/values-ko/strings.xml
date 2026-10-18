@@ -891,9 +891,16 @@
     <string name="danmu_batch_size">배치당 개수</string>
     <string name="danmu_section_display">표시 효과</string>
     <string name="danmu_speed">스크롤 속도</string>
+    <string name="danmu_speed_slow">느리게</string>
+    <string name="danmu_speed_standard">표준</string>
+    <string name="danmu_speed_fast">빠르게</string>
+    <string name="danmu_speed_very_fast">매우 빠르게</string>
+    <string name="danmu_speed_fine">세부 조정</string>
+    <string name="danmu_speed_crossing">화면 통과 ≈ %1$.1f초</string>
     <string name="danmu_max_tracks">트랙 수</string>
     <string name="danmu_auto_tracks">행 수 자동 조정</string>
-    <string name="danmu_auto_tracks_desc">글꼴 크기와 사용 가능 영역으로 행 수를 자동 계산합니다. 아래 값은 상한이 됩니다</string>
+    <string name="danmu_auto_tracks_desc">글꼴 크기와 사용 가능 영역으로 행 수를 자동 계산합니다. 끄면 직접 지정할 수 있습니다</string>
+    <string name="danmu_auto_tracks_current">자동 · 현재 약 %1$d행</string>
     <string name="danmu_opacity">불투명도</string>
     <string name="danmu_font_size">글자 크기</string>
     <string name="danmu_privacy_hint">활성화하면 화면이 압축되어 설정한 서비스로 전송됩니다</string>
@@ -923,6 +930,10 @@
     <string name="danmu_status_imported">%1$d개 가져옴</string>
     <string name="danmu_status_import_source">소스: 로컬 가져오기</string>
     <string name="danmu_time_jitter">시간 흩뿌리기</string>
+    <string name="danmu_jitter_weak">약</string>
+    <string name="danmu_jitter_medium">중</string>
+    <string name="danmu_jitter_strong">강</string>
+    <string name="danmu_time_jitter_sigma">현재 σ = %1$d ms · 같은 배치 탄막이 엇갈려 나오는 정도</string>
     <string name="danmu_time_jitter_hint">같은 배치의 탄막은 원래 동시에 나옵니다. 배치 시각을 중심으로 정규분포로 흩뿌려 자연스럽게 엇갈리게 합니다. 0 = 끄기(동시).</string>
     <string name="danmu_time_jitter_off">끄기</string>
     <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->

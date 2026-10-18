@@ -398,29 +398,45 @@
 
 ## 💬 AI 弹幕 / AI Danmaku（v2.4.0 起）
 
-- **只从屏幕右侧飞入**（v2.6.1）：弹幕位置完全由「出生时刻」推导
+- **只从屏幕右侧飞入**（v2.6.1 / v2.6.2）：弹幕位置完全由「出生时刻」推导
   （`x = 屏宽 − 已播秒数 × 速度`）。时间戳带抖动时，出生时刻若**早于当前时刻**，
-  按原公式弹幕一出生就已经在屏幕内部（凭空从画面中间冒出来）。
-  现在两层保证：抖动**只向未来**（取 `|jitter|` 后重排、上限 2.5 秒），
-  且位置公式把「已播秒数」夹到 ≥ 0 → **每条弹幕都从右缘起步**
-  - Always enters from the right edge (v2.6.1): jitter is now positive-only (absolute value,
-    re-sorted, capped at 2.5s) and the elapsed time is clamped to ≥ 0, so every item starts outside
-    the right edge instead of appearing mid-screen
+  按原公式弹幕一出生就已经在屏幕内部（凭空从画面中间冒出来）。现在三层保证：
+  ① 抖动**只向未来**（取绝对值后重排，上限 2.5 秒）；
+  ② 位置公式把「已播秒数」夹到 ≥ 0；
+  ③ `enqueue` 支持 `floorMs` 硬下限 —— 调用方的「内容基准时刻」可能因对齐时间轴而早于渲染时钟，
+  引擎保证 `bornMs ≥ floorMs`，从源头免疫（导入弹幕的显式时间戳不受影响）
+  - Always enters from the right edge (v2.6.1/v2.6.2): jitter is positive-only (absolute value,
+    re-sorted, capped at 2.5s), elapsed time is clamped to ≥ 0, and `enqueue` accepts a `floorMs`
+    hard floor so a content-baseline timestamp in the past can never place an item mid-screen
 - **滚动速度按屏宽归一化**（v2.6.1）：设置里的速度是 px/s，穿屏时间 = 屏宽 ÷ 速度 ——
   同一档在 1080p 屏约 4.9 秒、在 2K/平板要 11 秒以上。现在以 1080px 为基准等比缩放，
   各分辨率与分屏单眼的「穿屏时间」基本一致（此前引擎的速度字段从未被渲染层同步，
-  拖动滑条其实无效，也已一并修掉）
+  拖动滑条其实无效，也已一并修掉）。设置面板因此可以直接显示「穿屏 ≈ X.X 秒」
   - Scroll speed is normalized against a 1080px reference width (v2.6.1), so time-to-cross stays
     consistent across resolutions and per-eye split-screen widths; the engine's speed field is now
     actually synced from settings (it previously stayed at the default, making the slider a no-op)
 - **时间戳正态抖动**（v2.4.7 起，σ 可调、0 = 关闭）：同一批弹幕以基准时刻为均值做高斯抖动，
   截断在 ±2.5σ（另有绝对上限），抖动值**升序后按原下标取用** —— AI 返回顺序严格单调，
-  表现为「错落出现」而不是「一坨同时冒出」
+  表现为「错落出现」而不是「一坨同时冒出」。v2.6.2 起改为**半正态**（只向后延、最大 2.5 秒），
+  并在引擎里暴露 `lastBatchDelaysMs`（最近一批的实际延迟序列）供调试与单测断言
   - Normal-distributed timestamps: Gaussian jitter around the batch instant, clipped at ±2.5σ,
-    sorted then consumed by original index so the AI output order stays monotonic
-- **轨道（行）分配**（v2.4.41 / v2.6.1）：优先用空轨道；没有空轨道时选「与上一条间距最大」的那条，
-  间距需 ≥ 速度 × 0.35 秒；**本批把空轨道用尽后允许回头复用本批已占轨道**（只要间距真的够）——
-  否则一批 6 条而屏上只有 4 行时，最后 2 条会被整批丢弃
+    sorted then consumed by original index so the AI output order stays monotonic. Since v2.6.2 it is
+    a half-normal (delays only, capped at 2.5s) and the engine exposes `lastBatchDelaysMs` for
+    observability
+- **轨道（行）分配**（v2.4.41 / v2.6.1 / v2.6.2）：优先用空轨道；没有空轨道时选「与上一条间距最大」的那条，
+  间距需 ≥ 速度 × **0.45 秒**（v2.6.2 由 0.35 加大，下限 64px）；**本批把空轨道用尽后允许回头复用
+  本批已占轨道**（只要间距真的够）—— 否则一批 6 条而屏上只有 4 行时，最后 2 条会被整批丢弃。
+  同轨道避让用的是**入队时估算的文本宽度**（`estimateTextWidthPx`：CJK 1.0em / ASCII 0.55em × 1.08 安全系数），
+  不再依赖「渲染层是否已经画过这条」—— 此前新条目 `widthPx = 0` 会让尾巴间距被高估，导致同轨道重叠
+  - Track allocation prefers empty rows, then the largest gap (≥ speed × 0.45s, floor 64px); a batch
+    may reuse its own tracks once empty rows run out. Gap checks use a conservative width estimate
+    made at enqueue time (CJK 1.0em / ASCII 0.55em × 1.08) instead of waiting for the renderer to
+    measure the item, which previously let two items overlap on the same row
+- **弹幕区高度上限 60% 屏高**（v2.6.2）：自动行数 = `floor(屏高 × 0.60 / (字号 × 1.9))`。
+  旧值 45% 在横屏（1440px 高、18sp）只算出 **6 行**，而用户设的 8 行只是上限、永远够不到；
+  0.60 让 8 行能真正排下，同时仍保留「弹幕不遮满画面」的防护
+  - The danmaku area is capped at 60% of the screen height (v2.6.2); the old 45% cap yielded only
+    six rows on landscape screens, so a configured 8 rows was never reachable
   - Track allocation prefers empty rows, then the largest gap (≥ speed × 0.35s); a batch may reuse
     its own tracks once empty rows run out, so candidates are not dropped just because the batch is
     wider than the number of rows

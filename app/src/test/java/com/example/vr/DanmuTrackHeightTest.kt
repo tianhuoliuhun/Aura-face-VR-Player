@@ -193,8 +193,10 @@ class DanmuTrackHeightTest {
     }
 
     @Test
-    fun `区域上限比例为 0_45`() {
-        assertEquals(0.45f, DanmuEngine.AREA_HEIGHT_RATIO_MAX, 0.001f)
+    fun `区域上限比例为 0_60`() {
+        // v2.6.2：0.45 → 0.60。0.45 在横屏 1440px 高下只够 6 行（648/102.6），
+        // 用户设 8 行时会被自动行数悄悄压成 6 行。
+        assertEquals(0.60f, DanmuEngine.AREA_HEIGHT_RATIO_MAX, 0.001f)
     }
 
     // ============================================================ 默认参数观感（回归）
@@ -225,13 +227,13 @@ class DanmuTrackHeightTest {
 
     @Test
     fun `大字号且轨道多时会顶到上限但仍不溢出屏幕`() {
-        // 极端：20 轨 × 32sp@3x(=96px) → 内容 3648px，屏高 2400 → 上限 1080
+        // 极端：20 轨 × 32sp@3x(=96px) → 内容 3648px，屏高 2400 → 上限 1440（0.60）
         val screenH = 2400f
         val area = DanmuEngine.computeAreaHeightPx(96f, screenH, 20)
         assertEquals(screenH * DanmuEngine.AREA_HEIGHT_RATIO_MAX, area, 0.01f)
         val trackH = DanmuEngine.computeTrackHeightPx(96f, area, 20)
-        // 行距被压到 54px（= area/tracks），比理想 182.4 小，但保证 20 轨都在区内
-        assertEquals(54f, trackH, 0.01f)
+        // 行距被压到 72px（= area/tracks），比理想 182.4 小，但保证 20 轨都在区内
+        assertEquals(72f, trackH, 0.01f)
         assertTrue("总高不应超出区域", trackH * 20 <= area + 0.01f)
     }
 
@@ -242,9 +244,25 @@ class DanmuTrackHeightTest {
     @Test
     fun `行数自适应用满可用区域`() {
         // 1080×2400 / 18sp@3x(=54px)：
-        //   可用 = 2400 × 0.45 = 1080，单行 = 54 × 1.9 = 102.6 → floor = 10 行
+        //   v2.6.2 起可用 = 2400 × 0.60 = 1440，单行 = 54 × 1.9 = 102.6 → floor = 14 行
         val n = DanmuEngine.autoTrackCount(screenHeightPx = 2400f, fontSizePx = 54f, limit = 20)
-        assertEquals(10, n)
+        assertEquals(14, n)
+    }
+
+    @Test
+    fun `横屏 1440px 高时默认 8 行能真正排下`() {
+        // v2.6.2 的核心回归：MuMu 横屏高 1440px、18sp@3x=54px、maxTracks=8。
+        // 旧上限 0.45 → floor(648/102.6)=6（设 8 行只出 6 行）；
+        // 新上限 0.60 → 864/102.6=8.4 → floor=8，与用户设定一致。
+        assertEquals(
+            8,
+            DanmuEngine.autoTrackCount(screenHeightPx = 1440f, fontSizePx = 54f, limit = 8)
+        )
+        // 且区域装得下 8 行理想行距，行距不会被二次压缩
+        val area = DanmuEngine.computeAreaHeightPx(54f, 1440f, 8)
+        val trackH = DanmuEngine.computeTrackHeightPx(54f, area, 8)
+        assertEquals(54f * DanmuEngine.TRACK_HEIGHT_FONT_FACTOR, trackH, 0.01f)
+        assertEquals("轨道数 × 行高应等于区域", area, trackH * 8, 0.01f)
     }
 
     @Test

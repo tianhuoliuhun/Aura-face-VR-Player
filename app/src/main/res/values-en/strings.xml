@@ -931,9 +931,16 @@
     <string name="danmu_batch_size">Per Batch</string>
     <string name="danmu_section_display">Display</string>
     <string name="danmu_speed">Speed</string>
+    <string name="danmu_speed_slow">Slow</string>
+    <string name="danmu_speed_standard">Standard</string>
+    <string name="danmu_speed_fast">Fast</string>
+    <string name="danmu_speed_very_fast">Very fast</string>
+    <string name="danmu_speed_fine">Fine tune</string>
+    <string name="danmu_speed_crossing">Crosses in ≈ %1$.1f s</string>
     <string name="danmu_max_tracks">Tracks</string>
     <string name="danmu_auto_tracks">Auto line count</string>
-    <string name="danmu_auto_tracks_desc">Track count is derived from the font size and available area; the value below becomes an upper limit</string>
+    <string name="danmu_auto_tracks_desc">Line count is derived from the font size and available area; turn it off to set lines manually</string>
+    <string name="danmu_auto_tracks_current">Auto · about %1$d lines</string>
     <string name="danmu_opacity">Opacity</string>
     <string name="danmu_font_size">Font Size</string>
     <string name="danmu_privacy_hint">Frames will be compressed and uploaded to the endpoint you configure</string>
@@ -963,6 +970,10 @@
     <string name="danmu_status_imported">%1$d imported</string>
     <string name="danmu_status_import_source">Source: imported file</string>
     <string name="danmu_time_jitter">Time jitter</string>
+    <string name="danmu_jitter_weak">Weak</string>
+    <string name="danmu_jitter_medium">Medium</string>
+    <string name="danmu_jitter_strong">Strong</string>
+    <string name="danmu_time_jitter_sigma">Current σ = %1$d ms · how much a batch is staggered</string>
     <string name="danmu_time_jitter_hint">A batch would appear all at once; this spreads their timestamps with a normal distribution around the batch time. 0 = off (all at once).</string>
     <string name="danmu_time_jitter_off">Off</string>
     <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->

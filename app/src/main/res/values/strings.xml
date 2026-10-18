@@ -924,9 +924,16 @@
     <string name="danmu_batch_size">每批条数</string>
     <string name="danmu_section_display">显示效果</string>
     <string name="danmu_speed">滚动速度</string>
+    <string name="danmu_speed_slow">慢</string>
+    <string name="danmu_speed_standard">标准</string>
+    <string name="danmu_speed_fast">快</string>
+    <string name="danmu_speed_very_fast">很快</string>
+    <string name="danmu_speed_fine">精细调节</string>
+    <string name="danmu_speed_crossing">穿屏 ≈ %1$.1f 秒</string>
     <string name="danmu_max_tracks">轨道数</string>
     <string name="danmu_auto_tracks">行数自适应</string>
-    <string name="danmu_auto_tracks_desc">轨道数按字号与可用区域自动计算；下方的「最大轨道数」随之变为上限</string>
+    <string name="danmu_auto_tracks_desc">轨道数按字号与可用区域自动计算；关闭后可手动指定行数</string>
+    <string name="danmu_auto_tracks_current">自动 · 当前约 %1$d 行</string>
     <string name="danmu_opacity">不透明度</string>
     <string name="danmu_font_size">字号</string>
     <string name="danmu_privacy_hint">开启后画面会压缩上传至所填服务，请自行确认其隐私政策</string>
@@ -956,6 +963,10 @@
     <string name="danmu_status_imported">已导入 %1$d 条</string>
     <string name="danmu_status_import_source">来源：本地导入</string>
     <string name="danmu_time_jitter">时间抖动</string>
+    <string name="danmu_jitter_weak">弱</string>
+    <string name="danmu_jitter_medium">中</string>
+    <string name="danmu_jitter_strong">强</string>
+    <string name="danmu_time_jitter_sigma">当前 σ = %1$d ms · 同一批弹幕错落出现的程度</string>
     <string name="danmu_time_jitter_hint">同一批弹幕原本同时出现，这里以批次时刻为中心做正态分布抖动，让它们疏密自然地错开。0 = 关闭（同时出场）。</string>
     <string name="danmu_time_jitter_off">关闭</string>
     <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->

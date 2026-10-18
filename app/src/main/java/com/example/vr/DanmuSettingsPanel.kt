@@ -42,6 +42,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -571,26 +573,31 @@ fun DanmuSettingsPanel(
         // ⚠️ 仅在 AI 档显示 —— 导入的弹幕自带时间戳，抖动选项对它**无效**
         //    （显示出来会让用户以为能调，实际点了没反应，是很差的体验）。
         if (!config.isImportMode) {
-            DanmuSliderRow(
+            // ===== v2.6.2：抖动从「毫秒滑条」改成「关闭 / 弱 / 中 / 强」=====
+            // 400ms 这个数字对普通用户没有意义，也很难判断「调到 800 到底变了什么」。
+            // 四个档位对应 σ = 0 / 200 / 400 / 800 ms，仍写回原来的 timeJitterMs 字段，
+            // prefs 兼容不变。下面再显示当前 σ，方便排查「抖动是不是真的开着」。
+            DanmuTextChipRow(
                 title = stringResource(R.string.danmu_time_jitter),
-                valueText = if (config.timeJitterMs <= 0) {
-                    stringResource(R.string.danmu_time_jitter_off)
-                } else {
-                    "${config.timeJitterMs} ms"
+                options = DANMU_JITTER_PRESETS,
+                selectedId = config.timeJitterMs,
+                labelOf = { ms ->
+                    when (ms) {
+                        0 -> stringResource(R.string.danmu_time_jitter_off)
+                        DANMU_JITTER_PRESETS[1] -> stringResource(R.string.danmu_jitter_weak)
+                        DANMU_JITTER_PRESETS[2] -> stringResource(R.string.danmu_jitter_medium)
+                        DANMU_JITTER_PRESETS[3] -> stringResource(R.string.danmu_jitter_strong)
+                        // 旧 prefs 里的非标准值（200 的倍数）仍如实显示，不强行改写
+                        else -> "$ms ms"
+                    }
                 },
-                value = config.timeJitterMs.toFloat(),
-                range = DanmuConfig.MIN_TIME_JITTER_MS.toFloat()..
-                        DanmuConfig.MAX_TIME_JITTER_MS.toFloat(),
-                // v2.4.10：范围扩到 10 秒后，档位从 100ms 改为 **200ms** ——
-                // 100ms 会产生 99 档，手机上每档不到 4px，根本拖不准。
-                // 200ms 共 49 档，仍能选到 0 / 400（默认）/ 1000 / 5000 / 10000 等常用值。
-                steps = (DanmuConfig.MAX_TIME_JITTER_MS - DanmuConfig.MIN_TIME_JITTER_MS) / 200 - 1,
-                accentColor = accentColor,
-                onChange = {
-                    // 归到最近的 200ms 档，避免出现 413 这种"看起来很怪"的值
-                    val snapped = (it.toInt() / 200) * 200
-                    onConfigChange(config.copy(timeJitterMs = snapped))
-                }
+                onPick = { onConfigChange(config.copy(timeJitterMs = it)) }
+            )
+            Text(
+                text = stringResource(R.string.danmu_time_jitter_sigma, config.timeJitterMs),
+                color = accentColor.copy(alpha = 0.8f),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 2.dp)
             )
             Text(
                 text = stringResource(R.string.danmu_time_jitter_hint),
@@ -612,17 +619,40 @@ fun DanmuSettingsPanel(
             summary = "${config.opacityPercent}% · ${config.fontSizeSp}sp",
             tagPrefix = "danmu"
         ) {
-        DanmuSliderRow(
+        // ===== v2.6.2：速度改成「穿屏时间」语义 =====
+        // 滑条本身是 px/s，但用户在意的不是 220 这个数，而是「多久穿过去」。
+        // 渲染层已按 1080px 屏宽做归一化（见 DanmuOverlay 的 REFERENCE_SCREEN_WIDTH_PX），
+        // 因此穿屏时间恒为 `1080 / speed`，**与设备分辨率无关**，可以直接显示秒数。
+        // 同时给四个直观档位（慢 / 标准 / 快 / 很快），点一下即可，不必拖。
+        val crossingSec = REFERENCE_SCREEN_WIDTH_PX /
+                config.speedPxPerSec.coerceAtLeast(1)
+        DanmuTextChipRow(
             title = stringResource(R.string.danmu_speed),
-            valueText = config.speedPxPerSec.toString(),
+            options = DANMU_SPEED_PRESETS,
+            selectedId = config.speedPxPerSec,
+            labelOf = { speed ->
+                when (speed) {
+                    DANMU_SPEED_PRESETS[0] -> stringResource(R.string.danmu_speed_slow)
+                    DANMU_SPEED_PRESETS[1] -> stringResource(R.string.danmu_speed_standard)
+                    DANMU_SPEED_PRESETS[2] -> stringResource(R.string.danmu_speed_fast)
+                    else -> stringResource(R.string.danmu_speed_very_fast)
+                }
+            },
+            onPick = { onConfigChange(config.copy(speedPxPerSec = it)) }
+        )
+        DanmuSliderRow(
+            title = stringResource(R.string.danmu_speed_fine),
+            valueText = stringResource(R.string.danmu_speed_crossing, crossingSec),
             value = config.speedPxPerSec.toFloat(),
             range = 60f..600f,
-            steps = 8,
+            // 60..600 / 20 = 27 段 → 每档 20px/s，且默认 220 正好落在档位上
+            // （旧的 steps=8 每档 60px/s，默认 220 根本拖不到，一拖就跳到 240）。
+            steps = 26,
             accentColor = accentColor,
             onChange = { onConfigChange(config.copy(speedPxPerSec = it.toInt())) }
         )
         // ===== v2.4.10：行数自适应开关 =====
-        // 放在「轨道数」滑杆**之前** —— 因为开启后那个滑杆的语义从
+        // 放在「轨道数」控件**之前** —— 因为开启后轨道数的语义从
         // 「实际轨道数」变成「上限」，顺序反过来会让人以为下面那个才是主控。
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -648,15 +678,40 @@ fun DanmuSettingsPanel(
                 accentColor = accentColor
             )
         }
-        DanmuSliderRow(
-            title = stringResource(R.string.danmu_max_tracks),
-            valueText = config.maxTracks.toString(),
-            value = config.maxTracks.toFloat(),
-            range = 2f..DanmuConfig.MAX_TRACKS_LIMIT.toFloat(),
-            steps = DanmuConfig.MAX_TRACKS_LIMIT - 3,
-            accentColor = accentColor,
-            onChange = { onConfigChange(config.copy(maxTracks = it.toInt())) }
+        // ===== v2.6.2：轨道数 = 自动状态 / 手动 chip =====
+        // 旧的裸滑条有两个问题：
+        // ① 自动模式下它其实只是「上限」，用户看不出自动算了几行（也看不出为什么设 8 只出 6 行）；
+        // ② 手动模式下 2..20 的滑条没有语义，用户不知道 11 行意味着什么。
+        // 现在：自动模式只显示「当前实际行数」（用与渲染层同一个 autoTrackCount 估算）；
+        //       手动模式给常用档位 chip，点一下就是整数值。
+        val configuration = LocalConfiguration.current
+        val density = LocalDensity.current
+        // 注意：这里拿到的是**窗口**高度（含系统栏），与渲染层 `maxHeight` 略有差异，
+        // 所以文案写「约 N 行」而不是精确值。
+        val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+        val fontPx = with(density) { config.fontSizeSp.sp.toPx() }
+        val autoRowCount = DanmuEngine.autoTrackCount(
+            screenHeightPx = screenHeightPx,
+            fontSizePx = fontPx,
+            limit = config.maxTracks
         )
+        if (config.autoTracks) {
+            Text(
+                text = stringResource(R.string.danmu_auto_tracks_current, autoRowCount),
+                color = accentColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        } else {
+            DanmuTextChipRow(
+                title = stringResource(R.string.danmu_max_tracks),
+                options = DANMU_TRACK_PRESETS,
+                selectedId = config.maxTracks,
+                labelOf = { it.toString() },
+                onPick = { onConfigChange(config.copy(maxTracks = it)) }
+            )
+        }
         DanmuSliderRow(
             title = stringResource(R.string.danmu_opacity),
             valueText = "${config.opacityPercent}%",
@@ -989,6 +1044,33 @@ private val DanmuFieldTextStyle = androidx.compose.ui.text.TextStyle(
     color = Color.White
 )
 
+/**
+ * v2.6.2：速度预设（px/s）。
+ *
+ * 对应 `danmu_speed_slow / standard / fast / very_fast` 四档文案。
+ * 220 与 `DanmuConfig.DEFAULT_SPEED_PX_PER_SEC` 一致 —— 默认档必须能在 chip 里选中。
+ *
+ * ⚠️ 这些值是**1080px 基准屏宽**下的速度，渲染层会按实际屏宽等比缩放
+ *    （见 `DanmuOverlay` 的 REFERENCE_SCREEN_WIDTH_PX），因此「穿屏时间」在各设备一致。
+ */
+private val DANMU_SPEED_PRESETS = listOf(120, 220, 350, 500)
+
+/**
+ * v2.6.2：抖动预设（σ，ms）。
+ *
+ * 0 = 关闭；200 = 弱；400 = 中（旧默认）；800 = 强。
+ * 面板只写回 `DanmuConfig.timeJitterMs`，字段与 prefs key 不变。
+ */
+private val DANMU_JITTER_PRESETS = listOf(0, 200, 400, 800)
+
+/**
+ * v2.6.2：手动模式下的轨道数档位。
+ *
+ * 用 chip 而非滑条：这些值用户能直观理解（"几行"），且滑条的中间值
+ * （如 11 行）没有实际意义；上限仍受 `DanmuConfig.MAX_TRACKS_LIMIT` 约束。
+ */
+private val DANMU_TRACK_PRESETS = listOf(4, 6, 8, 10, 12, 16)
+
 @Composable
 private fun DanmuSliderRow(
     title: String,
@@ -1182,5 +1264,9 @@ private fun colorOptionId(opt: Any?): Int = when (opt) {
     is DanmuColorMode -> opt.id
     // v2.4.7：内容来源 chip 行（AI 生成 / 本地导入）
     is DanmuSourceType -> opt.id
+    // v2.6.2：数值型 chip 行（速度 / 抖动 / 轨道数 / 图片长边）—— id 就是值本身。
+    // ⚠️ 之前 Int 落到 `else -> 0`，导致「图片长边」等数值 chip 永远没有任何一项高亮
+    //    （selectedId 与 0 比较），表现为"点了没反应"。
+    is Int -> opt
     else -> 0
 }
