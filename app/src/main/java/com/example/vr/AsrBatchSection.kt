@@ -107,7 +107,7 @@ fun BatchTranscribeSection(
                 Text(
                     stringResource(R.string.asr_sensevoice_bundled),
                     color = Color.White.copy(alpha = 0.55f),
-                    fontSize = 9.sp,
+                    fontSize = 10.sp,
                     lineHeight = 12.sp
                 )
             }
@@ -172,7 +172,7 @@ fun BatchTranscribeSection(
                             else stringResource(R.string.asr_model_unavailable),
                             color = if (modelReady) accentColor.copy(alpha = 0.9f)
                             else Color(0xFFFFB74D),
-                            fontSize = 8.sp,
+                            fontSize = 9.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -211,7 +211,7 @@ fun BatchTranscribeSection(
                                     modelReady -> Color.White.copy(alpha = 0.85f)
                                     else -> accentOnColor
                                 },
-                                fontSize = 9.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -222,7 +222,7 @@ fun BatchTranscribeSection(
                     Text(
                         if (SherpaAsrManager.downloadStatus.isEmpty()) stringResource(R.string.asr_status_builtin_ready) else SherpaAsrManager.downloadStatus,
                         color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 8.sp,
+                        fontSize = 9.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -240,7 +240,7 @@ fun BatchTranscribeSection(
                             .clickable { SherpaAsrManager.cancelDownload(context) }
                             .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
-                        Text(stringResource(R.string.asr_cancel_download), color = Color(0xFFEF5350), fontSize = 8.sp)
+                        Text(stringResource(R.string.asr_cancel_download), color = Color(0xFFEF5350), fontSize = 9.sp)
                     }
                 }
             }
@@ -251,7 +251,7 @@ fun BatchTranscribeSection(
             // 此前这里是另一份独立副本，两个 bug 都源自它：
             //   1) `lang.modelId?.let{}` 会跳过内置候选 → 内置语言选不中（v2.1.226 的同类问题）
             //   2) 仍用旧的 7 语区分组，没跟上 v2.1.231 的四项分类
-            Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+            Text(stringResource(R.string.asr_language), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
             AsrLanguageChips(
                 context = context,
                 sherpaLangCode = sherpaLangCode,
@@ -268,7 +268,7 @@ fun BatchTranscribeSection(
             Text(
                 stringResource(R.string.asr_language_hint),
                 color = Color.White.copy(alpha = 0.4f),
-                fontSize = 8.sp,
+                fontSize = 9.sp,
                 lineHeight = 11.sp
             )
         }
@@ -336,7 +336,7 @@ private fun SenseVoiceQuickBlock(
                 Text(
                     stringResource(R.string.asr_sv_quick_sub),
                     color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 8.sp,
+                    fontSize = 9.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -345,7 +345,7 @@ private fun SenseVoiceQuickBlock(
                 Text(
                     stringResource(R.string.asr_ready),
                     color = accentColor.copy(alpha = 0.95f),
-                    fontSize = 9.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
             } else if (!downloading) {
@@ -362,7 +362,7 @@ private fun SenseVoiceQuickBlock(
                     Text(
                         stringResource(R.string.asr_sv_download, entry.sizeMb),
                         color = accentOnColor,
-                        fontSize = 9.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -395,7 +395,7 @@ private fun SenseVoiceQuickBlock(
                         Text(
                             text = stringResource(m.labelResId),
                             color = if (sel) accentOnColor else Color.White.copy(alpha = 0.88f),
-                            fontSize = 8.sp,
+                            fontSize = 9.sp,
                             fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
                             maxLines = 1
                         )

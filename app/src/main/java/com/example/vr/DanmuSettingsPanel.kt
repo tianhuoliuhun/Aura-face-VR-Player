@@ -204,8 +204,8 @@ fun DanmuSettingsPanel(
         OutlinedTextField(
             value = config.baseUrl,
             onValueChange = { onConfigChange(config.copy(baseUrl = it)) },
-            label = { Text(stringResource(R.string.danmu_base_url), fontSize = 8.sp) },
-            placeholder = { Text(DanmuConfig.DEFAULT_BASE_URL, fontSize = 8.sp) },
+            label = { Text(stringResource(R.string.danmu_base_url), fontSize = 9.sp) },
+            placeholder = { Text(DanmuConfig.DEFAULT_BASE_URL, fontSize = 9.sp) },
             singleLine = true,
             enabled = canPersistSecrets,
             textStyle = DanmuFieldTextStyle,
@@ -219,8 +219,8 @@ fun DanmuSettingsPanel(
         OutlinedTextField(
             value = config.modelName,
             onValueChange = { onConfigChange(config.copy(modelName = it)) },
-            label = { Text(stringResource(R.string.danmu_model_name), fontSize = 8.sp) },
-            placeholder = { Text(DanmuConfig.DEFAULT_MODEL, fontSize = 8.sp) },
+            label = { Text(stringResource(R.string.danmu_model_name), fontSize = 9.sp) },
+            placeholder = { Text(DanmuConfig.DEFAULT_MODEL, fontSize = 9.sp) },
             singleLine = true,
             enabled = canPersistSecrets,
             textStyle = DanmuFieldTextStyle,
@@ -234,10 +234,10 @@ fun DanmuSettingsPanel(
             //    尾随空格或换行，服务端会当作密钥的一部分 → `401 Invalid bearer token`，
             //    而用户肉眼看不出差别。这里在输入时就清掉，从源头消灭这类问题。
             onValueChange = { onConfigChange(config.copy(apiKey = it.trim())) },
-            label = { Text(stringResource(R.string.danmu_api_key), fontSize = 8.sp) },
+            label = { Text(stringResource(R.string.danmu_api_key), fontSize = 9.sp) },
             // ⚠️ v2.4.5：placeholder 原来写死 "sk-..."，但本项目默认的 AMD 平台
             //    Key 形如 `rc-...`。写死前缀会误导用户以为填错了。
-            placeholder = { Text(stringResource(R.string.danmu_api_key_hint), fontSize = 8.sp) },
+            placeholder = { Text(stringResource(R.string.danmu_api_key_hint), fontSize = 9.sp) },
             singleLine = true,
             enabled = canPersistSecrets,
             visualTransformation = PasswordVisualTransformation(),
@@ -310,7 +310,7 @@ fun DanmuSettingsPanel(
         OutlinedTextField(
             value = config.personaPrompt,
             onValueChange = { onConfigChange(config.copy(personaPrompt = it)) },
-            label = { Text(stringResource(R.string.danmu_persona), fontSize = 8.sp) },
+            label = { Text(stringResource(R.string.danmu_persona), fontSize = 9.sp) },
             minLines = 3,
             maxLines = 8,
             textStyle = DanmuFieldTextStyle,
@@ -1036,7 +1036,7 @@ private fun DanmuTextFieldColors(accentColor: Color) = OutlinedTextFieldDefaults
  * ⚠️ **这一条是「文字被切一半」的真正修复**。
  *    在 `Modifier.height(48.dp)` 的约束下，若正文/标签用默认的 16sp，
  *    单行输入框内部可用高度不够 → 文字**上下都被裁掉**（截图现象）。
- *    字幕面板之所以没事，是因为它每处 label 都显式写了 `fontSize = 8.sp`。
+ *    字幕面板之所以没事，是因为它每处 label 都显式写了 `fontSize = 9.sp`。
  *    这里统一用 12sp 正文 + 8sp 标签，与字幕面板完全一致。
  */
 private val DanmuFieldTextStyle = androidx.compose.ui.text.TextStyle(
@@ -1056,12 +1056,18 @@ private val DanmuFieldTextStyle = androidx.compose.ui.text.TextStyle(
 private val DANMU_SPEED_PRESETS = listOf(120, 220, 350, 500)
 
 /**
- * v2.6.2：抖动预设（σ，ms）。
+ * v2.6.2：抖动预设（σ，ms）。v2.6.4 按用户要求上调为 **0 / 2500 / 5000 / 10000**。
  *
- * 0 = 关闭；200 = 弱；400 = 中（旧默认）；800 = 强。
+ * 0 = 关闭；2500 = 弱；5000 = 中；10000 = 强。
+ * 实际延迟是**半正态** `|N(0, σ)|`，所以：
+ *  - 弱（2500）：多数条目在 0~2.5 秒内出现，最晚约 6 秒；
+ *  - 强（10000）：平均约 8 秒，最晚可到 25 秒（受 `DanmuEngine.MAX_BIRTH_DELAY_MS` 约束）。
  * 面板只写回 `DanmuConfig.timeJitterMs`，字段与 prefs key 不变。
+ *
+ * ⚠️ 强档的代价是"弹幕与画面脱节"——晚出现的条目说的可能是几秒前的画面。
+ *    这是强度本身决定的，不是 bug；下方「当前 σ = N ms」的文案让用户心里有数。
  */
-private val DANMU_JITTER_PRESETS = listOf(0, 200, 400, 800)
+private val DANMU_JITTER_PRESETS = listOf(0, 2500, 5000, 10000)
 
 /**
  * v2.6.2：手动模式下的轨道数档位。
@@ -1174,7 +1180,7 @@ private fun <T> DanmuColorRow(
                             text = labelOf(opt),
                             color = if (isSelected && enabled) Color.White
                             else Color.White.copy(alpha = 0.65f * contentAlpha),
-                            fontSize = 9.sp,
+                            fontSize = 10.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1230,7 +1236,7 @@ private fun <T> DanmuTextChipRow(
                         Text(
                             text = labelOf(opt),
                             color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
-                            fontSize = 9.sp,
+                            fontSize = 10.sp,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

@@ -429,13 +429,13 @@ fun SubtitleSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(stringResource(R.string.subtitle_online_search), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                Text(stringResource(R.string.subtitle_search_need_key), color = Color.White.copy(alpha = 0.4f), fontSize = 8.sp)
+                Text(stringResource(R.string.subtitle_search_need_key), color = Color.White.copy(alpha = 0.4f), fontSize = 9.sp)
             }
 
             OutlinedTextField(
                 value = subtitleSearchApiKey,
                 onValueChange = onSubtitleSearchApiKeyChange,
-                label = { Text("OpenSubtitles API Key", fontSize = 8.sp) },
+                label = { Text("OpenSubtitles API Key", fontSize = 9.sp) },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -456,7 +456,7 @@ fun SubtitleSettingsPanel(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    label = { Text(stringResource(R.string.subtitle_search_keyword), fontSize = 8.sp) },
+                    label = { Text(stringResource(R.string.subtitle_search_keyword), fontSize = 9.sp) },
                     singleLine = true,
                     modifier = Modifier
                         .weight(1f)
@@ -469,7 +469,7 @@ fun SubtitleSettingsPanel(
                     )
                 )
                 Column {
-                    Text(stringResource(R.string.subtitle_search_language), color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp)
+                    Text(stringResource(R.string.subtitle_search_language), color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         for (l in listOf("zh", "en", "ja")) {
                             val sel = searchLang == l
@@ -480,7 +480,7 @@ fun SubtitleSettingsPanel(
                                     .clickable { searchLang = l }
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
-                                Text(l, color = if (sel) accentOnColor else Color.White, fontSize = 9.sp)
+                                Text(l, color = if (sel) accentOnColor else Color.White, fontSize = 10.sp)
                             }
                         }
                     }
@@ -509,7 +509,7 @@ fun SubtitleSettingsPanel(
             }
 
             if (searchStatus.isNotEmpty()) {
-                Text(searchStatus, color = accentColor, fontSize = 9.sp)
+                Text(searchStatus, color = accentColor, fontSize = 10.sp)
             }
 
             if (searchResults.isNotEmpty()) {
@@ -542,14 +542,14 @@ fun SubtitleSettingsPanel(
                         Text(
                             text = r.language.uppercase(),
                             color = accentColor,
-                            fontSize = 9.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.width(32.dp)
                         )
                         Text(
                             text = r.releaseName,
                             color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 9.sp,
+                            fontSize = 10.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -616,7 +616,7 @@ fun SubtitleSettingsPanel(
                             Text(
                                 text = stringResource(R.string.subtitle_translate_neural),
                                 color = if (translator.config.isEnabled) accentOnColor else Color.White,
-                                fontSize = 9.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -654,7 +654,7 @@ fun SubtitleSettingsPanel(
                         Text(
                             text = translator.statusMessage,
                             color = accentColor,
-                            fontSize = 9.sp,
+                            fontSize = 10.sp,
                             modifier = Modifier.weight(1f)
                         )
 
@@ -669,7 +669,7 @@ fun SubtitleSettingsPanel(
                                     }
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
-                                Text(stringResource(R.string.subtitle_translate_file), color = accentColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.subtitle_translate_file), color = accentColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Box(
@@ -682,14 +682,14 @@ fun SubtitleSettingsPanel(
                                     }
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
-                                Text(stringResource(R.string.subtitle_translate_clear_cache), color = Color.White.copy(alpha = 0.8f), fontSize = 8.sp)
+                                Text(stringResource(R.string.subtitle_translate_clear_cache), color = Color.White.copy(alpha = 0.8f), fontSize = 9.sp)
                             }
                         }
                     }
 
                     // Target Language Selector
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(stringResource(R.string.subtitle_translate_target_lang), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                        Text(stringResource(R.string.subtitle_translate_target_lang), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                         // v2.0.153 修复：原先 `.take(5)` 导致其余 4 种目标语言（fr / de / es / ru）
                         // 在 UI 上**根本选不到**（枚举里有、界面没入口）。改为每行 5 个自动换行。
                         for (langRow in TranslationTargetLanguage.values().toList().chunked(5)) {
@@ -714,7 +714,7 @@ fun SubtitleSettingsPanel(
                                         Text(
                                             text = stringResource(lang.nameResId),
                                             color = if (isSel) accentOnColor else Color.White,
-                                            fontSize = 8.sp,
+                                            fontSize = 9.sp,
                                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                             maxLines = 1
                                         )
@@ -730,7 +730,7 @@ fun SubtitleSettingsPanel(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(stringResource(R.string.subtitle_display_mode), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                            Text(stringResource(R.string.subtitle_display_mode), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 for (mode in TranslationDisplayMode.values()) {
                                     val isSel = translator.config.displayMode == mode
@@ -749,7 +749,7 @@ fun SubtitleSettingsPanel(
                                         Text(
                                             text = if (mode == TranslationDisplayMode.DUAL_LANGUAGE) stringResource(R.string.subtitle_mode_bilingual) else stringResource(R.string.subtitle_mode_translated_only),
                                             color = if (isSel) accentOnColor else Color.White,
-                                            fontSize = 9.sp
+                                            fontSize = 10.sp
                                         )
                                     }
                                 }
@@ -759,7 +759,7 @@ fun SubtitleSettingsPanel(
 
                     // Translation Engine Selector
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(stringResource(R.string.subtitle_translate_engine), color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp)
+                        Text(stringResource(R.string.subtitle_translate_engine), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             val engines = TranslationEngine.values()
                             // v2.0.157：引擎已增至 10 个，原先写死的 take(3)/drop(3) 两行放不下
@@ -784,7 +784,7 @@ fun SubtitleSettingsPanel(
                                             Text(
                                                 text = stringResource(eng.displayNameResId),
                                                 color = if (isSel) accentOnColor else Color.White,
-                                                fontSize = 8.sp,
+                                                fontSize = 9.sp,
                                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                                 maxLines = 1
                                             )
@@ -830,7 +830,7 @@ fun SubtitleSettingsPanel(
                                     translator.config = translator.config.copy(apiKey = key)
                                     onUserActivity()
                                 },
-                                label = { Text(stringResource(translator.config.engine.displayNameResId) + " API Key", fontSize = 9.sp) },
+                                label = { Text(stringResource(translator.config.engine.displayNameResId) + " API Key", fontSize = 10.sp) },
                                 singleLine = true,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -856,8 +856,8 @@ fun SubtitleSettingsPanel(
                                         translator.config = translator.config.copy(baseUrl = url)
                                         onUserActivity()
                                     },
-                                    label = { Text("Base URL", fontSize = 8.sp) },
-                                    placeholder = { Text(translator.config.engine.defaultBaseUrl, fontSize = 8.sp) },
+                                    label = { Text("Base URL", fontSize = 9.sp) },
+                                    placeholder = { Text(translator.config.engine.defaultBaseUrl, fontSize = 9.sp) },
                                     singleLine = true,
                                     modifier = Modifier
                                         .weight(1.2f)
@@ -878,8 +878,8 @@ fun SubtitleSettingsPanel(
                                         translator.config = translator.config.copy(modelName = model)
                                         onUserActivity()
                                     },
-                                    label = { Text("Model", fontSize = 8.sp) },
-                                    placeholder = { Text(translator.config.engine.defaultModel, fontSize = 8.sp) },
+                                    label = { Text("Model", fontSize = 9.sp) },
+                                    placeholder = { Text(translator.config.engine.defaultModel, fontSize = 9.sp) },
                                     singleLine = true,
                                     modifier = Modifier
                                         .weight(0.8f)
@@ -912,14 +912,14 @@ fun SubtitleSettingsPanel(
                             Text(
                                 stringResource(R.string.subtitle_cache_stats),
                                 color = accentColor,
-                                fontSize = 9.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f)
                             )
                             Text(
                                 stringResource(R.string.subtitle_cache_stats_refresh),
                                 color = Color.White.copy(alpha = 0.75f),
-                                fontSize = 8.sp,
+                                fontSize = 9.sp,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(Color.White.copy(alpha = 0.1f))
@@ -937,7 +937,7 @@ fun SubtitleSettingsPanel(
                                 tr.currentLangEntryCount
                             ),
                             color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 8.sp
+                            fontSize = 9.sp
                         )
                         Text(
                             stringResource(
@@ -947,7 +947,7 @@ fun SubtitleSettingsPanel(
                                 tr.cacheMissCount
                             ),
                             color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 8.sp
+                            fontSize = 9.sp
                         )
                         Text(
                             stringResource(
@@ -956,13 +956,13 @@ fun SubtitleSettingsPanel(
                                 tr.sessionLimit
                             ),
                             color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 8.sp
+                            fontSize = 9.sp
                         )
                         if (cacheStats.value.isEmpty()) {
                             Text(
                                 stringResource(R.string.subtitle_cache_stats_empty),
                                 color = Color.White.copy(alpha = 0.5f),
-                                fontSize = 8.sp
+                                fontSize = 9.sp
                             )
                         } else {
                             cacheStats.value.forEach { s ->
@@ -970,7 +970,7 @@ fun SubtitleSettingsPanel(
                                     Text(
                                         s.langTag,
                                         color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 8.sp,
+                                        fontSize = 9.sp,
                                         modifier = Modifier.weight(1f)
                                     )
                                     Text(
@@ -980,7 +980,7 @@ fun SubtitleSettingsPanel(
                                             (s.bytes / 1024).toInt()
                                         ),
                                         color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 8.sp
+                                        fontSize = 9.sp
                                     )
                                 }
                             }
@@ -996,7 +996,7 @@ fun SubtitleSettingsPanel(
                             ) {
                                 Text(
                                     stringResource(R.string.subtitle_cache_clear_current),
-                                    fontSize = 8.sp,
+                                    fontSize = 9.sp,
                                     maxLines = 1
                                 )
                             }
@@ -1010,7 +1010,7 @@ fun SubtitleSettingsPanel(
                             ) {
                                 Text(
                                     stringResource(R.string.subtitle_cache_clear_all),
-                                    fontSize = 8.sp,
+                                    fontSize = 9.sp,
                                     maxLines = 1
                                 )
                             }
@@ -1153,6 +1153,7 @@ internal fun SubtitleSection(
             modifier = Modifier.padding(horizontal = 6.dp)
         )
         // v2.0.158：展开/收起加动画，避免长列表瞬间跳变（手感更稳）
+        // v2.6.4：曾改成自定义贝塞尔曲线，用户反馈后已撤回 → 恢复默认曲线。
         AnimatedVisibility(
             visible = expanded,
             enter = expandVertically() + fadeIn(),

@@ -416,7 +416,23 @@ class DanmuEngine {
             // 数据，里面重复的「哈哈哈」是真实弹幕的一部分，不该被模型用的相似度规则压掉；
             // AI 路径保留去重（防模型复读）。
             if (dedupe && isDuplicate(c.text)) continue
-            val track = pickTrack(c.bornMs, usedTracks)
+
+            // 🔴 v2.6.4：**轨道不够时延后出生，而不是丢弃**。
+            //    一批 10 条而屏上只有 6 行时，旧逻辑会把后 4 条直接塞进 `unplaced`（屏上永远少 4 条）。
+            //    现在：`pickTrack` 失败 → 算出「所有轨道中最早能塞下新条目的时刻」→ 把出生时刻推后重试。
+            //    视觉上就是「前 6 条先出来，剩下的排队跟在后面」，而不是凭空消失。
+            var born = c.bornMs
+            var track = pickTrack(born, usedTracks)
+            var tries = 0
+            while (track == null && tries < MAX_SLOT_DEFER_TRIES) {
+                val next = earliestSlotMs(born)
+                // 算不出更晚的可放时刻，或累计延后已超上限 → 放弃（防死循环 / 弹幕迟到太久）
+                if (next <= born) break
+                if (next - c.bornMs > MAX_TOTAL_DEFER_MS) break
+                born = next
+                track = pickTrack(born, usedTracks)
+                tries++
+            }
             if (track == null) { unplaced.add(ci); continue }
 
             // 指定色优先；未指定才按颜色模式掷（保证外部导入不会被随机覆盖）
@@ -429,7 +445,7 @@ class DanmuEngine {
                 DanmuItem(
                     text = c.text,
                     track = track,
-                    bornMs = c.bornMs,
+                    bornMs = born,
                     widthPx = estimateTextWidthPx(c.text, fontSizePx),
                     color = color
                 )
@@ -571,6 +587,46 @@ class DanmuEngine {
      * @param usedTracks **本批**已占用的轨道，禁止复用（保证一批 N 条分散到 N 条轨道）
      * @return 轨道下标；没有可用轨道时返回 null
      */
+    /**
+     * v2.6.4：**最早能容纳一条新弹幕的时刻**（用于"轨道不够就排队"）。
+     *
+     * 对每条轨道算「最后一条的尾巴越过右缘 + 最小间距」所需的时间，取其中最小值 ——
+     * 新条目在该时刻出生时，与**每条**轨道上最后一条的间距都 ≥ [minGapPx]，必有空位。
+     *
+     * 推导：条目在 t 时刻出生时从右缘出发（x = screenW），要求
+     * `screenW - (lastX(t) + lastWidth) ≥ minGap`；
+     * 而 `lastX(t) = lastX(now) - (t - now) / 1000 × speed`，
+     * 解得 `t = now + (minGap + lastWidth + lastX(now) - screenW) / speed × 1000`。
+     *
+     * ⚠️ 有空轨道时直接返回 [nowMs]（立刻可放）；`speed` 为 0 时按 1 兜底，防除零。
+     */
+    private fun earliestSlotMs(nowMs: Long): Long {
+        val effectiveLimit = if (visibleTrackCount > 0) min(visibleTrackCount, maxTracks) else maxTracks
+        val trackCount = effectiveLimit.coerceIn(1, MAX_TRACKS_LIMIT)
+        if (trackCount <= 0) return nowMs
+
+        val lastOnTrack = arrayOfNulls<DanmuItem>(trackCount)
+        for (item in items) {
+            if (item.track in 0 until trackCount) {
+                val cur = lastOnTrack[item.track]
+                if (cur == null || item.bornMs >= cur.bornMs) lastOnTrack[item.track] = item
+            }
+        }
+
+        val speed = speedPxPerSec.coerceAtLeast(1).toFloat()
+        val gap = minGapPx()
+        var best = Long.MAX_VALUE
+        for (t in 0 until trackCount) {
+            val last = lastOnTrack[t] ?: return nowMs   // 还有空轨道 → 此刻就能放
+            val lastX = last.currentX(nowMs, screenWidthPx, speedPxPerSec)
+            val needPx = gap + last.widthPx + lastX - screenWidthPx
+            val waitMs = (needPx / speed * 1000f).toLong()
+            val at = nowMs + waitMs.coerceAtLeast(0L)
+            if (at < best) best = at
+        }
+        return if (best == Long.MAX_VALUE) nowMs else best
+    }
+
     private fun pickTrack(nowMs: Long, usedTracks: Set<Int> = emptySet()): Int? {
         // v2.4.41（弹幕审查 #3）：优先用渲染层同步来的**真实轨道数**（行数自适应的结果），
         // 再受用户上限 maxTracks 约束；未同步（0）→ 退回 maxTracks（旧行为）。
@@ -961,7 +1017,25 @@ class DanmuEngine {
          * 旧 prefs 里若残留更大的 σ（最长 10 秒），本上限仍会把它压到 2.5 秒，
          * 这是刻意的防御：宁可控住滞后，也不让弹幕晚十几秒才出现。
          */
-        const val MAX_BIRTH_DELAY_MS = 2_500L
+        const val MAX_BIRTH_DELAY_MS = 26_000L
+
+        /**
+         * v2.6.4：**单条弹幕最多为抢轨道延后几次**。
+         *
+         * 轨道不够时会把出生时刻推到「最早空位」重试（见 [earliestSlotMs]）；
+         * 每次推进至少是一个"尾巴越过右缘 + 间距"的时间，正常 3~5 次就能排上，
+         * 这里给 8 次余量。超过就放弃 —— 防死循环，也防某条弹幕无限往后排。
+         */
+        private const val MAX_SLOT_DEFER_TRIES = 8
+
+        /**
+         * v2.6.4：**单条弹幕因抢轨道累计延后的上限**（ms）。
+         *
+         * 一批远超轨道数的弹幕（如 10 条挤 6 行）会让后面的条目排队；
+         * 若不加总上限，最后几条可能被推到半分钟之后 —— 那时画面早已不是它对应的内容。
+         * 20 秒 ≈ 4 轮穿屏，够排完一批，又不至于离谱。
+         */
+        private const val MAX_TOTAL_DEFER_MS = 20_000L
 
         /**
          * 截断倍率：单条抖动不超过 **±2.5σ**。

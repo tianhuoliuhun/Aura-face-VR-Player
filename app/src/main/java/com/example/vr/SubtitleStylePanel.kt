@@ -162,7 +162,7 @@ fun SubtitleStyleSettings(
             Text(
                 text = stringResource(R.string.subtitle_preview_header),
                 color = Color.White.copy(alpha = 0.4f),
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 modifier = Modifier.padding(bottom = 6.dp)
             )
 
@@ -209,7 +209,7 @@ fun SubtitleStyleSettings(
                             Text(
                                 text = stringResource(fOpt.labelRes),
                                 color = if (isSel) accentOnColor else Color.White,
-                                fontSize = 9.sp,
+                                fontSize = 10.sp,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                             )
                         }
@@ -395,7 +395,7 @@ fun SubtitleStyleSettings(
                         Text(
                             text = stringResource(sOpt.labelRes),
                             color = if (isSel) accentOnColor else Color.White,
-                            fontSize = 9.sp
+                            fontSize = 10.sp
                         )
                     }
                 }
@@ -422,7 +422,7 @@ fun SubtitleStyleSettings(
                         Text(
                             text = stringResource(sOpt.labelRes),
                             color = if (isSel) accentOnColor else Color.White,
-                            fontSize = 9.sp
+                            fontSize = 10.sp
                         )
                     }
                 }
@@ -448,7 +448,7 @@ fun SubtitleStyleSettings(
                         Text(
                             text = stringResource(bgOpt.labelRes),
                             color = if (isSel) accentOnColor else Color.White,
-                            fontSize = 9.sp
+                            fontSize = 10.sp
                         )
                     }
                 }
@@ -495,7 +495,7 @@ fun SubtitleStyleSettings(
                             Text(
                                 text = stringResource(R.string.subtitle_n_lines, n),
                                 color = if (isSel) accentOnColor else Color.White,
-                                fontSize = 9.sp,
+                                fontSize = 10.sp,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                             )
                         }
@@ -526,7 +526,7 @@ fun SubtitleStyleSettings(
                             Text(
                                 text = stringResource(alignOpt.labelRes),
                                 color = if (isSel) accentOnColor else Color.White,
-                                fontSize = 9.sp
+                                fontSize = 10.sp
                             )
                         }
                     }
@@ -542,9 +542,9 @@ fun SubtitleStyleSettings(
             ) {
                 Text(stringResource(R.string.subtitle_offset_y, (offsetYRatio * 100).roundToInt()), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(stringResource(R.string.align_bottom), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.12f); onUserActivity() })
-                    Text(stringResource(R.string.align_center), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.50f); onUserActivity() })
-                    Text(stringResource(R.string.align_top), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.82f); onUserActivity() })
+                    Text(stringResource(R.string.align_bottom), color = accentColor, fontSize = 10.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.12f); onUserActivity() })
+                    Text(stringResource(R.string.align_center), color = accentColor, fontSize = 10.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.50f); onUserActivity() })
+                    Text(stringResource(R.string.align_top), color = accentColor, fontSize = 10.sp, modifier = Modifier.clickable { onOffsetYRatioChange(0.82f); onUserActivity() })
                 }
             }
             Slider(
@@ -566,7 +566,7 @@ fun SubtitleStyleSettings(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(stringResource(R.string.subtitle_offset_x, (offsetXRatio * 100).roundToInt()), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
-                Text(stringResource(R.string.align_center), color = accentColor, fontSize = 9.sp, modifier = Modifier.clickable { onOffsetXRatioChange(0.0f); onUserActivity() })
+                Text(stringResource(R.string.align_center), color = accentColor, fontSize = 10.sp, modifier = Modifier.clickable { onOffsetXRatioChange(0.0f); onUserActivity() })
             }
             Slider(
                 value = offsetXRatio,
@@ -636,7 +636,7 @@ fun SubtitleStyleSettings(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = Color.White, fontSize = 9.sp)
+                        Text(label, color = Color.White, fontSize = 10.sp)
                     }
                 }
 
@@ -652,7 +652,7 @@ fun SubtitleStyleSettings(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("0s", color = accentOnColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("0s", color = accentOnColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
 
                 listOf(100L to "+0.1s", 500L to "+0.5s", 1000L to "+1s", 5000L to "+5s").forEach { (step, label) ->
@@ -668,7 +668,7 @@ fun SubtitleStyleSettings(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = Color.White, fontSize = 9.sp)
+                        Text(label, color = Color.White, fontSize = 10.sp)
                     }
                 }
             }

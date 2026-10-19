@@ -96,7 +96,7 @@
     <string name="action_media_info">Media info</string>
     <string name="action_track_select">Audio / subtitle tracks</string>
     <string name="action_close">Close</string>
-    <string name="settings_group_ui_theme">0. UI theme &amp; glass effect</string>
+    <string name="settings_group_ui_theme">UI theme &amp; glass effect</string>
     <string name="theme_solid">Solid</string>
     <string name="theme_name_violet">Violet</string>
     <string name="theme_name_indigo">Indigo</string>
@@ -105,7 +105,7 @@
     <string name="theme_name_amber">Amber</string>
     <string name="theme_name_mint">Mint</string>
     <string name="theme_liquid_glass">Liquid glass</string>
-    <string name="settings_group_projection">1. Lens projection &amp; view mode</string>
+    <string name="settings_group_projection">Lens projection &amp; view mode</string>
     <string name="projection_auto_detect">Smart projection detection</string>
     <string name="projection_auto_detect_desc">Detects 2:1 panorama / plain 2D and switches projection &amp; stereo mode</string>
     <string name="force_video_type">Force video type</string>
@@ -183,7 +183,7 @@
     <string name="auto_fallback_soft">Auto-fallback to software decode</string>
     <string name="auto_fallback_soft_desc">Fall back to software decoding when HW decoding errors out</string>
     <string name="panorama_note">Note: 360°/180° panoramas support gyro or drag for fluid looking around.</string>
-    <string name="settings_group_floating_ball">3. Floating ball &amp; speed</string>
+    <string name="settings_group_floating_ball">Floating ball &amp; speed</string>
     <string name="floating_ball_enable">Enable floating ball</string>
     <string name="seek_ball_forward_enable">Forward ball</string>
     <string name="seek_ball_backward_enable">Rewind ball</string>
@@ -195,7 +195,7 @@
     <string name="floating_ball_desc">Hold to boost · Double-tap to cycle speed steps · Drag to reposition · Switch is remembered</string>
     <string name="floating_ball_speed">Long-press speed</string>
     <string name="base_playback_speed">Normal playback speed</string>
-    <string name="settings_group_decoder">4. Decoder core &amp; FPS limit</string>
+    <string name="settings_group_decoder">Decoder core &amp; FPS limit</string>
     <string name="decoder_engine">Decoder engine</string>
     <string name="decode_mode">Decode mode</string>
     <string name="decode_hw">Hardware (GPU accel)</string>
@@ -205,7 +205,7 @@
 
     <!-- ===== batch ===== -->
     <string name="asr_engine_title">AI subtitle engine</string>
-    <string name="asr_engine_sensevoice_desc">Dolphin: 40 Eastern languages + 22 Chinese dialects, bundled in the APK, automatic language detection</string>
+    <string name="asr_engine_sensevoice_desc">40 Eastern languages + 22 Chinese dialects; bundled model, auto language detection</string>
     <string name="asr_language">Recognition language</string>
     <string name="asr_sensevoice_tag">40 languages + 22 dialects - bundled - auto detection</string>
     <string name="asr_downloading">⬇ Downloading</string>
@@ -220,7 +220,7 @@
     <string name="beauty_preset_natural">Natural</string>
     <string name="beauty_preset_light">Light</string>
     <string name="beauty_preset_heavy">Glam</string>
-    <string name="settings_group_beauty">2. Realtime beauty (shader)</string>
+    <string name="settings_group_beauty">Realtime beauty (shader)</string>
     <string name="beauty_face_slim">Face slimming</string>
     <string name="beauty_big_eyes">Big eyes</string>
     <string name="beauty_dark_circles">Dark circles</string>
@@ -244,13 +244,14 @@
     <string name="group_title_8k_hw">8K hardware decode</string>
     <string name="group_title_floating_ball">Floating ball &amp; speed</string>
     <string name="group_title_decoder">Decoder core &amp; FPS</string>
-    <string name="group_title_subtitle">Subtitle settings</string>
+    <string name="group_title_ai_subtitle">AI Subtitles</string>
+    <string name="group_title_subtitle">Subtitles &amp; translation</string>
     <string name="group_title_danmu">AI Danmaku</string>
     <string name="danmu_section_color">Global Color (all danmaku)</string>
     <string name="danmu_text_color">Text Color</string>
     <string name="danmu_stroke">Stroke</string>
     <string name="danmu_bg">Background</string>
-    <string name="danmu_color_hint">In "Single color" mode all danmu share one color; in random modes each danmu picks its own. Independent from subtitle colors.</string>
+    <string name="danmu_color_hint">Single color: all danmaku share one color. Random: each picks its own. Independent of subtitle color.</string>
     <string name="danmu_status_title">Status</string>
     <string name="danmu_status_not_configured">Not configured yet: fill in endpoint, model name and API key</string>
     <string name="danmu_status_waiting">Ready, waiting for the first frame analysis... (a few seconds)</string>
@@ -266,7 +267,7 @@
     <string name="danmu_source_both">Frame+Lines</string>
     <string name="danmu_source_image">Frame only</string>
     <string name="danmu_source_subtitle">Lines only</string>
-    <string name="danmu_source_hint">"Lines" comes from AI subtitles near the current position (15s before / 5s after). Lines-only mode sends no screenshot — faster and lighter, but it cannot see the picture.</string>
+    <string name="danmu_source_hint">“Lines” uses AI subtitles near the current position (15s before / 5s after). Lines-only mode sends no screenshot — faster and lighter, but blind to the picture.</string>
     <string name="danmu_err_no_subtitle">No lines at this position yet — enable AI subtitles and wait for them to generate</string>
     <string name="danmu_err_url_empty">Endpoint address is empty — enter an address starting with http:// or https://</string>
     <string name="danmu_err_url_no_scheme">Endpoint address is missing a prefix — it must start with http:// or https:// (e.g. https://api.xiaomimimo.com/v1)</string>
@@ -674,7 +675,7 @@
     <string name="beauty_gp_half_res_desc">Process beauty at half resolution: lower cost, slightly softer detail. Turn off for full-resolution processing (best quality, higher cost). GPUPixel engine only</string>
 
 <!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
-    <string name="settings_group_enhance">5. Image enhancement</string>
+    <string name="settings_group_enhance">Image enhancement</string>
     <string name="memc_enabled">MEMC interpolation</string>
     <string name="memc_target_fps">Target frame rate</string>
     <string name="memc_desc">Motion-compensated interpolation: synthesises in-between frames so motion looks smoother (video playback only)</string>
@@ -957,16 +958,16 @@
     <string name="danmu_color_mode_single">Single color</string>
     <string name="danmu_color_mode_random">Fully random</string>
     <string name="danmu_color_mode_mostly_white">80% white + random</string>
-    <string name="danmu_color_random_hint">Each danmu picks a random color from white / lemon / cyan / green / pink / orange (black excluded — unreadable on dark scenes).</string>
+    <string name="danmu_color_random_hint">Random from white / lemon / cyan / green / pink / orange (no black — stays readable in dark scenes).</string>
     <string name="danmu_source_type">Danmaku source</string>
     <string name="danmu_source_type_ai">AI generated</string>
     <string name="danmu_source_type_import">Import file</string>
-    <string name="danmu_source_type_hint">“AI generated” creates danmaku live from the current frame; “Import file” reads your own danmaku file (Bilibili XML or JSON). Choose one.</string>
+    <string name="danmu_source_type_hint">“AI generated” writes from the current frame; “Import” reads your own file (Bilibili XML / JSON).</string>
     <string name="danmu_import_pick">Choose danmaku file</string>
     <string name="danmu_import_none">No file selected</string>
     <string name="danmu_import_loaded">{count} danmaku loaded</string>
     <string name="danmu_import_clear">Clear import</string>
-    <string name="danmu_import_hint">Supports Bilibili danmaku XML (&lt;d p="time,mode,size,color,..."&gt;) and JSON arrays (time / text / color). Only scrolling danmaku are used; other types are skipped.</string>
+    <string name="danmu_import_hint">Supports Bilibili danmaku XML and JSON arrays (time / text / color). Scrolling danmaku only.</string>
     <string name="danmu_import_loading">Reading file…</string>
     <string name="danmu_import_ok">Imported %1$d danmaku</string>
     <string name="danmu_import_ok_truncated">Imported %1$d danmaku (limit reached; the rest was truncated)</string>
@@ -983,7 +984,7 @@
     <string name="danmu_jitter_medium">Medium</string>
     <string name="danmu_jitter_strong">Strong</string>
     <string name="danmu_time_jitter_sigma">Current σ = %1$d ms · how much a batch is staggered</string>
-    <string name="danmu_time_jitter_hint">A batch would appear all at once; this spreads their timestamps with a normal distribution around the batch time. 0 = off (all at once).</string>
+    <string name="danmu_time_jitter_hint">Spreads a batch with a normal distribution so danmaku stagger naturally. 0 = off (all at once).</string>
     <string name="danmu_time_jitter_off">Off</string>
     <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->
     <string name="cast_receiver_title">Cast Receiver</string>

@@ -105,7 +105,7 @@
     <string name="action_media_info">視頻信息</string>
     <string name="action_track_select">音軌/字幕軌選擇</string>
     <string name="action_close">關閉</string>
-    <string name="settings_group_ui_theme">0. UI 主題與玻璃效果（8/2 功能）</string>
+    <string name="settings_group_ui_theme">UI 主題與玻璃效果</string>
     <string name="theme_solid">實色</string>
     <string name="theme_name_violet">紫羅蘭</string>
     <string name="theme_name_indigo">靛藍</string>
@@ -114,7 +114,7 @@
     <string name="theme_name_amber">琥珀</string>
     <string name="theme_name_mint">薄荷</string>
     <string name="theme_liquid_glass">液體玻璃</string>
-    <string name="settings_group_projection">1. 鏡頭投影與視角模式</string>
+    <string name="settings_group_projection">鏡頭投影與視角模式</string>
     <string name="projection_auto_detect">投影智能檢測</string>
     <string name="projection_auto_detect_desc">自動識別 2:1 全景 / 普通 2D 內容並切換投影與立體模式</string>
     <string name="force_video_type">強制視頻類型</string>
@@ -185,7 +185,7 @@
     <string name="auto_fallback_soft">硬解失敗自動切軟件</string>
     <string name="auto_fallback_soft_desc">硬件解碼報錯時自動切換軟件解碼兜底</string>
     <string name="panorama_note">說明：360°與180°全景支持陀螺儀或滑動實現多視角流暢環顧。</string>
-    <string name="settings_group_floating_ball">3. 懸浮球控速與播放倍速</string>
+    <string name="settings_group_floating_ball">懸浮球控速與播放倍速</string>
     <string name="floating_ball_enable">啓用屏幕懸浮球</string>
     <string name="seek_ball_forward_enable">快進懸浮球</string>
     <string name="seek_ball_backward_enable">後退懸浮球</string>
@@ -197,7 +197,7 @@
     <string name="floating_ball_desc">按住加速 · 雙擊循環切換倍速檔位 · 拖動調整位置 · 開關自動記憶</string>
     <string name="floating_ball_speed">懸浮球長按倍速</string>
     <string name="base_playback_speed">基礎常規播放倍速</string>
-    <string name="settings_group_decoder">4. 解碼內核與幀率限制</string>
+    <string name="settings_group_decoder">解碼內核與幀率限制</string>
     <string name="decoder_engine">解碼器引擎</string>
     <string name="decode_mode">解碼模式</string>
     <string name="decode_hw">硬件解碼 (GPU加速)</string>
@@ -207,7 +207,7 @@
 
     <!-- ===== batch ===== -->
     <string name="asr_engine_title">AI 字幕引擎</string>
-    <string name="asr_engine_sensevoice_desc">Dolphin：40 種東方語言 + 22 種中文方言，內置模型（無需下載），自帶語種識別</string>
+    <string name="asr_engine_sensevoice_desc">40 種東方語言 + 22 種中文方言；內建模型免下載，自動辨識語種</string>
     <string name="asr_language">識別語言</string>
     <string name="asr_sensevoice_tag">40 語 + 22 方言 · 內置 · 自帶語種識別</string>
     <string name="asr_downloading">⬇ 下載中</string>
@@ -222,7 +222,7 @@
     <string name="beauty_preset_natural">自然</string>
     <string name="beauty_preset_light">淡妝</string>
     <string name="beauty_preset_heavy">濃妝</string>
-    <string name="settings_group_beauty">2. Shader 實時美顏</string>
+    <string name="settings_group_beauty">Shader 實時美顏</string>
     <string name="beauty_face_slim">瘦臉</string>
     <string name="beauty_big_eyes">大眼</string>
     <string name="beauty_dark_circles">去黑眼圈</string>
@@ -246,13 +246,14 @@
     <string name="group_title_8k_hw">8K 硬解實驗</string>
     <string name="group_title_floating_ball">懸浮球與播放倍速</string>
     <string name="group_title_decoder">解碼內核與幀率</string>
-    <string name="group_title_subtitle">字幕功能設置</string>
+    <string name="group_title_ai_subtitle">AI 字幕</string>
+    <string name="group_title_subtitle">字幕與翻譯</string>
     <string name="group_title_danmu">AI 彈幕</string>
     <string name="danmu_section_color">全域顏色（作用於全部彈幕）</string>
     <string name="danmu_text_color">文字顏色</string>
     <string name="danmu_stroke">描邊</string>
     <string name="danmu_bg">背景底</string>
-    <string name="danmu_color_hint">「單一顏色」模式下所有彈幕同色；選隨機模式後每條彈幕各自取色，可與影片內的字幕顏色分開配置。</string>
+    <string name="danmu_color_hint">單一色：全部彈幕同色；隨機：每條各自取色。與字幕顏色獨立。</string>
     <string name="danmu_status_title">執行狀態</string>
     <string name="danmu_status_not_configured">尚未設定完成：請填寫服務端點、模型名稱與 API Key</string>
     <string name="danmu_status_waiting">已就緒，正在等待首次畫面辨識…（約需數秒）</string>
@@ -268,7 +269,7 @@
     <string name="danmu_source_both">畫面+台詞</string>
     <string name="danmu_source_image">僅畫面</string>
     <string name="danmu_source_subtitle">僅台詞</string>
-    <string name="danmu_source_hint">「台詞」取自目前播放位置附近的 AI 字幕（前 15 秒 / 後 5 秒）。僅台詞模式不傳送截圖，更快也更省流量，但看不到畫面。</string>
+    <string name="danmu_source_hint">「台詞」取自目前位置附近的 AI 字幕（前 15 秒 / 後 5 秒）。僅台詞模式不傳截圖，更快更省流量，但看不到畫面。</string>
     <string name="danmu_err_no_subtitle">目前位置還沒有台詞：請先開啟 AI 字幕並稍等生成</string>
     <string name="danmu_err_url_empty">介面位址不能為空：請在設定中填寫以 http:// 或 https:// 開頭的位址</string>
     <string name="danmu_err_url_no_scheme">介面位址缺少前綴：需要以 http:// 或 https:// 開頭（例如 https://api.xiaomimimo.com/v1）</string>
@@ -676,7 +677,7 @@
     <string name="beauty_gp_half_res_desc">美顏以 1/2 解析度處理：負載較低、畫面細節略為柔化。關閉則以全解析度處理，畫質最佳但負載較高（僅 GPUPixel 引擎生效）</string>
 
 <!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
-    <string name="settings_group_enhance">5. 畫質增強</string>
+    <string name="settings_group_enhance">畫質增強</string>
     <string name="memc_enabled">MEMC 補幀</string>
     <string name="memc_target_fps">目標幀率</string>
     <string name="memc_desc">運動補償補幀：在相鄰兩幀之間生成中間幀，讓運動更順暢（僅影片播放時生效）</string>
@@ -959,16 +960,16 @@
     <string name="danmu_color_mode_single">單一顏色</string>
     <string name="danmu_color_mode_random">完全隨機</string>
     <string name="danmu_color_mode_mostly_white">80% 白 + 隨機</string>
-    <string name="danmu_color_random_hint">每條彈幕從「白 / 檸檬黃 / 青藍 / 螢光綠 / 櫻花粉 / 暖陽橙」中隨機取色（不含黑色，避免暗場景看不清）。</string>
+    <string name="danmu_color_random_hint">從白 / 檸檬黃 / 青藍 / 螢光綠 / 櫻花粉 / 暖陽橙中隨機（不含黑色，暗場景也清晰）。</string>
     <string name="danmu_source_type">彈幕來源</string>
     <string name="danmu_source_type_ai">AI 產生</string>
     <string name="danmu_source_type_import">本機匯入</string>
-    <string name="danmu_source_type_hint">「AI 產生」由視覺模型依目前畫面即時創作；「本機匯入」讀取你準備的彈幕檔案（B 站 XML 或 JSON），兩者二選一。</string>
+    <string name="danmu_source_type_hint">「AI 產生」依目前畫面即時創作；「本機匯入」讀取你的彈幕檔案（B 站 XML / JSON）。</string>
     <string name="danmu_import_pick">選擇彈幕檔案</string>
     <string name="danmu_import_none">尚未選擇檔案</string>
     <string name="danmu_import_loaded">共 {count} 條彈幕</string>
     <string name="danmu_import_clear">清除匯入</string>
-    <string name="danmu_import_hint">支援 B 站彈幕 XML（&lt;d p="時間,模式,字級,顏色,..."&gt;）與 JSON 陣列（time / text / color）。僅使用捲動類彈幕，其餘類型會被跳過。</string>
+    <string name="danmu_import_hint">支援 B 站彈幕 XML 與 JSON 陣列（time / text / color）。僅匯入捲動類彈幕。</string>
     <string name="danmu_import_loading">正在讀取檔案…</string>
     <string name="danmu_import_ok">匯入成功，共 %1$d 條</string>
     <string name="danmu_import_ok_truncated">已匯入 %1$d 條（已達上限，超出部分已截取）</string>
@@ -985,7 +986,7 @@
     <string name="danmu_jitter_medium">中</string>
     <string name="danmu_jitter_strong">強</string>
     <string name="danmu_time_jitter_sigma">目前 σ = %1$d ms · 同一批彈幕錯落出現的程度</string>
-    <string name="danmu_time_jitter_hint">同一批彈幕原本同時出現，這裡以批次時刻為中心做常態分布抖動，讓它們疏密自然地錯開。0 = 關閉（同時出場）。</string>
+    <string name="danmu_time_jitter_hint">以批次時刻為中心做常態分布抖動，讓同批彈幕疏密自然地錯開。0 = 關閉（同時出場）。</string>
     <string name="danmu_time_jitter_off">關閉</string>
     <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->
     <string name="cast_receiver_title">投放接收</string>

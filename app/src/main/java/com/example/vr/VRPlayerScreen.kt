@@ -7397,7 +7397,7 @@ fun VRPlayerScreen(
                                                                 Text(
                                                                     text = res.label,
                                                                     color = if (isSelected) AccentOnColor else Color.White,
-                                                                    fontSize = 8.sp,
+                                                                    fontSize = 9.sp,
                                                                     fontWeight = FontWeight.SemiBold
                                                                 )
                                                             }
@@ -7414,14 +7414,20 @@ fun VRPlayerScreen(
                                     Text(
                                         text = stringResource(R.string.enhance_perf_hint),
                                         color = Color.White.copy(alpha = 0.35f),
-                                        fontSize = 9.sp
+                                        fontSize = 10.sp
                                     )
                                 }
                                 }
 
                                 /** 区块 6：字幕功能设置（SubtitleSettingsPanel：字体/位置/ASR/翻译入口） */
                                 @Composable
-                                fun SettingsSectionSubtitle() {
+                                /**
+                                 * 区块 6：**AI 字幕**（v2.6.4 从「字幕功能设置」中独立，与「AI 弹幕」同级）
+                                 *
+                                 * 承载「生成字幕」这条链路：ASR 引擎选择、识别语言、模型下载、全片批量转写。
+                                 * 与「字幕功能设置」（字幕文件 / 在线翻译 / 样式）是两件事：前者决定**字幕怎么来**，后者决定**已有字幕怎么用**。
+                                 */
+                                fun SettingsSectionAiSubtitle() {
 
                                 // ===== ASR 引擎选择（v111：Vosk / Qwen3-ASR / SenseVoice QNN）=====
                                 Column(
@@ -7448,7 +7454,7 @@ fun VRPlayerScreen(
                                     Text(
                                         text = stringResource(R.string.asr_engine_sensevoice_desc),
                                         color = Color.White.copy(alpha = 0.45f),
-                                        fontSize = 8.sp,
+                                        fontSize = 9.sp,
                                         lineHeight = 11.sp
                                     )
                                     // sherpa-onnx 引擎语言选择（v111；v127 含 SenseVoice CPU）
@@ -7508,7 +7514,7 @@ fun VRPlayerScreen(
                                                     Text(
                                                         text = modelDesc,
                                                         color = Color.White.copy(alpha = 0.4f),
-                                                        fontSize = 8.sp
+                                                        fontSize = 9.sp
                                                     )
                                                 }
                                                 Text(
@@ -7522,7 +7528,7 @@ fun VRPlayerScreen(
                                                         sherpaReady.value -> Color(0xFF81C784)
                                                         else -> Color.White
                                                     },
-                                                    fontSize = 9.sp,
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                             }
@@ -7535,13 +7541,13 @@ fun VRPlayerScreen(
                                                     modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
                                                 )
                                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                                    Text(stringResource(R.string.asr_download_percent, (SherpaAsrManager.modelDownloadProgress * 100).toInt()), color = Color(0xFF4FC3F7), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                                    Text(if (SherpaAsrManager.downloadStatus.isEmpty()) stringResource(R.string.asr_status_builtin_ready) else SherpaAsrManager.downloadStatus, color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(stringResource(R.string.asr_download_percent, (SherpaAsrManager.modelDownloadProgress * 100).toInt()), color = Color(0xFF4FC3F7), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    Text(if (SherpaAsrManager.downloadStatus.isEmpty()) stringResource(R.string.asr_status_builtin_ready) else SherpaAsrManager.downloadStatus, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 }
                                                 Text(
                                                     text = stringResource(R.string.asr_cancel_download),
                                                     color = Color(0xFFEF5350),
-                                                    fontSize = 9.sp,
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     modifier = Modifier.align(Alignment.End)
                                                         .clip(RoundedCornerShape(4.dp))
@@ -7569,12 +7575,35 @@ fun VRPlayerScreen(
                                                 Text(
                                                     text = stringResource(R.string.asr_model_ready_hint, modelName),
                                                     color = Color(0xFF81C784),
-                                                    fontSize = 8.sp
+                                                    fontSize = 9.sp
                                                 )
                                             }
                                         }
                                     }
                                 }
+
+                                // ===== 后台生成全片字幕（v91 提取复用）=====
+                                BatchTranscribeSection(
+                                                            accentColor = AccentColor,
+                                                            accentOnColor = AccentOnColor,
+                                                            sherpaLangCode = sherpaLangCode,
+                                                            onSherpaLangCodeChange = { changeAsrLanguage(it) },
+                                                            onUserInteraction = { keepUiAlight() },
+                                                            // v2.4.30：AI 字幕面板里把 SenseVoice 单独置顶
+                                                            senseVoiceFirst = true
+                                                        )
+                                }
+
+                                /**
+                                 * 区块 6a：字幕文件 / 在线翻译 / 样式
+                                 *
+                                 * v2.6.4：**AI 字幕已独立**为顶级的 SettingsSectionAiSubtitle（ASR 引擎 / 识别语言 /
+                                 * 模型下载 / 全片批量转写）。本分组只保留**播放期字幕**的配置：加载字幕文件、在线翻译引擎、
+                                 * 字幕样式与布局。
+                                 */
+                                @Composable
+                                fun SettingsSectionSubtitle() {
+
 
                                 // ===== v2.3.0：AI 弹幕设置已**独立成组**（见 SettingsSectionDanmu）
                                 // 此前 v2.2.0 曾把弹幕面板放在本分组内，导致「弹幕」与「字幕」混在一起。
@@ -7691,16 +7720,6 @@ fun VRPlayerScreen(
                                     onUserActivity = { keepUiAlight() }
                                 )
 
-                                // ===== 后台生成全片字幕（v91 提取复用）=====
-                                BatchTranscribeSection(
-                                                            accentColor = AccentColor,
-                                                            accentOnColor = AccentOnColor,
-                                                            sherpaLangCode = sherpaLangCode,
-                                                            onSherpaLangCodeChange = { changeAsrLanguage(it) },
-                                                            onUserInteraction = { keepUiAlight() },
-                                                            // v2.4.30：AI 字幕面板里把 SenseVoice 单独置顶
-                                                            senseVoiceFirst = true
-                                                        )
                                 }
                                 /**
                                  * 区块 6b：AI 弹幕设置（v2.3.0 从「字幕」分组中独立出来）
@@ -7901,7 +7920,7 @@ fun VRPlayerScreen(
                                     Text(
                                         text = stringResource(R.string.memory_mode_desc),
                                         color = Color.White.copy(alpha = 0.5f),
-                                        fontSize = 9.sp
+                                        fontSize = 10.sp
                                     )
                                 }
                             }
@@ -7938,6 +7957,7 @@ fun VRPlayerScreen(
                                     fun SettingsGroup(
                                         title: String,
                                         key: String,
+                                        icon: ImageVector? = null,
                                         content: @Composable () -> Unit
                                     ) {
                                         val expanded = key in expandedSettings
@@ -7958,10 +7978,22 @@ fun VRPlayerScreen(
                                                     .padding(horizontal = 10.dp, vertical = 8.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
+                                                // v2.6.4：分组标题补图标 —— 10 个分组纯文字时辨识度低，
+                                                // 折叠状态下只能靠读标题区分；图标 + 12sp 让一级/二级层级更清楚。
+                                                if (icon != null) {
+                                                    Icon(
+                                                        imageVector = icon,
+                                                        contentDescription = null,
+                                                        tint = if (expanded) AccentColor
+                                                        else Color.White.copy(alpha = 0.55f),
+                                                        modifier = Modifier.size(15.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                }
                                                 Text(
                                                     text = title,
                                                     color = if (expanded) AccentColor else Color.White.copy(alpha = 0.85f),
-                                                    fontSize = 11.sp,
+                                                    fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                                 Spacer(modifier = Modifier.weight(1f))
@@ -7984,19 +8016,21 @@ fun VRPlayerScreen(
                                         }
                                     }
 
-                                    // 左列分组（二级菜单）：主题 → 投影 → 8K → 倍速 → 解码 → 画质增强 → 字幕 → 弹幕
-                                    SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme") { SettingsSection0() }
-                                    SettingsGroup(stringResource(R.string.group_title_projection), "proj") { SettingsSection1() }
-                                    SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k") { SettingsSection8K() }
-                                    SettingsGroup(stringResource(R.string.group_title_floating_ball), "ball") { SettingsSection3() }
-                                    SettingsGroup(stringResource(R.string.group_title_decoder), "decode") { SettingsSection4() }
-                                    // v2.0.206：MEMC 插帧 / FSR 超分
-                                    SettingsGroup(stringResource(R.string.group_title_enhance), "enhance") { SettingsSectionEnhance() }
-                                    SettingsGroup(stringResource(R.string.group_title_subtitle), "sub") { SettingsSectionSubtitle() }
+                                    // 左列分组（二级菜单）：主题 → 投影 → 字幕 → AI 字幕 → AI 弹幕 → 悬浮球 → 解码 → 画质增强 → 8K → 关于
+                                    SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme", Icons.Default.Palette) { SettingsSection0() }
+                                    SettingsGroup(stringResource(R.string.group_title_projection), "proj", Icons.Default.ViewInAr) { SettingsSection1() }
+                                    SettingsGroup(stringResource(R.string.group_title_subtitle), "sub", Icons.Default.Subtitles) { SettingsSectionSubtitle() }
+                                    // v2.6.4：AI 字幕独立成组，与「AI 弹幕」同级（此前挤在「字幕功能设置」里）
+                                    SettingsGroup(stringResource(R.string.group_title_ai_subtitle), "aisub", Icons.Default.Mic) { SettingsSectionAiSubtitle() }
                                     // v2.3.0：AI 弹幕独立成组（此前挂在「字幕」分组内，与字幕混在一起）
-                                    SettingsGroup(stringResource(R.string.group_title_danmu), "danmu") { SettingsSectionDanmu() }
+                                    SettingsGroup(stringResource(R.string.group_title_danmu), "danmu", Icons.Default.ChatBubble) { SettingsSectionDanmu() }
+                                    SettingsGroup(stringResource(R.string.group_title_floating_ball), "ball", Icons.Default.BubbleChart) { SettingsSection3() }
+                                    SettingsGroup(stringResource(R.string.group_title_decoder), "decode", Icons.Default.Memory) { SettingsSection4() }
+                                    // v2.0.206：MEMC 插帧 / FSR 超分
+                                    SettingsGroup(stringResource(R.string.group_title_enhance), "enhance", Icons.Default.AutoAwesome) { SettingsSectionEnhance() }
+                                    SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k", Icons.Default.HighQuality) { SettingsSection8K() }
                                     // v106：关于与开源许可（合规署名入口）
-                                    SettingsGroup(stringResource(R.string.group_title_about), "about") {
+                                    SettingsGroup(stringResource(R.string.group_title_about), "about", Icons.Default.Info) {
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -8015,7 +8049,7 @@ fun VRPlayerScreen(
                                                 Text(
                                                     text = stringResource(R.string.licenses_desc),
                                                     color = Color.White.copy(alpha = 0.45f),
-                                                    fontSize = 9.sp
+                                                    fontSize = 10.sp
                                                 )
                                             }
                                             Text(

@@ -85,7 +85,7 @@
     <string name="action_media_info">動画情報</string>
     <string name="action_track_select">音声/字幕トラック選択</string>
     <string name="action_close">閉じる</string>
-    <string name="settings_group_ui_theme">0. UI テーマとガラス効果</string>
+    <string name="settings_group_ui_theme">UI テーマとガラス効果</string>
     <string name="theme_solid">ベタ塗り</string>
     <string name="theme_name_violet">バイオレット</string>
     <string name="theme_name_indigo">インディゴ</string>
@@ -94,7 +94,7 @@
     <string name="theme_name_amber">アンバー</string>
     <string name="theme_name_mint">ミント</string>
     <string name="theme_liquid_glass">リキッドガラス</string>
-    <string name="settings_group_projection">1. レンズ投影と視野モード</string>
+    <string name="settings_group_projection">レンズ投影と視野モード</string>
     <string name="projection_auto_detect">投影の自動検出</string>
     <string name="projection_auto_detect_desc">2:1 パノラマ / 通常 2D を自動判別し、投影と立体モードを切り替えます</string>
     <string name="force_video_type">動画タイプを固定</string>
@@ -163,7 +163,7 @@
     <string name="auto_fallback_soft">ハードウェア失敗時にソフトへ自動切替</string>
     <string name="auto_fallback_soft_desc">ハードウェアデコードがエラーになったらソフトウェアに切り替えます</string>
     <string name="panorama_note">補足：360°/180° パノラマはジャイロまたはスワイプでスムーズに見回せます。</string>
-    <string name="settings_group_floating_ball">3. フローティングボールと再生速度</string>
+    <string name="settings_group_floating_ball">フローティングボールと再生速度</string>
     <string name="floating_ball_enable">フローティングボールを有効化</string>
     <string name="seek_ball_forward_enable">早送りボール</string>
     <string name="seek_ball_backward_enable">巻き戻しボール</string>
@@ -175,7 +175,7 @@
     <string name="floating_ball_desc">押し続けで加速 · ダブルタップで速度段を切替 · ドラッグで配置 · スイッチは記憶されます</string>
     <string name="floating_ball_speed">長押し時の速度</string>
     <string name="base_playback_speed">通常の再生速度</string>
-    <string name="settings_group_decoder">4. デコーダとフレームレート制限</string>
+    <string name="settings_group_decoder">デコーダとフレームレート制限</string>
     <string name="decoder_engine">デコーダエンジン</string>
     <string name="decode_mode">デコードモード</string>
     <string name="decode_hw">ハードウェア（GPU 高速化）</string>
@@ -183,7 +183,7 @@
     <string name="fps_limit">フレームレート制限</string>
     <string name="no_limit">制限なし</string>
     <string name="asr_engine_title">AI 字幕エンジン</string>
-    <string name="asr_engine_sensevoice_desc">Dolphin：東洋 40 言語 + 中国語 22 方言、内蔵モデル（ダウンロード不要）、言語自動判別</string>
+    <string name="asr_engine_sensevoice_desc">東洋 40 言語 + 中国語 22 方言、モデル内蔵でダウンロード不要、言語自動判別</string>
     <string name="asr_language">認識言語</string>
     <string name="asr_sensevoice_tag">40 言語 + 22 方言・内蔵・言語自動判別</string>
     <string name="asr_downloading">⬇ ダウンロード中</string>
@@ -198,7 +198,7 @@
     <string name="beauty_preset_natural">ナチュラル</string>
     <string name="beauty_preset_light">薄化粧</string>
     <string name="beauty_preset_heavy">濃いめ</string>
-    <string name="settings_group_beauty">2. Shader リアルタイム美顔</string>
+    <string name="settings_group_beauty">Shader リアルタイム美顔</string>
     <string name="beauty_face_slim">小顔</string>
     <string name="beauty_big_eyes">目を大きく</string>
     <string name="beauty_dark_circles">クマを消す</string>
@@ -220,13 +220,14 @@
     <string name="group_title_8k_hw">8K ハードウェアデコード</string>
     <string name="group_title_floating_ball">フローティングボールと速度</string>
     <string name="group_title_decoder">デコーダとフレームレート</string>
-    <string name="group_title_subtitle">字幕機能の設定</string>
+    <string name="group_title_ai_subtitle">AI 字幕</string>
+    <string name="group_title_subtitle">字幕と翻訳</string>
     <string name="group_title_danmu">AI コメント</string>
     <string name="danmu_section_color">全体カラー（全コメントに適用）</string>
     <string name="danmu_text_color">文字色</string>
     <string name="danmu_stroke">縁取り</string>
     <string name="danmu_bg">背景</string>
-    <string name="danmu_color_hint">「単色」では全弾幕が同じ色、ランダムモードでは弾幕ごとに色が変わります。字幕の色とは別に設定できます。</string>
+    <string name="danmu_color_hint">単色：全弾幕が同じ色。ランダム：弾幕ごとに色が変わります。字幕の色とは独立。</string>
     <string name="danmu_status_title">動作状況</string>
     <string name="danmu_status_not_configured">未設定です：エンドポイント・モデル名・API キーを入力してください</string>
     <string name="danmu_status_waiting">準備完了。最初の画面認識を待機中…（数秒）</string>
@@ -242,7 +243,7 @@
     <string name="danmu_source_both">映像+セリフ</string>
     <string name="danmu_source_image">映像のみ</string>
     <string name="danmu_source_subtitle">セリフのみ</string>
-    <string name="danmu_source_hint">「セリフ」は現在の再生位置付近の AI 字幕から取得します（前 15 秒 / 後 5 秒）。セリフのみモードはスクリーンショットを送信しないため高速・省通信ですが、映像は見えません。</string>
+    <string name="danmu_source_hint">「セリフ」は現在位置付近の AI 字幕（前 15 秒 / 後 5 秒）を使います。セリフのみはスクリーンショットを送らないため高速・省通信ですが、映像は見えません。</string>
     <string name="danmu_err_no_subtitle">現在位置のセリフがまだありません。AI 字幕を有効にして生成をお待ちください</string>
     <string name="danmu_err_url_empty">エンドポイントが空です。http:// または https:// で始まるアドレスを入力してください</string>
     <string name="danmu_err_url_no_scheme">エンドポイントに接頭辞がありません。http:// または https:// で始める必要があります（例: https://api.xiaomimimo.com/v1）</string>
@@ -634,7 +635,7 @@
     <string name="beauty_gp_half_res_desc">美顔を 1/2 解像度で処理します。負荷は下がりますが細部はやや軟らかくなります。オフにするとフル解像度処理（画質最優先・負荷大）。GPUPixel エンジンのみ有効</string>
 
 <!-- v2.0.206：画质增强（MEMC 插帧 / FSR 超分） -->
-    <string name="settings_group_enhance">5. 画質強化</string>
+    <string name="settings_group_enhance">画質強化</string>
     <string name="memc_enabled">MEMC フレーム補間</string>
     <string name="memc_target_fps">目標フレームレート</string>
     <string name="memc_desc">動き補償によるフレーム補間：隣接フレーム間に中間フレームを生成し、動きを滑らかにします（動画再生時のみ有効）</string>
@@ -917,16 +918,16 @@
     <string name="danmu_color_mode_single">単色</string>
     <string name="danmu_color_mode_random">完全ランダム</string>
     <string name="danmu_color_mode_mostly_white">80% 白 + ランダム</string>
-    <string name="danmu_color_random_hint">各弾幕は「白／レモン／シアン／グリーン／ピンク／オレンジ」からランダムに着色されます（黒は暗い場面で見えないため除外）。</string>
+    <string name="danmu_color_random_hint">白／レモン／シアン／グリーン／ピンク／オレンジからランダム（黒は暗所で見えないため除外）。</string>
     <string name="danmu_source_type">弾幕のソース</string>
     <string name="danmu_source_type_ai">AI 生成</string>
     <string name="danmu_source_type_import">ファイル読込</string>
-    <string name="danmu_source_type_hint">「AI 生成」は現在の映像からリアルタイムに生成します。「ファイル読込」は用意した弾幕ファイル（Bilibili XML／JSON）を読み込みます。どちらか一方を選びます。</string>
+    <string name="danmu_source_type_hint">「AI 生成」は現在の映像から生成。「ファイル読込」は自分の弾幕ファイル（Bilibili XML／JSON）を読み込みます。</string>
     <string name="danmu_import_pick">弾幕ファイルを選択</string>
     <string name="danmu_import_none">ファイル未選択</string>
     <string name="danmu_import_loaded">全 {count} 件</string>
     <string name="danmu_import_clear">読み込みを解除</string>
-    <string name="danmu_import_hint">Bilibili 弾幕 XML（&lt;d p="時間,モード,サイズ,色,..."&gt;）と JSON 配列（time / text / color）に対応。スクロール弾幕のみ使用し、他はスキップします。</string>
+    <string name="danmu_import_hint">Bilibili 弾幕 XML と JSON 配列（time / text / color）に対応。スクロール弾幕のみ読み込みます。</string>
     <string name="danmu_import_loading">ファイルを読み込み中…</string>
     <string name="danmu_import_ok">%1$d 件を取り込みました</string>
     <string name="danmu_import_ok_truncated">%1$d 件を取り込みました（上限に達したため残りは切り捨てました）</string>
@@ -943,7 +944,7 @@
     <string name="danmu_jitter_medium">中</string>
     <string name="danmu_jitter_strong">強</string>
     <string name="danmu_time_jitter_sigma">現在 σ = %1$d ms · 同じバッチの弾幕がずれて出る度合い</string>
-    <string name="danmu_time_jitter_hint">同じバッチの弾幕は本来同時に出ます。ここではバッチ時刻を中心に正規分布でばらけさせ、自然な粗密を作ります。0 で無効（同時）。</string>
+    <string name="danmu_time_jitter_hint">バッチ時刻を中心に正規分布でばらけさせ、自然に錯開させます。0 = オフ（同時）。</string>
     <string name="danmu_time_jitter_off">オフ</string>
     <!-- v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer） -->
     <string name="cast_receiver_title">キャスト受信</string>

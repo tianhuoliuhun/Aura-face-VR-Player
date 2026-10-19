@@ -75,19 +75,34 @@ class DanmuEngineOverlapAndJitterTest {
     // ------------------------------------------------------------ 同轨道避让
 
     @Test
-    fun `同轨道上一条已进屏时_按估计宽度判定为太近而拒绝复用`() {
-        // 这条是「弹幕重叠」的直接回归：
-        // 若 widthPx 仍是 0，t=1500 时 lastX=700 → gap=300 ≥ minGap(90) → 允许复用；
-        // 实际这条 10 字弹幕宽 ≈583px，右边缘还在 x=1283（屏外右侧），
-        // 新弹幕一进来就会压上去 → 必须拒绝。
+    fun `同轨道上一条已进屏时_太近则延后出生而非丢弃`() {
+        // 这条原本断言"拒绝复用（返回 0）"，v2.6.4 改为**排队**语义：
+        //   若 widthPx 仍是 0，t=1500 时 lastX=700 → gap=300 ≥ minGap(90) → 会直接复用同轨道（重叠）；
+        //   现在按估计宽度（10 字 ≈583px）判定"太近" → 不立刻放，但**也不丢弃**，
+        //   而是把出生时刻推到该轨道真正空出来之后。
+        // 断言重点随之从"是否入队"变成"入队了、且出生时刻被推后到不重叠"。
         val e = engine(maxTracks = 1)
         assertEquals(1, e.enqueue(listOf("十个汉字测试弹幕宽度"), 100_000L))
-        assertEquals(
-            "上一条的尾巴还没进屏，不应复用同轨道",
-            0,
-            e.enqueue(listOf("另一条完全不同的内容"), 101_500L)
+        val added = e.enqueue(listOf("另一条完全不同的内容"), 101_500L)
+        assertEquals("放不下时应延后排队，而不是丢弃", 1, added)
+
+        val items = e.snapshot()
+        assertEquals(2, items.size)
+        val first = items.first { it.text == "十个汉字测试弹幕宽度" }
+        val second = items.first { it.text == "另一条完全不同的内容" }
+
+        // ① 出生时刻确实被推后（否则就是重叠）
+        assertTrue(
+            "第二条应晚于原定时刻，实际延后 ${second.bornMs - 101_500L}ms",
+            second.bornMs > 101_500L
         )
-        assertEquals(1, e.size)
+        // ② 第二条出生那一刻，第一条的尾巴必须已让出至少 GAP_PX_MIN(64px) 的间距
+        val x = first.currentX(second.bornMs, e.screenWidthPx, e.speedPxPerSec)
+        val right = x + first.widthPx
+        assertTrue(
+            "延后后仍会重叠：第一条右边缘=$right，屏宽=${e.screenWidthPx}",
+            right <= e.screenWidthPx - 64f
+        )
     }
 
     @Test
