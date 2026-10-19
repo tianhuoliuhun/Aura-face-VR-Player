@@ -1,3 +1,10 @@
+/**
+ * ⚠️ v2.6.5：**本文件当前没有 UI 入口**（用户要求移除「网页直链播放」入口）。
+ *
+ * 保留代码的原因：嗅探链路本身可用（实测能抓到直链并成功播放），
+ * 只是"播放时会回退 MPV 内核"的观感问题尚未解决。若将来重新启用，
+ * 需要把入口加回「选择文件来源」并处理内核选择，别直接删这个文件。
+ */
 package com.example.vr
 
 import android.annotation.SuppressLint
@@ -71,7 +78,7 @@ import com.example.R
  */
 @Composable
 fun WebSnifferScreen(
-    onPlay: (String) -> Unit,
+    onPlay: (url: String, pageUrl: String) -> Unit,
     onClose: () -> Unit,
     accentColor: Color,
     accentOnColor: Color,
@@ -80,6 +87,8 @@ fun WebSnifferScreen(
     var input by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var currentHost by remember { mutableStateOf("") }
+    // 当前页面完整地址 —— 作为直链的 Referer（多数 CDN 校验，缺失直接 403）
+    var pageUrl by remember { mutableStateOf("") }
     val streams = remember { mutableStateListOf<VideoSniffer.SniffedStream>() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -195,6 +204,7 @@ fun WebSnifferScreen(
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 loading = false
+                                pageUrl = url ?: ""
                                 currentHost = url?.let { runCatching { java.net.URI(it).host }.getOrNull() } ?: ""
                             }
                         }
@@ -240,7 +250,7 @@ fun WebSnifferScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(Color.White.copy(alpha = 0.07f))
-                                .clickable { onPlay(s.url) }   // 完整 URL 只在这里传给播放器
+                                .clickable { onPlay(s.url, pageUrl) }   // 完整 URL + 来源页只在这里传给播放器
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {

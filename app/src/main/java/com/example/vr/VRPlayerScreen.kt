@@ -496,8 +496,6 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("is_perf_ball_enabled", false) else false
         )
     }
-    // v2.6.4：网页直链播放（嗅探面板）开关
-    var showWebSniffer by remember { mutableStateOf(false) }
     // v2.6.4：URL 直接播放对话框
     var showUrlPlayDialog by remember { mutableStateOf(false) }
     // 步长（秒），双击循环 5 → 10 → 15 → 30
@@ -1791,6 +1789,8 @@ fun VRPlayerScreen(
      * 轻则 OOM、重则直接把主线程卡死。
      */
     fun applyPickedToMedia(uri: Uri) {
+        // v2.6.5：本地文件播放不再需要网页请求头，先清掉（否则会残留到下一次播放）
+        HttpPlaybackHeaders.clear()
         val resolver = context.contentResolver
         val mimeType = runCatching { resolver.getType(uri) }.getOrNull()
         val isVideo = MediaFormats.looksLikeVideoUri(uri, mimeType)
@@ -3697,10 +3697,14 @@ fun VRPlayerScreen(
             // v2.0.139: DefaultDataSource 只处理 file/asset/content，其余 scheme 落到 base。
             // MT 等文件管理器把 FTP/SMB 远程文件经本地回环 HTTP 代理（http://127.0.0.1:port/...）
             // 交给播放器，故 base 按 scheme 分流：smb:// → jcifs，其余 → DefaultHttpDataSource。
-            val smbAwareFactory = androidx.media3.datasource.DefaultDataSource.Factory(
-                context,
-                SchemeRoutingDataSource.Factory(context)
-            )
+            //
+            // 🔴 v2.6.5（关键修正）：**不再用 DefaultDataSource 包一层**。
+            //    那层对 http(s) 会自建 `DefaultHttpDataSource`，而本 Media3 版本的双参构造
+            //    **不给它设 UA**（实测：无 UA → CDN 直接 403；带任意 UA → 206），
+            //    且该版本的 `DefaultDataSource.Factory` 没有 `setHttpDataSourceFactory` 可注入。
+            //    故改为由 `SchemeRoutingDataSource` 全权分流：rtmp / smb / 本地资源 / http
+            //    （http 分支按 HttpPlaybackHeaders 带 UA + Referer）。
+            val smbAwareFactory = SchemeRoutingDataSource.Factory(context)
             val exo = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(
                     // ⚠️ v2.4.14：传入 `AviExtractorsFactory` —— 用**改进版 AVI extractor**
@@ -8131,31 +8135,6 @@ fun VRPlayerScreen(
             OpenSourceLicensesDialog(onDismiss = { showLicensesDialog = false })
         }
 
-        // v2.6.4：**网页直链播放**（全屏嗅探面板）
-        // 抓到直链后**只把 URL 交给播放器**，标题写中性的「网页视频」——
-        // 完整链接（含 token/sign）不进入界面、标题与「最近播放」，满足隐私要求。
-        if (showWebSniffer) {
-            Dialog(
-                onDismissRequest = { showWebSniffer = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-            ) {
-                WebSnifferScreen(
-                    onPlay = { url ->
-                        showWebSniffer = false
-                        selectedMediaItem = MediaItem(
-                            id = "web_${System.currentTimeMillis()}",
-                            title = context.getString(R.string.web_sniffer_playing_title),
-                            uri = url,
-                            isVideo = true
-                        )
-                    },
-                    onClose = { showWebSniffer = false },
-                    accentColor = AccentColor,
-                    accentOnColor = AccentOnColor,
-                )
-            }
-        }
-
         // v2.6.4：**URL 直接播放**（粘贴直链即可播放，无需先嗅探）
         // 标题同样写中性的「URL 视频」，完整链接不进入标题与最近播放。
         if (showUrlPlayDialog) {
@@ -8205,6 +8184,7 @@ fun VRPlayerScreen(
                             val u = urlText.trim()
                             if (u.startsWith("http://", true) || u.startsWith("https://", true)) {
                                 showUrlPlayDialog = false
+                                HttpPlaybackHeaders.forWebPlayback(null, u)
                                 selectedMediaItem = MediaItem(
                                     id = "url_${System.currentTimeMillis()}",
                                     title = context.getString(R.string.url_play_playing_title),
@@ -8497,50 +8477,7 @@ fun VRPlayerScreen(
                             )
                         }
 
-                        // ── 入口 3：网页直链播放（v2.6.4，嗅探后直接播放）──
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
-                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                                .clickable {
-                                    pickerSourceDialogOpen = false
-                                    showWebSniffer = true
-                                }
-                                .padding(horizontal = 12.dp, vertical = 11.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Language,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.8f),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    stringResource(R.string.web_sniffer_title),
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    stringResource(R.string.web_sniffer_entry_desc),
-                                    color = Color.White.copy(alpha = 0.55f),
-                                    fontSize = 10.sp
-                                )
-                            }
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.45f),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // ── 入口 4：URL 直接播放（v2.6.4，粘贴 m3u8 / mp4）──
+                        // ── 入口 3：URL 直接播放（v2.6.4，粘贴 m3u8 / mp4）──
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

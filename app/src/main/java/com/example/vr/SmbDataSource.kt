@@ -135,13 +135,47 @@ class SchemeRoutingDataSource(private val context: Context) : BaseDataSource(/* 
             // smb:// → jcifs
             "smb" -> SmbDataSource()
 
+            // v2.6.5：**本地/内嵌资源**交给 DefaultDataSource 处理（file / content / asset / data）。
+            // 之所以放在这里，是因为 VRPlayerScreen 不再用 DefaultDataSource 包一层 ——
+            // 那层对 http 会自建数据源且**不带 UA**（实测 CDN 无 UA 直接 403），
+            // 而它的 http 工厂在本 Media3 版本没有对外 setter，无法注入。
+            // 现在由本分流器全权决定，http 的 UA/Referer 才真正生效。
+            "file", "content", "asset", "data", "rawresource", "android.resource" ->
+                androidx.media3.datasource.DefaultDataSource.Factory(context).createDataSource()
+
             else -> {
                 // v2.0.142：http(s)（MT 回环代理等）包 CacheDataSource——代理不支持 Range
                 // 时也能按需拉取字节、正常 seek（边下边播），moov 在尾部的 MP4 也能先读 moov。
-                CacheDataSource(
-                    getHttpCache(context),
-                    DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).createDataSource()
+                //
+                // v2.6.5：网页/URL 播放时带上 Referer + UA（由 HttpPlaybackHeaders 提供）。
+                // 不带的话多数站的 CDN 直接 403 —— 实测：无 UA → 403；带任意 UA（含 Exo 默认）→ 206。
+                //
+                // 🔴 **UA 必须永不为空**：第一版写成「有值才设」，而 URL 播放那条路径若没走到
+                //    forWebPlayback，userAgent 就是 null → 等于不设 UA → 依然 403。
+                //    这里无条件给一个兜底 UA。
+                val httpFactory = DefaultHttpDataSource.Factory()
+                    .setAllowCrossProtocolRedirects(true)
+                val ua = HttpPlaybackHeaders.userAgent?.takeIf { it.isNotBlank() }
+                    ?: androidx.media3.common.util.Util.getUserAgent(context, "Aura-face-VR-Player")
+                httpFactory.setUserAgent(ua)
+                HttpPlaybackHeaders.asRequestProperties()?.let {
+                    httpFactory.setDefaultRequestProperties(it)
+                }
+                // 留一条 INFO 日志：网页直链出问题时先看这里 UA 有没有带上（403 的常见成因）
+                android.util.Log.i(
+                    "SchemeRouting",
+                    "HTTP open: ua=$ua, referer=${HttpPlaybackHeaders.referer ?: "<null>"}"
                 )
+                val httpSource = httpFactory.createDataSource()
+                // v2.6.5：**网页/URL 播放不走 CacheDataSource**。
+                // 实测该 CDN 对 Range 请求按 5 MiB 分块返回，缓存层的 Tee 写入与 Content-Length
+                // 校验会打架，表现为 `EOFException @ Mp4Extractor.readSample`（拿到数据但比声称的短）。
+                // 直连 http 源少一层，行为更接近普通播放器；且网页直链带一次性 token，缓存无复用价值。
+                if (HttpPlaybackHeaders.isActive) {
+                    httpSource
+                } else {
+                    CacheDataSource(getHttpCache(context), httpSource)
+                }
             }
         }
         delegate = source
