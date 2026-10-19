@@ -82,6 +82,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -483,6 +485,21 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("is_battery_ball_enabled", false) else false
         )
     }
+    // v2.6.4：播放控制球 / 性能球（与信息球同属「悬浮球」组，默认关）
+    var isPlayBallEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_play_ball_enabled", false) else false
+        )
+    }
+    var isPerfBallEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("is_perf_ball_enabled", false) else false
+        )
+    }
+    // v2.6.4：网页直链播放（嗅探面板）开关
+    var showWebSniffer by remember { mutableStateOf(false) }
+    // v2.6.4：URL 直接播放对话框
+    var showUrlPlayDialog by remember { mutableStateOf(false) }
     // 步长（秒），双击循环 5 → 10 → 15 → 30
     var seekForwardStep by remember {
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("seek_forward_step", 5) else 5)
@@ -1246,6 +1263,9 @@ fun VRPlayerScreen(
         // v2.4.67：信息球开关 ⚠️ 必须进 key 列表，否则切换后 prefs 永不落盘（本项目头号坑）
         isClockBallEnabled,
         isBatteryBallEnabled,
+        // v2.6.4：播放控制球 / 性能球 ⚠️ 同样必须进 key 列表，否则切换后不落盘
+        isPlayBallEnabled,
+        isPerfBallEnabled,
         seekForwardStep,
         seekBackwardStep,
         floatingBallSpeed,
@@ -1358,6 +1378,8 @@ fun VRPlayerScreen(
                 putBoolean("is_marker_ball_enabled", isMarkerBallEnabled)
                 putBoolean("is_clock_ball_enabled", isClockBallEnabled)
                 putBoolean("is_battery_ball_enabled", isBatteryBallEnabled)
+                putBoolean("is_play_ball_enabled", isPlayBallEnabled)
+                putBoolean("is_perf_ball_enabled", isPerfBallEnabled)
                 putInt("seek_forward_step", seekForwardStep)
                 putInt("seek_backward_step", seekBackwardStep)
                 putFloat("floating_ball_speed", floatingBallSpeed)
@@ -1439,6 +1461,14 @@ fun VRPlayerScreen(
                 remove("is_floating_ball_enabled")
                 remove("floating_ball_speed")
                 remove("base_playback_speed")
+                // v2.6.4：补齐各悬浮球开关的 remove —— 这三个 key（marker/clock/battery）
+                // 自 v2.1.208 / v2.4.67 加入起就只有「读取 + 写回」两处，漏了本分支的 remove，
+                // 导致「关闭记忆模式」后旧值残留在 prefs，下次开启被恢复成过期状态。
+                remove("is_marker_ball_enabled")
+                remove("is_clock_ball_enabled")
+                remove("is_battery_ball_enabled")
+                remove("is_play_ball_enabled")
+                remove("is_perf_ball_enabled")
                 remove("max_fps")
                 remove("is_software_decoding")
                 remove("decoder_engine_id")
@@ -6921,6 +6951,21 @@ fun VRPlayerScreen(
                                         onChange = { isBatteryBallEnabled = it },
                                         tag = "battery_ball_switch"
                                     )
+                                    // v2.6.4：播放控制球 / 性能球（同一组、同一样式）
+                                    BallSwitchRow(
+                                        title = stringResource(R.string.control_ball_enable),
+                                        desc = stringResource(R.string.control_ball_desc),
+                                        checked = isPlayBallEnabled,
+                                        onChange = { isPlayBallEnabled = it },
+                                        tag = "play_ball_switch"
+                                    )
+                                    BallSwitchRow(
+                                        title = stringResource(R.string.perf_ball_enable),
+                                        desc = stringResource(R.string.perf_ball_desc),
+                                        checked = isPerfBallEnabled,
+                                        onChange = { isPerfBallEnabled = it },
+                                        tag = "perf_ball_switch"
+                                    )
 
                                     if (isFloatingBallEnabled) {
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -8031,6 +8076,8 @@ fun VRPlayerScreen(
                                     SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k", Icons.Default.HighQuality) { SettingsSection8K() }
                                     // v106：关于与开源许可（合规署名入口）
                                     SettingsGroup(stringResource(R.string.group_title_about), "about", Icons.Default.Info) {
+                                        // v2.6.4：URL 播放 / 网页直链播放的入口已移至「选择文件来源」对话框
+                                        // （与相册、任意文件并列），此处不再重复放入口，避免同一功能两个入口。
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -8082,6 +8129,109 @@ fun VRPlayerScreen(
         // v106：开源许可对话框（设置面板 → 关于与开源许可）
         if (showLicensesDialog) {
             OpenSourceLicensesDialog(onDismiss = { showLicensesDialog = false })
+        }
+
+        // v2.6.4：**网页直链播放**（全屏嗅探面板）
+        // 抓到直链后**只把 URL 交给播放器**，标题写中性的「网页视频」——
+        // 完整链接（含 token/sign）不进入界面、标题与「最近播放」，满足隐私要求。
+        if (showWebSniffer) {
+            Dialog(
+                onDismissRequest = { showWebSniffer = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                WebSnifferScreen(
+                    onPlay = { url ->
+                        showWebSniffer = false
+                        selectedMediaItem = MediaItem(
+                            id = "web_${System.currentTimeMillis()}",
+                            title = context.getString(R.string.web_sniffer_playing_title),
+                            uri = url,
+                            isVideo = true
+                        )
+                    },
+                    onClose = { showWebSniffer = false },
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                )
+            }
+        }
+
+        // v2.6.4：**URL 直接播放**（粘贴直链即可播放，无需先嗅探）
+        // 标题同样写中性的「URL 视频」，完整链接不进入标题与最近播放。
+        if (showUrlPlayDialog) {
+            var urlText by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { showUrlPlayDialog = false },
+                containerColor = Color(0xFC18171C),
+                title = {
+                    Text(
+                        stringResource(R.string.url_play_title),
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = urlText,
+                            onValueChange = { urlText = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = {
+                                Text(
+                                    stringResource(R.string.url_play_hint),
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.35f)
+                                )
+                            },
+                            singleLine = false,
+                            maxLines = 3,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 12.sp,
+                                color = Color.White
+                            )
+                        )
+                        Text(
+                            text = stringResource(R.string.url_play_note),
+                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = 9.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val u = urlText.trim()
+                            if (u.startsWith("http://", true) || u.startsWith("https://", true)) {
+                                showUrlPlayDialog = false
+                                selectedMediaItem = MediaItem(
+                                    id = "url_${System.currentTimeMillis()}",
+                                    title = context.getString(R.string.url_play_playing_title),
+                                    uri = u,
+                                    isVideo = true
+                                )
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.url_play_invalid),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    ) {
+                        Text(stringResource(R.string.url_play_action), color = AccentColor)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showUrlPlayDialog = false }) {
+                        Text(
+                            stringResource(R.string.action_close),
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            )
         }
 
         // LAN (SMB) browser dialog (8/2 功能)
@@ -8335,6 +8485,92 @@ fun VRPlayerScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     stringResource(R.string.picker_source_any_file_desc),
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.45f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // ── 入口 3：网页直链播放（v2.6.4，嗅探后直接播放）──
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    pickerSourceDialogOpen = false
+                                    showWebSniffer = true
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.web_sniffer_title),
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    stringResource(R.string.web_sniffer_entry_desc),
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.45f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // ── 入口 4：URL 直接播放（v2.6.4，粘贴 m3u8 / mp4）──
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    pickerSourceDialogOpen = false
+                                    showUrlPlayDialog = true
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Link,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.url_play_title),
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    stringResource(R.string.url_play_entry_desc),
                                     color = Color.White.copy(alpha = 0.55f),
                                     fontSize = 10.sp
                                 )
@@ -8822,6 +9058,52 @@ fun VRPlayerScreen(
                 glassModifier = ballMaterialModifier,
                 prefs = prefs,
                 ballId = FloatingBallPositions.BATTERY,
+                rememberPosition = isMemoryModeEnabled
+            )
+        }
+
+        // 13d. v2.6.4：**播放控制球**（右侧中部）
+        // 单击 = 播放/暂停，双击 = 播报状态。球面图标由 `playerInstance.isPlaying` 驱动
+        // （不由球自己持有状态）→ 自动暂停、播完、外部控制暂停都能反映到图标上。
+        if (isPlayBallEnabled) {
+            ControlFloatingBall(
+                isPlaying = playerInstance?.isPlaying == true,
+                maxX = seekMaxX,
+                maxY = seekMaxY,
+                accentColor = AccentColor,
+                accentOnColor = AccentOnColor,
+                onTogglePlayPause = {
+                    val p = playerInstance
+                    if (p != null) {
+                        if (p.isPlaying) p.pause() else p.play()
+                    }
+                },
+                onFeedback = { seekHudText = it },
+                initialXRatio = 1f,
+                // 与后退球（0.68）/ 快进球（0.28）错开
+                initialYRatio = 0.42f,
+                isLiquidGlass = isLiquidGlass,
+                glassModifier = ballMaterialModifier,
+                prefs = prefs,
+                ballId = FloatingBallPositions.PLAY,
+                rememberPosition = isMemoryModeEnabled
+            )
+        }
+
+        // 13e. v2.6.4：**性能球**（左上；时钟球占 y=0.10，这里 0.26 不重叠）
+        if (isPerfBallEnabled) {
+            PerfFloatingBall(
+                maxX = seekMaxX,
+                maxY = seekMaxY,
+                accentColor = AccentColor,
+                accentOnColor = AccentOnColor,
+                onFeedback = { seekHudText = it },
+                initialXRatio = 0f,
+                initialYRatio = 0.26f,
+                isLiquidGlass = isLiquidGlass,
+                glassModifier = ballMaterialModifier,
+                prefs = prefs,
+                ballId = FloatingBallPositions.PERF,
                 rememberPosition = isMemoryModeEnabled
             )
         }

@@ -116,13 +116,6 @@
       "titleKey": "licenses_group_fonts",
       "items": [
         {
-          "name": "MiSans",
-          "version": "variable",
-          "license": "小米 MiSans 字体授权（免费商用）",
-          "url": "https://hyperos.mi.com/font/",
-          "note": "可免费用于商业产品；不得修改字形、不得单独售卖字体。"
-        },
-        {
           "name": "OPPO Sans",
           "version": "4.0",
           "license": "OPPO Sans 字体授权（免费商用）",

@@ -1,6 +1,6 @@
 {
   "generated": "2026-09-28",
-  "count": 181,
+  "count": 180,
   "items": [
     {
       "group": "androidx.activity",
@@ -1212,11 +1212,6 @@
       "version": "1.7.32",
       "license": "MIT",
       "url": ""
-    },
-    {
-      "name": "MiSans (可变字体 mi_sans_vf.ttf)",
-      "license": "小米 MiSans 字体授权（免费商用）",
-      "note": "由小米设计；可免费商用，但禁止修改字体文件、禁止单独分发字体本身"
     },
     {
       "name": "OPPO Sans (oppo_sans_4_0.ttf)",

@@ -18,7 +18,6 @@ data class SubtitleCue(
 enum class SubtitleFont(val displayName: String, @StringRes val labelRes: Int, val id: Int) {
     SYSTEM("系统默认", R.string.font_system, 0),
     OPPO_SANS("OPPO Sans (默认)", R.string.font_oppo_sans, 1),
-    MI_SANS("MiSans (小米)", R.string.font_mi_sans, 7),
     SANS_SERIF("无衬线 (Sans-Serif)", R.string.font_sans_serif, 3),
     SERIF("衬线 (Serif)", R.string.font_serif, 4),
     MONOSPACE("等宽 (Monospace)", R.string.font_monospace, 5),

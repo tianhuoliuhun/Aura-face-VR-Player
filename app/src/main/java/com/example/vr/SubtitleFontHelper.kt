@@ -34,7 +34,6 @@ object SubtitleFontHelper {
             when (fontOption) {
                 SubtitleFont.SYSTEM -> FontFamily.Default
                 SubtitleFont.OPPO_SANS -> variableFont(R.font.oppo_sans_4_0, weight)
-                SubtitleFont.MI_SANS -> variableFont(R.font.mi_sans_vf, weight)
                 SubtitleFont.SANS_SERIF -> FontFamily.SansSerif
                 SubtitleFont.SERIF -> FontFamily.Serif
                 SubtitleFont.MONOSPACE -> FontFamily.Monospace

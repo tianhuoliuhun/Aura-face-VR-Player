@@ -31,6 +31,10 @@ object FloatingBallPositions {
     const val CLOCK = "clock"
     /** 信息球：电量 */
     const val BATTERY = "battery"
+    /** 播放控制球（播放/暂停） */
+    const val PLAY = "play"
+    /** 性能球（CPU / 温度 / 帧率） */
+    const val PERF = "perf"
 
     private fun keyX(id: String) = "ball_pos_${id}_xr"
     private fun keyY(id: String) = "ball_pos_${id}_yr"
@@ -56,7 +60,7 @@ object FloatingBallPositions {
     /** 记忆模式关闭时清掉全部存档（与项目「关闭即 remove」的约定一致） */
     fun clearAll(prefs: SharedPreferences) {
         prefs.edit().apply {
-            listOf(SPEED, SEEK_FWD, SEEK_BWD, MARKER, CLOCK, BATTERY).forEach { id ->
+            listOf(SPEED, SEEK_FWD, SEEK_BWD, MARKER, CLOCK, BATTERY, PLAY, PERF).forEach { id ->
                 remove(keyX(id))
                 remove(keyY(id))
             }
