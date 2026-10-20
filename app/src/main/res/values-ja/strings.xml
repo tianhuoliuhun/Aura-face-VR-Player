@@ -217,7 +217,7 @@
     <string name="action_expand">展開</string>
     <string name="group_title_ui_theme">テーマとガラス効果</string>
     <string name="group_title_projection">レンズ投影と視野</string>
-    <string name="group_title_8k_hw">8K ハードウェアデコード</string>
+    <string name="group_title_8k_hw">実験的機能</string>
     <string name="group_title_floating_ball">フローティングボールと速度</string>
     <string name="group_title_decoder">デコーダとフレームレート</string>
     <string name="group_title_ai_subtitle">AI 字幕</string>

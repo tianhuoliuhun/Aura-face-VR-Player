@@ -241,7 +241,7 @@
     <!-- ===== batch ===== -->
     <string name="group_title_ui_theme">Theme &amp; glass effect</string>
     <string name="group_title_projection">Lens projection &amp; view</string>
-    <string name="group_title_8k_hw">8K hardware decode</string>
+    <string name="group_title_8k_hw">Experimental features</string>
     <string name="group_title_floating_ball">Floating ball &amp; speed</string>
     <string name="group_title_decoder">Decoder core &amp; FPS</string>
     <string name="group_title_ai_subtitle">AI Subtitles</string>

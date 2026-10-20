@@ -243,7 +243,7 @@
     <!-- ===== batch ===== -->
     <string name="group_title_ui_theme">主題與玻璃效果</string>
     <string name="group_title_projection">鏡頭投影與視角</string>
-    <string name="group_title_8k_hw">8K 硬解實驗</string>
+    <string name="group_title_8k_hw">實驗性功能</string>
     <string name="group_title_floating_ball">懸浮球與播放倍速</string>
     <string name="group_title_decoder">解碼內核與幀率</string>
     <string name="group_title_ai_subtitle">AI 字幕</string>

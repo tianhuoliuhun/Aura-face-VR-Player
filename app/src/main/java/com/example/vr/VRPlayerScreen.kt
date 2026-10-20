@@ -102,12 +102,6 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 
-private val CustomEaseOutBack = Easing { fraction ->
-    val t = fraction - 1.0f
-    val c1 = 1.70158f
-    val c3 = c1 + 1.0f
-    1.0f + c3 * t * t * t + c1 * t * t
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,7 +115,11 @@ fun VRPlayerScreen(
 
     // Load local SharedPreferences & memory mode flag
     val prefs = remember { context.getSharedPreferences("vr_player_prefs", android.content.Context.MODE_PRIVATE) }
-    var isMemoryModeEnabled by remember { mutableStateOf(prefs.getBoolean("is_memory_mode_enabled", true)) }
+    // v2.6.7：**记忆模式改为强制开启**（用户要求去掉开关 UI）。
+    // 保留这个常量而不是删掉变量：下游有 100+ 处 `if (isMemoryModeEnabled)` 门控
+    // （读 pref 与否、写回与否），恒真即「始终读写 prefs」，与旧版默认值一致，
+    // 因此无需逐个改判断。写回处仍会 putBoolean(true)，可自动纠正旧设备上的 false。
+    val isMemoryModeEnabled = true
     // v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer）开关 —— 开启后本机在局域网内
     // 作为一台「可投屏设备」出现，接收其他 App 推送的视频 URL 并播放。
     var castReceiverEnabled by remember {
@@ -1194,6 +1192,12 @@ fun VRPlayerScreen(
     var isSubtitleQuickPanelOpen by remember { mutableStateOf(false) }
     // v91：设置面板左列折叠分组展开状态（需在外层供快捷面板引用）
     var expandedSettings by remember { mutableStateOf(setOf("theme")) }
+    // v2.6.7：从设置面板区前置到这里 —— 局部函数不能前向引用，
+    // 而 SettingsGroup 的调用点在它原本的定义之前。
+    fun toggleSettings(key: String) {
+    expandedSettings = if (key in expandedSettings) expandedSettings - key else expandedSettings + key
+    }
+
     var ballOffsetX by remember { mutableFloatStateOf(0f) }
     var ballOffsetY by remember { mutableFloatStateOf(0f) }
     var isBallPositionInitialized by remember { mutableStateOf(false) }
@@ -1321,7 +1325,8 @@ fun VRPlayerScreen(
             else -> -1
         }
         prefs.edit().apply {
-            putBoolean("is_memory_mode_enabled", isMemoryModeEnabled)
+            // v2.6.7：记忆模式强制开启，这里显式写 true（顺手纠正旧设备上的 false 值）
+            putBoolean("is_memory_mode_enabled", true)
             // v2.4.35（#13）：美颜参数与记忆模式解耦 —— 以下美颜 key 始终落盘，不受 isMemoryModeEnabled 影响
             putInt("beauty_engine_type", beautyEngineType)
             putBoolean("beauty_master_enabled", beautyMasterEnabled)
@@ -1467,6 +1472,11 @@ fun VRPlayerScreen(
                 remove("is_battery_ball_enabled")
                 remove("is_play_ball_enabled")
                 remove("is_perf_ball_enabled")
+                // v2.6.7：补齐快进/后退球开关与步长（与上面同批漏掉的另外 4 个 key）
+                remove("is_seek_forward_ball_enabled")
+                remove("is_seek_backward_ball_enabled")
+                remove("seek_forward_step")
+                remove("seek_backward_step")
                 remove("max_fps")
                 remove("is_software_decoding")
                 remove("decoder_engine_id")
@@ -5863,11 +5873,19 @@ fun VRPlayerScreen(
                     modifier = Modifier
                         .widthIn(max = 560.dp)
                         .fillMaxWidth()
+                        // v2.6.7：**必须给面板确定高度**，否则两列的 fillMaxHeight()
+                        // 会吃满父约束 → 面板内容总高超出可用高度 → 底部「记忆模式」
+                        // 一整行被挤出屏幕（用户报「找不到勾选/按钮」的真正原因）。
+                        // 撑满后 Row(weight=1f) 才有确定的剩余高度可分。
+                        .fillMaxHeight()
                         .clickable(enabled = false) {} // Prevent click-through closing
                         .testTag("secondary_settings_dialog_card")
                 ) {
                     Column(
-                        modifier = Modifier.padding(20.dp),
+                        // v2.6.7：撑满 Card 高度，让下面 Row 的 weight(1f) 生效
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
 
@@ -6815,66 +6833,6 @@ fun VRPlayerScreen(
                                 @Composable
                                 fun SettingsSection3() {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    /** v2.0.165：悬浮球开关行（加速球 / 快进球 / 后退球共用同一布局样式） */
-                                    @Composable
-                                    fun BallSwitchRow(
-                                        title: String,
-                                        desc: String?,
-                                        checked: Boolean,
-                                        onChange: (Boolean) -> Unit,
-                                        tag: String
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .background(Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(10.dp))
-                                                .clickable { onChange(!checked); keepUiAlight() }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    title,
-                                                    color = Color.White,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    // v2.1.213：标题限 1 行 —— 某些语言的标题较长
-                                                    //（德/俄语系），不限行会把 Switch 挤出可视区
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                // ⚠️ 不用 desc?.let{} —— @Composable 调用嵌进普通 lambda 会丢作用域
-                                                if (desc != null) {
-                                                    Text(
-                                                        desc,
-                                                        color = Color.White.copy(alpha = 0.5f),
-                                                        fontSize = 11.sp,
-                                                        // v2.1.213：**描述必须限行**。
-                                                        // 原先不限行，描述一长（如时间标记球那句 33 字）
-                                                        // 就会换行成 4~5 行、把整行撑得极高，
-                                                        // 视觉上像「开关这块 UI 溢出/撑爆了」。
-                                                        // 2 行 + 省略号，溢出内容仍可读到开头。
-                                                        maxLines = 2,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-                                            AuraSwitch(
-                                                checked = checked,
-                                                onCheckedChange = { onChange(it); keepUiAlight() },
-                                                accentColor = AccentColor,
-                                                accentOnColor = AccentOnColor,
-                                                modifier = Modifier
-                                                    // v2.1.213：**scale() 不改变布局占位**，
-                                                    // Switch 仍按标准宽度（约 52dp）占位、在窄屏上
-                                                    // 会把左侧文字挤到很窄。给固定宽度把空间让给文字。
-                                                    .width(46.dp)
-                                                    .scale(0.8f)
-                                                    .testTag(tag)
-                                            )
-                                        }
-                                    }
 
                                     Text(
                                         text = stringResource(R.string.settings_group_floating_ball),
@@ -6923,14 +6881,20 @@ fun VRPlayerScreen(
                                         desc = stringResource(R.string.seek_ball_desc),
                                         checked = isSeekForwardBallEnabled,
                                         onChange = { isSeekForwardBallEnabled = it },
-                                        tag = "seek_forward_ball_switch"
+                                        tag = "seek_forward_ball_switch",
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor,
+                                        onInteract = { keepUiAlight() }
                                     )
                                     BallSwitchRow(
                                         title = stringResource(R.string.seek_ball_backward_enable),
                                         desc = stringResource(R.string.seek_ball_desc),
                                         checked = isSeekBackwardBallEnabled,
                                         onChange = { isSeekBackwardBallEnabled = it },
-                                        tag = "seek_backward_ball_switch"
+                                        tag = "seek_backward_ball_switch",
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor,
+                                        onInteract = { keepUiAlight() }
                                     )
                                     // v2.1.208：时间标记球开关（与上面两个同组、同一样式组件）
                                     BallSwitchRow(
@@ -6938,7 +6902,10 @@ fun VRPlayerScreen(
                                         desc = stringResource(R.string.marker_ball_desc),
                                         checked = isMarkerBallEnabled,
                                         onChange = { isMarkerBallEnabled = it },
-                                        tag = "marker_ball_switch"
+                                        tag = "marker_ball_switch",
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor,
+                                        onInteract = { keepUiAlight() }
                                     )
                                     // v2.4.67：信息球（时钟 / 电量）—— 同组、同一行样式组件
                                     BallSwitchRow(
@@ -6946,14 +6913,20 @@ fun VRPlayerScreen(
                                         desc = stringResource(R.string.info_ball_clock_desc),
                                         checked = isClockBallEnabled,
                                         onChange = { isClockBallEnabled = it },
-                                        tag = "clock_ball_switch"
+                                        tag = "clock_ball_switch",
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor,
+                                        onInteract = { keepUiAlight() }
                                     )
                                     BallSwitchRow(
                                         title = stringResource(R.string.info_ball_battery_enable),
                                         desc = stringResource(R.string.info_ball_battery_desc),
                                         checked = isBatteryBallEnabled,
                                         onChange = { isBatteryBallEnabled = it },
-                                        tag = "battery_ball_switch"
+                                        tag = "battery_ball_switch",
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor,
+                                        onInteract = { keepUiAlight() }
                                     )
                                     // v2.6.4：播放控制球 / 性能球（同一组、同一样式）
                                     BallSwitchRow(
@@ -6961,14 +6934,20 @@ fun VRPlayerScreen(
                                         desc = stringResource(R.string.control_ball_desc),
                                         checked = isPlayBallEnabled,
                                         onChange = { isPlayBallEnabled = it },
-                                        tag = "play_ball_switch"
+                                        tag = "play_ball_switch",
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor,
+                                        onInteract = { keepUiAlight() }
                                     )
                                     BallSwitchRow(
                                         title = stringResource(R.string.perf_ball_enable),
                                         desc = stringResource(R.string.perf_ball_desc),
                                         checked = isPerfBallEnabled,
                                         onChange = { isPerfBallEnabled = it },
-                                        tag = "perf_ball_switch"
+                                        tag = "perf_ball_switch",
+                                        accentColor = AccentColor,
+                                        accentOnColor = AccentOnColor,
+                                        onInteract = { keepUiAlight() }
                                     )
 
                                     if (isFloatingBallEnabled) {
@@ -7933,60 +7912,19 @@ fun VRPlayerScreen(
                                 )
                                 } // v2.0.160：end if GLSL（人像精修区，瘦脸/大眼等由 GPUPixel 滑块替代）
                                 }
-                                /** 设置面板底部：记忆模式开关 + 确认并应用按钮 */
-                                @Composable
-                                fun SettingsFooter() {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { isMemoryModeEnabled = !isMemoryModeEnabled }
-                                    .padding(vertical = 4.dp, horizontal = 8.dp)
-                            ) {
-                                Checkbox(
-                                    checked = isMemoryModeEnabled,
-                                    onCheckedChange = { isMemoryModeEnabled = it },
-                                    colors = CheckboxDefaults.colors(
-                                        checkedColor = AccentColor,
-                                        uncheckedColor = Color.White.copy(alpha = 0.4f),
-                                        checkmarkColor = AccentOnColor
-                                    ),
-                                    modifier = Modifier.size(32.dp).testTag("memory_mode_checkbox")
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Column {
-                                    Text(
-                                        text = stringResource(R.string.memory_mode),
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.memory_mode_desc),
-                                        color = Color.White.copy(alpha = 0.5f),
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
-
-                            Button(
-                                onClick = { isSettingsDialogOpen = false },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentColor),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text(stringResource(R.string.action_confirm_apply), color = AccentOnColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                                }
 
                                 SettingsHeader()
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            // v2.6.7：两列拿走 header / footer 之外的全部高度。
+                            // 之前 Row 没有高度约束、两列又用 fillMaxHeight()，结果是
+                            // 两列各吃满「整块可用高度」，Row 总高 + header + footer
+                            // 超出面板高度 → 底部 Footer（记忆模式勾选）被挤出屏幕，
+                            // 左列内容也在滚动视口边界处被切断。
+                            // weight(1f) 让 Row 得到确定高度，两列的 fillMaxHeight()
+                            // 才是「填满剩余空间」的正确语义。
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
                             horizontalArrangement = Arrangement.spacedBy(20.dp)
                         ) {
                             // Column 1: Lens / 3D Projection Style
@@ -7998,88 +7936,23 @@ fun VRPlayerScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                     // ===== v90 二级菜单：可折叠分组（expandedSettings 定义在外层供快捷面板共用）=====
-                                    fun toggleSettings(key: String) {
-                                        expandedSettings = if (key in expandedSettings) expandedSettings - key else expandedSettings + key
-                                    }
 
-                                    @Composable
-                                    fun SettingsGroup(
-                                        title: String,
-                                        key: String,
-                                        icon: ImageVector? = null,
-                                        content: @Composable () -> Unit
-                                    ) {
-                                        val expanded = key in expandedSettings
-                                        val arrowRotation by animateFloatAsState(
-                                            targetValue = if (expanded) 180f else 0f,
-                                            label = "settingsArrow"
-                                        )
-                                        Column {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(
-                                                        if (expanded) Color.White.copy(alpha = 0.07f)
-                                                        else Color.White.copy(alpha = 0.03f)
-                                                    )
-                                                    .clickable { toggleSettings(key); keepUiAlight() }
-                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                // v2.6.4：分组标题补图标 —— 10 个分组纯文字时辨识度低，
-                                                // 折叠状态下只能靠读标题区分；图标 + 12sp 让一级/二级层级更清楚。
-                                                if (icon != null) {
-                                                    Icon(
-                                                        imageVector = icon,
-                                                        contentDescription = null,
-                                                        tint = if (expanded) AccentColor
-                                                        else Color.White.copy(alpha = 0.55f),
-                                                        modifier = Modifier.size(15.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                }
-                                                Text(
-                                                    text = title,
-                                                    color = if (expanded) AccentColor else Color.White.copy(alpha = 0.85f),
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Spacer(modifier = Modifier.weight(1f))
-                                                Icon(
-                                                    imageVector = Icons.Default.KeyboardArrowDown,
-                                                    contentDescription = if (expanded) stringResource(R.string.action_collapse) else stringResource(R.string.action_expand),
-                                                    tint = Color.White.copy(alpha = 0.5f),
-                                                    modifier = Modifier
-                                                        .size(16.dp)
-                                                        .graphicsLayer { rotationZ = arrowRotation }
-                                                )
-                                            }
-                                            AnimatedVisibility(
-                                                visible = expanded,
-                                                enter = expandVertically() + fadeIn(),
-                                                exit = shrinkVertically() + fadeOut()
-                                            ) {
-                                                Column(modifier = Modifier.padding(top = 8.dp)) { content() }
-                                            }
-                                        }
-                                    }
 
                                     // 左列分组（二级菜单）：主题 → 投影 → 字幕 → AI 字幕 → AI 弹幕 → 悬浮球 → 解码 → 画质增强 → 8K → 关于
-                                    SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme", Icons.Default.Palette) { SettingsSection0() }
-                                    SettingsGroup(stringResource(R.string.group_title_projection), "proj", Icons.Default.ViewInAr) { SettingsSection1() }
-                                    SettingsGroup(stringResource(R.string.group_title_subtitle), "sub", Icons.Default.Subtitles) { SettingsSectionSubtitle() }
+                                    SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme", Icons.Default.Palette, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection0() }
+                                    SettingsGroup(stringResource(R.string.group_title_projection), "proj", Icons.Default.ViewInAr, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection1() }
+                                    SettingsGroup(stringResource(R.string.group_title_subtitle), "sub", Icons.Default.Subtitles, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionSubtitle() }
                                     // v2.6.4：AI 字幕独立成组，与「AI 弹幕」同级（此前挤在「字幕功能设置」里）
-                                    SettingsGroup(stringResource(R.string.group_title_ai_subtitle), "aisub", Icons.Default.Mic) { SettingsSectionAiSubtitle() }
+                                    SettingsGroup(stringResource(R.string.group_title_ai_subtitle), "aisub", Icons.Default.Mic, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionAiSubtitle() }
                                     // v2.3.0：AI 弹幕独立成组（此前挂在「字幕」分组内，与字幕混在一起）
-                                    SettingsGroup(stringResource(R.string.group_title_danmu), "danmu", Icons.Default.ChatBubble) { SettingsSectionDanmu() }
-                                    SettingsGroup(stringResource(R.string.group_title_floating_ball), "ball", Icons.Default.BubbleChart) { SettingsSection3() }
-                                    SettingsGroup(stringResource(R.string.group_title_decoder), "decode", Icons.Default.Memory) { SettingsSection4() }
+                                    SettingsGroup(stringResource(R.string.group_title_danmu), "danmu", Icons.Default.ChatBubble, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionDanmu() }
+                                    SettingsGroup(stringResource(R.string.group_title_floating_ball), "ball", Icons.Default.BubbleChart, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection3() }
+                                    SettingsGroup(stringResource(R.string.group_title_decoder), "decode", Icons.Default.Memory, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection4() }
                                     // v2.0.206：MEMC 插帧 / FSR 超分
-                                    SettingsGroup(stringResource(R.string.group_title_enhance), "enhance", Icons.Default.AutoAwesome) { SettingsSectionEnhance() }
-                                    SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k", Icons.Default.HighQuality) { SettingsSection8K() }
+                                    SettingsGroup(stringResource(R.string.group_title_enhance), "enhance", Icons.Default.AutoAwesome, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionEnhance() }
+                                    SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k", Icons.Default.HighQuality, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection8K() }
                                     // v106：关于与开源许可（合规署名入口）
-                                    SettingsGroup(stringResource(R.string.group_title_about), "about", Icons.Default.Info) {
+                                    SettingsGroup(stringResource(R.string.group_title_about), "about", Icons.Default.Info, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) {
                                         // v2.6.4：URL 播放 / 网页直链播放的入口已移至「选择文件来源」对话框
                                         // （与相册、任意文件并列），此处不再重复放入口，避免同一功能两个入口。
                                         Row(
@@ -8124,7 +7997,6 @@ fun VRPlayerScreen(
                                     SettingsColumn2()
                             }
                         }
-                                SettingsFooter()
                     }
                 }
             }

@@ -217,7 +217,7 @@
     <string name="action_expand">펼치기</string>
     <string name="group_title_ui_theme">테마와 글래스 효과</string>
     <string name="group_title_projection">렌즈 투영과 시야</string>
-    <string name="group_title_8k_hw">8K 하드웨어 디코딩</string>
+    <string name="group_title_8k_hw">실험적 기능</string>
     <string name="group_title_floating_ball">플로팅 볼과 재생 속도</string>
     <string name="group_title_decoder">디코더와 FPS</string>
     <string name="group_title_ai_subtitle">AI 자막</string>
