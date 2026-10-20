@@ -312,6 +312,7 @@
     <string name="toast_patching_header">ハードウェアデコーダの上限を超えています。ヘッダーを書き換えて試します（実験的）...</string>
     <string name="toast_hw_patch_ok">ハードウェアデコード互換版を生成して再生します（乱れ/黒画面/無音の場合はチップ型番を報告ください）</string>
     <string name="suffix_hw_patched"> （ハードウェア対応）</string>
+    <string name="toast_detected_360_sbs">360° 3D パノラマ（左右）を検出しました</string>
     <string name="toast_detected_360">2:1 パノラマを検出し VR_360 全景（単眼）に切り替えました</string>
     <string name="toast_detected_2d">通常の 2D 動画を検出し平面モードに切り替えました</string>
     <string name="toast_2d_mono">2D 動画は単眼表示に戻しました（3D 立体は 3D ソース専用）</string>

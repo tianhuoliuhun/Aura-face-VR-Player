@@ -330,6 +330,7 @@
     <string name="toast_patching_header">视频超出硬件解码标称上限，正在修改编码头尝试硬件解码（实验性）...</string>
     <string name="toast_hw_patch_ok">已生成硬件解码兼容版本，正在播放（若花屏/黑屏/无声请反馈芯片型号）</string>
     <string name="suffix_hw_patched"> （硬解适配）</string>
+    <string name="toast_detected_360_sbs">已识别为 360° 3D 全景（左右立体）</string>
     <string name="toast_detected_360">检测到 2:1 全景视频，已切换至 VR_360 全景（单目）</string>
     <string name="toast_detected_2d">检测到普通 2D 视频，已切换至平面模式</string>
     <string name="toast_2d_mono">普通 2D 视频已恢复单目显示（3D 立体仅适用于 3D 片源）</string>

@@ -312,6 +312,7 @@
     <string name="toast_patching_header">하드웨어 디코더 한계를 넘었습니다. 헤더를 수정해 시도합니다 (실험적)...</string>
     <string name="toast_hw_patch_ok">하드웨어 디코딩 호환 버전을 만들어 재생합니다 (깨짐/검은 화면/무음이면 칩 모델을 알려주세요)</string>
     <string name="suffix_hw_patched"> (하드웨어 대응)</string>
+    <string name="toast_detected_360_sbs">360° 3D 파노라마(좌우) 감지</string>
     <string name="toast_detected_360">2:1 파노라마를 감지해 VR_360 파노라마(단안)로 전환했습니다</string>
     <string name="toast_detected_2d">일반 2D 영상을 감지해 평면 모드로 전환했습니다</string>
     <string name="toast_2d_mono">2D 영상을 단안 표시로 되돌렸습니다 (3D 입체는 3D 소스 전용)</string>

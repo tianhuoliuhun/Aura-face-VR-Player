@@ -3217,27 +3217,31 @@ fun VRPlayerScreen(
                         ).show()
                     }
                 } else if (isSmartProjectionEnabled && !projectionModeUserAdjusted) {
-                    val aspect = width.toFloat() / height.toFloat()
-                    when {
-                        aspect in 1.80f..2.20f -> {
-                            // Equirectangular panorama (2:1): 切 VR_360 全景 + 单目（平面 2D 立体模式）
-                            // + 双中心变形（左右半区各以 25%/75% 为变形中心）
-                            if (projectionMode != ProjectionMode.VR_360 || stereoMode != StereoMode.MONO) {
-                                projectionMode = ProjectionMode.VR_360
-                                stereoMode = StereoMode.MONO
-                                currentGlSurfaceView?.renderer?.warpDualCenter = true
-                                Toast.makeText(context, context.getString(R.string.toast_detected_360), Toast.LENGTH_SHORT).show()
-                            }
+                    // v2.6.8：判定规则抽到 ProjectionAutoDetector（可单测、阈值单一来源）。
+                    //   ① 360 窗口由 1.80~2.20 收窄到 1.95~2.05 —— 原窗口把 1.85:1 与 2.2:1
+                    //      的**普通电影**也判成全景，画面被塞进球面投影严重变形；
+                    //   ② 新增 4:1 → 360 + SBS（左右立体 3D 全景），此前这类片源会被判成
+                    //      平面并清掉立体模式，等于完全不可用；
+                    //   ③ 尺寸无效（解码器初始回调 0x0）返回 null，不套用任何结论。
+                    val suggestion = ProjectionAutoDetector.detect(width, height)
+                    val needsApply = suggestion != null && when (suggestion.reason) {
+                        // 平面：只在投影模式不对时动手；立体复位交给下面那段独立的逻辑，
+                        // 避免同一判断在两处各写一遍（那样很容易只改一处）。
+                        ProjectionAutoDetector.Reason.FLAT ->
+                            projectionMode != ProjectionMode.STANDARD
+
+                        else -> projectionMode != suggestion.mode || stereoMode != suggestion.stereo
+                    }
+                    if (suggestion != null && needsApply) {
+                        projectionMode = suggestion.mode
+                        stereoMode = suggestion.stereo
+                        currentGlSurfaceView?.renderer?.warpDualCenter = suggestion.warpDualCenter
+                        val toastRes = when (suggestion.reason) {
+                            ProjectionAutoDetector.Reason.EQUIRECT_360 -> R.string.toast_detected_360
+                            ProjectionAutoDetector.Reason.EQUIRECT_360_SBS -> R.string.toast_detected_360_sbs
+                            ProjectionAutoDetector.Reason.FLAT -> R.string.toast_detected_2d
                         }
-                        else -> {
-                            // Ordinary flat video: don't let the 180° dome distort it
-                            if (projectionMode != ProjectionMode.STANDARD) {
-                                projectionMode = ProjectionMode.STANDARD
-                                stereoMode = StereoMode.MONO
-                                currentGlSurfaceView?.renderer?.warpDualCenter = false
-                                Toast.makeText(context, context.getString(R.string.toast_detected_2d), Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                        Toast.makeText(context, context.getString(toastRes), Toast.LENGTH_SHORT).show()
                     }
                 }
 
@@ -3245,11 +3249,14 @@ fun VRPlayerScreen(
                 // 2D video renders only half the frame stretched full-screen.
                 // 3D framing only makes sense on 3D sources, so we always fall
                 // back to mono for ordinary aspect videos in planar projection.
+                // v2.6.8：阈值改用 ProjectionAutoDetector.isEquirect 单一来源 ——
+                //   原先这里和上面的检测各写一份 `1.80f..2.20f`，收窄窗口时极容易出现
+                //   「检测按 1.95~2.05 判 2D、这里却按 1.80~2.20 保留 SBS」的自相矛盾。
                 val vidAspect = width.toFloat() / height.toFloat()
                 val isPlanar = projectionMode == ProjectionMode.STANDARD ||
                     projectionMode == ProjectionMode.FISHEYE
                 if (isSmartProjectionEnabled && isPlanar &&
-                    vidAspect !in 1.80f..2.20f && stereoMode != StereoMode.MONO
+                    !ProjectionAutoDetector.isEquirect(vidAspect) && stereoMode != StereoMode.MONO
                 ) {
                     stereoMode = StereoMode.MONO
                     Toast.makeText(context, context.getString(R.string.toast_2d_mono), Toast.LENGTH_SHORT).show()
@@ -8278,7 +8285,16 @@ fun VRPlayerScreen(
                     //    正是最需要一眼看出的信息。
                     //    现在改为「图标 + 主标题 + 副标题」两行式卡片，并按「日常用 / 兜底用」
                     //    做视觉分层：相册卡为强调色描边（推荐），任意文件卡为中性面。
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // v2.6.8：**内容可滚动** —— 小屏 / 系统字体放大 / 横屏高度不足时，
+                    //    AlertDialog 的 text 槽高度有限，3 个入口卡片 + 格式一览 + 提示行
+                    //    会被截断（用户反馈「某些情况下下面的入口看不到」）。
+                    //    加滚动后任何可用高度都能到达全部内容。
+                    //    ⚠️ 不要给它加 fillMaxHeight / weight —— 它在 Dialog 的 text 槽内，
+                    //    父级已经分配了确定高度，再加 fill 会把对话框撑出屏幕。
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
 
                         // ── 入口 1：相册（有缩略图，日常主路径）──
                         Row(

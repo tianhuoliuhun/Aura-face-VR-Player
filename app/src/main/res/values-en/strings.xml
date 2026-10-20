@@ -338,6 +338,7 @@
     <string name="toast_patching_header">Beyond hardware decoder limits - patching headers to try HW decode (experimental)...</string>
     <string name="toast_hw_patch_ok">HW-decode compatible version ready (report chip model if glitches/black screen/no audio)</string>
     <string name="suffix_hw_patched"> (HW patched)</string>
+    <string name="toast_detected_360_sbs">Detected 360° 3D panorama (side-by-side)</string>
     <string name="toast_detected_360">2:1 panorama detected - switched to VR_360 (mono)</string>
     <string name="toast_detected_2d">Plain 2D detected - switched to flat mode</string>
     <string name="toast_2d_mono">2D restored to mono (3D stereo only for 3D sources)</string>
