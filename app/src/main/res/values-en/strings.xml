@@ -260,6 +260,8 @@
     <string name="danmu_err_not_configured">Incomplete config: check endpoint, model and API key</string>
     <string name="danmu_err_no_renderer">Renderer not ready yet, will retry automatically</string>
     <string name="danmu_err_capture_timeout">Frame capture timed out, will retry automatically</string>
+    <string name="danmu_retry_in_sec">%1$s (failure #%2$d, retrying in %3$d s)</string>
+    <string name="danmu_retry_in_min">%1$s (failure #%2$d, retrying in ~%3$d min)</string>
     <string name="danmu_err_empty_response">Model returned no usable danmaku, will retry automatically</string>
     <string name="danmu_err_unexpected">Unexpected error, this round was skipped (playback unaffected)</string>
     <string name="danmu_section_source">Source Material</string>

@@ -2137,6 +2137,9 @@ fun VRPlayerScreen(
             DanmuConfig.MIN_INTERVAL_SEC, DanmuConfig.MAX_INTERVAL_SEC
         ) * 1000L
         // 首次稍作等待，避免刚进页面就抓一帧（可能还是黑帧/加载图）
+                // v2.6.8：连续失败计数 —— 驱动 DanmuRetryPolicy 的指数退避。
+                // 成功一次即清零（见下方），所以"偶发失败"不会累积成长时间等待。
+                var danmuFailStreak = 0
         delay(FIRST_CAPTURE_DELAY_MS)
         while (true) {
             // v2.4.40（弹幕审查 #2）：**暂停时不请求模型**。
@@ -2250,33 +2253,52 @@ fun VRPlayerScreen(
                 if (frame != null && !frame.isRecycled) frame.recycle()
 
                 if (!fetched.isSuccess) {
-                    danmuLastError = danmuErrorText(context, fetched.kind)
+                    // v2.6.8：**按错误类别退避**（见 DanmuRetryPolicy）。
+                    // 之前是「失败 → 记一句文案 → delay(periodMs) 继续」，即固定周期无条件重试：
+                    //   · 密钥/模型名这类致命错误重试一万次也不会成功，却仍按周期打请求；
+                    //   · 429 / 5xx / 断网时等于持续加压；
+                    //   · 用户也看不出"系统还在等多久后自愈"。
+                    // ⚠️ 故意不 break：本 LaunchedEffect 的 key 不含密钥/模型名，
+                    //    用户改完配置不会重启循环 —— break 会导致永远不恢复，只能手动关开弹幕。
+                    danmuFailStreak++
+                    val retryInMs = DanmuRetryPolicy.nextDelayMs(
+                        periodMs, danmuFailStreak, fetched.kind
+                    )
+                    danmuLastError = danmuRetryHint(
+                        context, danmuErrorText(context, fetched.kind), retryInMs, danmuFailStreak
+                    )
+                    // ⚠️ 自己 delay 后 continue，跳过循环末尾的 delay(periodMs)；
+                    //    否则实际间隔变成「退避 + 周期」，退避等于失效。
+                    delay(retryInMs)
+                    continue
+                }
+
+                // 成功：清零计数，让下一次失败重新从最短退避开始
+                danmuFailStreak = 0
+                danmuLastError = ""
+                val now = android.os.SystemClock.elapsedRealtime()
+                // v2.4.41（弹幕审查 #10）：请求耗时 2~10s（读超时最长 30s），期间画面已推进 ——
+                //   偏离超过阈值就丢弃该批（否则内容对应的是「已经过去」的画面，明显滞后）。
+                val driftMs = kotlin.math.abs(currentPositionMs - capturePosMs)
+                if (driftMs > DANMU_LATE_DROP_MS) {
+                    android.util.Log.i(
+                        "VRPlayerScreen",
+                        "弹幕批丢弃：响应与截图位置相差 ${driftMs}ms（>${DANMU_LATE_DROP_MS}ms）"
+                    )
                 } else {
-                    danmuLastError = ""
-                    val now = android.os.SystemClock.elapsedRealtime()
-                    // v2.4.41（弹幕审查 #10）：请求耗时 2~10s（读超时最长 30s），期间画面已推进 ——
-                    //   偏离超过阈值就丢弃该批（否则内容对应的是「已经过去」的画面，明显滞后）。
-                    val driftMs = kotlin.math.abs(currentPositionMs - capturePosMs)
-                    if (driftMs > DANMU_LATE_DROP_MS) {
-                        android.util.Log.i(
-                            "VRPlayerScreen",
-                            "弹幕批丢弃：响应与截图位置相差 ${driftMs}ms（>${DANMU_LATE_DROP_MS}ms）"
-                        )
-                    } else {
-                        // 🔴 v2.6.2：**不再倒推出生时刻**。
-                        //    旧实现 `spawnBaseMs = now - driftMs` 是为了让弹幕位置"对齐截图那一刻的画面
-                        //    时间轴"，但代价是 bornMs 早于当前时刻 → 位置公式里 elapsed > 0 →
-                        //    弹幕一出生就已经在屏幕内部（用户反馈的「从屏幕中间冒出」）。
-                        //    「对齐时间轴」与「必须从右缘飞入」本质冲突，只能二选一 ——
-                        //    既然要求只能从右缘飞入，就不再补偿这段已过去的时长：
-                        //    偏离过大（> DANMU_LATE_DROP_MS）的批次上面已经整批丢弃，
-                        //    剩下的滞后在可接受范围内。
-                        val spawnBaseMs = now
-                        val added = danmuEngine.enqueue(fetched.lines, spawnBaseMs)
-                        danmuGeneratedCount += added
-                        // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）
-                        danmuEngine.prune(now)
-                    }
+                    // 🔴 v2.6.2：**不再倒推出生时刻**。
+                    //    旧实现 `spawnBaseMs = now - driftMs` 是为了让弹幕位置"对齐截图那一刻的画面
+                    //    时间轴"，但代价是 bornMs 早于当前时刻 → 位置公式里 elapsed > 0 →
+                    //    弹幕一出生就已经在屏幕内部（用户反馈的「从屏幕中间冒出」）。
+                    //    「对齐时间轴」与「必须从右缘飞入」本质冲突，只能二选一 ——
+                    //    既然要求只能从右缘飞入，就不再补偿这段已过去的时长：
+                    //    偏离过大（> DANMU_LATE_DROP_MS）的批次上面已经整批丢弃，
+                    //    剩下的滞后在可接受范围内。
+                    val spawnBaseMs = now
+                    val added = danmuEngine.enqueue(fetched.lines, spawnBaseMs)
+                    danmuGeneratedCount += added
+                    // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）
+                    danmuEngine.prune(now)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e  // 协程取消必须原样抛出，否则 LaunchedEffect 无法正确结束

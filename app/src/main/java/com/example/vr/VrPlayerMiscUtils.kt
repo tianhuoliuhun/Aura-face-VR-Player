@@ -229,3 +229,40 @@ internal fun danmuErrorText(
     DanmuVisionClient.ChatErrorKind.EMPTY_RESPONSE ->
         context.getString(R.string.danmu_err_empty_response)
 }
+
+/**
+ * v2.6.8：把「失败原因」「第几次失败」「还有多久重试」拼成一行状态文案。
+ *
+ * ## 为什么集中在一处
+ * 秒/分钟的换挡（≥90 秒按分钟显示）只该有一个实现，否则界面里会出现
+ * 「300 秒后重试」这种既不友好、又让人以为卡住的数字。
+ *
+ * ## 为什么显示「第几次失败」
+ * 只给倒计时的话，用户无法判断是"偶发一次马上就好"还是"已经连错二十次、该去检查配置了"。
+ * 次数正是退避策略的输入，展示出来让自愈过程可观测。
+ *
+ * ## 为什么用 `getString(..., args)` 而不是字符串拼接
+ * 各语言的括号与空格规则不同（日文用全角括号、英文要空格），
+ * 交给 `strings.xml` 的占位符更稳；`%1$s` 里的内容不会被二次格式化。
+ *
+ * 占位符顺序在所有语言里统一为：`%1$s` 原因 / `%2$d` 第几次失败 / `%3$d` 秒或分钟。
+ *
+ * @param text     原始错误文案（[danmuErrorText] 的输出）；为空时原样返回
+ * @param delayMs  本次退避时长
+ * @param failures 连续失败次数（失败分支里已自增，从 1 开始）
+ */
+internal fun danmuRetryHint(
+    context: android.content.Context,
+    text: String,
+    delayMs: Long,
+    failures: Int
+): String {
+    if (text.isBlank()) return text
+    val sec = DanmuRetryPolicy.delaySeconds(delayMs)
+    val n = failures.coerceAtLeast(1)
+    return if (sec >= 90) {
+        context.getString(R.string.danmu_retry_in_min, text, n, (sec + 59) / 60)
+    } else {
+        context.getString(R.string.danmu_retry_in_sec, text, n, sec)
+    }
+}

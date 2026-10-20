@@ -252,6 +252,8 @@
     <string name="danmu_err_not_configured">配置不完整：请检查端点、模型与 API Key</string>
     <string name="danmu_err_no_renderer">渲染器尚未就绪，稍后自动重试</string>
     <string name="danmu_err_capture_timeout">画面抓取超时，稍后自动重试</string>
+    <string name="danmu_retry_in_sec">%1$s（第 %2$d 次失败，%3$d 秒后重试）</string>
+    <string name="danmu_retry_in_min">%1$s（第 %2$d 次失败，约 %3$d 分钟后重试）</string>
     <string name="danmu_err_empty_response">模型未返回可用弹幕，稍后自动重试</string>
     <string name="danmu_err_unexpected">出现意外错误，已跳过本轮（不影响播放）</string>
     <string name="danmu_section_source">素材来源</string>
