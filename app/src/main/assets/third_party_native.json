@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-18",
+  "generated": "2026-10-21",
   "groups": [
     {
       "titleKey": "licenses_group_disclaimer",
@@ -17,6 +17,13 @@
           "license": "非 Microsoft 官方 API / unofficial endpoint",
           "url": "https://www.microsoft.com/servicesagreement",
           "note": "字幕翻译的 Bing 引擎调用 Bing 网页版翻译端点（cn.bing.com/ttranslatev3），不是 Microsoft 官方 API；本应用与 Microsoft 无关联、未获授权与背书。该端点面向浏览器设计，第三方程序自动化调用可能不符合其服务条款，可用性亦可能随时变化——商业分发建议改用有明确授权的官方接口（如 Azure AI Translator）。启用时字幕文本会发送至该端点，请勿翻译敏感内容。 / The Bing engine uses Bing's web endpoint, not an official Microsoft API. This app is not affiliated with or endorsed by Microsoft; automated use of that endpoint may not comply with Microsoft's terms and its availability may change at any time. Subtitle text is sent to that endpoint — do not translate sensitive content."
+        },
+        {
+          "name": "Google 翻译 / Google translation",
+          "version": "",
+          "license": "非 Google 官方 API / unofficial endpoint",
+          "url": "https://policies.google.com/terms",
+          "note": "字幕翻译的 Google 引擎调用 Chrome 词典扩展所用的网页端点（clients5.google.com/translate_a/t?client=dict-chrome-ex），不是 Google Cloud Translation 官方 API（官方接口需 API Key 与计费账户，未携带身份直接请求会返回 403 unregistered callers）；本应用与 Google LLC 无关联、未获授权与背书。该端点面向浏览器扩展设计，第三方程序自动化调用可能不符合其服务条款，可用性亦可能随时变化（在 200 / 429 / 403 之间切换）——商业分发建议改用有明确授权的官方接口或其它合规引擎（DeepL 官方 API、自备 Key 的接口、本地离线模型）。启用时字幕文本会发送至该端点，请勿翻译敏感内容。 / The Google engine uses the web endpoint used by Chrome's dictionary extension (clients5.google.com/translate_a/t?client=dict-chrome-ex), not the official Google Cloud Translation API (which requires an API key and billing; a request without identity returns 403 unregistered callers). This app is not affiliated with or endorsed by Google LLC; automated use of that endpoint may not comply with Google's terms and its availability may change at any time (flipping between 200 / 429 / 403). Subtitle text is sent to that endpoint — do not translate sensitive content."
         }
       ]
     },

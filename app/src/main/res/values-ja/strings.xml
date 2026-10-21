@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aura美顔VRプレーヤー</string>
+    <string name="app_name">Aura Lens</string>
     <string name="ui_language">インターフェース言語</string>
     <string name="ui_language_hint">すぐに画面が更新されます。再生位置は保持されます</string>
     <string name="subtitle_quick_title">字幕</string>
@@ -312,6 +312,7 @@
     <string name="toast_patching_header">ハードウェアデコーダの上限を超えています。ヘッダーを書き換えて試します（実験的）...</string>
     <string name="toast_hw_patch_ok">ハードウェアデコード互換版を生成して再生します（乱れ/黒画面/無音の場合はチップ型番を報告ください）</string>
     <string name="suffix_hw_patched"> （ハードウェア対応）</string>
+    <string name="toast_detected_360_tab">360° 3D パノラマ（上下）を検出しました</string>
     <string name="toast_detected_360_sbs">360° 3D パノラマ（左右）を検出しました</string>
     <string name="toast_detected_360">2:1 パノラマを検出し VR_360 全景（単眼）に切り替えました</string>
     <string name="toast_detected_2d">通常の 2D 動画を検出し平面モードに切り替えました</string>
@@ -514,7 +515,7 @@
     <string name="engine_mymemory">MyMemory 翻訳</string>
     <string name="engine_libretranslate">LibreTranslate</string>
     <string name="engine_deepl">DeepL</string>
-    <string name="engine_google_free">Google 翻訳（キー不要）</string>
+    <string name="engine_google_free">Google 翻訳（非公式）</string>
     <string name="engine_local_llm">ローカル AI 翻訳（オフライン）</string>
     <string name="translate_mymemory_cooldown">MyMemory の無料枠を使い切りました。約 %1$d 分後に再開します</string>
     <string name="lang_zh">簡体字中国語</string>

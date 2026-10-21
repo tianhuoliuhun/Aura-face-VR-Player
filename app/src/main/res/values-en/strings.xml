@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aura face VR Player</string>
+    <string name="app_name">Aura Lens</string>
 
     <!-- ===== Interface language (v2.0.129) ===== -->
     <string name="ui_language">Interface language</string>
@@ -338,6 +338,7 @@
     <string name="toast_patching_header">Beyond hardware decoder limits - patching headers to try HW decode (experimental)...</string>
     <string name="toast_hw_patch_ok">HW-decode compatible version ready (report chip model if glitches/black screen/no audio)</string>
     <string name="suffix_hw_patched"> (HW patched)</string>
+    <string name="toast_detected_360_tab">Detected 360° 3D panorama (top-bottom)</string>
     <string name="toast_detected_360_sbs">Detected 360° 3D panorama (side-by-side)</string>
     <string name="toast_detected_360">2:1 panorama detected - switched to VR_360 (mono)</string>
     <string name="toast_detected_2d">Plain 2D detected - switched to flat mode</string>
@@ -554,7 +555,7 @@
     <string name="engine_mymemory">MyMemory</string>
     <string name="engine_libretranslate">LibreTranslate</string>
     <string name="engine_deepl">DeepL</string>
-    <string name="engine_google_free">Google Translate (keyless)</string>
+    <string name="engine_google_free">Google Translate (unofficial)</string>
     <string name="engine_local_llm">On-device AI (offline)</string>
     <string name="translate_mymemory_cooldown">MyMemory free quota reached; will retry in about %1$d min</string>
     <string name="lang_zh">Simplified Chinese</string>

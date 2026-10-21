@@ -40,6 +40,24 @@ internal object ProjectionAutoDetector {
     const val SBS_360_ASPECT_MIN = 3.90f
     const val SBS_360_ASPECT_MAX = 4.10f
 
+    /**
+     * 上下立体 3D 全景的宽高比窗口 —— **1:1**。
+     *
+     * 上下各一张 2:1 equirect 拼起来就是方形：1920×960 ×2 = 1920×1920。
+     * 因此「方形 + 足够大」是上下拼接全景在比例上唯一的确定信号。
+     */
+    const val TAB_PANO_ASPECT_MIN = 0.95f
+    const val TAB_PANO_ASPECT_MAX = 1.05f
+
+    /**
+     * 认定为「上下拼接全景」所需的最小边。
+     *
+     * 方形视频本身就常见（社交视频、封面图、屏幕录制），只靠 1:1 会误伤；
+     * 而上下拼接全景的每半边至少是一张 2:1 全景，整体边长不会小于 1024
+     *（1920×1920 是最常见的下限）。低于此只当普通平面。
+     */
+    const val TAB_PANO_MIN_SIDE = 1024
+
     /** 触发检测结果的原因（决定提示文案） */
     enum class Reason {
         /** 2:1 单目全景 */
@@ -47,6 +65,9 @@ internal object ProjectionAutoDetector {
 
         /** 4:1 左右立体全景 */
         EQUIRECT_360_SBS,
+
+        /** 1:1 上下立体全景 */
+        EQUIRECT_360_TAB,
 
         /** 普通平面视频（含宽银幕、竖屏、方形） */
         FLAT
@@ -72,6 +93,22 @@ internal object ProjectionAutoDetector {
         aspect >= SBS_360_ASPECT_MIN && aspect <= SBS_360_ASPECT_MAX
 
     /**
+     * 是否为「上下拼接的全景」（方形且足够大）。
+     *
+     * ⚠️ 需要尺寸而非仅宽高比 —— 因为 1:1 本身太常见，必须配分辨率门槛。
+     * ⚠️ **2:1 的上下拼接全景无法被识别**：一张 2:1 的 TAB 片源（上下各一张 180°
+     * 半球，或上下各一张被缩过的 360）与"单目 360"宽高比完全相同，仅靠尺寸区分不了。
+     * 这种片源只能由用户在「立体格式」里手动选「上下3D」—— 正因如此，
+     * 手动选择必须能锁住检测结果（见 `VRPlayerScreen` 里 `projectionModeUserAdjusted`）。
+     */
+    fun isTabPano(width: Int, height: Int): Boolean {
+        if (width <= 0 || height <= 0) return false
+        val aspect = width.toFloat() / height.toFloat()
+        return aspect >= TAB_PANO_ASPECT_MIN && aspect <= TAB_PANO_ASPECT_MAX &&
+            minOf(width, height) >= TAB_PANO_MIN_SIDE
+    }
+
+    /**
      * 根据视频尺寸给出投影建议。
      *
      * @return 尺寸无效（任一边 ≤ 0，常见于解码器初始回调）时返回 null ——
@@ -87,6 +124,15 @@ internal object ProjectionAutoDetector {
                 // 双中心变形只在 MONO 下生效（shader 里显式判断），这里给 false 更诚实
                 warpDualCenter = false,
                 reason = Reason.EQUIRECT_360_SBS
+            )
+
+            // 上下拼接全景：方位放在 2:1 判定之前无所谓（1:1 与 2:1 不重叠），
+            // 但显式排在前面，读代码时"立体格式优先"的顺序更直观。
+            isTabPano(width, height) -> Suggestion(
+                mode = ProjectionMode.VR_360,
+                stereo = StereoMode.TAB,
+                warpDualCenter = false,
+                reason = Reason.EQUIRECT_360_TAB
             )
 
             isEquirect(aspect) -> Suggestion(

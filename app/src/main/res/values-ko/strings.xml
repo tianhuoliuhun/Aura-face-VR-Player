@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aura 미안 VR 플레이어</string>
+    <string name="app_name">Aura Lens</string>
     <string name="ui_language">인터페이스 언어</string>
     <string name="ui_language_hint">바로 화면이 갱신됩니다. 재생 위치는 유지됩니다</string>
     <string name="subtitle_quick_title">자막</string>
@@ -312,6 +312,7 @@
     <string name="toast_patching_header">하드웨어 디코더 한계를 넘었습니다. 헤더를 수정해 시도합니다 (실험적)...</string>
     <string name="toast_hw_patch_ok">하드웨어 디코딩 호환 버전을 만들어 재생합니다 (깨짐/검은 화면/무음이면 칩 모델을 알려주세요)</string>
     <string name="suffix_hw_patched"> (하드웨어 대응)</string>
+    <string name="toast_detected_360_tab">360° 3D 파노라마(상하) 감지</string>
     <string name="toast_detected_360_sbs">360° 3D 파노라마(좌우) 감지</string>
     <string name="toast_detected_360">2:1 파노라마를 감지해 VR_360 파노라마(단안)로 전환했습니다</string>
     <string name="toast_detected_2d">일반 2D 영상을 감지해 평면 모드로 전환했습니다</string>
@@ -514,7 +515,7 @@
     <string name="engine_mymemory">MyMemory 번역</string>
     <string name="engine_libretranslate">LibreTranslate</string>
     <string name="engine_deepl">DeepL</string>
-    <string name="engine_google_free">Google 번역(키 불필요)</string>
+    <string name="engine_google_free">Google 번역(비공식)</string>
     <string name="engine_local_llm">로컬 AI 번역(오프라인)</string>
     <string name="translate_mymemory_cooldown">MyMemory 무료 한도를 초과했습니다. 약 %1$d분 후 재시도합니다</string>
     <string name="lang_zh">간체중국어</string>

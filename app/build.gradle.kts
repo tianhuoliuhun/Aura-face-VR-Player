@@ -20,8 +20,8 @@ android {
     // 代价：不再支持 Android 7.x（7.0/7.1）。已与用户确认。
     minSdk = 26
     targetSdk = 36
-    versionCode = 327
-    versionName = "2.6.8"
+    versionCode = 328
+    versionName = "2.6.9"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -705,7 +705,7 @@ dependencies {
 // 默认的 app-release.apk / app-debug.apk 看不出版本，归档与分发时极易混淆。
 // AGP 9 已移除旧的 applicationVariants 改名 API，这里改为在 assemble 完成后重命名文件，
 // 与 AGP 版本无关（src 不存在时自动跳过，可重复执行）。
-// 产物：Aura-face-VR-Player-v<versionName>.apk / -debug.apk
+// 产物：Aura-Lens-v<versionName>.apk / -debug.apk
 // 注意两点，都是 AGP 9 + Gradle 9 的坑：
 // 1) assemble 任务注册较晚：必须用 afterEvaluate + matching（live 集合），
 //    直接用 tasks.named 会在配置期抛 "Task with name 'assembleRelease' not found"。
@@ -734,8 +734,8 @@ afterEvaluate {
     val dirPath = if (flavor.isEmpty()) "$buildDirPath/outputs/apk/$typeDir"
     else "$buildDirPath/outputs/apk/$flavor/$typeDir"
     val srcName = if (flavor.isEmpty()) "app-$typeDir.apk" else "app-$flavor-$typeDir.apk"
-    val dstName = if (flavor.isEmpty()) "Aura-face-VR-Player-v$ver$suffix.apk"
-    else "Aura-face-VR-Player-v$ver-$flavor$suffix.apk"
+    val dstName = if (flavor.isEmpty()) "Aura-Lens-v$ver$suffix.apk"
+    else "Aura-Lens-v$ver-$flavor$suffix.apk"
     doLast {
       val src = File(dirPath, srcName)
       val dst = File(dirPath, dstName)

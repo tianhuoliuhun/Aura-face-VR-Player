@@ -1,4 +1,4 @@
-# 🎬 Aura美颜VR播放器 / Aura face VR Player
+# 🎬 Aura Lens 灵境
 
 > 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体视频，
 > 内置实时 AI 人脸美颜、3D LUT 电影调色、**60+ 种语言与方言的离线语音转字幕**、10 引擎在线翻译与局域网 SMB 播放。
@@ -38,7 +38,7 @@
 | ✨ **实时 AI 美颜**<br>Real-time AI Beauty | **GLSL / GPUPixel 双引擎**可切换；478 点人像精修（瘦脸/大眼/去黑眼圈/鼻梁/嘴型/牙齿/口红/腮红/眉毛）；磨皮为频域分离 + 可调皮肤质感<br>Dual switchable engines, 478-landmark portrait retouch, frequency-separation smoothing |
 | 🎨 **3D LUT 调色**<br>LUT Color Grading | 36 款内置 LUT（人像美颜 24 + 风格滤镜 12，全部自研/开源可商用）；可导入自定义 `.cube`<br>36 bundled LUTs plus custom `.cube` import |
 | 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **Dolphin 已内置**（开箱即用）：**40 种东方语言 + 22 种中文方言**，自带语种识别；实时生成、整片转写、SRT 导出、去标点。语言面板点**「自动」即直接使用随包内置模型**（真·语种识别，不下载）<br>Bundled offline ASR (Dolphin): 40 Eastern languages + 22 Chinese dialects with auto language detection, realtime generation, batch transcription and SRT export. The 「Auto」 entry uses the **bundled** model directly — no download |
-| 🌐 **字幕在线翻译**<br>Online Translation | **10 种引擎**（4 个免密/免费：必应 / Google 免密 / MyMemory / LibreTranslate）；本地词库缓存（LRU + TTL + 按语言分文件）<br>10 engines including 4 keyless/free, with a local per-language translation memory |
+| 🌐 **字幕在线翻译**<br>Online Translation | **12 种引擎**（4 个免密/免费端点：必应 / Google / MyMemory / LibreTranslate；另有官方 API 的 DeepL 与完全本地的离线模型）；本地词库缓存（LRU + TTL + 按语言分文件）<br>12 engines including 4 keyless/free endpoints, the official DeepL API and an on-device model, with a local per-language translation memory |
 | 🎤 **发声人分离 / 去男声**<br>Speaker Separation | 🚧 **未完成（开发中）** —— 目标：分析音轨判断「谁在说话、什么性别」，并把男声段落从人声里分离出去（sherpa-onnx 说话人分离 + ONNX 性别分类 + MDX-Net 源分离）；目前**离线分析面板与单段处理已跑通**，长片流式处理与效果验收未完成<br>🚧 **Work in progress** — intended speaker diarization plus gender classification and MDX-Net source separation so male-voice segments can be removed; the offline analysis panel and short-clip path work, long-video streaming and quality validation are not done |
 | 🧠 **端侧本地大模型**<br>On-device LLM | 🚧 **未完成（开发中）** —— 目标是下载一次后**全程离线**：本地 AI 翻译 + 本地弹幕生成（**MiniCPM-V 4.7 1B，Q4_K_M 量化，Apache 2.0** + 自建 llama.cpp / libmtmd JNI；主权重约 672MB，可选视觉编码器 mmproj 约 1.11GB）；**推理链路已跑通**（单 worker 调度 + 优先级队列：实时字幕 > 弹幕 > 远期预翻译；超时与失败原因如实回传；不联网、不上传内容），但**翻译与弹幕的实际输出质量尚未达到可用**，故按未完成论<br>🚧 **Work in progress** — goal is fully offline local AI translation and danmaku generation (**MiniCPM-V 4.7 1B, Q4_K_M, Apache 2.0** with a self-built llama.cpp / libmtmd JNI; ~672MB main weights, optional ~1.11GB mmproj). The inference path works (single-worker scheduler with a **priority queue**, timeouts and real failure reasons surfaced), but output quality is not yet usable, so it is not a shipped feature |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
@@ -65,7 +65,7 @@
 
 | 项目 | 说明 / Notes |
 |---|---|
-| 产物 | **单个 APK**（含内置 ASR 模型与解码内核）；文件名由 Gradle 任务**自动带版本号**：`Aura-face-VR-Player-v<版本>-<flavor>.apk`（发版用 `all`，如 `Aura-face-VR-Player-v2.6.0-all.apk`）/ Single APK with the ASR model & decoder kernels bundled; the Gradle rename task stamps the version into the file name: `Aura-face-VR-Player-v<version>-<flavor>.apk` (`all` for releases) |
+| 产物 | **单个 APK**（含内置 ASR 模型与解码内核）；文件名由 Gradle 任务**自动带版本号**：`Aura-Lens-v<版本>-<flavor>.apk`（发版用 `all`，如 `Aura-Lens-v2.6.9-all.apk`）/ Single APK with the ASR model & decoder kernels bundled; the Gradle rename task stamps the version into the file name: `Aura-Lens-v<version>-<flavor>.apk` (`all` for releases) |
 | 体积 | 约 **210MB**（`all` 全兼容包；其中内置 Dolphin ASR 模型约 99MB、原生解码 / 推理库约 43MB）/ ~210MB (the `all` build; ~99MB Dolphin ASR model + ~43MB native decoder / inference libs) |
 | 包含 ABI | **仅 `arm64-v8a`**（v2.4.10 起）。闭源预编译库（旷视 Mars-Face / MediaPipe / VR SDK）只提供 arm64 / v7a，`CMakeLists.txt` 对缺失 ABI 是 `FATAL_ERROR`，故 **x86 / x86_64 物理上无法构建** / **`arm64-v8a` only** (since v2.4.10): the closed-source prebuilt libs ship only arm64 / v7a and CMake fails hard on a missing ABI, so x86 / x86_64 cannot be built at all |
 | 安装 | 普通手机与 VR 眼镜均直接安装，系统自动选原生库 / Installs directly on both phones and VR glasses; the OS picks the native libs |
@@ -93,7 +93,7 @@ $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot"   # �
 # 1) 构建 —— ⚠️ 必须带 flavor，否则 assembleRelease 会把 5 个 flavor 全编一遍
 gradle.bat :app:assembleStandardRelease                     # 日常主线包（体积最小，不编 OpenXR）
 gradle.bat :app:assembleAllRelease -x lintVitalAllRelease   # 发版全兼容包
-# 产物：app\build\outputs\apk\all\release\Aura-face-VR-Player-v<版本>-all.apk（单 APK，arm64-v8a，含内置模型）
+# 产物：app\build\outputs\apk\all\release\Aura-Lens-v<版本>-all.apk（单 APK，arm64-v8a，含内置模型）
 
 # 可选：额外拉取 SenseVoice-Small（约 228MB，超 GitHub 单文件限制故不入 git）
 #       内置的 Dolphin 已随仓库提供，走「自动」语种无需此步
@@ -117,7 +117,7 @@ gradle.bat :app:assembleAllRelease -x lintVitalAllRelease   # 发版全兼容包
 | 2 | **安装包较大（约 210MB）**——ASR 模型（Dolphin）已内置以保证开箱即用；若需精简版可自行移除 `assets/dolphin/` 并改用下载兜底 | **Large APK (~210MB)** — the bundled ASR model (Dolphin) makes it work out of the box; remove `assets/dolphin/` for a slimmer build with download fallback |
 | 3 | **陀螺仪漂移**——长时间观看后水平朝向缓慢漂移，双击画面重置视角即可（原理性，GAME_ROTATION_VECTOR 无绝对北向基准） | **Gyroscope drift** — yaw drifts slowly over long sessions; double-tap to recenter (inherent to game rotation vector) |
 | 4 | **AI 字幕多行时间线可能不匹配**——断句/静音判断误差导致时间轴偏移 | **Multi-line ASR subtitle timeline mismatch** — auto-generated timestamps may not perfectly align |
-| 5 | **免费翻译端点有额度限制**——必应为非官方网页端点、MyMemory 匿名仅 5000 字符/天（已内置限速与冷却），重度使用建议自配 LLM API Key 或自建 LibreTranslate | **Free translation endpoints are rate-limited** — Bing is unofficial; MyMemory allows ~5000 chars/day anonymously (pacing & cooldown built in) |
+| 5 | **免费翻译端点有额度限制**——必应与 Google 均为非官方网页端点、MyMemory 匿名仅 5000 字符/天（已内置限速与冷却），重度使用建议自配 LLM API Key 或自建 LibreTranslate | **Free translation endpoints are rate-limited** — Bing and Google are both unofficial web endpoints; MyMemory allows ~5000 chars/day anonymously (pacing & cooldown built in) |
 | 6 | **多语言 ASR 模型需联网首次下载**——11 种语言共用 102MB 包；泰语无「按文件」源，需下 664MB 整包（解压后仅保留约 154MB） | **Multi-language ASR models need a one-time download** — 11 languages share a 102MB package; Thai has no per-file source (664MB package, ~154MB kept) |
 | 7 | **画质增强只在视频播放时生效**——MEMC / FSR 的启用判定基于**视频源分辨率**，图片与全景浏览模式下开关虽可打开但不参与（副标题会显示「等待视频信息」） | **Video enhancement applies to video playback only** — MEMC / FSR are keyed off the video source resolution, so the toggles stay inert while browsing images or panoramas (the subtitle reads "waiting for video info") |
 | 8 | **MEMC 目标帧率是「输出上限」而非保证值**——它只能向下限制输出节奏，无法把渲染循环帧率提上去；实际可达帧率受**屏幕刷新率**与 GPU 负载限制（例如 60Hz 屏上选 120 不会有额外效果，但也不会出错） | **The MEMC target frame rate is an output cap, not a guarantee** — it can only slow the output down, never raise the render loop's rate; the achievable rate is bounded by the display refresh rate and GPU load |
@@ -196,6 +196,18 @@ the user, who is responsible for having the rights to play it.
 <br>**Bing translation**: the Bing engine calls Bing's **web** endpoint, not an official Microsoft API.
 This project is not affiliated with or endorsed by Microsoft; automated use of that endpoint may not
 comply with Microsoft's terms — prefer an officially licensed API for commercial distribution.
+
+**Google 翻译**：「字幕在线翻译」的 Google 引擎调用 **Chrome 词典扩展所用的网页端点**
+（`clients5.google.com/translate_a/t?client=dict-chrome-ex`），**不是 Google Cloud Translation 官方 API**
+（官方接口需 API Key 与计费账户）。本项目与 Google LLC **无关联、未获授权与背书**（"Google / Google
+Translate" 为其商标，仅用于描述所调用的服务）。该端点面向浏览器扩展设计，第三方程序自动化调用
+**可能不符合 Google 服务条款**，可用性也可能随时变化（会在 `200` / `429` / `403` 之间切换）——
+**商业分发建议改用有明确授权的官方接口**或其它合规引擎（内置的 DeepL 官方 API、自配 Key 的接口、
+本地离线模型）。启用该引擎时字幕文本会发送至该端点，请勿翻译敏感内容。
+<br>**Google translation**: the Google engine calls the **web** endpoint used by Chrome's dictionary
+extension, not the official Google Cloud Translation API (which requires a key and billing). This project
+is not affiliated with or endorsed by Google; automated use of that endpoint may not comply with Google's
+terms and its availability may change at any time — prefer an officially licensed API for commercial use.
 
 完整版见 **[内容与第三方服务声明](docs/CONTENT_AND_SERVICE_DISCLAIMER.md)**，
 第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [NOTICE](NOTICE)。

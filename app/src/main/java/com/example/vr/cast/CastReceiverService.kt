@@ -41,7 +41,7 @@ class CastReceiverService : Service() {
         private const val NOTIFICATION_ID = 41001
 
         /** 手机端「投屏」列表里显示的设备名 */
-        const val FRIENDLY_NAME = "Aura VR Player"
+        const val FRIENDLY_NAME = "Aura Lens"
 
         fun start(context: Context) {
             val i = Intent(context, CastReceiverService::class.java)

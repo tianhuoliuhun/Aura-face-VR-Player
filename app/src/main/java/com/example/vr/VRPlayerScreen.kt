@@ -1784,6 +1784,16 @@ fun VRPlayerScreen(
     LaunchedEffect(selectedMediaItem.uri) {
         seekThumbCache.evictAll()
         hoverPreviewBitmap = null
+        // v2.6.9：**换视频时复位「用户手动调过」的锁**。
+        //   各选片入口（相册 / 文档 / 外部意图 / 投屏）都会把 projectionMode 复位成
+        //   STANDARD，但 `projectionModeUserAdjusted` 以前**从不复位** →
+        //   只要手动调过一次，此后所有视频都不再跑智能检测。
+        //   典型症状：为了看上下拼接片手选过一次「上下3D」，之后打开普通 2:1 全景
+        //   也不会再自动识别，只能看压扁的画面，且必须重启 App 才恢复。
+        // 同时复位立体模式：上一个片源的 TAB/SBS 残留到新视频会只显示上半/左半
+        // （虽然后续尺寸回调会纠正，但那个中间态很刺眼）。
+        projectionModeUserAdjusted = false
+        stereoMode = StereoMode.MONO
     }
 
     /**
@@ -3196,12 +3206,25 @@ fun VRPlayerScreen(
                 if (forceVideoType != 0) {
                     val targetMode: ProjectionMode
                     val targetStereo: StereoMode
+                    // v2.6.9：强制「3D 左右 / 3D 上下」时**不要再把投影锁死成平面**。
+                    //   用户选这两项表达的是"这是拼接 3D 片源"，与投影是否球面无关；
+                    //   原来固定 STANDARD，导致上下拼接的全景只能被压扁着看，
+                    //   想正确观看必须先选 3D 上下、再手动改投影（而且会被自动检测覆盖）。
+                    //   现在：当前已经是全景（360/180）就保留，否则仍按平面处理（与旧行为一致）。
+                    val keepPano = projectionMode == ProjectionMode.VR_360 ||
+                        projectionMode == ProjectionMode.VR_180
                     when (forceVideoType) {
                         1 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
                         2 -> { targetMode = ProjectionMode.VR_360; targetStereo = StereoMode.MONO }
                         3 -> { targetMode = ProjectionMode.VR_180; targetStereo = StereoMode.MONO }
-                        4 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.SBS }
-                        5 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.TAB }
+                        4 -> {
+                            targetMode = if (keepPano) projectionMode else ProjectionMode.STANDARD
+                            targetStereo = StereoMode.SBS
+                        }
+                        5 -> {
+                            targetMode = if (keepPano) projectionMode else ProjectionMode.STANDARD
+                            targetStereo = StereoMode.TAB
+                        }
                         else -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
                     }
                     if (projectionMode != targetMode || stereoMode != targetStereo) {
@@ -3239,6 +3262,8 @@ fun VRPlayerScreen(
                         val toastRes = when (suggestion.reason) {
                             ProjectionAutoDetector.Reason.EQUIRECT_360 -> R.string.toast_detected_360
                             ProjectionAutoDetector.Reason.EQUIRECT_360_SBS -> R.string.toast_detected_360_sbs
+                            // v2.6.9：上下拼接全景（1:1，上下各一张 2:1）
+                            ProjectionAutoDetector.Reason.EQUIRECT_360_TAB -> R.string.toast_detected_360_tab
                             ProjectionAutoDetector.Reason.FLAT -> R.string.toast_detected_2d
                         }
                         Toast.makeText(context, context.getString(toastRes), Toast.LENGTH_SHORT).show()
@@ -6352,6 +6377,14 @@ fun VRPlayerScreen(
                                                     )
                                                     .clickable {
                                                         stereoMode = mode
+                                                        // 🔴 v2.6.9：**手动选立体格式必须锁住自动检测**。
+                                                        //    以前只改 stereoMode 不置标志，于是下一次
+                                                        //    onVideoSizeChanged 触发智能检测时：
+                                                        //    2:1 的上下拼接全景会被判成「360 + 单目」，
+                                                        //    检测发现 stereo 不同 → 直接把你选的「上下3D」改回单目。
+                                                        //    表现就是「选了上下3D没反应 / 过一会儿自己变回2D」，
+                                                        //    上下屏 VR 片源几乎一定会踩到。
+                                                        projectionModeUserAdjusted = true
                                                         keepUiAlight()
                                                     },
                                                 contentAlignment = Alignment.Center

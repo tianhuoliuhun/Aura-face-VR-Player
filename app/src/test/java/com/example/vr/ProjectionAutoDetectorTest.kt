@@ -128,4 +128,62 @@ class ProjectionAutoDetectorTest {
         assertFalse(ProjectionAutoDetector.isSbsPano(2.0f))
         assertFalse(ProjectionAutoDetector.isSbsPano(3.5f))
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // v2.6.9：「上下屏」（TAB）拼接全景
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `上下拼接全景判 360 且带 TAB`() {
+        // 上下各一张 2:1 equirect 拼起来就是方形：1920x960 ×2 = 1920x1920
+        listOf(1920 to 1920, 3840 to 3840, 2560 to 2560).forEach { (w, h) ->
+            val s = ProjectionAutoDetector.detect(w, h)!!
+            assertEquals("${w}x$h 应为 360", ProjectionMode.VR_360, s.mode)
+            assertEquals("${w}x$h 应为 TAB", StereoMode.TAB, s.stereo)
+            // 双中心变形只在 MONO 下生效，上下立体时应为 false
+            assertFalse(s.warpDualCenter)
+            assertEquals(ProjectionAutoDetector.Reason.EQUIRECT_360_TAB, s.reason)
+        }
+    }
+
+    @Test
+    fun `小尺寸方形视频不被误判成上下拼接全景`() {
+        // 🔴 回归用例：1:1 本身很常见（社交视频、封面、录屏），必须配分辨率门槛
+        // 1000x1000 低于 TAB_PANO_MIN_SIDE(1024)
+        val s = ProjectionAutoDetector.detect(1000, 1000)!!
+        assertEquals(ProjectionMode.STANDARD, s.mode)
+        assertEquals(StereoMode.MONO, s.stereo)
+        assertEquals(ProjectionAutoDetector.Reason.FLAT, s.reason)
+    }
+
+    @Test
+    fun `方形门槛按最小边判定且边界算命中`() {
+        assertTrue(ProjectionAutoDetector.isTabPano(1024, 1024))   // 正好到门槛
+        assertFalse(ProjectionAutoDetector.isTabPano(1023, 1024))
+        assertFalse(ProjectionAutoDetector.isTabPano(1024, 1023))
+        // 非方形的一律不是（即便很大）
+        assertFalse(ProjectionAutoDetector.isTabPano(1920, 1080))
+        assertFalse(ProjectionAutoDetector.isTabPano(3840, 1920))
+        // 无效尺寸
+        assertFalse(ProjectionAutoDetector.isTabPano(0, 0))
+    }
+
+    @Test
+    fun `方形窗口上下边界`() {
+        // 1.05 仍在窗口内（2016/1920 = 1.05）；1.10 出窗
+        assertEquals(ProjectionMode.VR_360, ProjectionAutoDetector.detect(2016, 1920)!!.mode)
+        assertEquals(StereoMode.TAB, ProjectionAutoDetector.detect(2016, 1920)!!.stereo)
+        assertEquals(ProjectionMode.STANDARD, ProjectionAutoDetector.detect(2112, 1920)!!.mode)
+        // 0.95（1824/1920）也命中
+        assertEquals(StereoMode.TAB, ProjectionAutoDetector.detect(1824, 1920)!!.stereo)
+    }
+
+    @Test
+    fun `立体三种格式的宽度比互不重叠`() {
+        // 2:1 单目 / 4:1 SBS / 1:1 TAB 三个窗口必须两两不交，否则会出现判定顺序依赖
+        assertFalse(ProjectionAutoDetector.isEquirect(1.0f))
+        assertFalse(ProjectionAutoDetector.isSbsPano(1.0f))
+        assertFalse(ProjectionAutoDetector.isEquirect(4.0f))
+        assertFalse(ProjectionAutoDetector.isEquirect(0.95f))
+    }
 }

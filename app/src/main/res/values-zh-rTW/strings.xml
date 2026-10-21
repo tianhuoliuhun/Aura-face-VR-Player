@@ -10,7 +10,7 @@
     无效（不用無效）    推荐（不用建議）    识别（不用辨識）    当前（不用目前）
 -->
 <resources>
-    <string name="app_name">Aura美顏VR播放器</string>
+    <string name="app_name">Aura Lens 靈境</string>
 
     <!-- ===== 界面語言（v2.0.129）===== -->
     <string name="ui_language">界面語言</string>
@@ -340,6 +340,7 @@
     <string name="toast_patching_header">視頻超出硬件解碼標稱上限，正在修改編碼頭嘗試硬件解碼（實驗性）...</string>
     <string name="toast_hw_patch_ok">已生成硬件解碼兼容版本，正在播放（若花屏/黑屏/無聲請反饋芯片型號）</string>
     <string name="suffix_hw_patched"> （硬解適配）</string>
+    <string name="toast_detected_360_tab">已辨識為 360° 3D 全景（上下立體）</string>
     <string name="toast_detected_360_sbs">已辨識為 360° 3D 全景（左右立體）</string>
     <string name="toast_detected_360">檢測到 2:1 全景視頻，已切換至 VR_360 全景（單目）</string>
     <string name="toast_detected_2d">檢測到普通 2D 視頻，已切換至平面模式</string>
@@ -556,7 +557,7 @@
     <string name="engine_mymemory">MyMemory 翻譯</string>
     <string name="engine_libretranslate">LibreTranslate</string>
     <string name="engine_deepl">DeepL</string>
-    <string name="engine_google_free">Google 翻譯（免密）</string>
+    <string name="engine_google_free">Google 翻譯（非官方）</string>
     <string name="engine_local_llm">本機 AI 翻譯（離線）</string>
     <string name="translate_mymemory_cooldown">MyMemory 已達免費額度，約 %1$d 分鐘後自動恢復</string>
     <string name="lang_zh">簡體中文</string>
