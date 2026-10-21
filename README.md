@@ -1,9 +1,9 @@
 # 🎬 Aura Lens 灵境
 
-> 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体视频，
+> 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体与普通 **2D 平面视频**，
 > 内置实时 AI 人脸美颜、3D LUT 电影调色、**60+ 种语言与方言的离线语音转字幕**、10 引擎在线翻译与局域网 SMB 播放。
 >
-> A professional mobile VR player with real-time AI beauty filters, 3D LUT color grading,
+> A professional mobile VR player for **plain 2D, 360°/180° panorama, fisheye and 3D SBS/TAB** videos with real-time AI beauty filters, 3D LUT color grading,
 > offline ASR subtitles (**60+ languages & dialects**), 10-engine online translation and LAN (SMB) playback.
 
 > **版本里程碑 / Milestones**：
@@ -32,7 +32,7 @@
 
 | 功能 / Feature | 亮点 / Highlights |
 |---|---|
-| 🥽 **VR 播放**<br>VR Playback | 360°/180° 全景、鱼眼、标准平面四种投影；3D SBS/TAB 立体；陀螺仪跟随与手动偏移；圆柱曲面沉浸；8K 硬解实验（默认关）<br>Four projection modes, SBS/TAB stereo, gyro tracking, cylinder curvature, experimental 8K decoding |
+| 🥽 **VR 播放**<br>VR Playback | 360°/180° 全景、鱼眼、标准平面四种投影，**普通 2D 视频开箱即播**；3D SBS/TAB 立体；陀螺仪跟随与手动偏移；圆柱曲面沉浸；8K 硬解实验（默认关）<br>Four projection modes — **plain 2D videos play out of the box**; SBS/TAB stereo, gyro tracking, cylinder curvature, experimental 8K decoding |
 | 🕶️ **VR 眼镜 / OpenXR**<br>VR Glasses & OpenXR | 🚧 **未完成（开发中）** —— 目标支持 **华为 VR Glass / Pico / Quest** 等 VR 眼镜（OpenXR 会话与立体渲染）；已按 **flavor 分包**（主线 `standard`（不编 OpenXR、体积最小）/ 全兼容 `all`（发版）/ 单眼镜 `huawei`·`pico`·`quest`），眼镜包在普通手机上同样可运行；**真机上的渲染与交互验收尚未完成，暂不作为正式功能**<br>🚧 **Work in progress** — intended OpenXR support for Huawei VR Glass / Pico / Quest, split into **per-flavor builds** (mainline `standard` / all-in-one `all` / single-glasses `huawei`·`pico`·`quest`); on-device rendering and interaction are not yet validated, so it is not a shipped feature |
 | ⚡ **画质增强**<br>Video Enhancement | **MEMC 运动补偿插帧**（48/60/72/90/120 fps）+ **FSR 超分**（EASU + RCAS，默认规则与自定义 6 档，自定义完全接管）<br>Motion-compensated interpolation plus FSR upscaling with default and fully-overriding custom rules |
 | ✨ **实时 AI 美颜**<br>Real-time AI Beauty | **GLSL / GPUPixel 双引擎**可切换；478 点人像精修（瘦脸/大眼/去黑眼圈/鼻梁/嘴型/牙齿/口红/腮红/眉毛）；磨皮为频域分离 + 可调皮肤质感<br>Dual switchable engines, 478-landmark portrait retouch, frequency-separation smoothing |

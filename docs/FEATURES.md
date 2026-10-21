@@ -8,8 +8,8 @@
 ---
 
 ## 🥽 VR 播放能力 / VR Playback
-- 多投影模式：标准平面 / 鱼眼 / 360° 球面 / 180° 穹幕，一键切换
-  - Projection modes: Standard / Fisheye / 360° Sphere / 180° Dome
+- 多投影模式：标准平面 / 鱼眼 / 360° 球面 / 180° 穹幕，一键切换；普通 **2D 平面视频**（MP4 / MKV 等）开箱即播，同样走完整链路（美颜 / LUT / 字幕与 ASR / 画质增强）
+  - Projection modes: Standard / Fisheye / 360° Sphere / 180° Dome; plain **2D videos** (MP4 / MKV etc.) play out of the box with the full pipeline (beauty / LUT / subtitles & ASR / enhancement)
 - 3D 立体支持：Side-by-Side（左右）与 Top-and-Bottom（上下）3D 视频
   - 3D stereo: Side-by-Side and Top-and-Bottom formats
 - 体感操控：陀螺仪视角跟随，支持手动偏移、重置视角中心
