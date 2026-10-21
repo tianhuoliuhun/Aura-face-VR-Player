@@ -1,6 +1,6 @@
 # 第三方组件声明 / Third-Party Notices
 
-> 本文档列出 Aura face VR Player（下称"本项目"）分发时包含的第三方组件、许可与义务。
+> 本文档列出 Aura Lens 灵境（Aura Lens VR Player，下称"本项目"）分发时包含的第三方组件、许可与义务。
 > 应用内同一份内容见「设置 → 关于与开源许可」；根目录 `NOTICE` 是 Apache-2.0 要求的简短署名文件。
 >
 > 本项目自身以 **Apache License 2.0** 发布，见根目录 `LICENSE`。
