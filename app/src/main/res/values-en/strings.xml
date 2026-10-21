@@ -290,6 +290,11 @@
     <string name="action_view">View</string>
     <string name="track_dialog_title">Audio &amp; subtitle tracks</string>
     <string name="track_none">This media has no switchable audio/subtitle tracks</string>
+    <string name="huawei_vr_initializing">Initializing Huawei VR…</string>
+    <string name="toast_switched_codec">Switched to: %1$s</string>
+    <string name="subtitle_loaded_toast">Subtitles generated and loaded: %1$s (%2$d lines)</string>
+    <string name="track_subtitle_item">Subtitle track %1$d</string>
+    <string name="track_audio_item">Audio track %1$d</string>
     <string name="track_audio">Audio</string>
     <string name="track_subtitle_embedded">Subtitles (embedded)</string>
     <string name="track_subtitle_off">Turn off embedded subtitles</string>

@@ -12,6 +12,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import androidx.compose.ui.unit.dp
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -93,6 +94,19 @@ internal const val FIRST_CAPTURE_DELAY_MS = 8_000L
 
 /** 请求取帧后，轮询结果的最大尝试次数（GL 回读发生在下一帧） */
 internal const val FRAME_POLL_MAX_TRIES = 20
+
+/**
+ * v2.6.10：快捷面板（字幕/美颜等）内容视口的**上限高度**。
+ *
+ * 🔴 这是**单一来源**：`VRPlayerScreen` 里 `PlayerProgressBar` 的三处都要用它 ——
+ * ① `Column.heightIn(max = …)`；② 右侧滚动条的「可视高度」换算；③ 滚动条自身高度。
+ * 此前三处各写一个 `480.dp`，改一处漏两处就会让滚动条与内容视口错位
+ * （本项目「同一份数据两处登记」的老问题）。
+ *
+ * ⚠️ 实际视口 = `minOf(BoxWithConstraints.maxHeight, 该上限)`，见调用处 ——
+ * 小屏 / 分屏 / 系统字体放大时不会超出可用高度。
+ */
+internal val QUICK_PANEL_VIEWPORT_DP = 480.dp
 
 /** 每次轮询的间隔（ms）—— 20 × 100ms = 最多等 2s */
 internal const val FRAME_POLL_INTERVAL_MS = 100L

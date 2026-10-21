@@ -16,6 +16,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.graphics.Color
 import android.util.TypedValue
+import com.example.R
 import com.example.vr.DemoMediaProvider
 import com.example.vr.VRGLRenderer
 import javax.microedition.khronos.egl.EGLConfig
@@ -183,7 +184,8 @@ class HuaweiVrActivity : Activity() {
         statusText = TextView(this).apply {
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            text = "华为 VR 初始化中…"
+            // v2.6.10：走 strings（五语）—— 原来硬编码中文
+            text = getString(R.string.huawei_vr_initializing)
         }
         root.addView(
             statusText,

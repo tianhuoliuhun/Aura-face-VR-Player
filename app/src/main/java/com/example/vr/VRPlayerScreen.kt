@@ -1171,7 +1171,12 @@ fun VRPlayerScreen(
                 loadedSubtitleCues = cues
                 loadedSubtitleFileName = file.name
                 isSubtitleEnabled = true
-                Toast.makeText(context, "字幕已生成并加载：${file.name}（${cues.size} 句）", Toast.LENGTH_LONG).show()
+                // v2.6.10：文案走 strings（五语）—— 原来硬编码中文，英日韩用户看到中文
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.subtitle_loaded_toast, file.name, cues.size),
+                    Toast.LENGTH_LONG
+                ).show()
             } else {
                 Toast.makeText(context, context.getString(R.string.toast_subtitle_gen_failed, batchTranscriber.statusMessage), Toast.LENGTH_LONG).show()
             }
@@ -5424,11 +5429,16 @@ fun VRPlayerScreen(
                     // 会超出屏幕且无法滚动。改为「限高 + 竖向滚动」，
                     // 并在右侧显示滚动条（内容未超出时不显示）。
                     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        // v2.6.10：**视口高度单一来源**（替代原先散落三处的 480.dp 字面量）。
+                        //   · `minOf(maxHeight, …)`：小屏 / 分屏 / 系统字体放大时视口不超出可用高度；
+                        //   · Column 的 heightIn、滚动条的「可视高度」换算、滚动条自身高度
+                        //     全部用它 —— 改这里一处即全局生效，不会再出现滚动条与视口错位。
+                        val viewportH = minOf(maxHeight, QUICK_PANEL_VIEWPORT_DP)
                         val quickPanelScroll = rememberScrollState()
                         val density = LocalDensity.current
                         Column(
                             modifier = Modifier
-                                .heightIn(max = 480.dp)
+                                .heightIn(max = viewportH)
                                 .verticalScroll(quickPanelScroll)
                                 .padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -5852,8 +5862,9 @@ fun VRPlayerScreen(
 
                         // 右侧滚动条：仅当内容超出限高时才出现
                         if (quickPanelScroll.maxValue > 0) {
-                            // 可视高度 = 上面的限高（480.dp），内容超过它才会走到这里
-                            val viewH = with(density) { 480.dp.toPx() }
+                            // 可视高度 = 上面的限高（与 Column 的 heightIn 同一个 viewportH），
+                            // 内容超过它才会走到这里
+                            val viewH = with(density) { viewportH.toPx() }
                             val totalH = quickPanelScroll.maxValue + viewH
                             val thumbRatio = (viewH / totalH).coerceIn(0.15f, 1f)
                             val progress = quickPanelScroll.value.toFloat() /
@@ -5861,13 +5872,14 @@ fun VRPlayerScreen(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
-                                    // v2.0.137 修"面板底部一大块空白"：原先 fillMaxHeight()
-                                    // 在 Box 里会填满**父级传入的最大约束**（整屏高），
-                                    // 把 BoxWithConstraints/面板从内容高度撑到屏幕高——
-                                    // 实测面板 593dp 而内容视口仅 480dp，底部多出 ~113dp 空白。
-                                    // 改为与内容视口同高的固定值（matchParentSize 在本版本
-                                    // Compose 无法 import，见 v2.0.128 记录）。
-                                    .height(480.dp)
+                            // v2.0.137 修"面板底部一大块空白"：原先 fillMaxHeight()
+                            // 在 Box 里会填满**父级传入的最大约束**（整屏高），
+                            // 把 BoxWithConstraints/面板从内容高度撑到屏幕高——
+                            // 实测面板 593dp 而内容视口仅 480dp，底部多出 ~113dp 空白。
+                            // 改为与内容视口同高（matchParentSize 在本版本
+                            // Compose 无法 import，见 v2.0.128 记录）。
+                            // v2.6.10：高度改用 viewportH（单一来源），不再重复写 480.dp
+                            .height(viewportH)
                                     .padding(vertical = 6.dp, horizontal = 2.dp)
                                     .width(7.dp),
                                 contentAlignment = Alignment.TopEnd
@@ -7246,7 +7258,19 @@ fun VRPlayerScreen(
                                                         )
                                                         .clickable {
                                                             isSoftwareDecoding = isSw
-                                                            Toast.makeText(context, "已切换为: ${if (isSw) "软件解码" else context.getString(R.string.info_hw_decode)}", Toast.LENGTH_SHORT).show()
+                                                            // v2.6.10：软件解码名也走资源（decode_sw），
+                                                            // 原硬编码中文会让英日韩用户看到「软件解码」
+                                                            Toast.makeText(
+                                                                context,
+                                                                context.getString(
+                                                                    R.string.toast_switched_codec,
+                                                                    context.getString(
+                                                                        if (isSw) R.string.decode_sw
+                                                                        else R.string.info_hw_decode
+                                                                    )
+                                                                ),
+                                                                Toast.LENGTH_SHORT
+                                                            ).show()
                                                             keepUiAlight()
                                                         },
                                                     contentAlignment = Alignment.Center
@@ -8156,11 +8180,17 @@ fun VRPlayerScreen(
                 containerColor = Color(0xFC18171C),
                 title = { Text(stringResource(R.string.action_media_info), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
                 text = {
+                    // v2.6.10：媒体信息是多行长文本（分辨率/编码/码率/HDR/各轨道），
+                    //   不给限高 + 滚动时，超出 Dialog 可视区的部分直接裁掉，
+                    //   用户看不到完整信息也没有滚动条。
                     Text(
                         text = info,
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 12.sp,
-                        lineHeight = 18.sp
+                        lineHeight = 18.sp,
+                        modifier = Modifier
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState())
                     )
                 },
                 confirmButton = {
@@ -8185,7 +8215,12 @@ fun VRPlayerScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 420.dp),
+                            .heightIn(max = 420.dp)
+                            // v2.6.10：**限高必须配滚动**。
+                            //   之前只有 heightIn 没有 verticalScroll —— 内容超出限高时
+                            //   底部被裁掉且无法到达（音轨/字幕轨按 length 动态生成，
+                            //   蓝光片 13 轨以上必中；SMB 设备多时同理）。
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (audioGroup == null && textGroup == null) {
@@ -8214,7 +8249,8 @@ fun VRPlayerScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "音轨 ${i + 1}${f.language?.let { " ($it)" } ?: ""}",
+                                        text = stringResource(R.string.track_audio_item, i + 1) +
+                                            (f.language?.let { " ($it)" } ?: ""),
                                         color = Color.White.copy(alpha = 0.85f),
                                         fontSize = 10.sp,
                                         maxLines = 1,
@@ -8265,7 +8301,8 @@ fun VRPlayerScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "字幕 ${i + 1}${f.language?.let { " ($it)" } ?: ""}",
+                                        text = stringResource(R.string.track_subtitle_item, i + 1) +
+                                            (f.language?.let { " ($it)" } ?: ""),
                                         color = Color.White.copy(alpha = 0.85f),
                                         fontSize = 10.sp,
                                         maxLines = 1,
@@ -8510,7 +8547,12 @@ fun VRPlayerScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 420.dp),
+                            .heightIn(max = 420.dp)
+                            // v2.6.10：**限高必须配滚动**。
+                            //   之前只有 heightIn 没有 verticalScroll —— 内容超出限高时
+                            //   底部被裁掉且无法到达（音轨/字幕轨按 length 动态生成，
+                            //   蓝光片 13 轨以上必中；SMB 设备多时同理）。
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         OutlinedTextField(

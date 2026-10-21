@@ -292,6 +292,11 @@
     <string name="action_view">查看</string>
     <string name="track_dialog_title">音軌與字幕軌</string>
     <string name="track_none">當前媒體沒有可切換的音軌/字幕軌</string>
+    <string name="huawei_vr_initializing">華為 VR 初始化中…</string>
+    <string name="toast_switched_codec">已切換為：%1$s</string>
+    <string name="subtitle_loaded_toast">字幕已生成並載入：%1$s（%2$d 句）</string>
+    <string name="track_subtitle_item">字幕 %1$d</string>
+    <string name="track_audio_item">音軌 %1$d</string>
     <string name="track_audio">音軌</string>
     <string name="track_subtitle_embedded">字幕軌（內嵌）</string>
     <string name="track_subtitle_off">關閉內嵌字幕</string>

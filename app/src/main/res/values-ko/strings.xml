@@ -266,6 +266,11 @@
     <string name="action_view">보기</string>
     <string name="track_dialog_title">오디오/자막 트랙</string>
     <string name="track_none">전환할 오디오/자막 트랙이 없습니다</string>
+    <string name="huawei_vr_initializing">Huawei VR 초기화 중…</string>
+    <string name="toast_switched_codec">전환됨: %1$s</string>
+    <string name="subtitle_loaded_toast">자막 생성 및 로드: %1$s (%2$d줄)</string>
+    <string name="track_subtitle_item">자막 트랙 %1$d</string>
+    <string name="track_audio_item">오디오 트랙 %1$d</string>
     <string name="track_audio">오디오</string>
     <string name="track_subtitle_embedded">자막 (내장)</string>
     <string name="track_subtitle_off">내장 자막 끄기</string>

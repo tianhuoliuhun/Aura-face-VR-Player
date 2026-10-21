@@ -266,6 +266,11 @@
     <string name="action_view">表示</string>
     <string name="track_dialog_title">音声トラックと字幕トラック</string>
     <string name="track_none">切り替え可能な音声/字幕トラックがありません</string>
+    <string name="huawei_vr_initializing">Huawei VR を初期化中…</string>
+    <string name="toast_switched_codec">切り替えました：%1$s</string>
+    <string name="subtitle_loaded_toast">字幕を生成して読み込みました：%1$s（%2$d 行）</string>
+    <string name="track_subtitle_item">字幕トラック %1$d</string>
+    <string name="track_audio_item">音声トラック %1$d</string>
     <string name="track_audio">音声</string>
     <string name="track_subtitle_embedded">字幕（内蔵）</string>
     <string name="track_subtitle_off">内蔵字幕をオフ</string>
