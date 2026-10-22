@@ -527,6 +527,10 @@
     <string name="translate_pollinations_cooldown">Pollinations の無料枠がレート制限中です。%1$d 秒後に再開します</string>
     <string name="engine_reverso">Reverso（キー不要）</string>
     <string name="translate_reverso_cooldown">Reverso がレート制限中です。%1$d 秒後に再開します</string>
+    <string name="engine_openrouter">OpenRouter（:free プール）</string>
+    <string name="translate_openrouter_cooldown">OpenRouter の無料モデルがすべてレート制限中です。%1$d 秒後に再開します</string>
+    <string name="translate_openrouter_unavailable">OpenRouter の無料モデルが利用できません。しばらくしてから再試行してください</string>
+    <string name="translate_openrouter_pool_hint">空欄なら :free モデルプールを自動で切り替えます（カンマ区切りで複数指定可）</string>
     <string name="lang_zh">簡体字中国語</string>
     <string name="lang_en">英語</string>
     <string name="lang_ja">日本語</string>

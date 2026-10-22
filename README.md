@@ -1,7 +1,7 @@
 # 🎬 Aura Lens 灵境
 
 > 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体与普通 **2D 平面视频**，
-> 内置实时 AI 人脸美颜、3D LUT 电影调色、**60+ 种语言与方言的离线语音转字幕**、14 种翻译引擎与局域网 SMB 播放。
+> 内置实时 AI 人脸美颜、3D LUT 电影调色、**60+ 种语言与方言的离线语音转字幕**、15 种翻译引擎与局域网 SMB 播放。
 >
 > A professional mobile VR player for **plain 2D, 360°/180° panorama, fisheye and 3D SBS/TAB** videos with real-time AI beauty filters, 3D LUT color grading,
 > offline ASR subtitles (**60+ languages & dialects**), 13 translation engines and LAN (SMB) playback.
@@ -38,7 +38,7 @@
 | ✨ **实时 AI 美颜**<br>Real-time AI Beauty | **GLSL / GPUPixel 双引擎**可切换；478 点人像精修（瘦脸/大眼/去黑眼圈/鼻梁/嘴型/牙齿/口红/腮红/眉毛）；磨皮为频域分离 + 可调皮肤质感<br>Dual switchable engines, 478-landmark portrait retouch, frequency-separation smoothing |
 | 🎨 **3D LUT 调色**<br>LUT Color Grading | 36 款内置 LUT（人像美颜 24 + 风格滤镜 12，全部自研/开源可商用）；可导入自定义 `.cube`<br>36 bundled LUTs plus custom `.cube` import |
 | 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **Dolphin 已内置**（开箱即用）：**40 种东方语言 + 22 种中文方言**，自带语种识别；实时生成、整片转写、SRT 导出、去标点。语言面板点**「自动」即直接使用随包内置模型**（真·语种识别，不下载）<br>Bundled offline ASR (Dolphin): 40 Eastern languages + 22 Chinese dialects with auto language detection, realtime generation, batch transcription and SRT export. The 「Auto」 entry uses the **bundled** model directly — no download |
-| 🌐 **字幕在线翻译**<br>Online Translation | **14 种引擎**（6 个免密端点：必应 / Google / MyMemory / LibreTranslate / **Pollinations** / **Reverso**；其中**必应、Google、Reverso 均为非官方网页端点**，另有官方 API 的 DeepL 与完全本地的离线模型）；本地词库缓存（LRU + TTL + 按语言分文件）<br>14 engines including 6 keyless endpoints (Bing, Google and Reverso are unofficial web endpoints), the official DeepL API and an on-device model, with a local per-language translation memory |
+| 🌐 **字幕在线翻译**<br>Online Translation | **15 种引擎**（6 个免密端点：必应 / Google / MyMemory / LibreTranslate / **Pollinations** / **Reverso**；其中**必应、Google、Reverso 均为非官方网页端点**；另有 **OpenRouter `:free` 免费模型池**（免费注册自备 Key，池内自动轮换）、官方 API 的 DeepL 与完全本地的离线模型）；本地词库缓存（LRU + TTL + 按语言分文件）<br>15 engines: 6 keyless endpoints (Bing, Google and Reverso are unofficial web endpoints), the **OpenRouter `:free` pool** (free account + own key, automatic per-model rotation), the official DeepL API and an on-device model, with a local per-language translation memory |
 | 🎤 **发声人分离 / 去男声**<br>Speaker Separation | 🚧 **未完成（开发中）** —— 目标：分析音轨判断「谁在说话、什么性别」，并把男声段落从人声里分离出去（sherpa-onnx 说话人分离 + ONNX 性别分类 + MDX-Net 源分离）；目前**离线分析面板与单段处理已跑通**，长片流式处理与效果验收未完成<br>🚧 **Work in progress** — intended speaker diarization plus gender classification and MDX-Net source separation so male-voice segments can be removed; the offline analysis panel and short-clip path work, long-video streaming and quality validation are not done |
 | 🧠 **端侧本地大模型**<br>On-device LLM | 🚧 **未完成（开发中）** —— 目标是下载一次后**全程离线**：本地 AI 翻译 + 本地弹幕生成（**MiniCPM-V 4.7 1B，Q4_K_M 量化，Apache 2.0** + 自建 llama.cpp / libmtmd JNI；主权重约 672MB，可选视觉编码器 mmproj 约 1.11GB）；**推理链路已跑通**（单 worker 调度 + 优先级队列：实时字幕 > 弹幕 > 远期预翻译；超时与失败原因如实回传；不联网、不上传内容），但**翻译与弹幕的实际输出质量尚未达到可用**，故按未完成论<br>🚧 **Work in progress** — goal is fully offline local AI translation and danmaku generation (**MiniCPM-V 4.7 1B, Q4_K_M, Apache 2.0** with a self-built llama.cpp / libmtmd JNI; ~672MB main weights, optional ~1.11GB mmproj). The inference path works (single-worker scheduler with a **priority queue**, timeouts and real failure reasons surfaced), but output quality is not yet usable, so it is not a shipped feature |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
@@ -235,6 +235,23 @@ change at any time (Cloudflare fronting returns a 403 challenge for datacenter /
 pauses for 60 s and reports the recovery time). Free-tier limits are set unilaterally by the operator —
 prefer an officially licensed API (such as the bundled DeepL API) or an on-device model for commercial use.
 Subtitle text is sent to that endpoint — do not translate sensitive content.
+
+**OpenRouter 翻译（`:free` 模型池）**：「字幕在线翻译」的 OpenRouter 引擎调用 **OpenRouter 官方
+OpenAI 兼容接口**（`POST /api/v1/chat/completions`），且**只使用 id 带 `:free` 后缀、prompt 单价为 0 的免费模型**——
+免费额度由各家上游 provider 提供，OpenRouter 平台本身不收费。**需要自备 API Key**（在 openrouter.ai
+免费注册即可获取，本应用不内置任何 Key）；模型候选池在运行时从公开的 `/api/v1/models` 列表发现，
+某个模型被限流时会给**该模型单独冷却**并自动换用池内下一个。本项目与 OpenRouter **无关联、未获授权与背书**；
+免费模型的可用性、速率限制与定价由 OpenRouter 及上游 provider 单方决定、可能随时变化。
+启用该引擎时字幕文本会发送至 OpenRouter 及其上游 provider，请勿翻译敏感内容。
+<br>**OpenRouter translation (`:free` pool)**: the OpenRouter engine calls **OpenRouter's official
+OpenAI-compatible API** (`POST /api/v1/chat/completions`) and uses **only free models whose id ends with
+`:free` and whose prompt price is 0** — the free allowance comes from each upstream provider, not from
+OpenRouter. A **user-supplied API key** is required (free to create at openrouter.ai; this app ships no
+key). The candidate pool is discovered at runtime from the public `/api/v1/models` list, and a rate-limited
+model is cooled down individually while the app rotates to another model in the pool. This project is not
+affiliated with, licensed by or endorsed by OpenRouter; availability, rate limits and pricing of free models
+are set unilaterally by OpenRouter and its upstream providers and may change at any time. Subtitle text is
+sent to OpenRouter and its upstream providers — do not translate sensitive content.
 
 完整版见 **[内容与第三方服务声明](docs/CONTENT_AND_SERVICE_DISCLAIMER.md)**，
 第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [NOTICE](NOTICE)。

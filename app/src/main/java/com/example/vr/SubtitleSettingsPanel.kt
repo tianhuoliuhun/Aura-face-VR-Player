@@ -894,6 +894,17 @@ fun SubtitleSettingsPanel(
                                     )
                                 )
                             }
+
+                            // v2.6.11：OpenRouter 的 Model 框**留空 = 自动在 :free 池内轮换**。
+                            // 这个语义不写出来，用户会以为「没配好模型」而随便填一个，
+                            // 反而丢掉池的兜底能力 → 就地说明（仅该引擎显示）。
+                            if (translator.config.engine == TranslationEngine.OPENROUTER) {
+                                Text(
+                                    stringResource(R.string.translate_openrouter_pool_hint),
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 9.sp
+                                )
+                            }
                         }
                     }
 

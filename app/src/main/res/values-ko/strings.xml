@@ -527,6 +527,10 @@
     <string name="translate_pollinations_cooldown">Pollinations 무료 한도가 제한 중입니다. %1$d초 후 재시도합니다</string>
     <string name="engine_reverso">Reverso(키 불필요)</string>
     <string name="translate_reverso_cooldown">Reverso 사용량이 제한 중입니다. %1$d초 후 재시도합니다</string>
+    <string name="engine_openrouter">OpenRouter(:free 풀)</string>
+    <string name="translate_openrouter_cooldown">OpenRouter 무료 모델이 모두 제한 중입니다. %1$d초 후 재시도합니다</string>
+    <string name="translate_openrouter_unavailable">OpenRouter 무료 모델을 사용할 수 없습니다. 잠시 후 다시 시도하세요</string>
+    <string name="translate_openrouter_pool_hint">비워 두면 :free 모델 풀을 자동 순환합니다(쉼표로 여러 개 지정 가능)</string>
     <string name="lang_zh">간체중국어</string>
     <string name="lang_en">영어</string>
     <string name="lang_ja">일본어</string>

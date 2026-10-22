@@ -188,7 +188,25 @@ SMB / DLNA 推送）均由用户自行提供，**用户须确保拥有合法权�
 该端点，请勿翻译敏感内容；重要内容建议改用自配 Key 的接口（DeepL 官方 API / OpenAI 兼容）
 或本地离线模型。
 
-### 4.6 用户自配置的 AI 服务
+### 4.6 OpenRouter 翻译（`:free` 模型池）
+
+「字幕在线翻译」的 OpenRouter 引擎调用 **OpenRouter 官方 OpenAI 兼容接口**
+（`POST openrouter.ai/api/v1/chat/completions`）。OpenRouter 是**模型聚合网关**：
+同一套协议可访问数百个模型，其中带 **`:free` 后缀**的一批按 **0 计费**（`pricing.prompt == "0"`），
+免费额度由**各家上游 provider** 提供，平台本身不向用户收费。
+
+筛选规则（应用内硬编码，可审计）：只使用 `id` 以 `:free` 结尾、`architecture.input_modalities`
+含 `text`、`pricing.prompt` 为 0 的模型；候选池**在运行时**从公开的 `GET /api/v1/models`
+列表发现（缓存 10 分钟），另有少量精选模型作首轮优先。某个模型被限流 / 下线时，
+应用只给**该模型**单独冷却（429 → 60 秒；404 或无可用 provider → 30 分钟）并自动换用池内下一个。
+
+⚠️ **需要用户自备 API Key**（在 openrouter.ai 免费注册获取）—— 免费模型同样需要鉴权，
+本应用**不内置任何 Key**，也不代用户申请。本项目与 **OpenRouter 无关联、未获授权与背书**；
+"OpenRouter" 为其名称，仅用于描述所调用服务。免费模型的**可用性、速率限制与定价**
+由 OpenRouter 及上游 provider 单方决定、可能随时变化。启用该引擎时字幕文本会发送至
+OpenRouter 及其上游 provider，请勿翻译敏感内容。
+
+### 4.7 用户自配置的 AI 服务
 
 应用可连接用户自行配置的 OpenAI 兼容接口（含第三方聚合网关）。
 这些请求由用户发起、使用用户自己的凭据，须遵守对应服务商的服务条款与隐私政策；

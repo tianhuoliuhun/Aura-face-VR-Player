@@ -330,8 +330,8 @@
 | 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
 
 ## 🌐 字幕在线翻译 / Online Translation
-- **14 种引擎**：必应翻译（免费，**非官方端点**） / **Google 免密**（**非官方端点**） / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / **Pollinations**（免密，短请求约 1 秒） / **Reverso**（免密，实测 1266 字符长文一次过、0.8~1.7 秒） / **DeepL**（官方 API） / **本地 AI**（离线） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
-  - 14 engines: Bing (free, unofficial endpoint) / Google keyless (unofficial endpoint) / MyMemory (free) / LibreTranslate (free, self-hostable) / Pollinations (keyless, ~1 s per short request) / Reverso (keyless, 1266-char passages in one shot, 0.8–1.7 s) / DeepL (official API) / on-device AI (offline) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
+- **15 种引擎**：必应翻译（免费，**非官方端点**） / **Google 免密**（**非官方端点**） / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / **Pollinations**（免密，短请求约 1 秒） / **Reverso**（免密，实测 1266 字符长文一次过、0.8~1.7 秒） / **OpenRouter**（官方 API，`:free` 免费模型池自动轮换，需自备免费 Key） / **DeepL**（官方 API） / **本地 AI**（离线） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
+  - 15 engines: Bing (free, unofficial endpoint) / Google keyless (unofficial endpoint) / MyMemory (free) / LibreTranslate (free, self-hostable) / Pollinations (keyless, ~1 s per short request) / Reverso (keyless, 1266-char passages in one shot, 0.8–1.7 s) / OpenRouter (official API, rotating `:free` model pool, own free key) / DeepL (official API) / on-device AI (offline) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
 - 显示模式：**双语（原文+译文）** 与 **仅译文** 一键切换，选择**已持久化**
   - Display modes: bilingual / translation-only, both persisted
 - MyMemory：匿名额度 **5000 字符/天**，程序内置**串行限速 + 错误文案识别 + 配额冷却 10 分钟 + 超长句跳过**，避免触发其限流

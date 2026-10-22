@@ -25,7 +25,7 @@
 │  智能模块 / Intelligence                             │
 │  MediaPipe Face Landmarker（人脸关键点 468 点）      │
 │  SenseVoice + 多语言 transducer + Silero VAD        │
-│  14 引擎字幕翻译                                      │
+│  15 引擎字幕翻译                                      │
 │  Room 持久化（设置记忆/字幕缓存）                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -46,7 +46,7 @@
 | `RealtimeSubtitleEngine.kt` | 自研 | 实时字幕引擎：独立音频解码 + Silero VAD + 优先级调度 + seek 处理 |
 | `SubtitleCache.kt` | 自研 | 字幕稀疏时间索引（TreeMap + 二分查找，O(log n)） |
 | `SubtitleExporter.kt` | 自研 | SRT 导出（由内存字幕缓存生成） |
-| `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（**14 种引擎**可切换，含 MyMemory 限速与配额冷却、Google 免密端点、限流冷却兜底） |
+| `SubtitleTranslator.kt` | 自研多引擎 | 字幕翻译（**15 种引擎**可切换，含 MyMemory 限速与配额冷却、Google 免密端点、OpenRouter `:free` 池轮换、限流冷却兜底） |
 | `LutUtils.kt` | 自研 | .cube 解析 + 三线性重采样 + 512×512 网格打包 |
 | `SchemeRoutingDataSource.kt` | 自研 | 按 scheme 分流数据源（`smb://` → jcifs，其余 → HTTP + 缓存） |
 

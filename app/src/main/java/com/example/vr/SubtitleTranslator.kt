@@ -221,6 +221,33 @@ enum class TranslationEngine(
         defaultBaseUrl = "https://api.reverso.net",
         defaultModel = "",
         requiresApiKey = false
+    ),
+
+    /**
+     * v2.6.11：**OpenRouter `:free` 模型池**。
+     *
+     * ## 它是什么
+     * OpenRouter 是**官方运营的模型聚合网关**（OpenAI 兼容协议），
+     * 用一个 Key 可调用数百个模型，其中带 **`:free` 后缀**的一批**按 0 计费**
+     * （`pricing.prompt == "0"`）——免费额度由各家 provider 出，平台不收钱。
+     *
+     * ## 为什么做成「池」
+     * `:free` 模型不是长期合约：上游随时下线某个模型、或对它单独限流。
+     * 钉死一个模型时，只要它当天不可用，整部片就翻不出来 ——
+     * 所以按 [OpenRouterModelPool] 的策略**逐模型轮换 + 单模型冷却**，
+     * 用户也可手填多个模型（逗号分隔）当作自定义小池。
+     *
+     * ## 为什么 [requiresApiKey] 仍是 true
+     * 免费 ≠ 免密钥：`:free` 模型同样要 Key 才能鉴权（免费注册即可获取）。
+     * 面板据此显示 Key 输入框；[defaultModel] 故意留空 = 「自动在池内挑选」，
+     * UI 另有说明文案（`translate_openrouter_pool_hint`）。
+     */
+    OPENROUTER(
+        id = 14,
+        displayNameResId = R.string.engine_openrouter,
+        defaultBaseUrl = "https://openrouter.ai/api/v1",
+        defaultModel = "",
+        requiresApiKey = true
     )
 }
 
@@ -375,6 +402,46 @@ class SubtitleTranslator(private val context: Context) {
          * 留一倍余量取 3000（字幕单条通常 < 200 字符，整句预读也在范围内）。
          */
         private const val REVERSO_MAX_TEXT_CHARS = 3_000
+
+        // ===== v2.6.11：OpenRouter `:free` 模型池 =====
+
+        /**
+         * 单条文本长度上限。
+         *
+         * `:free` 模型普遍有上下文限制（小的 64K，大的 1M），字幕单条远达不到；
+         * 这里限制的其实是**单次请求的浪费**：免费额度按 token 计，超长文本除了拖慢
+         * 没有收益。字幕单条通常 < 200 字符，4000 对「整句预读」也够。
+         */
+        private const val OPENROUTER_MAX_TEXT_CHARS = 4_000
+
+        /**
+         * 单条字幕**最多尝试几个模型**。
+         *
+         * 池可能很大（精选 5 + 发现十几个），一条字幕把整池试完会让延迟爆炸；
+         * 取 3 —— 免费模型的失败高度相关（同期限流），再往后试收益很低。
+         */
+        private const val OPENROUTER_MAX_ATTEMPTS = 3
+
+        /** 429 限流：单个模型冷却 60 秒（下一轮换别的模型，用户几乎无感） */
+        private const val OPENROUTER_RATE_LIMIT_COOLDOWN_MS = 60 * 1000L
+
+        /**
+         * 模型不可用（404 / `No endpoints found`）的冷却：**30 分钟**。
+         * 这类失败是「该模型当天没有可用 provider」，一分钟内重试必然还是失败，
+         * 短冷却只会让每条字幕都白试一次。
+         */
+        private const val OPENROUTER_GONE_COOLDOWN_MS = 30 * 60 * 1000L
+
+        /** 5xx / 超时 / 空内容：上游临时抖动，冷却 30 秒即可 */
+        private const val OPENROUTER_TRANSIENT_COOLDOWN_MS = 30 * 1000L
+
+        /**
+         * 运行时发现结果的**缓存时长**。
+         *
+         * `/api/v1/models` 返回 ~800KB，不可能每条字幕都拉；但名单确实会变，
+         * 所以设 10 分钟 TTL，而不是「一次进程内只拉一次」。
+         */
+        private const val OPENROUTER_DISCOVERY_TTL_MS = 10 * 60 * 1000L
 
         // ===== v2.6.11：Reverso 语言码（纯函数，放 companion 便于单测）=====
 
@@ -1078,6 +1145,20 @@ class SubtitleTranslator(private val context: Context) {
     /** 限流后的冷却截止时间（ms）；冷却期内直接跳过并提示剩余秒数 */
     private var reversoCooldownUntilMs = 0L
 
+    // v2.6.11：OpenRouter `:free` 池状态。
+    // ⚠️ 与前面三个引擎的「单变量冷却」不同 —— 这里是**按模型 id 分别冷却**：
+    //    「池」的意义就是某模型被限流只影响它自己，其余模型照常可用。
+    //    用一个全局变量会让「换模型重试」等价于「整体停摆」，池就白做了。
+    private val openRouterModelCooldownUntil = ConcurrentHashMap<String, Long>()
+
+    /** 运行时从 `/api/v1/models` 发现的 `:free` 候选（已过滤/去重），进程内缓存 */
+    @Volatile
+    private var openRouterDiscovered: List<String> = emptyList()
+
+    /** 上面那份发现结果的时间戳（ms），配合 [OPENROUTER_DISCOVERY_TTL_MS] 判断是否该重拉 */
+    @Volatile
+    private var openRouterDiscoveredAtMs = 0L
+
     /**
      * 网页/免密端点通用 UA（v2.6.11）。
      *
@@ -1494,6 +1575,10 @@ class SubtitleTranslator(private val context: Context) {
                     // v2.6.11：Reverso 是 **POST JSON 的专用协议**（不是 OpenAI 兼容），
                     // 落进 else 会拿 baseUrl 拼 /chat/completions 直接 404。
                     TranslationEngine.REVERSO -> translateViaReverso(text, targetLangCode)
+                    // v2.6.11：OpenRouter 虽然是 **OpenAI 兼容协议**，但**不能落进 else** ——
+                    // else 只会用单一模型打一次，而它的核心价值是「:free 池轮换 + 单模型冷却」，
+                    // 落进 else 等于丢掉整套兜底（模型当天被限流就整片翻不出来）。
+                    TranslationEngine.OPENROUTER -> translateViaOpenRouter(text, targetLangCode)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -2403,6 +2488,337 @@ class SubtitleTranslator(private val context: Context) {
         } catch (e: Exception) {
             Log.w("SubtitleTranslator", "Reverso 响应不是合法 JSON：${s.take(160)}")
             ""
+        }
+    }
+
+    // ==================== v2.6.11：OpenRouter `:free` 模型池 ====================
+
+    /** 单次模型尝试的结果分类 —— 决定「该模型冷却多久」以及「要不要换下一个」。 */
+    private sealed class OpenRouterAttempt {
+        /** 拿到译文 */
+        data class Ok(val text: String) : OpenRouterAttempt()
+
+        /** 429 / rate limit：本模型冷却 60s，换下一个 */
+        data object RateLimited : OpenRouterAttempt()
+
+        /** 404 / `No endpoints found`：模型当前无可用 provider，冷却 30min */
+        data object Gone : OpenRouterAttempt()
+
+        /** 5xx / 超时 / 空内容：临时抖动，冷却 30s */
+        data object Transient : OpenRouterAttempt()
+
+        /** Key 无效 / 余额不足：换模型也没用，停止本轮 */
+        data class Fatal(val code: Int) : OpenRouterAttempt()
+    }
+
+    /**
+     * OpenRouter `:free` 池翻译（v2.6.11）。
+     *
+     * 协议就是标准的 **OpenAI 兼容** `POST {base}/chat/completions`，
+     * 与 [translateViaOpenAiApi] 的差别全在**失败处理**：
+     *
+     * ```
+     * 用户手填模型（可逗号分隔多个）
+     *   └─> 精选池（OpenRouterModelPool.SEED_MODELS）
+     *         └─> 运行时 /models 发现的 :free 候选
+     * 逐个尝试，最多 OPENROUTER_MAX_ATTEMPTS 个：
+     *   失败 → 只给**这个模型**上冷却 → 换下一个
+     * ```
+     *
+     * ## 两个必须知道的点
+     * ① OpenRouter 会把上游错误包成 **HTTP 200 + `{"error":{...}}`** ——
+     *    只看 HTTP 状态码会把错误当成空译文吞掉（之后还会被写进缓存），必须先看 `error`。
+     * ② `:free` 模型**按 token 免费但有速率限制**，同一模型连打极易 429；
+     *    因此「换模型」比「等冷却」更划算 —— 这是池存在的意义。
+     */
+    private suspend fun translateViaOpenRouter(text: String, targetLangCode: String): String {
+        val apiKey = config.apiKey.trim()
+        if (apiKey.isBlank()) {
+            withContext(Dispatchers.Main) {
+                statusMessage = context.getString(
+                    R.string.translate_please_set_api_key,
+                    context.getString(config.engine.displayNameResId)
+                )
+            }
+            return ""
+        }
+        if (text.length > OPENROUTER_MAX_TEXT_CHARS) {
+            Log.w(
+                "SubtitleTranslator",
+                "OpenRouter 跳过超长文本（${text.length} 字符 > $OPENROUTER_MAX_TEXT_CHARS）"
+            )
+            return ""
+        }
+
+        val base = getActiveBaseUrl().trim().trimEnd('/')
+            .ifBlank { "https://openrouter.ai/api/v1" }
+
+        // 用户没指定模型时才需要「发现」：指定了就严格按用户给的顺序试，
+        // 不额外发一次 ~800KB 的 /models 请求。
+        if (config.modelName.isBlank() && isOpenRouterDiscoveryStale()) {
+            refreshOpenRouterFreeModels(apiKey, base)
+        }
+
+        val order = OpenRouterModelPool.buildAttemptOrder(config.modelName, openRouterDiscovered)
+        if (order.isEmpty()) {
+            Log.w("SubtitleTranslator", "OpenRouter 没有可用候选模型（发现结果为空，Key 是否有效？）")
+            withContext(Dispatchers.Main) {
+                statusMessage = context.getString(R.string.translate_openrouter_unavailable)
+            }
+            return ""
+        }
+
+        val langName = config.targetLanguage.displayName
+        var attempts = 0
+        var fatalCode = 0
+
+        for (model in order) {
+            if (attempts >= OPENROUTER_MAX_ATTEMPTS) break
+            val cooldownUntil = openRouterModelCooldownUntil[model] ?: 0L
+            if (cooldownUntil > System.currentTimeMillis()) continue
+            attempts++
+            when (val attempt = requestOpenRouterModel(apiKey, base, model, text, langName)) {
+                is OpenRouterAttempt.Ok -> {
+                    // 成功即清掉该模型的冷却，避免「上次限流、这次还能用」却继续跳过
+                    openRouterModelCooldownUntil.remove(model)
+                    return attempt.text
+                }
+                OpenRouterAttempt.RateLimited ->
+                    cooldownOpenRouterModel(model, OPENROUTER_RATE_LIMIT_COOLDOWN_MS)
+                OpenRouterAttempt.Gone ->
+                    cooldownOpenRouterModel(model, OPENROUTER_GONE_COOLDOWN_MS)
+                OpenRouterAttempt.Transient ->
+                    cooldownOpenRouterModel(model, OPENROUTER_TRANSIENT_COOLDOWN_MS)
+                is OpenRouterAttempt.Fatal -> {
+                    fatalCode = attempt.code
+                    break
+                }
+            }
+        }
+
+        withContext(Dispatchers.Main) {
+            when {
+                fatalCode != 0 -> {
+                    // 401/403 = Key 无效，402 = 余额不足（多半是手填了付费模型）
+                    statusMessage = context.getString(R.string.subtitle_api_error, fatalCode)
+                }
+                else -> {
+                    val leftMs = OpenRouterModelPool.earliestRecoveryInMs(
+                        order,
+                        System.currentTimeMillis()
+                    ) { openRouterModelCooldownUntil[it] ?: 0L }
+                    statusMessage = if (leftMs > 0L) {
+                        // 全池都在冷却：给准确恢复时间，别让用户以为坏了
+                        val leftSec = ((leftMs + 999L) / 1000L).coerceAtLeast(1L)
+                        context.getString(R.string.translate_openrouter_cooldown, leftSec)
+                    } else {
+                        context.getString(R.string.translate_openrouter_unavailable)
+                    }
+                }
+            }
+        }
+        return ""
+    }
+
+    /** 给某个模型单独上冷却（只影响它自己，池里其它模型照常可用）。 */
+    private fun cooldownOpenRouterModel(model: String, durationMs: Long) {
+        val until = System.currentTimeMillis() + durationMs
+        val prev = openRouterModelCooldownUntil[model] ?: 0L
+        if (until > prev) openRouterModelCooldownUntil[model] = until
+        Log.w("SubtitleTranslator", "OpenRouter 模型 $model 冷却 ${durationMs / 1000}s")
+    }
+
+    /**
+     * 打一次 `chat/completions`，把结果**归类**（而不是直接返回字符串）。
+     *
+     * 归类是池轮换的前提：只有区分「限流 / 下线 / 抖动 / Key 无效」，
+     * 才能决定冷却多久、要不要换模型（Key 无效换模型毫无意义）。
+     */
+    private suspend fun requestOpenRouterModel(
+        apiKey: String,
+        base: String,
+        model: String,
+        text: String,
+        langName: String
+    ): OpenRouterAttempt = withContext(Dispatchers.IO) {
+        val url = if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
+        val payload = JSONObject().apply {
+            put("model", model)
+            put("temperature", 0.2)
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put("role", "system")
+                            put(
+                                "content",
+                                "You are an expert subtitle translator. Translate the given " +
+                                    "video subtitle text accurately into $langName. Output ONLY " +
+                                    "the translated text without explanations, quotes, or markdown."
+                            )
+                        }
+                    )
+                    put(
+                        JSONObject().apply {
+                            put("role", "user")
+                            put("content", text)
+                        }
+                    )
+                }
+            )
+        }.toString()
+
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $apiKey")
+                .header("Content-Type", "application/json")
+                // OpenRouter 官方建议带这两个头（用于应用来源标识/排行）；不带也能用
+                .header("HTTP-Referer", "https://github.com/tianhuoliuhun/Aura-face-VR-Player")
+                .header("X-Title", "Aura Lens VR Player")
+                .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val bodyStr = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.w(
+                        "SubtitleTranslator",
+                        "OpenRouter HTTP ${response.code} model=$model body=${bodyStr.take(200)}"
+                    )
+                    return@withContext when (response.code) {
+                        401, 402, 403 -> OpenRouterAttempt.Fatal(response.code)
+                        429 -> OpenRouterAttempt.RateLimited
+                        404 -> OpenRouterAttempt.Gone
+                        else -> OpenRouterAttempt.Transient
+                    }
+                }
+
+                // ⚠️ OpenRouter 会以 HTTP 200 携带 {"error":{...}} 返回上游错误
+                val root = JSONObject(bodyStr)
+                val error = root.optJSONObject("error")
+                if (error != null) {
+                    val code = error.optInt("code", 0)
+                    val message = error.optString("message")
+                    Log.w("SubtitleTranslator", "OpenRouter error model=$model code=$code msg=$message")
+                    return@withContext when {
+                        code == 401 || code == 403 -> OpenRouterAttempt.Fatal(code)
+                        code == 402 -> OpenRouterAttempt.Fatal(402)
+                        code == 429 || message.contains("rate limit", ignoreCase = true) ->
+                            OpenRouterAttempt.RateLimited
+                        // 「该模型现在没有可用 provider」—— 当天重试也是白费
+                        message.contains("no endpoints found", ignoreCase = true) ->
+                            OpenRouterAttempt.Gone
+                        else -> OpenRouterAttempt.Transient
+                    }
+                }
+
+                val content = root.optJSONArray("choices")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("message")
+                    ?.optString("content")
+                    ?.trim()
+                    .orEmpty()
+                if (content.isBlank()) OpenRouterAttempt.Transient
+                else OpenRouterAttempt.Ok(content)
+            }
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "OpenRouter 请求异常 model=$model: ${e.localizedMessage}")
+            OpenRouterAttempt.Transient
+        }
+    }
+
+    /** 发现结果是否该重拉（空结果 / 超过 TTL 都算过期）。 */
+    private fun isOpenRouterDiscoveryStale(): Boolean {
+        if (openRouterDiscovered.isEmpty()) return true
+        return System.currentTimeMillis() - openRouterDiscoveredAtMs > OPENROUTER_DISCOVERY_TTL_MS
+    }
+
+    /**
+     * 拉 `/api/v1/models` 刷新 `:free` 候选池。
+     *
+     * 为什么必须做「运行时发现」而不是全靠硬编码：实测 468 个模型里只有 18 个
+     * `:free`，且这一代名单换代很快（`llama-3.x:free` 那一批已全部消失）。
+     * 硬编码只作首轮优先，真正兜底靠这里。
+     *
+     * 失败**不抛异常**：这是一次「优化机会」，拿不到就沿用已有候选，
+     * 不该因此让整条翻译链断掉。
+     */
+    private suspend fun refreshOpenRouterFreeModels(apiKey: String, base: String) {
+        val modelsUrl = if (base.endsWith("/models")) base else "$base/models"
+        withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(modelsUrl)
+                    // 该端点匿名也可访问，带 Key 能看到与本账号一致的视图
+                    .header("Authorization", "Bearer $apiKey")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.w("SubtitleTranslator", "OpenRouter /models HTTP ${response.code}")
+                        return@withContext
+                    }
+                    val models = parseOpenRouterFreeModels(response.body?.string().orEmpty())
+                    if (models.isNotEmpty()) {
+                        openRouterDiscovered = models
+                        openRouterDiscoveredAtMs = System.currentTimeMillis()
+                        Log.i(
+                            "SubtitleTranslator",
+                            "OpenRouter 发现 ${models.size} 个 :free 模型：${models.joinToString()}"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("SubtitleTranslator", "OpenRouter 发现模型失败：${e.localizedMessage}")
+            }
+        }
+    }
+
+    /**
+     * 从 `/api/v1/models` 响应里抽出可用的 `:free` 模型。
+     *
+     * 三重过滤（后两条是**防御性**的：字段语义可能变，宁可少收几个，
+     * 也不要把付费模型拉进池里烧钱）：
+     * ① `id` 以 `:free` 结尾；
+     * ② `architecture.input_modalities` 含 `text`（纯语音/图像模型翻不了字幕）；
+     * ③ `pricing.prompt` 为 0。
+     */
+    private fun parseOpenRouterFreeModels(body: String): List<String> {
+        if (body.isBlank()) return emptyList()
+        return try {
+            val data = JSONObject(body).optJSONArray("data") ?: return emptyList()
+            val free = ArrayList<String>()
+            for (i in 0 until data.length()) {
+                val item = data.optJSONObject(i) ?: continue
+                val id = item.optString("id").trim()
+                if (!OpenRouterModelPool.isFreeModel(id)) continue
+
+                val modalities = item.optJSONObject("architecture")
+                    ?.optJSONArray("input_modalities")
+                if (modalities != null) {
+                    var hasText = false
+                    for (j in 0 until modalities.length()) {
+                        if (modalities.optString(j).equals("text", ignoreCase = true)) {
+                            hasText = true
+                            break
+                        }
+                    }
+                    if (!hasText) continue
+                }
+
+                val promptPrice = item.optJSONObject("pricing")?.optString("prompt")
+                val price = promptPrice?.toDoubleOrNull()
+                if (price != null && price > 0.0) continue
+
+                free.add(id)
+            }
+            OpenRouterModelPool.rankCandidates(free)
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "OpenRouter /models 解析失败：${e.localizedMessage}")
+            emptyList()
         }
     }
 

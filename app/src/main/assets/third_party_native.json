@@ -38,8 +38,14 @@
           "license": "网页端点非官方调用 / unofficial endpoint",
           "url": "https://www.reverso.net",
           "note": "字幕翻译的 Reverso 引擎调用 reverso.net 的网页翻译端点（api.reverso.net/translate/v1/translation，后端为 Lingvanex 引擎），无需注册或 API Key；本应用与 Reverso Technologies 无关联、未获授权与背书。该端点面向网页端设计，第三方程序自动化调用可能不符合其服务条款，可用性亦可能随时变化（前置 Cloudflare 会对机房/代理 IP 返回 403 挑战，命中时本应用暂停 60 秒并提示）；免费额度的实际限制由服务方单方决定 —— 商业分发建议改用有明确授权的官方接口（如 DeepL 官方 API）或本地离线模型。启用时字幕文本会发送至该端点，请勿翻译敏感内容。 / The Reverso engine uses reverso.net's web translation endpoint (api.reverso.net/translate/v1/translation, backed by Lingvanex), with no sign-up or API key. This app is not affiliated with or endorsed by Reverso Technologies; automated use of that endpoint may not comply with their terms and its availability may change at any time (Cloudflare fronting returns a 403 challenge for datacenter or proxy IPs; the app then pauses for 60 s). Free-tier limits are set unilaterally by the operator. Subtitle text is sent to that endpoint — do not translate sensitive content."
-        }
-      ]
+        },
+        {
+          "name": "OpenRouter 翻译（:free 模型池） / OpenRouter translation (:free model pool)",
+          "version": "",
+          "license": "官方 API，免费模型池需自备 Key / official API, key required for free pool",
+          "url": "https://openrouter.ai",
+          "note": "字幕翻译的 OpenRouter 引擎调用 OpenRouter（openrouter.ai）的官方 OpenAI 兼容接口 POST /api/v1/chat/completions，并只使用模型 id 带 :free 后缀、pricing.prompt 为 0 的免费模型（候选池在运行时从公开的 /api/v1/models 列表发现，免费额度由各家上游 provider 提供）。需要用户在 openrouter.ai 免费注册并自备 API Key —— 免费模型同样需要鉴权，本应用不内置任何 Key。本应用与 OpenRouter 无关联、未获授权与背书；免费模型的可用性、速率限制与定价由 OpenRouter 及上游 provider 单方决定、可能随时变化（命中限流时本应用会给该模型单独冷却并自动换用池内其它模型）。启用时字幕文本会发送至 OpenRouter 及其上游 provider，请勿翻译敏感内容。 / The OpenRouter engine calls OpenRouter's official OpenAI-compatible endpoint (POST /api/v1/chat/completions) and uses only free models whose id ends with ':free' and whose prompt price is 0 (the candidate pool is discovered at runtime from the public /api/v1/models list; the free allowance is provided by each upstream provider). A user-supplied API key from a free openrouter.ai account is required — free models are still authenticated and this app ships no key. This app is not affiliated with or endorsed by OpenRouter; availability, rate limits and pricing of free models are set unilaterally by OpenRouter and its upstream providers and may change at any time (on rate limiting the app cools down that single model and rotates to another model in the pool). Subtitle text is sent to OpenRouter and its upstream providers — do not translate sensitive content."
+        }      ]
     },
     {
       "titleKey": "licenses_group_decoders",

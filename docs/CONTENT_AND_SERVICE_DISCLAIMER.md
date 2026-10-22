@@ -1,6 +1,6 @@
 # 内容与第三方服务声明 / Content & Third-Party Service Notice
 
-> 适用版本：v2.6.2 起（v2.6.11 增 Pollinations / Reverso）　｜　更新：2026-10-22（补充 Pollinations、Reverso 引擎披露）
+> 适用版本：v2.6.2 起（v2.6.11 增 Pollinations / Reverso / OpenRouter）　｜　更新：2026-10-22（补充 Pollinations、Reverso、OpenRouter 引擎披露）
 > 本文是 **免责与归属声明**，与 `LICENSE`（代码许可）、`THIRD_PARTY_NOTICES.md`（组件许可）互为补充。
 
 ---
@@ -122,6 +122,7 @@
   条款为准，本应用不对结果的正确性、完整性或可用性作任何保证。
 - 若需要**可控、可追责**的翻译链路，应用内已内置以下选择：
   - **DeepL**（官方 API，有明确条款与月度额度）
+  - **OpenRouter**（官方 API，`:free` 免费模型池，需自备免费 Key，见 OpenRouter 一节）
   - 用户**自备 API Key** 的 OpenAI 兼容接口（DeepSeek / Qwen / 其它）
   - **本地离线模型**（不产生任何网络请求）
 
@@ -154,12 +155,34 @@
   为准，本应用不对结果的正确性、完整性或可用性作任何保证。
 - 若需要**可控、可追责**的翻译链路，应用内已内置以下选择：
   - **DeepL**（官方 API，有明确条款与月度额度）
+  - **OpenRouter**（官方 API，`:free` 免费模型池，需自备免费 Key，见 OpenRouter 一节）
   - 用户**自备 API Key** 的 OpenAI 兼容接口（DeepSeek / Qwen / 其它）
   - **本地离线模型**（不产生任何网络请求）
 
 ---
 
-## 六、其它需要说明的第三方依赖
+## 六、OpenRouter 翻译 / OpenRouter Translate
+
+「字幕在线翻译」的 **OpenRouter** 引擎调用 **OpenRouter 官方 OpenAI 兼容接口**
+（`POST https://openrouter.ai/api/v1/chat/completions`），并且**只使用免费模型**：
+模型 id 以 `:free` 结尾、`pricing.prompt` 为 0。免费额度由**各家上游 provider** 提供，
+OpenRouter 平台本身不向用户收费。
+
+- **需要自备 API Key**：免费模型同样需要鉴权，请在 openrouter.ai 免费注册后自行填写；
+  本应用**不内置任何 Key**，也不会代用户申请或上传 Key。
+- **候选池是运行时发现的**：应用从公开的 `GET /api/v1/models` 列表中筛出 `:free` 模型
+  （缓存 10 分钟），另用少量精选模型作首轮优先；某个模型被限流或下线时，
+  只给**该模型**单独冷却（429 → 60 秒，404 / 无可用 provider → 30 分钟）并自动换用池内下一个。
+- **归属**：本项目与 **OpenRouter 无关联、未获授权与背书**；"OpenRouter" 为其名称，
+  仅用于描述所调用的服务。
+- **可用性与定价**：免费模型的可用性、速率限制与计费规则由 OpenRouter 及上游 provider
+  **单方决定、可能随时变化**，本应用无法保证其持续可用；对稳定性有要求时请改用
+  自备 Key 的官方接口（如 DeepL 官方 API）或本地离线模型。
+- **隐私**：启用该引擎时，字幕文本会发送至 **OpenRouter 及其上游 provider**，请勿翻译敏感内容。
+
+---
+
+## 七、其它需要说明的第三方依赖
 
 - **AI 弹幕 / 画面识别**：开启后会把**压缩后的画面**发送到用户配置的服务端点，
   请自行确认该服务的隐私政策；应用内已有相应提示。
@@ -168,7 +191,7 @@
 
 ---
 
-## 七、声明之间的关系
+## 八、声明之间的关系
 
 | 文档 | 管什么 |
 |---|---|

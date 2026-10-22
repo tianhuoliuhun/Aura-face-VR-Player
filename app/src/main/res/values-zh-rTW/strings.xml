@@ -569,6 +569,10 @@
     <string name="translate_pollinations_cooldown">Pollinations 免費層限流，%1$d 秒後自動恢復</string>
     <string name="engine_reverso">Reverso（免密）</string>
     <string name="translate_reverso_cooldown">Reverso 限流中，%1$d 秒後自動恢復</string>
+    <string name="engine_openrouter">OpenRouter（:free 池）</string>
+    <string name="translate_openrouter_cooldown">OpenRouter 免費模型均在限流，%1$d 秒後自動恢復</string>
+    <string name="translate_openrouter_unavailable">OpenRouter 免費模型暫不可用，請稍後重試</string>
+    <string name="translate_openrouter_pool_hint">留空自動在 :free 模型池內輪換；可填多個，逗號分隔</string>
     <string name="lang_zh">簡體中文</string>
     <string name="lang_en">英語</string>
     <string name="lang_ja">日語</string>
