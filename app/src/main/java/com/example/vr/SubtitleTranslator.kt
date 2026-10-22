@@ -185,6 +185,42 @@ enum class TranslationEngine(
         defaultBaseUrl = "https://text.pollinations.ai",
         defaultModel = "",
         requiresApiKey = false
+    ),
+
+    /**
+     * v2.6.11：**Reverso 免密钥翻译**（后端为 Lingvanex 引擎）。
+     *
+     * ## 为什么加它
+     * 免密端点里现役的几家都有硬短板：MyMemory 单次 500 字节、配额按天算完就锁 10 分钟；
+     * Pollinations 是 LLM 网关，短请求走 URL 路径、长文必然失败。Reverso 是**真正的
+     * 机器翻译引擎**：实测**单条 1266 字符一次过**、中英双向质量稳定（无截断），
+     * 延迟 0.8~1.7 秒，连续 3 次不触发限流 —— 目前免密钥通道里综合最好的一个。
+     *
+     * ## 协议
+     * `POST {base}/translate/v1/translation`，JSON 报文：
+     * ```
+     * { "format":"text", "from":"eng", "to":"chi", "input":"...",
+     *   "options": { "sentenceSplitter":true, "origin":"translation.web",
+     *                "contextResults":false, "languageDetection":true } }
+     * ```
+     * 响应 `{"translation":["译文"], ...}` → 取 `translation[0]`。
+     * 语言码用 **ISO 639-2 三字母**（eng / chi / jpn / kor / fra / ger / spa / rus）。
+     *
+     * ## 两个必须知道的点
+     *  - `from` **是必填项**（网页端的「自动检测」是前端行为，API 不接受 `auto`）→
+     *    由 [detectReversoSourceLang] 在本地做粗粒度判定，再用 `languageDetection:true` 兜底。
+     *  - 端点前面挂着 **Cloudflare**：机房/代理 IP 会被托管挑战拦成 403（HTML 而非 JSON）。
+     *    真机家用网络正常，但**必须带浏览器 UA**，OkHttp 默认 UA 更容易被判成机器人。
+     *
+     * ⚠️ 与 `BING` / `GOOGLE_FREE` 同属**网页端点的非官方调用**（条款风险，见
+     *    `docs/CONTENT_AND_SERVICE_DISCLAIMER.md`）；字幕文本会外发，仍受敏感内容禁区约束。
+     */
+    REVERSO(
+        id = 13,
+        displayNameResId = R.string.engine_reverso,
+        defaultBaseUrl = "https://api.reverso.net",
+        defaultModel = "",
+        requiresApiKey = false
     )
 }
 
@@ -323,6 +359,79 @@ class SubtitleTranslator(private val context: Context) {
          * 字幕单条通常 < 200 字符，800 留足余量。
          */
         private const val POLLINATIONS_MAX_TEXT_CHARS = 800
+
+        /**
+         * Reverso 节流常量（v2.6.11）。
+         *
+         * 实测**连续 3 次不触发限流**、单次 0.8~1.7 秒，比 MyMemory / Pollinations 都宽松，
+         * 因此最小间隔取 0.9 秒（≈ 单次往返时间，串行时基本不额外等待）。
+         * ⚠️ 仍然串行：Reverso 前面挂 Cloudflare，突发并发最容易招来挑战页。
+         */
+        private const val REVERSO_MIN_INTERVAL_MS = 900L
+        /** 命中限流后的冷却时长：秒级恢复能力比 MyMemory 强，不必锁 10 分钟 */
+        private const val REVERSO_COOLDOWN_MS = 60 * 1000L
+        /**
+         * 单条文本长度上限：实测 **1266 字符一次过、无截断**，
+         * 留一倍余量取 3000（字幕单条通常 < 200 字符，整句预读也在范围内）。
+         */
+        private const val REVERSO_MAX_TEXT_CHARS = 3_000
+
+        // ===== v2.6.11：Reverso 语言码（纯函数，放 companion 便于单测）=====
+
+        /**
+         * Reverso **目标**语言映射：ISO 639-2 **三字母码**（不是常见的两字母）。
+         *
+         * 简繁中文在 Reverso 里是两套码：`chi`（简体）/ `cht`（繁体），
+         * 混用会让简体片全出繁体 —— 这类「同一门语言两个码」的映射必须有单测守着。
+         */
+        fun mapReversoLang(code: String): String = when (code) {
+            "zh" -> "chi"
+            "zh-TW" -> "cht"
+            "en" -> "eng"
+            "ja" -> "jpn"
+            "ko" -> "kor"
+            "fr" -> "fra"
+            "de" -> "ger"
+            "es" -> "spa"
+            "ru" -> "rus"
+            else -> "eng"
+        }
+
+        /**
+         * 推断 Reverso 的**源语言**（`from` 必填，API 不接受 `auto`）。
+         *
+         * 只按「强特征字符」计数，不猜欧洲语言之间的区别（那正是 `languageDetection:true`
+         * 该干的活）：假名 → 日，谚文 → 韩，汉字 → 中，西里尔 → 俄。
+         * 特征字符占比不足 15% 时判为英语 —— 避免「英文句子夹一个中文词」被整句当中文。
+         */
+        fun detectReversoSourceLang(text: String): String {
+            var han = 0
+            var kana = 0
+            var hangul = 0
+            var cyrillic = 0
+            var letters = 0
+            for (ch in text) {
+                if (!ch.isLetter()) continue
+                letters++
+                val c = ch.code
+                when {
+                    c in 0x3040..0x30FF -> kana++                           // 平假名/片假名
+                    c in 0xAC00..0xD7AF || c in 0x1100..0x11FF -> hangul++  // 谚文
+                    c in 0x4E00..0x9FFF || c in 0x3400..0x4DBF -> han++     // 汉字
+                    c in 0x0400..0x04FF -> cyrillic++                       // 西里尔
+                }
+            }
+            if (letters == 0) return "eng"
+            // 假名优先：日文正文必带假名、同时含大量汉字，先判日再判中
+            if (kana > 0 && kana * 100 / letters >= 5) return "jpn"
+            val best = maxOf(han, hangul, cyrillic)
+            if (best * 100 / letters < 15) return "eng"
+            return when {
+                best == hangul -> "kor"
+                best == cyrillic -> "rus"
+                else -> "chi"
+            }
+        }
 
         // ===== v2.4.8：缓存 key 归一化（纯函数，放 companion 便于单测）=====
 
@@ -962,6 +1071,13 @@ class SubtitleTranslator(private val context: Context) {
     /** 429 后的冷却截止时间（ms）；冷却期内直接跳过并提示剩余秒数 */
     private var pollinationsCooldownUntilMs = 0L
 
+    // v2.6.11：Reverso 专用节流器（与 Pollinations 那套**各自独立**：
+    // 限速口径不同 0.9s vs 1.2s，共用变量会互相踩，见「同一份数据两处登记」的老坑）。
+    private val reversoPacer = Mutex()
+    private var reversoLastCallMs = 0L
+    /** 限流后的冷却截止时间（ms）；冷却期内直接跳过并提示剩余秒数 */
+    private var reversoCooldownUntilMs = 0L
+
     /**
      * 网页/免密端点通用 UA（v2.6.11）。
      *
@@ -1375,6 +1491,9 @@ class SubtitleTranslator(private val context: Context) {
                     // v2.6.11：Pollinations 走短请求（GET），**不能落进 else** ——
                     // else 是 OpenAI 兼容 POST，会打 /openai 端点吃 8~9 秒且需要模型名。
                     TranslationEngine.POLLINATIONS -> translateViaPollinations(text, targetLangCode)
+                    // v2.6.11：Reverso 是 **POST JSON 的专用协议**（不是 OpenAI 兼容），
+                    // 落进 else 会拿 baseUrl 拼 /chat/completions 直接 404。
+                    TranslationEngine.REVERSO -> translateViaReverso(text, targetLangCode)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -2139,6 +2258,152 @@ class SubtitleTranslator(private val context: Context) {
         "es" -> "Spanish"
         "ru" -> "Russian"
         else -> code
+    }
+
+    /**
+     * v2.6.11：Reverso 翻译（后端 Lingvanex）。
+     *
+     * `POST {base}/translate/v1/translation` + JSON 报文 → `{"translation":["译文"]}`。
+     *
+     * 与 MyMemory / Pollinations 同款三层兜底（限速口径按各自实测调）：
+     *  ① 专用串行 + 最小间隔 [REVERSO_MIN_INTERVAL_MS]；
+     *  ② 限流（429 / 403 挑战页）→ 冷却 [REVERSO_COOLDOWN_MS]，期内跳过并提示；
+     *  ③ 超长文本前置跳过（[REVERSO_MAX_TEXT_CHARS]，实测 1266 字符可直过）。
+     *
+     * ⚠️ `from` 必填且**不接受 `auto`**（网页端的自动检测是前端行为）→ 用
+     *    [detectReversoSourceLang] 本地判定，另开 `languageDetection:true` 让服务端兜底。
+     *    源语言与目标语言相同（如中文字幕翻中文）直接返回原文，不必发请求。
+     */
+    private suspend fun translateViaReverso(text: String, targetLangCode: String): String {
+        val nowMs = System.currentTimeMillis()
+        if (nowMs < reversoCooldownUntilMs) {
+            val leftSec = ((reversoCooldownUntilMs - nowMs + 999L) / 1000L).coerceAtLeast(1L)
+            Log.w("SubtitleTranslator", "Reverso 冷却中，约 ${leftSec} 秒后恢复")
+            withContext(Dispatchers.Main) {
+                statusMessage = context.getString(R.string.translate_reverso_cooldown, leftSec)
+            }
+            return ""
+        }
+        if (text.length > REVERSO_MAX_TEXT_CHARS) {
+            Log.w(
+                "SubtitleTranslator",
+                "Reverso 跳过超长文本（${text.length} 字符 > $REVERSO_MAX_TEXT_CHARS）"
+            )
+            return ""
+        }
+        val fromCode = detectReversoSourceLang(text)
+        val toCode = mapReversoLang(targetLangCode)
+        // 同语种互译没有意义（Reverso 会原样返回或给出改写），直接省掉一次请求
+        if (fromCode == toCode) return text
+
+        // ① 串行 + 最小间隔（Cloudflare 前置对突发并发最敏感，不吃 Semaphore(4) 的并发额度）
+        reversoPacer.withLock {
+            val wait = REVERSO_MIN_INTERVAL_MS - (System.currentTimeMillis() - reversoLastCallMs)
+            if (wait > 0) delay(wait)
+            reversoLastCallMs = System.currentTimeMillis()
+        }
+
+        val base = getActiveBaseUrl().trim().trimEnd('/')
+            .ifBlank { "https://api.reverso.net" }
+        // 允许用户把 base 直接填成完整端点（自建反代/镜像时常见）
+        val url = if (base.endsWith("/translation")) base else "$base/translate/v1/translation"
+
+        val payload = JSONObject().apply {
+            put("format", "text")
+            put("from", fromCode)
+            put("to", toCode)
+            put("input", text)
+            put(
+                "options",
+                JSONObject().apply {
+                    // sentenceSplitter=true：多句字幕逐句译，长文不会因为一句没断好整段崩
+                    put("sentenceSplitter", true)
+                    put("origin", "translation.web")
+                    // contextResults 只用于词典例句，字幕用不上 → 关掉省流量与延迟
+                    put("contextResults", false)
+                    put("languageDetection", true)
+                }
+            )
+        }.toString()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", freeEndpointUserAgent)
+                    .header("Accept", "application/json, text/plain, */*")
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                    // Cloudflare 对「无来源头的裸 POST」更警惕，补上网页端同款 Origin/Referer
+                    .header("Origin", "https://www.reverso.net")
+                    .header("Referer", "https://www.reverso.net/")
+                    .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e(
+                            "SubtitleTranslator",
+                            "Reverso HTTP ${response.code} ${response.message}"
+                        )
+                        if (response.code == 429 || response.code == 403) {
+                            // 429 = 限流；403 多为 Cloudflare 托管挑战（机房 IP/代理易触发）
+                            reversoCooldownUntilMs =
+                                System.currentTimeMillis() + REVERSO_COOLDOWN_MS
+                            withContext(Dispatchers.Main) {
+                                statusMessage = context.getString(
+                                    R.string.translate_reverso_cooldown,
+                                    REVERSO_COOLDOWN_MS / 1000L
+                                )
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                statusMessage = context.getString(
+                                    R.string.subtitle_api_error,
+                                    response.code
+                                )
+                            }
+                        }
+                        return@withContext ""
+                    }
+                    extractReversoTranslation(response.body?.string().orEmpty())
+                }
+            } catch (e: Exception) {
+                Log.e("SubtitleTranslator", "Reverso 请求异常", e)
+                withContext(Dispatchers.Main) {
+                    statusMessage = context.getString(
+                        R.string.subtitle_translate_failed,
+                        e.localizedMessage ?: ""
+                    )
+                }
+                ""
+            }
+        }
+    }
+
+    /**
+     * 解析 Reverso 返回：主译文在 `translation[0]`。
+     *
+     * ⚠️ 挑战页/错误页会返回 **HTML 或错 JSON** —— 必须显式判失败返回空串，
+     * 否则整段 HTML 会被当成译文写进缓存，之后永远命中错内容（与 Pollinations 同型坑）。
+     */
+    private fun extractReversoTranslation(body: String): String {
+        val s = body.trim()
+        if (s.isEmpty()) return ""
+        val head = s.take(200).lowercase()
+        if (head.startsWith("<!doctype") || head.startsWith("<html")) {
+            Log.w("SubtitleTranslator", "Reverso 返回 HTML（可能被 Cloudflare 挑战）：${s.take(120)}")
+            return ""
+        }
+        return try {
+            val arr = JSONObject(s).optJSONArray("translation")
+            val translated = arr?.optString(0)?.trim().orEmpty()
+            if (translated.isBlank()) {
+                Log.w("SubtitleTranslator", "Reverso 返回无 translation 字段：${s.take(160)}")
+            }
+            translated
+        } catch (e: Exception) {
+            Log.w("SubtitleTranslator", "Reverso 响应不是合法 JSON：${s.take(160)}")
+            ""
+        }
     }
 
     /** MyMemory 目标语言码映射：简中→zh-CN，繁中→zh-TW，其余直接用 code */

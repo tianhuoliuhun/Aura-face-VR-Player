@@ -31,6 +31,13 @@
           "license": "第三方公开网关 / third-party public gateway",
           "url": "https://pollinations.ai",
           "note": "字幕翻译的 Pollinations 引擎调用其公开的免密钥文本网关（text.pollinations.ai，短请求模式 GET /<prompt>），无需注册或 API Key；本应用与 Pollinations 无关联，该服务由第三方独立运营，可用性、限流与输出内容均由服务方决定、可能随时变化（免费层有频率限制，命中时本应用暂停 60 秒并提示）。启用时字幕文本会发送至该服务，请勿翻译敏感内容。 / The Pollinations engine uses its public keyless text gateway (text.pollinations.ai, short-request mode GET /<prompt>); no sign-up or API key is required. This app is not affiliated with Pollinations, a third-party service whose availability, rate limits and output are outside our control; the free tier is rate-limited (the app pauses for 60 s and tells you when hit). Subtitle text is sent to that service — do not translate sensitive content."
+        },
+        {
+          "name": "Reverso 翻译 / Reverso translation",
+          "version": "",
+          "license": "网页端点非官方调用 / unofficial endpoint",
+          "url": "https://www.reverso.net",
+          "note": "字幕翻译的 Reverso 引擎调用 reverso.net 的网页翻译端点（api.reverso.net/translate/v1/translation，后端为 Lingvanex 引擎），无需注册或 API Key；本应用与 Reverso Technologies 无关联、未获授权与背书。该端点面向网页端设计，第三方程序自动化调用可能不符合其服务条款，可用性亦可能随时变化（前置 Cloudflare 会对机房/代理 IP 返回 403 挑战，命中时本应用暂停 60 秒并提示）；免费额度的实际限制由服务方单方决定 —— 商业分发建议改用有明确授权的官方接口（如 DeepL 官方 API）或本地离线模型。启用时字幕文本会发送至该端点，请勿翻译敏感内容。 / The Reverso engine uses reverso.net's web translation endpoint (api.reverso.net/translate/v1/translation, backed by Lingvanex), with no sign-up or API key. This app is not affiliated with or endorsed by Reverso Technologies; automated use of that endpoint may not comply with their terms and its availability may change at any time (Cloudflare fronting returns a 403 challenge for datacenter or proxy IPs; the app then pauses for 60 s). Free-tier limits are set unilaterally by the operator. Subtitle text is sent to that endpoint — do not translate sensitive content."
         }
       ]
     },

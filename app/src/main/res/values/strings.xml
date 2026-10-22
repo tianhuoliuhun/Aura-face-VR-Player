@@ -557,6 +557,8 @@
     <string name="engine_pollinations">Pollinations（免密）</string>
     <string name="translate_mymemory_cooldown">MyMemory 已达免费额度，约 %1$d 分钟后自动恢复</string>
     <string name="translate_pollinations_cooldown">Pollinations 免费层限流，%1$d 秒后自动恢复</string>
+    <string name="engine_reverso">Reverso（免密）</string>
+    <string name="translate_reverso_cooldown">Reverso 限流中，%1$d 秒后自动恢复</string>
     <string name="lang_zh">简体中文</string>
     <string name="lang_en">英语</string>
     <string name="lang_ja">日语</string>
