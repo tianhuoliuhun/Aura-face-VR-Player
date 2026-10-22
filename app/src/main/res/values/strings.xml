@@ -542,7 +542,7 @@
     <string name="decoder_coming_soon">开发中</string>
     <string name="auto_opt">自动</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
-    <string name="engine_bing">必应翻译</string>
+    <string name="engine_bing">必应翻译（非官方）</string>
     <string name="engine_deepseek">DeepSeek API</string>
     <string name="engine_qwen">通义千问</string>
     <string name="engine_glm">智谱</string>

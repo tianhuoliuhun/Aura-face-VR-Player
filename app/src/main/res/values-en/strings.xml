@@ -550,7 +550,7 @@
     <string name="decoder_coming_soon">Coming soon</string>
     <string name="auto_opt">Auto</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
-    <string name="engine_bing">Bing Translate</string>
+    <string name="engine_bing">Bing Translate (unofficial)</string>
     <string name="engine_deepseek">DeepSeek API</string>
     <string name="engine_qwen">Qwen</string>
     <string name="engine_glm">Zhipu</string>

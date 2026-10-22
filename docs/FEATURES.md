@@ -330,16 +330,16 @@
 | 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
 
 ## 🌐 字幕在线翻译 / Online Translation
-- **14 种引擎**：必应翻译（免费） / **Google 免密** / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / **Pollinations**（免密，短请求约 1 秒） / **Reverso**（免密，实测 1266 字符长文一次过、0.8~1.7 秒） / **DeepL**（官方 API） / **本地 AI**（离线） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
-  - 14 engines: Bing (free) / Google keyless / MyMemory (free) / LibreTranslate (free, self-hostable) / Pollinations (keyless, ~1 s per short request) / Reverso (keyless, 1266-char passages in one shot, 0.8–1.7 s) / DeepL (official API) / on-device AI (offline) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
+- **14 种引擎**：必应翻译（免费，**非官方端点**） / **Google 免密**（**非官方端点**） / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / **Pollinations**（免密，短请求约 1 秒） / **Reverso**（免密，实测 1266 字符长文一次过、0.8~1.7 秒） / **DeepL**（官方 API） / **本地 AI**（离线） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
+  - 14 engines: Bing (free, unofficial endpoint) / Google keyless (unofficial endpoint) / MyMemory (free) / LibreTranslate (free, self-hostable) / Pollinations (keyless, ~1 s per short request) / Reverso (keyless, 1266-char passages in one shot, 0.8–1.7 s) / DeepL (official API) / on-device AI (offline) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
 - 显示模式：**双语（原文+译文）** 与 **仅译文** 一键切换，选择**已持久化**
   - Display modes: bilingual / translation-only, both persisted
 - MyMemory：匿名额度 **5000 字符/天**，程序内置**串行限速 + 错误文案识别 + 配额冷却 10 分钟 + 超长句跳过**，避免触发其限流
   - MyMemory: built-in pacing, error-text detection and 10-min cooldown to respect its quota limits
 - LibreTranslate：标准 `/translate` 协议，设置面板可填 Base URL 指向**私有实例**
   - LibreTranslate follows the standard protocol; Base URL configurable for a private instance
-- **Google 免密端点**（clients5）：`GET https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=…&q=…`，**无需 API Key、无需登录**；返回格式随 `sl` 变化（`sl=auto` → `[["译文","en"]]`，显式指定源语言 → `["译文"]`），解析统一取「每项里的第一个字符串」，两种都兼容；Base URL 可改为镜像
-  - **Google keyless endpoint** (clients5): no API key or sign-in required; the response shape depends on `sl` (`sl=auto` → `[["text","en"]]`, explicit `sl` → `["text"]`), so the parser takes the first string of each item; Base URL is configurable for mirrors
+- **Google 免密端点**（clients5，**非 Google 官方 API**）：`GET https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=…&q=…`，**无需 API Key、无需登录**；返回格式随 `sl` 变化（`sl=auto` → `[["译文","en"]]`，显式指定源语言 → `["译文"]`），解析统一取「每项里的第一个字符串」，两种都兼容；Base URL 可改为镜像
+  - **Google keyless endpoint** (clients5, **not an official Google API**): no API key or sign-in required; the response shape depends on `sl` (`sl=auto` → `[["text","en"]]`, explicit `sl` → `["text"]`), so the parser takes the first string of each item; Base URL is configurable for mirrors
 - 必应翻译参考 [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api)（MIT，自研 Kotlin HTTP 实现，未直接引入 npm 包）
   - Bing translation inspired by [plainheart/bing-translate-api](https://github.com/plainheart/bing-translate-api) (MIT; self-written Kotlin HTTP, npm package NOT bundled)
 - **引擎 / 目标语言 / API Key / Base URL / 模型名 / 显示模式全部持久化**（重启不丢）

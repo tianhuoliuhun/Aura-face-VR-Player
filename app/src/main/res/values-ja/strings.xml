@@ -510,7 +510,7 @@
     <string name="decoder_coming_soon">開発中</string>
     <string name="auto_opt">自動</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
-    <string name="engine_bing">Bing 翻訳</string>
+    <string name="engine_bing">Bing 翻訳（非公式）</string>
     <string name="engine_deepseek">DeepSeek API</string>
     <string name="engine_qwen">Qwen</string>
     <string name="engine_glm">Zhipu</string>
