@@ -154,6 +154,37 @@ enum class TranslationEngine(
         defaultBaseUrl = "",
         defaultModel = "",
         requiresApiKey = true
+    ),
+
+    /**
+     * v2.6.11：**Pollinations 免密钥大模型网关**（短请求模式）。
+     *
+     * ## 它是什么
+     * 一个**公开的大模型推理网关**，无需注册、无需 API Key、无需登录。
+     * 提供两种用法：
+     *  - **短请求（GET）**：`GET https://text.pollinations.ai/<prompt>` → **纯文本**回复；
+     *  - **OpenAI 兼容（POST）**：`POST /openai`，标准 `chat/completions` 报文。
+     *
+     * ## 为什么只用短请求
+     * 实测延迟差一个数量级：**短请求约 1 秒，大模型模式 8–9 秒**；而免费层只开放
+     * `openai-fast` 一个模型，用 POST 换来的能力提升有限、延迟却翻 8 倍。
+     * 字幕是**逐条、实时**翻译，延迟优先 → 走 [translateViaPollinations] 的 GET 路径，
+     * 不实现 POST（要 OpenAI 格式的用户本就有 `OPENAI` / `CUSTOM` 引擎可配）。
+     *
+     * ## 为什么不需要 API Key
+     * 匿名即可用 → [requiresApiKey] = false，面板不显示 Key 输入框。
+     * 代价是**免费层有频率限制**（连打会 429），由 `translateViaPollinations` 里的
+     * 专用串行节流 + 冷却兜底处理。
+     *
+     * ⚠️ 与 `BING` / `GOOGLE_FREE` 的区别：那两个是**网页端点的非官方调用**（条款风险），
+     *    Pollinations 是**服务方自己公开的接口**；但字幕文本同样会外发，仍属敏感内容禁区。
+     */
+    POLLINATIONS(
+        id = 12,
+        displayNameResId = R.string.engine_pollinations,
+        defaultBaseUrl = "https://text.pollinations.ai",
+        defaultModel = "",
+        requiresApiKey = false
     )
 }
 
@@ -273,6 +304,25 @@ class SubtitleTranslator(private val context: Context) {
         private const val MYMEMORY_MAX_QUERY_BYTES = 500
         /** 触发配额/限流后的冷却时长 */
         private const val MYMEMORY_COOLDOWN_MS = 10 * 60 * 1000L
+
+        /**
+         * Pollinations 短请求的节流常量（v2.6.11）。
+         *
+         * 免费层不需要 Key，但**按频率限流**：并发连打会直接 429。
+         * 短请求本身约 1 秒返回，因此「专用串行 + 1.2 秒最小间隔」既不打满上游，
+         * 也不会把字幕翻译拖到不可用（比 MyMemory 的 1.5 秒更短，因为单次更快）。
+         */
+        private const val POLLINATIONS_MIN_INTERVAL_MS = 1_200L
+        /** 命中 429 后的冷却时长（秒级恢复，不必像 MyMemory 那样等 10 分钟） */
+        private const val POLLINATIONS_COOLDOWN_MS = 60 * 1000L
+        /**
+         * 单条文本长度上限。
+         *
+         * 短请求模式把 prompt 放在 **URL 路径**里，长度受上游与中间代理的 URL 上限约束，
+         * 且百分号编码后还会再膨胀 1~3 倍 → 超长文本必然失败，前置跳过更诚实。
+         * 字幕单条通常 < 200 字符，800 留足余量。
+         */
+        private const val POLLINATIONS_MAX_TEXT_CHARS = 800
 
         // ===== v2.4.8：缓存 key 归一化（纯函数，放 companion 便于单测）=====
 
@@ -903,6 +953,26 @@ class SubtitleTranslator(private val context: Context) {
     /** 配额/限流触发后的冷却截止时间（ms）；冷却期内直接跳过，不再打接口 */
     private var myMemoryCooldownUntilMs = 0L
 
+    // v2.6.11：Pollinations 专用节流器。**独立于 MyMemory 的一套**——
+    // 两者限速口径不同（1.2s vs 1.5s、冷却 1min vs 10min），共用变量会互相踩。
+    // ⚠️ 也不用 translationSemaphore(4) 的并发额度：免费层对并发最敏感，
+    //    这里必须**串行**（Mutex 天然串行），否则 4 路并发连打立刻 429。
+    private val pollinationsPacer = Mutex()
+    private var pollinationsLastCallMs = 0L
+    /** 429 后的冷却截止时间（ms）；冷却期内直接跳过并提示剩余秒数 */
+    private var pollinationsCooldownUntilMs = 0L
+
+    /**
+     * 网页/免密端点通用 UA（v2.6.11）。
+     *
+     * Pollinations 与 Google clients5 都是「面向浏览器/公开网关」的端点，
+     * 用浏览器 UA 比 OkHttp 默认 UA 更不容易被前置防护拦下 —— 两处共用一份，
+     * 避免以后要改时漏改一处（本项目「同一份数据两处登记」的老坑）。
+     */
+    private val freeEndpointUserAgent =
+        "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36"
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -1302,6 +1372,9 @@ class SubtitleTranslator(private val context: Context) {
                     //    而本地引擎没有 baseUrl/Key → 必然失败且报错信息完全误导。
                     TranslationEngine.LOCAL_LLM -> translateViaLocalLlm(text, targetLangCode, priority)
                     TranslationEngine.DEEPL -> translateViaDeepl(text, targetLangCode)
+                    // v2.6.11：Pollinations 走短请求（GET），**不能落进 else** ——
+                    // else 是 OpenAI 兼容 POST，会打 /openai 端点吃 8~9 秒且需要模型名。
+                    TranslationEngine.POLLINATIONS -> translateViaPollinations(text, targetLangCode)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -1848,11 +1921,7 @@ class SubtitleTranslator(private val context: Context) {
             ?: return ""
         val request = Request.Builder()
             .url(url)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36"
-            )
+            .header("User-Agent", freeEndpointUserAgent)
             .get()
             .build()
 
@@ -1909,6 +1978,166 @@ class SubtitleTranslator(private val context: Context) {
     private fun mapGoogleFreeLang(code: String): String = when (code) {
         "zh" -> "zh-CN"
         "zh-TW" -> "zh-TW"
+        else -> code
+    }
+
+    /**
+     * v2.6.11：Pollinations **短请求（GET）** 翻译。
+     *
+     * 请求：`GET {base}/<urlencoded prompt>` → **纯文本**译文（不是 JSON）。
+     * 参考行为：`Translate to Chinese: Hello world` → `你好，世界`，耗时约 1 秒。
+     *
+     * 为什么不用它的 OpenAI 兼容端点（`POST /openai`）：免费层只有 `openai-fast`
+     * 一个模型，实测要 8~9 秒 —— 字幕是逐条实时翻译，延迟优先。
+     *
+     * 免费层按频率限流（连打会 429），因此与 MyMemory 同款三层兜底：
+     *  ① 专用串行 + 最小间隔（[POLLINATIONS_MIN_INTERVAL_MS]）；
+     *  ② 429 → 冷却 [POLLINATIONS_COOLDOWN_MS]，期内直接跳过并提示剩余秒数；
+     *  ③ 超长文本前置跳过（prompt 走 URL 路径，长度有上限）。
+     */
+    private suspend fun translateViaPollinations(text: String, targetLangCode: String): String {
+        val nowMs = System.currentTimeMillis()
+        if (nowMs < pollinationsCooldownUntilMs) {
+            val leftSec = ((pollinationsCooldownUntilMs - nowMs + 999L) / 1000L).coerceAtLeast(1L)
+            Log.w("SubtitleTranslator", "Pollinations 冷却中，约 ${leftSec} 秒后恢复")
+            withContext(Dispatchers.Main) {
+                statusMessage = context.getString(R.string.translate_pollinations_cooldown, leftSec)
+            }
+            return ""
+        }
+        if (text.length > POLLINATIONS_MAX_TEXT_CHARS) {
+            Log.w(
+                "SubtitleTranslator",
+                "Pollinations 跳过超长文本（${text.length} 字符 > $POLLINATIONS_MAX_TEXT_CHARS）"
+            )
+            return ""
+        }
+        // ① 串行 + 最小间隔：免费层对并发最敏感，不能吃 Semaphore(4) 的并发额度
+        pollinationsPacer.withLock {
+            val wait =
+                POLLINATIONS_MIN_INTERVAL_MS - (System.currentTimeMillis() - pollinationsLastCallMs)
+            if (wait > 0) delay(wait)
+            pollinationsLastCallMs = System.currentTimeMillis()
+        }
+
+        val base = getActiveBaseUrl().trim().trimEnd('/')
+            .ifBlank { "https://text.pollinations.ai" }
+        val prompt = buildString {
+            append("Translate to ")
+            append(mapPollinationsLang(targetLangCode))
+            append(". Output only the translation:\n")
+            append(text)
+        }
+        // ⚠️ 必须用 addPathSegment：prompt 含空格 / 换行 / 冒号，手工字符串拼接会拼出
+        //    非法 URL，或让内容被切成多段路径。addPathSegment 会做完整百分号编码
+        //    （连 "/" 与换行也会被编码）。
+        val url = (base.toHttpUrlOrNull() ?: return "")
+            .newBuilder()
+            .addPathSegment(prompt)
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", freeEndpointUserAgent)
+                    .get()
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e(
+                            "SubtitleTranslator",
+                            "Pollinations HTTP ${response.code} ${response.message}"
+                        )
+                        if (response.code == 429) {
+                            // 免费层限流：进入冷却，并把「多久后恢复」如实告诉用户
+                            pollinationsCooldownUntilMs =
+                                System.currentTimeMillis() + POLLINATIONS_COOLDOWN_MS
+                            withContext(Dispatchers.Main) {
+                                statusMessage = context.getString(
+                                    R.string.translate_pollinations_cooldown,
+                                    POLLINATIONS_COOLDOWN_MS / 1000L
+                                )
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                statusMessage = context.getString(
+                                    R.string.subtitle_api_error,
+                                    response.code
+                                )
+                            }
+                        }
+                        return@withContext ""
+                    }
+                    extractPollinationsTranslation(response.body?.string().orEmpty())
+                }
+            } catch (e: Exception) {
+                Log.e("SubtitleTranslator", "Pollinations 请求异常", e)
+                withContext(Dispatchers.Main) {
+                    statusMessage = context.getString(
+                        R.string.subtitle_translate_failed,
+                        e.localizedMessage ?: ""
+                    )
+                }
+                ""
+            }
+        }
+    }
+
+    /**
+     * 清理 Pollinations 的**纯文本**返回 —— 短请求模式直接把回复写在响应体里。
+     *
+     * 模型有时会顺手带上 Markdown 代码块、成对引号或「译文：」前缀，这些都会
+     * **原样进字幕**，所以逐层剥离；返回 HTML / 错误 JSON 时判为失败并返回空串 ——
+     * 否则错误页会被当成译文写进缓存，之后永远命中错内容。
+     */
+    private fun extractPollinationsTranslation(body: String): String {
+        var s = body.trim()
+        if (s.isEmpty()) return ""
+        val head = s.take(200).lowercase()
+        if (head.startsWith("<!doctype") || head.startsWith("<html") ||
+            (s.startsWith("{") && head.contains("\"error\""))
+        ) {
+            Log.w("SubtitleTranslator", "Pollinations 返回错误内容：${s.take(160)}")
+            return ""
+        }
+        // ```text … ``` 代码块：去掉首行围栏（可能带语言标记）与结尾围栏
+        if (s.startsWith("```")) {
+            s = s.lines().drop(1).joinToString("\n").substringBefore("```").trim()
+        }
+        // 成对引号包裹
+        val quotePairs = listOf(
+            "\"" to "\"", "'" to "'", "“" to "”", "「" to "」", "『" to "』"
+        )
+        for ((open, close) in quotePairs) {
+            if (s.length > 2 && s.startsWith(open) && s.endsWith(close)) {
+                s = s.substring(open.length, s.length - close.length).trim()
+                break
+            }
+        }
+        // 「译文：xxx」/「Translation: xxx」前缀
+        s = s.replace(
+            Regex("^(译文|翻譯|translation|translated text)\\s*[:：]\\s*", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+        return s
+    }
+
+    /**
+     * Pollinations 目标语言映射：短请求用**自然语言指令**指定目标语言，
+     * 因此给英文语言名（简繁中文必须分开写，否则简体片会出繁体）。
+     * 未收录的 code 原样透传 —— 模型一般能理解语言代码。
+     */
+    private fun mapPollinationsLang(code: String): String = when (code) {
+        "zh" -> "Simplified Chinese"
+        "zh-TW" -> "Traditional Chinese"
+        "en" -> "English"
+        "ja" -> "Japanese"
+        "ko" -> "Korean"
+        "fr" -> "French"
+        "de" -> "German"
+        "es" -> "Spanish"
+        "ru" -> "Russian"
         else -> code
     }
 

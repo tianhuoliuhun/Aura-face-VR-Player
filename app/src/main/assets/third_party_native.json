@@ -24,6 +24,13 @@
           "license": "非 Google 官方 API / unofficial endpoint",
           "url": "https://policies.google.com/terms",
           "note": "字幕翻译的 Google 引擎调用 Chrome 词典扩展所用的网页端点（clients5.google.com/translate_a/t?client=dict-chrome-ex），不是 Google Cloud Translation 官方 API（官方接口需 API Key 与计费账户，未携带身份直接请求会返回 403 unregistered callers）；本应用与 Google LLC 无关联、未获授权与背书。该端点面向浏览器扩展设计，第三方程序自动化调用可能不符合其服务条款，可用性亦可能随时变化（在 200 / 429 / 403 之间切换）——商业分发建议改用有明确授权的官方接口或其它合规引擎（DeepL 官方 API、自备 Key 的接口、本地离线模型）。启用时字幕文本会发送至该端点，请勿翻译敏感内容。 / The Google engine uses the web endpoint used by Chrome's dictionary extension (clients5.google.com/translate_a/t?client=dict-chrome-ex), not the official Google Cloud Translation API (which requires an API key and billing; a request without identity returns 403 unregistered callers). This app is not affiliated with or endorsed by Google LLC; automated use of that endpoint may not comply with Google's terms and its availability may change at any time (flipping between 200 / 429 / 403). Subtitle text is sent to that endpoint — do not translate sensitive content."
+        },
+        {
+          "name": "Pollinations 翻译 / Pollinations translation",
+          "version": "",
+          "license": "第三方公开网关 / third-party public gateway",
+          "url": "https://pollinations.ai",
+          "note": "字幕翻译的 Pollinations 引擎调用其公开的免密钥文本网关（text.pollinations.ai，短请求模式 GET /<prompt>），无需注册或 API Key；本应用与 Pollinations 无关联，该服务由第三方独立运营，可用性、限流与输出内容均由服务方决定、可能随时变化（免费层有频率限制，命中时本应用暂停 60 秒并提示）。启用时字幕文本会发送至该服务，请勿翻译敏感内容。 / The Pollinations engine uses its public keyless text gateway (text.pollinations.ai, short-request mode GET /<prompt>); no sign-up or API key is required. This app is not affiliated with Pollinations, a third-party service whose availability, rate limits and output are outside our control; the free tier is rate-limited (the app pauses for 60 s and tells you when hit). Subtitle text is sent to that service — do not translate sensitive content."
         }
       ]
     },

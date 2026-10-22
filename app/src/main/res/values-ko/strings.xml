@@ -522,7 +522,9 @@
     <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google 번역(비공식)</string>
     <string name="engine_local_llm">로컬 AI 번역(오프라인)</string>
+    <string name="engine_pollinations">Pollinations(키 불필요)</string>
     <string name="translate_mymemory_cooldown">MyMemory 무료 한도를 초과했습니다. 약 %1$d분 후 재시도합니다</string>
+    <string name="translate_pollinations_cooldown">Pollinations 무료 한도가 제한 중입니다. %1$d초 후 재시도합니다</string>
     <string name="lang_zh">간체중국어</string>
     <string name="lang_en">영어</string>
     <string name="lang_ja">일본어</string>

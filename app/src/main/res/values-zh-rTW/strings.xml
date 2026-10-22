@@ -564,7 +564,9 @@
     <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google 翻譯（非官方）</string>
     <string name="engine_local_llm">本機 AI 翻譯（離線）</string>
+    <string name="engine_pollinations">Pollinations（免密）</string>
     <string name="translate_mymemory_cooldown">MyMemory 已達免費額度，約 %1$d 分鐘後自動恢復</string>
+    <string name="translate_pollinations_cooldown">Pollinations 免費層限流，%1$d 秒後自動恢復</string>
     <string name="lang_zh">簡體中文</string>
     <string name="lang_en">英語</string>
     <string name="lang_ja">日語</string>

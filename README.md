@@ -1,10 +1,10 @@
 # 🎬 Aura Lens 灵境
 
 > 一款面向移动端的**专业级美颜 VR 播放器**：支持 360°/180° 全景、鱼眼、3D SBS/TAB 立体与普通 **2D 平面视频**，
-> 内置实时 AI 人脸美颜、3D LUT 电影调色、**60+ 种语言与方言的离线语音转字幕**、10 引擎在线翻译与局域网 SMB 播放。
+> 内置实时 AI 人脸美颜、3D LUT 电影调色、**60+ 种语言与方言的离线语音转字幕**、13 种翻译引擎与局域网 SMB 播放。
 >
 > A professional mobile VR player for **plain 2D, 360°/180° panorama, fisheye and 3D SBS/TAB** videos with real-time AI beauty filters, 3D LUT color grading,
-> offline ASR subtitles (**60+ languages & dialects**), 10-engine online translation and LAN (SMB) playback.
+> offline ASR subtitles (**60+ languages & dialects**), 13 translation engines and LAN (SMB) playback.
 
 > **版本里程碑 / Milestones**：
 > **v1.0** 完成 VR 播放的基本功能（投影 / 立体 / 陀螺仪 / LUT 调色）·
@@ -38,7 +38,7 @@
 | ✨ **实时 AI 美颜**<br>Real-time AI Beauty | **GLSL / GPUPixel 双引擎**可切换；478 点人像精修（瘦脸/大眼/去黑眼圈/鼻梁/嘴型/牙齿/口红/腮红/眉毛）；磨皮为频域分离 + 可调皮肤质感<br>Dual switchable engines, 478-landmark portrait retouch, frequency-separation smoothing |
 | 🎨 **3D LUT 调色**<br>LUT Color Grading | 36 款内置 LUT（人像美颜 24 + 风格滤镜 12，全部自研/开源可商用）；可导入自定义 `.cube`<br>36 bundled LUTs plus custom `.cube` import |
 | 🗣️ **字幕与语音转写**<br>Subtitles & ASR | 离线 **Dolphin 已内置**（开箱即用）：**40 种东方语言 + 22 种中文方言**，自带语种识别；实时生成、整片转写、SRT 导出、去标点。语言面板点**「自动」即直接使用随包内置模型**（真·语种识别，不下载）<br>Bundled offline ASR (Dolphin): 40 Eastern languages + 22 Chinese dialects with auto language detection, realtime generation, batch transcription and SRT export. The 「Auto」 entry uses the **bundled** model directly — no download |
-| 🌐 **字幕在线翻译**<br>Online Translation | **12 种引擎**（4 个免密/免费端点：必应 / Google / MyMemory / LibreTranslate；另有官方 API 的 DeepL 与完全本地的离线模型）；本地词库缓存（LRU + TTL + 按语言分文件）<br>12 engines including 4 keyless/free endpoints, the official DeepL API and an on-device model, with a local per-language translation memory |
+| 🌐 **字幕在线翻译**<br>Online Translation | **13 种引擎**（5 个免密端点：必应 / Google / MyMemory / LibreTranslate / **Pollinations**；另有官方 API 的 DeepL 与完全本地的离线模型）；本地词库缓存（LRU + TTL + 按语言分文件）<br>13 engines including 5 keyless endpoints, the official DeepL API and an on-device model, with a local per-language translation memory |
 | 🎤 **发声人分离 / 去男声**<br>Speaker Separation | 🚧 **未完成（开发中）** —— 目标：分析音轨判断「谁在说话、什么性别」，并把男声段落从人声里分离出去（sherpa-onnx 说话人分离 + ONNX 性别分类 + MDX-Net 源分离）；目前**离线分析面板与单段处理已跑通**，长片流式处理与效果验收未完成<br>🚧 **Work in progress** — intended speaker diarization plus gender classification and MDX-Net source separation so male-voice segments can be removed; the offline analysis panel and short-clip path work, long-video streaming and quality validation are not done |
 | 🧠 **端侧本地大模型**<br>On-device LLM | 🚧 **未完成（开发中）** —— 目标是下载一次后**全程离线**：本地 AI 翻译 + 本地弹幕生成（**MiniCPM-V 4.7 1B，Q4_K_M 量化，Apache 2.0** + 自建 llama.cpp / libmtmd JNI；主权重约 672MB，可选视觉编码器 mmproj 约 1.11GB）；**推理链路已跑通**（单 worker 调度 + 优先级队列：实时字幕 > 弹幕 > 远期预翻译；超时与失败原因如实回传；不联网、不上传内容），但**翻译与弹幕的实际输出质量尚未达到可用**，故按未完成论<br>🚧 **Work in progress** — goal is fully offline local AI translation and danmaku generation (**MiniCPM-V 4.7 1B, Q4_K_M, Apache 2.0** with a self-built llama.cpp / libmtmd JNI; ~672MB main weights, optional ~1.11GB mmproj). The inference path works (single-worker scheduler with a **priority queue**, timeouts and real failure reasons surfaced), but output quality is not yet usable, so it is not a shipped feature |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
@@ -208,6 +208,17 @@ Translate" 为其商标，仅用于描述所调用的服务）。该端点面向
 extension, not the official Google Cloud Translation API (which requires a key and billing). This project
 is not affiliated with or endorsed by Google; automated use of that endpoint may not comply with Google's
 terms and its availability may change at any time — prefer an officially licensed API for commercial use.
+
+**Pollinations 翻译**：「字幕在线翻译」的 Pollinations 引擎调用其**公开的免密钥文本网关**
+（`text.pollinations.ai`，短请求模式 `GET /<prompt>`），无需注册与 API Key。该服务由**第三方独立运营**，
+本项目与其**无关联、未获背书**；可用性、频率限制与输出内容均由服务方决定、可能随时变化
+（免费层有限流，命中时本应用暂停 60 秒并提示恢复时间）。启用该引擎时字幕文本会发送至该服务，
+请勿翻译敏感内容。
+<br>**Pollinations translation**: the Pollinations engine calls its **public keyless text gateway**
+(short-request mode `GET /<prompt>`); no sign-up or API key is needed. It is an independently operated
+third-party service with no affiliation to this project; its availability, rate limits and output are
+outside our control and may change at any time (the free tier is rate-limited — the app pauses for 60 s
+and reports the recovery time). Subtitle text is sent to that service — do not translate sensitive content.
 
 完整版见 **[内容与第三方服务声明](docs/CONTENT_AND_SERVICE_DISCLAIMER.md)**，
 第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [NOTICE](NOTICE)。

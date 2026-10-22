@@ -330,8 +330,8 @@
 | 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |
 
 ## 🌐 字幕在线翻译 / Online Translation
-- **10 种引擎**：必应翻译（免费） / **Google 免密** / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
-  - 10 engines: Bing (free) / Google keyless / MyMemory (free) / LibreTranslate (free, self-hostable) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
+- **13 种引擎**：必应翻译（免费） / **Google 免密** / **MyMemory**（免费） / **LibreTranslate**（免费，可自建） / **Pollinations**（免密，短请求约 1 秒） / **DeepL**（官方 API） / **本地 AI**（离线） / DeepSeek / 通义千问 / 智谱 GLM / MiniMax / OpenAI GPT / 自定义（OpenAI 兼容）
+  - 13 engines: Bing (free) / Google keyless / MyMemory (free) / LibreTranslate (free, self-hostable) / Pollinations (keyless, ~1 s per short request) / DeepL (official API) / on-device AI (offline) / DeepSeek / Qwen / Zhipu GLM / MiniMax / OpenAI GPT / Custom
 - 显示模式：**双语（原文+译文）** 与 **仅译文** 一键切换，选择**已持久化**
   - Display modes: bilingual / translation-only, both persisted
 - MyMemory：匿名额度 **5000 字符/天**，程序内置**串行限速 + 错误文案识别 + 配额冷却 10 分钟 + 超长句跳过**，避免触发其限流
