@@ -434,8 +434,11 @@ object AsrExtModels {
             fMs(DOLPHIN_MS_REPO, "model.int8.onnx", 90_000_000L),
             fMs(DOLPHIN_MS_REPO, "tokens.txt", 400_000L)
         ),
-        // 整包方案保留为兜底（ModelScope 不可达时可切回），当前不使用：
-        // ⚠️ files 非空时优先走按文件下载，archive 不会生效
+        // 整包方案保留为**兜底**，不再默认使用（v2.6.11 修正了实际执行顺序）：
+        // ⚠️ 下载顺序是「**files 非空则先逐文件，全部失败才回退 archive**」
+        //    （见 SherpaAsrManager.downloadExtModel）。此前 archive 分支写在前面
+        //    且直接 return，导致这里的 files 形同虚设 —— 实际一直在下 GitHub 整包，
+        //    国内网络下表现为「下载 Dolphin 失败」。
         archive = AsrExtArchive(
             url = DOLPHIN_URL,
             wanted = mapOf(

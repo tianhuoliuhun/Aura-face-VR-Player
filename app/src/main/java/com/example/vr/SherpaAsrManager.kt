@@ -980,7 +980,57 @@ object SherpaAsrManager {
                 modelDownloadProgress = 0f
                 downloadStatus = context.getString(R.string.asr_preparing_download, m.sizeMb)
             }
-            // 整包回退（如泰语：没有可按文件下载的源，只能下 tar.bz2 再解出需要的文件）
+            // ==================================================================
+            // 下载顺序：**先按文件，全部失败才回退整包**（v2.6.11 修正）
+            // ------------------------------------------------------------------
+            // ⚠️ 此前 archive 分支写在这里、且直接 return，而 files 分支在它之后
+            //    → 只要模型同时配了 files 和 archive，**files 永远执行不到**。
+            //    Dolphin / SenseVoice 都属于这种（两源都登记），于是实际一直在下
+            //    GitHub Releases 整包；而 github.com 在国内经常不可达
+            //    （实测模拟器把 github.com 解析到 127.0.0.1），用户侧表现就是
+            //    「下载 Dolphin 失败」，而本来可用的 ModelScope 逐文件源形同虚设。
+            //
+            // 现在按 AsrExtModels 里声明的语义执行：
+            //   ① files 非空 → 逐文件（ModelScope，支持断点续传）
+            //   ② files 为空（如泰语无分文件源）或 ① 全部失败 → 整包 tar.bz2 兜底
+            // ==================================================================
+            if (m.files.isNotEmpty()) {
+                val totalMin = m.files.sumOf { it.minBytes }.coerceAtLeast(1L)
+                var doneMin = 0L
+                var filesOk = true
+                for (f in m.files) {
+                    // ⚠️ 用 fileOf() 而不是 dir.resolve(f.name)：
+                    //    ① 远端名可能带子目录（`hi/model.int8.onnx`），本地只取 basename；
+                    //    ② 共享文件（IndicConformer 的 tokens）要落到 ext-indic-shared/，
+                    //       那个目录可能还没建，所以必须 mkdirs。
+                    val dest = fileOf(context, m, f)
+                    dest.parentFile?.mkdirs()
+                    val ok = downloadFileWithResume(
+                        url = f.url,
+                        dest = dest,
+                        progressBase = doneMin.toFloat() / totalMin,
+                        progressSpan = f.minBytes.toFloat() / totalMin,
+                        expectMinBytes = f.minBytes,
+                        label = f.name
+                    )
+                    if (!ok) {
+                        filesOk = false
+                        break
+                    }
+                    doneMin += f.minBytes
+                }
+                if (filesOk) {
+                    withContextMain {
+                        isModelDownloading = false
+                        modelDownloadProgress = 1f
+                        downloadStatus = context.getString(R.string.asr_model_ready)
+                    }
+                    return@withContext dir
+                }
+                // 这里**不能**把 isModelDownloading 置 false —— 还要继续试整包
+                Log.w(TAG, "${m.dirName} 按文件下载失败，回退整包")
+            }
+            // 整包兜底（泰语等没有分文件源的模型，或上面的逐文件全部失败）
             m.archive?.let { arc ->
                 val ok = downloadTarBz2AndExtract(context, arc, dir, m)
                 withContextMain {
@@ -994,38 +1044,13 @@ object SherpaAsrManager {
                 }
                 return@withContext if (ok) dir else null
             }
-            val totalMin = m.files.sumOf { it.minBytes }.coerceAtLeast(1L)
-            var doneMin = 0L
-            for (f in m.files) {
-                // ⚠️ 用 fileOf() 而不是 dir.resolve(f.name)：
-                //    ① 远端名可能带子目录（`hi/model.int8.onnx`），本地只取 basename；
-                //    ② 共享文件（IndicConformer 的 tokens）要落到 ext-indic-shared/，
-                //       那个目录可能还没建，所以必须 mkdirs。
-                val dest = fileOf(context, m, f)
-                dest.parentFile?.mkdirs()
-                val ok = downloadFileWithResume(
-                    url = f.url,
-                    dest = dest,
-                    progressBase = doneMin.toFloat() / totalMin,
-                    progressSpan = f.minBytes.toFloat() / totalMin,
-                    expectMinBytes = f.minBytes,
-                    label = f.name
-                )
-                if (!ok) {
-                    withContextMain {
-                        isModelDownloading = false
-                        downloadStatus = context.getString(R.string.asr_model_download_failed)
-                    }
-                    return@withContext null
-                }
-                doneMin += f.minBytes
-            }
+            // 既没有分文件源也没有整包源 → 只能失败
+            Log.e(TAG, "${m.dirName} 没有任何可用下载源（files 与 archive 均为空）")
             withContextMain {
                 isModelDownloading = false
-                modelDownloadProgress = 1f
-                downloadStatus = context.getString(R.string.asr_model_ready)
+                downloadStatus = context.getString(R.string.asr_model_download_failed)
             }
-            dir
+            null
         }
 
     /**
