@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  v2.6.11：release 启用 shrinkResources 后的「资源保留白名单」
+
+  LicensesScreen.kt 用 `resources.getIdentifier(titleKey, "string", packageName)`
+  按**资源名字符串**动态取 5 语标题（titleKey 来自 assets/third_party_native.json）。
+  静态扫描看不到这类引用 → 资源压缩会把它们当孤儿删掉，导致开源许可页标题
+  退化成显示 key 原文（licenses_group_models 之类）。
+
+  shrinkMode="safe" 是默认值，这里显式写出以免日后被误改：
+  它只删除「确定未被引用」的资源，配合 tools:keep 可精确兜住动态引用。
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/licenses_group_decoders,@string/licenses_group_disclaimer,@string/licenses_group_engines,@string/licenses_group_fonts,@string/licenses_group_luts,@string/licenses_group_models"
+    tools:shrinkMode="safe" />

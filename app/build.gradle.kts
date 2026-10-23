@@ -20,8 +20,8 @@ android {
     // 代价：不再支持 Android 7.x（7.0/7.1）。已与用户确认。
     minSdk = 26
     targetSdk = 36
-    versionCode = 329
-    versionName = "2.6.10"
+    versionCode = 330
+    versionName = "2.6.11"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -298,8 +298,31 @@ android {
 
   buildTypes {
     release {
-      isCrunchPngs = false
-      isMinifyEnabled = false
+      // ======================================================================
+      // v2.6.11：**首次启用 R8 代码裁剪 + 资源压缩**
+      // ----------------------------------------------------------------------
+      // 在此之前（v2.6.10 及以前）release 一直是 `isMinifyEnabled = false`，
+      // `proguard-rules.pro` 也只是一份 21 行的空模板 —— 也就是说**正式包里的
+      // 31.4MB dex 一行都没删过**（实测 all-debug 包内含 14 个 dex）。
+      //
+      // 三项开关的分工：
+      //   isMinifyEnabled   —— R8 删无用类/方法/字段 + 改名（dex 主要收益来源）
+      //   isShrinkResources —— 删未被引用的 res 资源（需 minify 同时开启）
+      //   isCrunchPngs      —— 对 png 做有损重压（本项收益 <0.2MB，顺手开）
+      //
+      // ⚠️ **风险与代价**：本项目反射/JNI 极多（三个播放内核、两套美颜引擎、
+      //    sherpa-onnx、本地 LLM、Jetty+jUPnP 投屏）。keep 规则见
+      //    `app/proguard-rules.pro`，每条都注明了对应的真实反射点。
+      //    首次开启后**必须逐项实测**：播放（Exo/IJK/MPV）+ 美颜双引擎 +
+      //    ASR + 本地 LLM + DLNA 投屏 + 四家翻译引擎 + 开源许可页。
+      //
+      // 📌 崩溃排查：产物在 `app/build/outputs/mapping/allRelease/mapping.txt`，
+      //    用 `retrace` 反混淆即可拿到原始类名与行号。
+      // 📌 debug 包**不受影响**（minify 只作用于 release buildType）。
+      // ======================================================================
+      isCrunchPngs = true
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
 
