@@ -118,15 +118,15 @@
   - All LUTs are self-generated via numpy scripts (no third-party copyright)
 
 ## 🗣️ 字幕与语音转写 / Subtitles & ASR
-- 离线语音识别：**Dolphin**（sherpa-onnx，CPU int8，**已内置进 APK，开箱即用**）
+- 离线语音识别：**Dolphin**（sherpa-onnx，CPU int8，**首次使用时按需下载**）
   - **40 种东方语言 + 22 种中文方言**，自带语种识别（LID），无需指定语言
   - 中文 WER 9.2%（Whisper large-v3 为 27.9%）；RTF 0.094（官方四个 Dolphin 变体中最快）
-  - **模型已内置**（约 229MB 打进 APK），开箱即用、无需联网下载
-  - 语言选择里的**「自动」= 直接使用随包内置的 Dolphin**（真·语种识别，不是下载版）：点「自动」后模型来源显示为「内置版（assets）」，面板上该 chip 会正常高亮（v2.1.246 修复）
-  - Offline ASR: **Dolphin bundled in the APK** — 40 Eastern languages + 22 Chinese dialects with auto language detection, no download needed. The 「Auto」 entry in the language picker routes to the **bundled** Dolphin (source label: *built-in (assets)*), fixed in v2.1.246
+  - **模型约 100MB，不再随 APK 内置**（v2.6.11 起，安装包因此小约 100MB）：在字幕面板模型状态旁点「下载」即可，支持断点续传，**下完永久离线可用**；一次下载覆盖全部 62 项语言与方言
+  - 语言选择里的**「自动」**走同一份本地模型（真·语种识别）；模型未下载时面板会显示「需下载」并给出下载入口，不会出现「不可用且无从下手」的死状态
+  - Offline ASR: **Dolphin**, **downloaded on first use** — 40 Eastern languages + 22 Chinese dialects with auto language detection. Since v2.6.11 the ~100MB model is no longer bundled (keeping the APK ~100MB smaller); tap "Download" next to the model status in the subtitle panel (resumable), then it works fully offline. One download covers all 62 languages & dialects; the 「Auto」 entry uses the same local model and the panel always offers a download entry when it is missing
 - 🌍 **多语言扩展识别（共 17 种语言）/ Multi-language ASR (17 languages)**
-  - 内置 5 语之外，可在设置里**按需下载**官方离线模型：越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
-  - Beyond the 5 bundled languages, more official offline models can be **downloaded on demand** in Settings: Vietnamese / Russian / French / German / Spanish / Belarusian / Croatian / Italian / Polish / Ukrainian / Thai
+  - Dolphin 覆盖的 62 项语言/方言之外，可在设置里**按需下载**官方离线模型：越南语 / 俄语 / 法语 / 德语 / 西班牙语 / 白俄罗斯语 / 克罗地亚语 / 意大利语 / 波兰语 / 乌克兰语 / 泰语
+  - Beyond the 62 languages & dialects covered by Dolphin, more official offline models can be **downloaded on demand** in Settings: Vietnamese / Russian / French / German / Spanish / Belarusian / Croatian / Italian / Polish / Ukrainian / Thai
   - **模型不打进 APK**（否则安装包会涨到 1GB+），下载到**应用私有目录**，因此**不需要任何存储权限**
   - Models are **NOT bundled** (the APK would exceed 1GB) and are downloaded into the **app-private directory**, so **no storage permission is required**
   - 11 种语言共用同一份 FastConformer 模型 → **下载一次，这 11 种语言全部可用**
@@ -324,7 +324,7 @@
 
 | 语言 / Language | 模型 / Model | 体积 / Size | 下载源 / Source |
 |---|---|---|---|
-| 自动 · 中 · 日 · 韩 · 粤 · 英语 · 22 种中文方言 · 40 种东方语言<br>auto / zh / ja / ko / yue / en / 22 Chinese dialects / 40 Eastern languages | **Dolphin**（**已内置 / bundled**） | 随 APK（99MB）<br>in APK (99MB) | 无需下载 / none |
+| 自动 · 中 · 日 · 韩 · 粤 · 英语 · 22 种中文方言 · 40 种东方语言<br>auto / zh / ja / ko / yue / en / 22 Chinese dialects / 40 Eastern languages | **Dolphin**（**按需下载 / on-demand**） | ≈100MB（首次使用下载）<br>≈100MB (downloaded on first use) | ModelScope（按文件、断点续传）<br>ModelScope, resumable |
 | 越南语 / Vietnamese | `sherpa-onnx-zipformer-vi-int8` | ≈74MB | hf-mirror |
 | 俄·法·德·西·白俄·克·意·波·乌<br>ru / fr / de / es / be / hr / it / pl / uk | `NeMo FastConformer 20k int8`<br>（**一个模型覆盖 11 语 / one model, 11 languages**） | 整包 102MB → 解压 ≈132MB<br>pkg 102MB → ≈132MB extracted | GitHub releases |
 | 泰语 / Thai | `sherpa-onnx-zipformer-thai-2024-06-20` | 整包 664MB → 解压 ≈154MB<br>pkg 664MB → ≈154MB extracted | GitHub releases |

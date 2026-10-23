@@ -776,7 +776,9 @@ object AsrExtModels {
      * 直接显示在「按模型分类」的组标题里会非常长且难懂。
      */
     fun friendlyModelName(modelId: String): String = when {
-        modelId == "builtin" -> "Dolphin（内置）"
+        // v2.6.11：Dolphin 已不再随包内置（改按需下载），「（内置）」字样会误导
+        //   （它出现在旧版本 prefs 里的 modelChoice="builtin" 上，也见于候选列表标题）。
+        modelId == "builtin" -> "Dolphin"
         modelId.startsWith("dolphin") -> "Dolphin"
         modelId.startsWith("sense-voice") -> "SenseVoice"
         modelId.startsWith("parakeet") -> "Parakeet v3"

@@ -149,6 +149,31 @@ object SherpaAsrManager {
         return m.isFile && m.length() > 1_000_000L && t.isFile && t.length() > 1000L
     }
 
+    /**
+     * 🔴 v2.6.11：Dolphin 模型**本地是否可用**（随包内置 assets 或已下载到 filesDir）。
+     *
+     * **为什么必须用这个函数、而不是直接调 [dolphinAssetAvailable]**
+     * ------------------------------------------------------------------
+     * 模型文件（99MB）已从 APK 的 `assets/dolphin/` **移除**，改为首次使用时按需下载。
+     * 因此 `dolphinAssetAvailable()` 在绝大多数设备上**恒为 false**。
+     * 凡是判断「该语言是否开箱即用 / 还需不需要下载」的地方，都必须看本函数，
+     * 否则会把「其实要下载」误判成「已内置、无需下载」→ UI 禁用下载按钮，
+     * 而识别器创建又因文件缺失失败 → 用户卡在「模型不可用」且无从下载。
+     *
+     * ⚠️ 反过来也要注意：判断「用 asset 路径还是 filesDir 路径装配识别器」时，
+     *    必须用 [dolphinAssetAvailable]（只有 asset 存在才能传 AssetManager），
+     *    不能把本函数的结果当成「有 assets」。
+     */
+    fun dolphinUsable(context: Context): Boolean =
+        dolphinAssetAvailable(context) || downloadedDolphinReady(context)
+
+    /**
+     * Dolphin 模型体积（MB）——用于「需下载」提示。
+     * 取模型表里的声明值，避免在 UI 侧再写一个 100 的魔法数字。
+     */
+    private fun dolphinModelSizeMb(): Int =
+        AsrExtModels.DOLPHIN_ALL.firstOrNull()?.sizeMb ?: 100
+
     // v2.1.244：原 `assetModelAvailable()`（探测 SenseVoice 内置 assets）已删除。
     // 它自 v2.1.214（assets 移除）起就成了死代码，且每次调用都必然打出
     // 「内置模型不可用：sense-voice/model.int8.onnx」的 W 级警告（纯噪音）。
@@ -307,19 +332,22 @@ object SherpaAsrManager {
     /**
      * 单个 chip 归属哪个分类（互斥，按 [AsrLangCategory] 表的顺序取第一个命中）。
      *
-     * 「内置」的判据是 **模型是不是内置 Dolphin**（而不是该语言是否在五语列表里）——
-     * Dolphin 本身是多语种模型、随 APK 发布，凡由它背书的 chip 都不需要下载。
+     * ⚠️ v2.6.11：**「内置」的判据从「模型是不是 Dolphin」改为「Dolphin 是否真的本地可用」**。
+     *   模型资产已从 APK 移除（改为按需下载），若仍按 `modelId` 静态判定，
+     *   这批语言会被归进「内置模型语言」组、看着像开箱即用，实际却要下载 —— 分类名误导。
+     *   现在：内置或已下载 → BUILTIN（本地已有，无需下载）；否则 → DOWNLOAD。
      */
-    fun categoryOf(chip: SherpaLang): AsrLangCategory = when {
+    fun categoryOf(context: Context, chip: SherpaLang): AsrLangCategory = when {
         AsrExtModels.isCommonKey(chip.code) -> AsrLangCategory.COMMON
         isCjkEnKey(chip.code) -> AsrLangCategory.CJK_EN
-        chip.modelId == AsrExtModels.DOLPHIN_DIR -> AsrLangCategory.BUILTIN
+        chip.modelId == AsrExtModels.DOLPHIN_DIR ->
+            if (dolphinUsable(context)) AsrLangCategory.BUILTIN else AsrLangCategory.DOWNLOAD
         else -> AsrLangCategory.DOWNLOAD
     }
 
     /** 按四项分类收纳后的 chip 分组（已按 [AsrLangCategory.sortOrder] 排序） */
-    fun groupedByCategory(): List<Pair<AsrLangCategory, List<SherpaLang>>> {
-        val byCat = sherpaLanguages.groupBy { categoryOf(it) }
+    fun groupedByCategory(context: Context): List<Pair<AsrLangCategory, List<SherpaLang>>> {
+        val byCat = sherpaLanguages.groupBy { categoryOf(context, it) }
         return AsrLangCategory.values()
             .sortedBy { it.sortOrder }
             .mapNotNull { cat -> byCat[cat]?.let { cat to it } }
@@ -351,8 +379,7 @@ object SherpaAsrManager {
      * 已移除、且内置地位由 Dolphin 接管 → 这两个判据都已失效（前者查的是废弃目录，
      * 后者恒 false）。改为按 **Dolphin** 判定，与 `activeModelSource` 保持一致。
      */
-    fun isModelReady(context: Context): Boolean =
-        dolphinAssetAvailable(context) || downloadedDolphinReady(context)
+    fun isModelReady(context: Context): Boolean = dolphinUsable(context)
 
     // ===== 下载管理 =====
 
@@ -577,8 +604,10 @@ object SherpaAsrManager {
         threads: Int = 0
     ): OfflineRecognizer? {
         lastInitError = null
-        if (!dolphinAssetAvailable(context) && !downloadedDolphinReady(context)) {
-            Log.w(TAG, "Dolphin not available（内置 assets 缺失且无下载版）")
+        if (!dolphinUsable(context)) {
+            // v2.6.11：Dolphin 已不再随包内置 —— 最常见的原因是**用户还没下载**（不是资源损坏），
+            //   故日志文案反过来写，便于排查时第一时间分清「没下」与「下载了但残缺」。
+            Log.w(TAG, "Dolphin not available（未下载，且无内置 assets）")
             lastInitError = context.getString(R.string.asr_dolphin_unavailable)
             return null
         }
@@ -683,7 +712,7 @@ object SherpaAsrManager {
             if (cands.any { it.modelType == "dolphin" && dolphinAssetAvailable(context) }) return true
             return cands.any { isExtModelReady(context, it) }
         }
-        return dolphinAssetAvailable(context) || downloadedDolphinReady(context)
+        return dolphinUsable(context)
     }
 
     /**
@@ -707,9 +736,13 @@ object SherpaAsrManager {
             return Triple(AsrExtModels.friendlyModelName(m.dirName), m.sizeMb, true)
         }
         val cands = AsrExtModels.candidatesByKey(langKey)
-        // v2.1.208：内置模型已改为 Dolphin（SenseVoice 已移除），无扩展候选时显示 Dolphin。
-        // 体积给 0：Dolphin 是**随 APK 内置**的，不该让用户看到"需下载 99MB"。
-        if (cands.isEmpty()) return Triple("Dolphin", 0, false)
+        // 🔴 v2.6.11：Dolphin 已改为**按需下载**，这里不能再恒返回「0MB / 非扩展」。
+        //   否则 UI 认为无需下载 → 下载按钮被禁用，而 createDolphinRecognizer 又因
+        //   文件缺失返回 null → 用户卡在「模型不可用」且**没有任何下载入口**（死状态）。
+        if (cands.isEmpty()) {
+            return if (dolphinUsable(context)) Triple("Dolphin", 0, false)
+            else Triple("Dolphin", dolphinModelSizeMb(), true)
+        }
         // ⚠️ Dolphin 已内置（assets 完好）→ 直接返回「内置、0MB、非扩展下载」三态，
         //    否则会走到下面的 pick 分支、显示成需要下载的扩展模型（且体积 99MB），
         //    与「开箱即用」的实际体验矛盾。
@@ -820,17 +853,22 @@ object SherpaAsrManager {
         // v2.1.223：Dolphin 随 APK 内置（体积 0、随包可用），因此作为「内置项」列出。
         // ⚠️ 原来这里硬编码 `true`（意为"需下载"），是 SenseVoice 时代的残留 ——
         //    内置化之后必须改为 assets 的实际可用性，否则 UI 会显示"需下载"却其实已内置。
-        if (langKey in BUILTIN_LANGS) {
+        // 🔴 v2.6.11：Dolphin 改为按需下载后，「本地已有」的判据从「有 assets」换成 [dolphinUsable]。
+        //   **未下载时不再列这条 0MB 的 builtin 项** —— 否则它会与下面 100MB 的 Dolphin
+        //   扩展项同时出现（两条同名、一条 0MB 一条 100MB），且那条 0MB 的点了也用不了。
+        val dolphinLocal = dolphinUsable(context)
+        if (langKey in BUILTIN_LANGS && dolphinLocal) {
             out += AsrModelCandidate(
                 id = "builtin",
+                // 语义已从「随包内置」变为「本地已有（内置或已下载）」——体积 0 表示无需再下载
                 label = "Dolphin",
                 sizeMb = 0,
-                builtin = dolphinAssetAvailable(context)
+                builtin = true
             )
         }
-        // ⚠️ 已内置（assets 完好）时不再把 Dolphin 作为「扩展下载项」重复列出 ——
-        //    否则同一语言会出现两条 Dolphin（一条 0MB 内置、一条 100MB 需下载），自相矛盾。
-        val dolphinBundled = dolphinAssetAvailable(context)
+        // ⚠️ 本地已有（内置或已下载）时不再把 Dolphin 作为「扩展下载项」重复列出 ——
+        //    否则同一语言会出现两条 Dolphin（一条 0MB 可用、一条 100MB 需下载），自相矛盾。
+        val dolphinBundled = dolphinLocal
         AsrExtModels.candidatesByKey(langKey).forEach { ext ->
             if (ext.modelType == "dolphin" && dolphinBundled) return@forEach
             out += AsrModelCandidate(ext.dirName, ext.dirName, ext.sizeMb, false)
@@ -868,8 +906,9 @@ object SherpaAsrManager {
      */
     fun isDownloadNeededFor(context: Context, langKey: String): Boolean {
         val cands = AsrExtModels.candidatesByKey(langKey)
-        // 无扩展候选 → 走内置 Dolphin（随 APK），nothing to download
-        if (cands.isEmpty()) return false
+        // v2.6.11：无扩展候选 → 由 Dolphin 承接。它已不再随包内置，
+        //   未下载时必须允许下载，否则这些语言会显示「模型不可用」而按钮禁用、无从下手。
+        if (cands.isEmpty()) return !dolphinUsable(context)
         // v2.4.29：**用户明确选了某个候选时只看该候选** —— 否则「选了 SenseVoice（中/日/韩/粤
         //   也登记了它）却因该语言另有内置 Dolphin 而显示『无需下载』」→ 选中后初始化失败。
         chosenExtModel(context, langKey)?.let { return !isExtModelReady(context, it) }
@@ -892,7 +931,19 @@ object SherpaAsrManager {
     fun startDownloadFor(context: Context, langKey: String) {
         val cands = AsrExtModels.candidatesByKey(langKey)
         if (cands.isEmpty()) {
-            Log.i(TAG, "startDownloadFor($langKey)：无扩展候选，由内置 Dolphin 覆盖，无需下载")
+            // v2.6.11：Dolphin 不再随包内置 —— 无扩展候选的语言必须**真的去下载它**，
+            //   而不是像以前那样直接 return（那样按钮点了没反应，用户以为坏了）。
+            if (dolphinUsable(context)) {
+                Log.i(TAG, "startDownloadFor($langKey)：无扩展候选，Dolphin 已可用，无需下载")
+                return
+            }
+            val target = AsrExtModels.DOLPHIN_ALL.firstOrNull()
+            if (target == null) {
+                Log.w(TAG, "startDownloadFor($langKey)：无扩展候选且模型表无 Dolphin 条目，无法下载")
+                return
+            }
+            Log.i(TAG, "startDownloadFor($langKey)：无扩展候选 → 下载 Dolphin（${target.sizeMb}MB）")
+            startExtModelDownload(context, target)
             return
         }
         // v2.4.29：**用户明确选了某个候选 → 优先下它**（即使该语言另有内置 Dolphin 覆盖）。

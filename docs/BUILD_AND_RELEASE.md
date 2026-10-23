@@ -24,19 +24,23 @@
 >
 > This repo has **no Gradle Wrapper** — invoke your local Gradle installation instead of `gradlew`.
 
-## 第一步：拉取内置 ASR 模型（首次 clone 后必做）/ Fetch bundled ASR model
+## 第一步（可选）：把 ASR 模型预置进 APK / Optional: pre-bundle the ASR model
 
-`model.int8.onnx`（约 228MB）超过 GitHub 单文件 100MB 限制，**不纳入 git**，
-需先跑脚本拉到 `app/src/main/assets/sense-voice/`，否则 APK 不会内置模型
-（仍能编译，但离线字幕会退回运行时下载模式）。
+**默认不需要这一步。** v2.6.11 起，ASR 模型（Dolphin，约 100MB）**不再随包分发** ——
+安装后首次使用语音识别时由 App 按需下载（ModelScope 按文件、支持断点续传），
+因此 **clone 下来直接编译即可得到完整可用的 APK**（体积小约 100MB）。
+
+只有在需要「离线安装、装完即用 ASR」的场景（如内网分发、无网环境部署）时，
+才把模型预置回 `app/src/main/assets/dolphin/`：
 
 ```powershell
 python scripts/fetch_asr_model.py          # 缺失才下载，支持断点续传
 python scripts/fetch_asr_model.py --check  # 只检查是否就绪
 ```
 
-> 镜像源为 `hf-mirror.com`；不可达时脚本会提示手动下载地址（HuggingFace 官方仓库）。
-> 多语言（17 语）模型中只有 SenseVoice 需要随包：**其余 11 种语言由 App 运行时按需下载**。
+> 预置后 APK 会增大约 100MB。镜像源为 `hf-mirror.com`；
+> 不可达时脚本会提示手动下载地址（HuggingFace 官方仓库）。
+> 预置的模型优先级高于下载版：只要 assets 完好就一直用它，不走网络。
 >
 > Mirror: `hf-mirror.com`; the script prints a manual download URL when unreachable.
 > Of the 17 languages, **only SenseVoice ships inside the APK** — the other 11 are downloaded on demand at runtime.
@@ -48,7 +52,7 @@ python scripts/fetch_asr_model.py --check  # 只检查是否就绪
 gradle.bat assembleDebug
 
 # Release 包（正式分发，必须！见 RELEASE_SIGNING.md）
-# 产物：app\build\outputs\apk\release\Aura-face-VR-Player-v<版本>.apk（单包全架构，含内置模型）
+# 产物：app\build\outputs\apk\all\release\Aura-Lens-v<版本>-all.apk（单 APK，arm64-v8a）
 gradle.bat assembleRelease
 
 # 依赖许可证清单导出

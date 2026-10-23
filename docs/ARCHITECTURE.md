@@ -41,7 +41,7 @@
 | `BeautySettingsSections.kt` | Compose | 美颜/模式提示/对比原图/预设等设置区块（v120–v121 拆出） |
 | `VRPlayerComponents.kt` | Compose | 通用组件：`TooltipIconButton` / `BeautySliderItem` / `ExperimentalSwitchRow` |
 | `MediaPipeFaceManager.kt` | MediaPipe Tasks | 468 点人脸关键点检测（arm64 真机） |
-| `SherpaAsrManager.kt` | sherpa-onnx | 识别器管理：内置 SenseVoice + **可下载的多语言扩展模型（transducer）**；含断点续传 / 整包解压 / 尺寸校验 |
+| `SherpaAsrManager.kt` | sherpa-onnx | 识别器管理：**Dolphin（按需下载）/ SenseVoice / FastConformer / Parakeet** 多候选装配；含断点续传 / 整包解压 / 尺寸校验 / 单模型冷却 |
 | `AsrExtModels.kt` | 自研 | **多语言扩展模型注册表**（语言 → 文件名清单 / 下载源 / 校验体积）；支持**多语言共用一个模型** |
 | `RealtimeSubtitleEngine.kt` | 自研 | 实时字幕引擎：独立音频解码 + Silero VAD + 优先级调度 + seek 处理 |
 | `SubtitleCache.kt` | 自研 | 字幕稀疏时间索引（TreeMap + 二分查找，O(log n)） |
@@ -67,14 +67,14 @@ Aura-face-VR-Player/
 │       │   ├── gpupixel/          # GPUPixel 引擎资源（⚠️ 不可删！7 张 lookup png + 2 个 .mars_model）
 │       │   ├── face_landmarker.task  # MediaPipe 人脸模型
 │       │   ├── silero_vad.onnx    # Silero VAD 语音活动检测（629KB）
-│       │   ├── sense-voice/       # SenseVoice 识别模型（内置；model.int8.onnx 由 scripts/fetch_asr_model.py 拉取）
+│       │   │                      # 注：ASR 模型（Dolphin ~100MB）v2.6.11 起**不再随包**，首次使用按需下载
 │       │   └── licenses.json      # 开源许可清单（自动生成）
 │       ├── cpp/                   # 华为 VR Glass 的 OpenXR 原生会话层
 │       └── res/                   # 资源与字体（MiSans/OPPO Sans）
 ├── third_party/gpupixel/          # GPUPixel（git submodule，源码级集成；其 src/res 亦为 assets/gpupixel 的来源）
 ├── docs/                          # 专题文档（见下方「文档索引」）
 ├── gradle/libs.versions.toml      # 依赖版本目录
-├── scripts/fetch_asr_model.py     # 内置 ASR 模型拉取脚本（hf-mirror，支持断点续传）
+├── scripts/fetch_asr_model.py     # 可选：把 ASR 模型预置回 assets（默认不内置，运行时按需下载）
 ├── scripts/gen_licenses.py        # 许可清单生成脚本
 ├── LICENSE                        # Apache License 2.0
 ├── RELEASE_SIGNING.md             # 签名与发布流程

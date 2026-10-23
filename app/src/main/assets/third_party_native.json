@@ -114,7 +114,7 @@
           "version": "small · int8 ONNX",
           "license": "Apache-2.0",
           "url": "https://huggingface.co/DataoceanAI/dolphin-small",
-          "note": "随包内置；权重由上游 PyTorch 转换为 ONNX int8。允许商用（核实于 2026-10-18）。"
+          "note": "v2.6.11 起**不再随包内置**，改为首次使用时按需下载（约 100MB，可断点续传）；权重由上游 PyTorch 转换为 ONNX int8。允许商用（核实于 2026-10-18）。"
         },
         {
           "name": "MiniCPM-V 4.7 1B (OpenBMB)",

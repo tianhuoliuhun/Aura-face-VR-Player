@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,6 +68,9 @@ fun AsrLanguageChips(
     /** 每行几个 chip（悬浮窗窄一点放 4 个刚好） */
     columns: Int = 4
 ) {
+    // v2.6.11：分类需要 context —— Dolphin 已改为按需下载，「内置模型语言」这一组
+    //   是否成立取决于模型是否**本地可用**（内置 assets 或已下载），不能再静态判定。
+    val context = LocalContext.current
     // —— 浏览态是**临时**的，不持久化（折叠 / 视角只是当前这次查看的方式）——
     // v2.1.231：默认视角由「按模型」改为「按四项分类」（用户反馈按模型找语言太绕），
     //           「按模型」作为对比视角保留。
@@ -126,7 +130,7 @@ fun AsrLanguageChips(
             // ================= 四项分类（可折叠） =================
             // 常用语言 / 中日韩英 / 内置模型语言 / 下载模型语言，四类互斥 ——
             // 每个 chip 只出现一次，面板不会因重复铺开而变得难找。
-            SherpaAsrManager.groupedByCategory().forEach { (cat, langs) ->
+            SherpaAsrManager.groupedByCategory(context).forEach { (cat, langs) ->
                 val cCollapsed = cat.name in collapsedGroups
                 Row(
                     modifier = Modifier
