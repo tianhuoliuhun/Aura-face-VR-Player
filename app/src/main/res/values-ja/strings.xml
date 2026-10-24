@@ -398,7 +398,7 @@
     <string name="downscaling_title">解像度を変換中</string>
     <string name="downscaling_desc">8K 動画をハードウェアエンコーダで高画質のまま低解像度へ変換しています。アプリを終了しないでください。</string>
     <string name="cd_beauty_icon">美顔</string>
-    <string name="app_desc">美顔VRプレーヤー</string>
+    <string name="app_desc">Aura Lens</string>
     <string name="current_media">再生中：%1$s</string>
     <string name="cd_vr_split_mode">VR 分割表示モード</string>
     <string name="cd_drag_thumbnail">シーク時のプレビュー</string>

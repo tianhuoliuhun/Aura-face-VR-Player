@@ -398,7 +398,7 @@
     <string name="downscaling_title">해상도 변환 중</string>
     <string name="downscaling_desc">8K 영상을 하드웨어 인코더로 더 작은 해상도로 고화질 변환하고 있습니다. 앱을 종료하지 마세요.</string>
     <string name="cd_beauty_icon">미용</string>
-    <string name="app_desc">미안 VR 플레이어</string>
+    <string name="app_desc">Aura Lens</string>
     <string name="current_media">재생 중: %1$s</string>
     <string name="cd_vr_split_mode">VR 분할 화면 모드</string>
     <string name="cd_drag_thumbnail">탐색 미리보기</string>

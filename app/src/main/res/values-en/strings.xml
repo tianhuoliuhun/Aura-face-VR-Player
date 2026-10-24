@@ -432,7 +432,7 @@
     <string name="downscaling_title">Downscaling video</string>
     <string name="downscaling_desc">Re-encoding the 8K video to a smaller resolution with the hardware encoder for smooth playback. Please keep the app open.</string>
     <string name="cd_beauty_icon">Beauty</string>
-    <string name="app_desc">Beauty VR Player</string>
+    <string name="app_desc">Aura Lens</string>
     <string name="current_media">Now playing: %1$s</string>
     <string name="cd_vr_split_mode">VR split-screen mode</string>
     <string name="cd_drag_thumbnail">Scrub preview thumbnail</string>

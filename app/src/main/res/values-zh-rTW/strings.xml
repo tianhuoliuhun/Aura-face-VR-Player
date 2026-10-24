@@ -434,7 +434,7 @@
     <string name="downscaling_title">視頻分辨率降軌轉換中</string>
     <string name="downscaling_desc">正在利用底層硬件編碼器將 8K 超清視頻高保真轉碼爲較小分辨率以保證完美流暢播放。請勿退出應用。</string>
     <string name="cd_beauty_icon">美顏圖標</string>
-    <string name="app_desc">美顏VR播放器</string>
+    <string name="app_desc">Aura Lens 靈境</string>
     <string name="current_media">當前媒體：%1$s</string>
     <string name="cd_vr_split_mode">VR分屏戴戴模式</string>
     <string name="cd_drag_thumbnail">視頻拖拽預覽縮略圖</string>
