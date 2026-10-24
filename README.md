@@ -24,6 +24,10 @@
 
 ![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
+<p align="center">
+  <img src="docs/images/hero.png" alt="Aura Lens 灵境 · 移动端专业级美颜 VR 播放器" width="100%">
+</p>
+
 ---
 
 ## ✨ 功能亮点 / Highlights
@@ -48,6 +52,27 @@
 | 🎞️ **多内核与格式兼容**<br>Multi-kernel & Formats | **四个内核可选**（EXO / IJK / MPV / 系统解码）+ 自动路由：打开 **WMV / ASF / RM / RMVB / ISO / VOB** 等片源时**本次自动切换**到能吃它的内核（不改写你的设置）。**MPV 已内置进 APK**，无需下载即可播放上述格式<br>Four selectable kernels with container-based auto-routing; **MPV is bundled in-APK** so WMV/ASF/RM/RMVB/ISO/VOB play out of the box |
 | 📄 **字幕格式**<br>Subtitle Formats | 外挂 **SRT / VTT / ASS / SSA**（按内容自动识别）；**MKV 内挂 ASS/SRT 字幕轨**也可切换；字幕文件**编码自动探测**（BOM / UTF-8 / GBK / Big5），中文老字幕不再乱码<br>External **SRT / VTT / ASS / SSA** (auto-detected), **embedded ASS/SRT in MKV**, and charset auto-detection (BOM / UTF-8 / GBK / Big5) |
 | ✅ **AI 弹幕**<br>AI Danmaku | **v2.4.0 起弹幕真正上屏，v2.4.1 起可用 AI 台词作为素材，v2.4.2 面板与字幕统一并加预设人格，v2.4.4 换默认端点并加「测试连接」，v2.4.5 失败原因如实显示，v2.4.6 行距自适应 + 随机颜色，v2.4.7 时间戳正态抖动 + 外部弹幕导入**：独立顶级设置分组 + 颜色（文字/描边/背景，与字幕色独立）；**颜色模式三选一**（单一颜色 / **完全随机** / **80% 白 + 其余随机**，逐条独立掷色、入队时定死；随机色板 6 色**含黑除外**，因弹幕无底框、黑字在暗场景不可读）；**行距自适应**（轨道高度 = `max(字号 × 1.9, 区域高 ÷ 轨道数)`，字号调大时行距自动变大、不再上下贴紧）；**时间戳正态抖动**（同批弹幕以基准时刻为均值做高斯抖动、±2.5σ 截断，抖动**只向未来**取用并按升序分配给原下标 → 保持 AI 返回顺序严格单调、错落出现而非「一坨同时冒出」，且每条都从屏幕右侧飞入；强度可调、0 = 关闭）；**外部弹幕导入**（「内容来源」二选一：AI 生成 / 本地导入，支持 **B 站 XML** 与 **JSON 数组**、逐条容错、只收滚动类；导入内容只驻留内存不占 prefs，seek 自动重置游标）；六个**可折叠区块**（展开状态跨会话记忆），**「预设风格」chip 一行选**（默认/搞笑/影迷/情绪/安静，点选填入提示词**不锁定**、手改即转「自定义」）；**素材三选一**（画面+台词 / 仅画面 / 仅台词，台词取自当前位置前 15 秒 / 后 5 秒的 AI 字幕，仅台词模式**不请求截图**、更快更省流量）；画面识别（OpenAI 兼容 `image_url`，默认 **AMD Radeon 平台 · MiMo-V2.6-Flash**）→ 弹幕引擎（相似度去重 + 轨道避让，附单测）→ **在画面上方约 30% 区域分轨道实时飘出**。**分屏 VR 左右眼各一份**，暂停即冻结、seek 即清空；**「测试连接」按钮**一次点按即逐类报出「密钥无效 / 模型名不被识别 / 连接被重置 / 超时」等原因，不再需要翻日志<br>**Danmaku lands on screen in v2.4.0; v2.4.1 adds AI subtitle lines as source material; v2.4.2 unifies the panel with subtitles and adds persona presets; v2.4.4 changes the default endpoint and adds "Test connection"; v2.4.5 makes failures report their real cause; v2.4.6 adds adaptive line spacing and random colors; v2.4.7 adds normal-distributed timestamps and external import**: own settings group + color (text/stroke/background, independent from subtitles); **three color modes** (single / **fully random** / **80% white + random** — rolled per danmaku and fixed at enqueue time; the 6-color palette **excludes black** since danmaku has no backing box); **adaptive line spacing** (track height = `max(font size × 1.9, area height ÷ track count)`); **normal-distributed timestamps** (Gaussian jitter around the batch base instant, clipped at ±2.5σ; jitters are **sorted then consumed by original index**, keeping the AI output order strictly monotonic so danmaku stagger instead of clumping; strength is adjustable, 0 = off); **external danmaku import** ("Content source": AI generated / local import, supporting **Bilibili XML** and **JSON arrays** with per-item fault tolerance and scrolling-only filtering; imported content stays in memory rather than prefs, and seek resets the cursor); six **collapsible sections** (state persisted) and a **preset-style chip row** (Default / Comedy / Cinephile / Emotional / Calm — fills the prompt **without locking it**); **three-way source** (frame+lines / frame only / lines only — lines taken from AI subtitles 15s before and 5s after the playhead; lines-only mode **sends no screenshot**, faster and lighter); vision (OpenAI-compatible `image_url`, defaults to the **AMD Radeon platform · MiMo-V2.6-Flash**) → engine (dedup + track avoidance, unit tested) → **scrolling across the top ~30% of the screen on multiple tracks**. Per-eye rendering in split-screen VR; pause freezes, seek clears; the **"Test connection" button** reports invalid key / model not found / reset connection / timeout individually, no more log digging |
+
+---
+
+## 📸 界面预览 / Screenshots
+
+> 下面的截图均来自 v2.6.11 的真实运行画面（模拟器 2560×1440），演示片源为示意素材。
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/images/shot-vr.jpg" alt="360° 全景播放"><br><b>360°/180° 全景 · 鱼眼 · 平面</b><br><sub>四种投影随意切换，<b>普通 2D 视频开箱即播</b></sub></td>
+    <td width="50%" align="center"><img src="docs/images/shot-split.jpg" alt="分屏 VR"><br><b>分屏 VR（SBS）</b><br><sub>左右眼各渲染一份，配合 VR 眼镜使用</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/shot-beauty.jpg" alt="实时 AI 美颜"><br><b>实时 AI 美颜</b><br><sub>478 点人像精修 · GLSL / GPUPixel 双引擎</sub></td>
+    <td align="center"><img src="docs/images/shot-translate.jpg" alt="字幕与翻译"><br><b>字幕与 15 种翻译引擎</b><br><sub>离线 ASR 转写 + 实时 AI 翻译，双语对照</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/shot-settings.jpg" alt="设置面板与玻璃材质"><br><b>三档玻璃材质</b><br><sub>纯色 / 液态 / 磨砂，调参即改即生效</sub></td>
+    <td align="center"><b>四播放内核 · 格式兼容</b><br><sub>EXO / IJK / MPV / 系统解码自动路由<br>WMV · ASF · RMVB · ISO · VOB 直接播</sub><br><br><b>画质增强</b><br><sub>MEMC 插帧 48–120fps + FSR 超分</sub></td>
+  </tr>
+</table>
 
 ---
 
