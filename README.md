@@ -69,10 +69,11 @@
     <td align="center"><img src="docs/images/shot-translate.jpg" alt="字幕与翻译"><br><b>字幕与 15 种翻译引擎</b><br><sub>离线 ASR 转写 + 实时 AI 翻译，双语对照</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/shot-settings.jpg" alt="设置面板与玻璃材质"><br><b>三档玻璃材质</b><br><sub>纯色 / 液态 / 磨砂，调参即改即生效</sub></td>
-    <td align="center"><b>四播放内核 · 格式兼容</b><br><sub>EXO / IJK / MPV / 系统解码自动路由<br>WMV · ASF · RMVB · ISO · VOB 直接播</sub><br><br><b>画质增强</b><br><sub>MEMC 插帧 48–120fps + FSR 超分</sub></td>
+    <td colspan="2" align="center"><img src="docs/images/shot-settings.jpg" alt="设置面板与玻璃材质" width="92%"><br><b>三档玻璃材质</b> · 纯色 / 液态 / 磨砂，调参即改即生效</td>
   </tr>
 </table>
+
+另有 **四播放内核自动路由**（EXO / IJK / MPV / 系统解码，WMV · ASF · RMVB · ISO · VOB 直接播）与 **画质增强**（MEMC 插帧 48–120fps + FSR 超分），详见上方功能表。
 
 ---
 
