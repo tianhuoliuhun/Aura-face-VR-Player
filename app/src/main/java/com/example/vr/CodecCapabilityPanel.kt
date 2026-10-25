@@ -138,6 +138,12 @@ fun CodecCapabilitySection(
             label = stringResource(R.string.codec_probe_best_codec),
             value = best?.name ?: "—"
         )
+        // VR 全景两档单独列：最高档只说「能吃多大」，不说「8192×4096 这张行不行」
+        SummaryLine(
+            label = stringResource(R.string.codec_probe_vr_tiers),
+            value = CodecCapabilityModel.vrTiersText(best),
+            highlight = accentColor
+        )
         SummaryLine(
             label = stringResource(R.string.codec_probe_counts),
             value = stringResource(
@@ -417,6 +423,8 @@ private fun CodecRow(
                 if (v.adaptive) add("adaptive")
                 if (v.tunneled) add("tunneled")
                 if (v.maxInstances > 0) add("×${v.maxInstances}")
+                val vrOk = CodecCapabilityModel.vrTiersSupportedText(v)
+                if (vrOk.isNotEmpty()) add("VR $vrOk")
             }
             if (extra.isNotEmpty()) {
                 Text(

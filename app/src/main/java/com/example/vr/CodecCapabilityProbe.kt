@@ -193,6 +193,41 @@ object CodecCapabilityProbe {
             emptyList()
         }
 
+        // VR 全景档位：与上面的「最高档」分开逐项各测一次。
+        // 为什么不能只靠上面那组：2:1 的片子宽度常先撞 supportedWidths.upper
+        // （很多 8K 解码器标称宽只到 7680），而上面那组只会保留一个命中项。
+        //
+        // ⚠️ 不支持的档还要回答「差在哪」：实测机型上 7680×4320 能解、8192×4096 不能，
+        // 像素只差 1.1%，标称宽度都是 8192 —— 卡的是 block-count。只有
+        // getSupportedWidthsFor(h) / getSupportedHeightsFor(w) 这种「固定一维问另一维」的
+        // 问法才能把真正的上限逼出来，所以这里顺带把它记下（见 VrSupport.limitWidth）。
+        val vrTiers = CodecCapabilityModel.VR_PANORAMA_TIERS.map { (w, h) ->
+            val withinRange = w <= widths.upper && h <= heights.upper
+            val ok = withinRange && try {
+                vc.isSizeSupported(w, h)
+            } catch (e: Exception) {
+                false
+            }
+            CodecCapabilityModel.VrSupport(
+                width = w,
+                height = h,
+                supported = ok,
+                maxFps = if (ok) {
+                    try {
+                        vc.getSupportedFrameRatesFor(w, h)?.upper?.toDouble() ?: 0.0
+                    } catch (e: Exception) {
+                        0.0
+                    }
+                } else {
+                    0.0
+                },
+                // 不支持时才需要「实际能到多少」：把目标尺寸按可达值收缩，语义恒为
+                // 「这一档最多能到 limitWidth×limitHeight」。
+                limitWidth = if (ok) 0 else minOf(w, widthAtHeight(vc, h, widths.upper)),
+                limitHeight = if (ok) 0 else minOf(h, heightAtWidth(vc, w, heights.upper))
+            )
+        }
+
         return CodecCapabilityModel.VideoCaps(
             minWidth = widths.lower,
             maxWidth = widths.upper,
@@ -212,7 +247,8 @@ object CodecCapabilityProbe {
             maxInstances = caps.maxSupportedInstances,
             tierWidth = tierW,
             tierHeight = tierH,
-            tierMaxFps = tierFps
+            tierMaxFps = tierFps,
+            vrTiers = vrTiers
         )
     }
 
@@ -220,6 +256,54 @@ object CodecCapabilityProbe {
         block()
     } catch (e: Exception) {
         0
+    }
+
+    /**
+     * 固定高度，问「这个高度下能到多宽」。
+     *
+     * `getSupportedWidthsFor(h)` 是公开 API，它把 block-count / 每秒块数一起算进去了；
+     * 而 `supportedWidths.upper` 只是宽度的单维上限。两者在 8K 边界上会差出关键的一档
+     * （标称 8192 宽，4096 高度下只到 7680）。
+     *
+     * ⚠️ `h` 超出 `supportedHeights` 时该 API 会抛 `IllegalArgumentException`，此时只能用单维上限。
+     */
+    private fun widthAtHeight(
+        vc: MediaCodecInfo.VideoCapabilities,
+        height: Int,
+        fallback: Int
+    ): Int {
+        if (height <= 0 || fallback <= 0) return fallback
+        val maxHeight = try {
+            vc.supportedHeights.upper
+        } catch (e: Exception) {
+            0
+        }
+        if (height > maxHeight) return fallback
+        return try {
+            vc.getSupportedWidthsFor(height)?.upper ?: fallback
+        } catch (e: Exception) {
+            fallback
+        }
+    }
+
+    /** 固定宽度，问「这个宽度下能到多高」。语义与 [widthAtHeight] 对称。 */
+    private fun heightAtWidth(
+        vc: MediaCodecInfo.VideoCapabilities,
+        width: Int,
+        fallback: Int
+    ): Int {
+        if (width <= 0 || fallback <= 0) return fallback
+        val maxWidth = try {
+            vc.supportedWidths.upper
+        } catch (e: Exception) {
+            0
+        }
+        if (width > maxWidth) return fallback
+        return try {
+            vc.getSupportedHeightsFor(width)?.upper ?: fallback
+        } catch (e: Exception) {
+            fallback
+        }
     }
 
     private fun featureSupported(caps: MediaCodecInfo.CodecCapabilities, name: String): Boolean =

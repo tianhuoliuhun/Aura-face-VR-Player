@@ -193,6 +193,7 @@
     <string name="codec_probe_failed">檢測失敗：本機 MediaCodec 未回傳可用資訊（詳見日誌 CodecCapabilityProbe）</string>
     <string name="codec_probe_best">最高硬體解碼</string>
     <string name="codec_probe_best_codec">對應解碼器</string>
+    <string name="codec_probe_vr_tiers">VR 全景檔位</string>
     <string name="codec_probe_counts">編解碼器數</string>
     <string name="codec_probe_counts_value">硬解 %1$d · 硬編 %2$d · 音訊 %3$d</string>
     <string name="codec_probe_device">裝置</string>
@@ -385,6 +386,7 @@
     <string name="toast_8k_hint">該視頻爲 %1$dx%2$d 8K超高清，若卡頓建議開啓解碼限制。</string>
     <string name="toast_8k_patching">視頻 %1$dx%2$d 超出硬件解碼標稱上限，正在嘗試修改編碼頭硬解</string>
     <string name="toast_hw_failed_sw">硬件解碼失敗，自動切換軟件解碼</string>
+    <string name="toast_oversize_soft_switch">此片 %1$s 超出本機硬體解碼上限，已切換軟解核心（可能掉幀）</string>
 
     <!-- ===== batch ===== -->
     <string name="privacy_dialog_title">隱私與數據統計</string>

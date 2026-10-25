@@ -47,7 +47,34 @@ object CodecCapabilityModel {
         val tierWidth: Int = 0,
         val tierHeight: Int = 0,
         /** 在上述档位下的最大帧率（`getSupportedFrameRatesFor(w,h).upper`）。 */
-        val tierMaxFps: Double = 0.0
+        val tierMaxFps: Double = 0.0,
+        /**
+         * [VR_PANORAMA_TIERS] 每一项的实测结果（顺序与常量一致）。
+         *
+         * 与 [tierWidth]/[tierHeight] 的区别：那组只回答「最高能吃哪一档」，
+         * 这组回答「这个具体的 2:1 尺寸能不能解」，是 VR 全景选片的关键依据。
+         */
+        val vrTiers: List<VrSupport> = emptyList()
+    )
+
+    /** 一个 VR 全景档位的实测结果。 */
+    data class VrSupport(
+        val width: Int,
+        val height: Int,
+        val supported: Boolean,
+        /** 该档下的最大帧率；[supported] 为 false 时为 0。 */
+        val maxFps: Double = 0.0,
+        /**
+         * 不支持时：该高度下解码器实际能到的最大宽度；0 = 无信息（或不适用）。
+         *
+         * 为什么要单独存：实测过「7680×4320 能解、8192×4096 不能」的机器 ——
+         * 两者像素只差 1.1%，标称宽度同样都是 8192，真正卡住的是 block-count。
+         * `getSupportedWidthsFor(h)` 才能给出「在 4096 高度下只到 7680 宽」这个答案，
+         * 不然用户只会看到「8192×4096 —」而不知道为什么。
+         */
+        val limitWidth: Int = 0,
+        /** 不支持时：该宽度下解码器实际能到的最大高度；0 = 无信息。 */
+        val limitHeight: Int = 0
     )
 
     /** 音频能力。 */
@@ -128,15 +155,33 @@ object CodecCapabilityModel {
      * 「能不能放 8K / 4K」，而不是某个非标的奇数尺寸。
      */
     val KNOWN_TIERS: List<Pair<Int, Int>> = listOf(
+        8192 to 4096,   // 8K 全景（等距柱状 2:1）
         7680 to 4320,   // 8K UHD
         5120 to 2880,   // 5K
         4096 to 2160,   // DCI 4K
+        4096 to 2048,   // 4K 全景（等距柱状 2:1）
         3840 to 2160,   // 4K UHD
         2560 to 1440,   // 2K / QHD
         1920 to 1080,   // 1080p
         1280 to 720,    // 720p
         854 to 480,     // 480p
         640 to 360      // 360p
+    )
+
+    /**
+     * VR 全景片源的两个主流分辨率，**与上面 [KNOWN_TIERS] 分开单列**。
+     *
+     * 为什么不只是「加两档进 KNOWN_TIERS 就完事」：等比 2:1 的片子在解码器上的
+     * 落点与 16:9 完全不同 —— 宽度 8192 常常先撞到 `supportedWidths.upper`
+     * （很多 8K 解码器标称宽只到 7680），而高度 4096 反而还有余量；
+     * 4096×2048 同理，它可能被支持、而 3840×2160 被对齐规则判否。
+     * 而 [KNOWN_TIERS] 的语义是「最高能吃哪一档」，只会保留一个命中项，
+     * 回答不了「8192×4096 这张全景到底能不能硬解」。
+     * 所以这两档**逐项各测一次**，结果存 [VideoCaps.vrTiers]。
+     */
+    val VR_PANORAMA_TIERS: List<Pair<Int, Int>> = listOf(
+        8192 to 4096,   // 8K 全景
+        4096 to 2048    // 4K 全景
     )
 
     fun pixels(w: Int, h: Int): Long = w.toLong() * h.toLong()
@@ -285,6 +330,36 @@ object CodecCapabilityModel {
         return "${resolutionText(v.tierWidth, v.tierHeight)} @ ${fpsText(v.tierMaxFps)}"
     }
 
+    /**
+     * VR 全景档位可读文本：`8192×4096 @ 30 fps · 4096×2048 —`。
+     *
+     * 支持的档给出该尺寸下的真实帧率，不支持的档用 `—`（与项目里其它「无」的写法一致，
+     * 不用 ✓/✗ 之类的符号，避免个别字体缺字形显示成豆腐块）。
+     *
+     * 不支持**且**知道实际上限时追加 `(≤7680×4320)`：光看到一个破折号没人知道差在哪，
+     * 而差的那 1.1% 恰好是「换个 2:1 尺寸就行」还是「这台机器完全吃不下 8K」的分水岭。
+     * `≤` 只用数字与一个通用符号，不需要为 5 种语言各写一份文案。
+     */
+    fun vrTiersText(entry: CodecEntry?): String {
+        val tiers = entry?.video?.vrTiers ?: return "—"
+        if (tiers.isEmpty()) return "—"
+        return tiers.joinToString(" · ") { t ->
+            val size = resolutionText(t.width, t.height)
+            when {
+                t.supported -> "$size @ ${fpsText(t.maxFps)}"
+                // 只有真的收缩了某一维才显示上限，否则「(≤8192×4096)」等于没说
+                (t.limitWidth in 1 until t.width) || (t.limitHeight in 1 until t.height) ->
+                    "$size — (≤${resolutionText(t.limitWidth, t.limitHeight)})"
+                else -> "$size —"
+            }
+        }
+    }
+
+    /** 该解码器能吃下的 VR 全景档位（只返回支持的），供列表行紧凑展示。 */
+    fun vrTiersSupportedText(v: VideoCaps): String =
+        v.vrTiers.filter { it.supported }
+            .joinToString("/") { resolutionText(it.width, it.height) }
+
     // ===================== 容器分组 =====================
 
     /** 扩展名 → 族名（仅用于展示；能力判定一律走 `MediaFormats`）。 */
@@ -351,6 +426,7 @@ object CodecCapabilityModel {
         appendLine("当前内核: ${d.currentEngine}  |  MPV 原生库: ${if (d.mpvInstalled) "已安装" else "未安装"}")
         val best = bestHardwareDecoder(report)
         appendLine("最高硬件解码: ${tierSummary(best)}${best?.let { "  (${it.name})" } ?: ""}")
+        appendLine("VR 全景档位: ${vrTiersText(best)}")
         appendLine()
 
         appendLine("--- 封装支持（按当前内核能力）---")
@@ -372,6 +448,7 @@ object CodecCapabilityModel {
                     "标称=${resolutionText(v.maxWidth, v.maxHeight)} " +
                     "实测=${if (v.tierWidth > 0) resolutionWithTier(v.tierWidth, v.tierHeight) else "无"} " +
                     "@${fpsText(v.tierMaxFps)} 码率=${bitrateRangeText(v.minBitrate, v.maxBitrate)} " +
+                    vrTiersSupportedText(v).takeIf { it.isNotEmpty() }?.let { "VR=$it " }.orEmpty() +
                     "色格式=${colorFormatsText(v.colorFormats)}" +
                     (if (v.secure) " secure" else "") +
                     (if (v.adaptive) " adaptive" else "") +

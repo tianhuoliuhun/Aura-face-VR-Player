@@ -54,6 +54,40 @@ class CodecCapabilityModelTest {
     }
 
     @Test
+    fun `tier 8k panorama counts as 8k`() {
+        // 8192×4096 是等距柱状 8K 全景，像素数比 7680×4320 还多一点 → 必须判 8K
+        assertEquals("8K", CodecCapabilityModel.tierName(8192, 4096))
+    }
+
+    @Test
+    fun `tier 4k panorama counts as 4k`() {
+        // 4096×2048 是 2:1 的 4K 全景，像素数略高于 3840×2160 → 必须判 4K（不能掉到 2K）
+        assertEquals("4K", CodecCapabilityModel.tierName(4096, 2048))
+    }
+
+    @Test
+    fun `known tiers sorted by pixels desc and cover vr panorama sizes`() {
+        val tiers = CodecCapabilityModel.KNOWN_TIERS
+        for (i in 1 until tiers.size) {
+            val prev = CodecCapabilityModel.pixels(tiers[i - 1].first, tiers[i - 1].second)
+            val cur = CodecCapabilityModel.pixels(tiers[i].first, tiers[i].second)
+            // 探测循环靠「第一个 isSizeSupported 命中即 break」取最高档，
+            // 所以这个列表**必须**按像素严格降序，否则会把低档当最高档
+            assertTrue("档位必须按像素降序，第 $i 项违反：$prev < $cur", prev >= cur)
+        }
+        assertTrue(CodecCapabilityModel.KNOWN_TIERS.contains(8192 to 4096))
+        assertTrue(CodecCapabilityModel.KNOWN_TIERS.contains(4096 to 2048))
+    }
+
+    @Test
+    fun `vr panorama tiers are the two equirect sizes in fixed order`() {
+        assertEquals(
+            listOf(8192 to 4096, 4096 to 2048),
+            CodecCapabilityModel.VR_PANORAMA_TIERS
+        )
+    }
+
+    @Test
     fun `resolution with tier combines both`() {
         assertEquals("3840×2160 (4K)", CodecCapabilityModel.resolutionWithTier(3840, 2160))
     }
@@ -136,7 +170,8 @@ class CodecCapabilityModelTest {
     // ===================== 最佳硬解 =====================
 
     private fun video(
-        w: Int, h: Int, tierW: Int, tierH: Int, tierFps: Double
+        w: Int, h: Int, tierW: Int, tierH: Int, tierFps: Double,
+        vr: List<CodecCapabilityModel.VrSupport> = emptyList()
     ) = CodecCapabilityModel.VideoCaps(
         minWidth = 16, maxWidth = w, minHeight = 16, maxHeight = h,
         widthAlign = 2, heightAlign = 2,
@@ -144,7 +179,8 @@ class CodecCapabilityModelTest {
         minBitrate = 0, maxBitrate = 100_000_000,
         colorFormats = listOf(21), profiles = listOf("Main"),
         secure = true, adaptive = true, tunneled = false, maxInstances = 4,
-        tierWidth = tierW, tierHeight = tierH, tierMaxFps = tierFps
+        tierWidth = tierW, tierHeight = tierH, tierMaxFps = tierFps,
+        vrTiers = vr
     )
 
     private fun entry(
@@ -225,6 +261,100 @@ class CodecCapabilityModelTest {
         val group = CodecCapabilityModel.ContainerGroup("WMV / ASF", listOf("wmv"), false, false, true)
         assertTrue(!group.playable(mpvReady = false))
         assertTrue(group.playable(mpvReady = true))
+    }
+
+    // ===================== VR 全景档位 =====================
+
+    @Test
+    fun `vr tiers text lists both tiers with their own fps`() {
+        val v = video(
+            8192, 8192, 8192, 4096, 30.0,
+            vr = listOf(
+                CodecCapabilityModel.VrSupport(8192, 4096, true, 30.0),
+                CodecCapabilityModel.VrSupport(4096, 2048, true, 60.0)
+            )
+        )
+        val e = entry("c2.qti.hevc.decoder", "video/hevc", hw = true, v = v)
+        assertEquals(
+            "8192×4096 @ 30 fps · 4096×2048 @ 60 fps",
+            CodecCapabilityModel.vrTiersText(e)
+        )
+    }
+
+    @Test
+    fun `vr tiers text uses dash for the tier that failed`() {
+        val v = video(
+            7680, 4320, 7680, 4320, 30.0,
+            vr = listOf(
+                // 宽度 8192 > supportedWidths.upper(7680) → 不支持；4096×2048 支持
+                CodecCapabilityModel.VrSupport(8192, 4096, false, 0.0),
+                CodecCapabilityModel.VrSupport(4096, 2048, true, 30.0)
+            )
+        )
+        val e = entry("c2.qti.hevc.decoder", "video/hevc", hw = true, v = v)
+        assertEquals(
+            "8192×4096 — · 4096×2048 @ 30 fps",
+            CodecCapabilityModel.vrTiersText(e)
+        )
+    }
+
+    @Test
+    fun `vr tier shows the reachable cap when block count blocks the size`() {
+        // 真机实测场景：标称宽 8192（supportedWidths.upper），但 4096 高度下只能到 7680
+        // —— 8192×4096 判否，而 7680×4320 能解。用户要看的就是这个「≤7680」。
+        val v = video(
+            8192, 8192, 7680, 4320, 30.0,
+            vr = listOf(
+                CodecCapabilityModel.VrSupport(
+                    8192, 4096, false, 0.0,
+                    limitWidth = 7680, limitHeight = 4096
+                ),
+                CodecCapabilityModel.VrSupport(4096, 2048, true, 60.0)
+            )
+        )
+        val e = entry("c2.qti.hevc.decoder", "video/hevc", hw = true, v = v)
+        assertEquals(
+            "8192×4096 — (≤7680×4096) · 4096×2048 @ 60 fps",
+            CodecCapabilityModel.vrTiersText(e)
+        )
+    }
+
+    @Test
+    fun `vr tier omits the cap when no dimension actually shrinks`() {
+        // limit 与目标完全一致时不该输出「(≤8192×4096)」—— 等于没说，还占位
+        val v = video(
+            8192, 8192, 7680, 4320, 30.0,
+            vr = listOf(
+                CodecCapabilityModel.VrSupport(
+                    8192, 4096, false, 0.0,
+                    limitWidth = 8192, limitHeight = 4096
+                )
+            )
+        )
+        val e = entry("c2.qti.hevc.decoder", "video/hevc", hw = true, v = v)
+        assertEquals("8192×4096 —", CodecCapabilityModel.vrTiersText(e))
+    }
+
+    @Test
+    fun `vr tiers text is dash when nothing measured`() {
+        assertEquals("—", CodecCapabilityModel.vrTiersText(null))
+        val e = entry(
+            "c2.android.avc.decoder", "video/avc", hw = false,
+            v = video(1920, 1080, 1920, 1080, 30.0)
+        )
+        assertEquals("—", CodecCapabilityModel.vrTiersText(e))
+    }
+
+    @Test
+    fun `vr supported text lists only playable sizes`() {
+        val v = video(
+            8192, 8192, 7680, 4320, 60.0,
+            vr = listOf(
+                CodecCapabilityModel.VrSupport(8192, 4096, false, 0.0),
+                CodecCapabilityModel.VrSupport(4096, 2048, true, 60.0)
+            )
+        )
+        assertEquals("4096×2048", CodecCapabilityModel.vrTiersSupportedText(v))
     }
 
     // ===================== 报告文本 =====================

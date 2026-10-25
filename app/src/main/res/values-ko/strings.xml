@@ -171,6 +171,7 @@
     <string name="codec_probe_failed">검사 실패: MediaCodec이 유효한 정보를 반환하지 않았습니다(로그 태그 CodecCapabilityProbe)</string>
     <string name="codec_probe_best">최고 하드웨어 디코딩</string>
     <string name="codec_probe_best_codec">코덱</string>
+    <string name="codec_probe_vr_tiers">VR 파노라마 해상도</string>
     <string name="codec_probe_counts">코덱 수</string>
     <string name="codec_probe_counts_value">디코딩 %1$d · 인코딩 %2$d · 오디오 %3$d</string>
     <string name="codec_probe_device">기기</string>
@@ -357,6 +358,7 @@
     <string name="toast_8k_hint">%1$dx%2$d 8K입니다. 끊기면 디코딩 제한을 켜세요</string>
     <string name="toast_8k_patching">%1$dx%2$d는 하드웨어 디코더 한계 초과. 헤더 수정을 시도합니다</string>
     <string name="toast_hw_failed_sw">하드웨어 디코딩 실패로 소프트웨어로 전환했습니다</string>
+    <string name="toast_oversize_soft_switch">%1$s은(는) 이 기기의 하드웨어 디코딩 한도를 초과하여 소프트웨어 디코딩으로 전환했습니다 (프레임 드롭 가능)</string>
     <string name="privacy_dialog_title">개인정보와 데이터 통계</string>
     <string name="privacy_dialog_msg1">익명 사용 데이터(기기 모델, OS 버전, 실행/활동 횟수) 수집을 허용하시겠습니까?</string>
     <string name="privacy_dialog_msg2">사용자 수 집계와 제품 개선에 사용됩니다.\n\n</string>

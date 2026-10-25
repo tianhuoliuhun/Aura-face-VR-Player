@@ -183,6 +183,7 @@
     <string name="codec_probe_failed">检测失败：本机 MediaCodec 未返回可用信息（详见日志 CodecCapabilityProbe）</string>
     <string name="codec_probe_best">最高硬件解码</string>
     <string name="codec_probe_best_codec">对应解码器</string>
+    <string name="codec_probe_vr_tiers">VR 全景档位</string>
     <string name="codec_probe_counts">编解码器数</string>
     <string name="codec_probe_counts_value">硬解 %1$d · 硬编 %2$d · 音频 %3$d</string>
     <string name="codec_probe_device">设备</string>
@@ -375,6 +376,7 @@
     <string name="toast_8k_hint">该视频为 %1$dx%2$d 8K超高清，若卡顿建议开启解码限制。</string>
     <string name="toast_8k_patching">视频 %1$dx%2$d 超出硬件解码标称上限，正在尝试修改编码头硬解</string>
     <string name="toast_hw_failed_sw">硬件解码失败，自动切换软件解码</string>
+    <string name="toast_oversize_soft_switch">该片 %1$s 超出本机硬件解码上限，已切换软解内核（可能掉帧）</string>
 
     <!-- ===== batch ===== -->
     <string name="privacy_dialog_title">隐私与数据统计</string>

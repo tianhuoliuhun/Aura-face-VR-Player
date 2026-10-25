@@ -171,6 +171,7 @@
     <string name="codec_probe_failed">チェック失敗：MediaCodec から有効な情報が返りませんでした（ログタグ CodecCapabilityProbe）</string>
     <string name="codec_probe_best">最高ハードウェアデコード</string>
     <string name="codec_probe_best_codec">コーデック</string>
+    <string name="codec_probe_vr_tiers">VR パノラマ解像度</string>
     <string name="codec_probe_counts">コーデック数</string>
     <string name="codec_probe_counts_value">デコード %1$d · エンコード %2$d · 音声 %3$d</string>
     <string name="codec_probe_device">端末</string>
@@ -357,6 +358,7 @@
     <string name="toast_8k_hint">%1$dx%2$d の 8K です。カクつく場合はデコード制限を有効にしてください</string>
     <string name="toast_8k_patching">%1$dx%2$d はハードウェアデコーダの上限超過。ヘッダー書き換えを試します</string>
     <string name="toast_hw_failed_sw">ハードウェアデコードに失敗しソフトウェアに切り替えました</string>
+    <string name="toast_oversize_soft_switch">%1$s は本機のハードウェアデコード上限を超えています。ソフトウェアデコードに切り替えました（フレーム落ちの可能性あり）</string>
     <string name="privacy_dialog_title">プライバシーとデータ統計</string>
     <string name="privacy_dialog_msg1">匿名の利用データ（端末型番、OS バージョン、起動と利用回数）の収集を許可しますか？</string>
     <string name="privacy_dialog_msg2">ユーザー数の集計と製品改善に使用します。\n\n</string>

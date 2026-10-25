@@ -633,6 +633,21 @@ fun VRPlayerScreen(
      */
     var mpvRetryUri by remember { mutableStateOf<String?>(null) }
 
+    /**
+     * v2.6.13：**该文件超出本机硬件解码上限** → 本次改用软件解码内核（IJK / MPV）。
+     *
+     * 为什么需要它：`MediaCodec` **没有**任何「按低分辨率解码」的开关（`KEY_MAX_WIDTH`
+     * 只对编码器有效），所以 8192×4096 这类超出 VPU block-count 的尺寸，硬解必然
+     * configure 失败。能播的唯一途径是换 FFmpeg 软解内核（IJK 内置，MPV 需下载）。
+     *
+     * 判据与置位见 Exo 的 `onPlayerError`（先用 MediaMetadataRetriever 取真实尺寸，
+     * 再用 [DecoderCapabilities.findHardwareFit] 确认「真的没有硬解能吃」才切）；
+     * 消费点见 `setupVideoPlayer` 的 `effectiveEngine`。
+     *
+     * ⚠️ 与 [mpvRetryUri] 一样只记「这一个文件」，且**不写回 prefs** —— 用户设置的内核不变。
+     */
+    var softRetryUri by remember { mutableStateOf<String?>(null) }
+
     // v2.1.233：IJK 内核的可调参数（对应设置面板「解码器参数 · IJK」那几项）。
     // 只有选中 IJK 时才会被读取；切回 EXO 时这些值不参与播放，但仍保留在 prefs 里，
     // 用户下次切回 IJK 时不用重设。
@@ -3344,6 +3359,31 @@ fun VRPlayerScreen(
             .ifEmpty { MediaFormats.extFromMime(selectedMediaItem.mimeType) }
         var effectiveEngine = decoderEngine
         // ======================================================================
+        // v2.6.13：**该文件超出硬件解码上限 → 本次改用软解内核**
+        // ----------------------------------------------------------------------
+        // 判据与置位都在 Exo 的 onPlayerError（解码器初始化/解码失败 → 探测真实尺寸 →
+        //   DecoderCapabilities.findHardwareFit 确认没有硬解能吃），这里只负责消费：
+        //   ① IJK 优先：内置 FFmpeg 软解，不需要额外下载，8K 也能出画面；
+        //   ② IJK 不可用（native 库缺失）→ MPV（若已安装）；
+        //   ③ 两者都没有 → 保持原内核（外层原有错误提示仍在，不会静默）。
+        // ⚠️ 与 mpvRetryUri 同理：只改本次 `effectiveEngine`，**不写回 prefs**。
+        // ======================================================================
+        if (softRetryUri != null && softRetryUri == selectedMediaItem.uri &&
+            decoderEngine != DecoderEngine.IJK && decoderEngine != DecoderEngine.MPV
+        ) {
+            effectiveEngine = when {
+                // supports(uri) 也要判：SMB 等 FFmpeg 协议集外的源切过去只会静默回退 Exo
+                IjkPlayerFactory.supports(decodedUri) && IjkPlayerFactory.ensureLibraries() ->
+                    DecoderEngine.IJK
+                MpvPlayerFactory.isAvailable(context) -> DecoderEngine.MPV
+                else -> decoderEngine
+            }
+            Log.i(
+                "VRPlayerScreen",
+                "该片超出本机硬件解码上限 → 本次改用软解内核 $effectiveEngine"
+            )
+        }
+        // ======================================================================
         // v2.4.32：**该文件 Exo 打开失败过 → 本次直接用 MPV**（只对这一个文件、只重试一次）
         // ----------------------------------------------------------------------
         // 与下方容器路由同为「只改 effectiveEngine、不写回 prefs」：用户的解码器设置不变。
@@ -3890,6 +3930,42 @@ fun VRPlayerScreen(
                     
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         Log.e("VRPlayerScreen", "ExoPlayer playback error", error)
+                        // ==========================================================
+                        // v2.6.13：解码类失败 → 先排除「尺寸超出硬件上限」
+                        // ----------------------------------------------------------
+                        // 典型场景：8192×4096 的 8K 全景。MediaCodec 的软解（c2.android.*）
+                        //   也走同一套 size/block 校验，所以 Exo 把候选解码器试一遍后会全部
+                        //   DECODER_INIT_FAILED —— 此时再把 `isSoftwareDecoding` 置 true 毫无
+                        //   意义（还是同一个 4096 上限）。唯一出路是换 FFmpeg 软解内核。
+                        // ⚠️ 必须先探测尺寸再决定：解码失败的原因很多（profile 不支持、
+                        //   secure 缺失、DRM…），不能一律当超限处理，否则会把普通片源
+                        //   无谓地推去软解。
+                        // ⚠️ 只在 EXO 生效：IJK/MPV 本身就是软解，`decoderEngine` 为它们时
+                        //   这条分支不会走到（onPlayerError 只挂在 Exo 上）。
+                        // ==========================================================
+                        val decError =
+                            error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED
+                        val softCandidate = selectedMediaItem.uri
+                        if (decError && softCandidate != null && softCandidate != softRetryUri) {
+                            scope.launch(Dispatchers.IO) {
+                                val oversize = probeOversizedVideo(context, Uri.parse(softCandidate))
+                                if (oversize != null) {
+                                    Log.w(
+                                        "VRPlayerScreen",
+                                        "解码失败且尺寸 $oversize 超出本机硬件上限 → 改用软解内核重试"
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        softRetryUri = softCandidate
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.toast_oversize_soft_switch, oversize),
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            }
+                        }
                         // F. Auto fallback to software decoding when the hardware
                         // decoder fails to initialize or decode (opt-in, off by default). (8/3 功能)
                         if (autoFallbackSoftEnabled && !isSoftwareDecoding &&
@@ -4063,7 +4139,15 @@ fun VRPlayerScreen(
     //    `!mpctx->initialized` 断言并 native 崩溃（实测）。vo 改为创建前预判。
     // ⚠️ v2.4.32：`mpvRetryUri` 也作为 key —— Exo 打开失败时置位它（见 onPlayerError），
     //    借此**触发一次重建**并用 MPV 重试；它只在失败时变一次，不会引起意外重建。
-    LaunchedEffect(isSoftwareDecoding, decoderEngine, ijkOptions, photoReloadTrigger, mpvRetryUri) {
+    // ⚠️ v2.6.13：`softRetryUri` 同理（尺寸超硬解上限 → 切软解内核），同样只会变一次。
+    LaunchedEffect(
+        isSoftwareDecoding,
+        decoderEngine,
+        ijkOptions,
+        photoReloadTrigger,
+        mpvRetryUri,
+        softRetryUri
+    ) {
         if (!decoderRebindSeen) {
             // 首次组合时上面的 Effect A 已经完成绑定，这里跳过，避免重复创建播放器
             decoderRebindSeen = true
@@ -9132,5 +9216,74 @@ fun VRPlayerScreen(
             }
         }
 
+    }
+}
+
+/**
+ * v2.6.13：探测「这个片源的真实分辨率是否超出本机**全部**硬件解码器的能力」。
+ *
+ * ## 为什么要独立探测，而不是从 Exo 的 format 里拿
+ * 这个方法是在 `onPlayerError`（解码器初始化失败）里调用的 —— 那时 Exo 还没解出任何一帧，
+ * `getVideoFormat()` 可能拿不到宽高。用 `MediaMetadataRetriever` 直接读容器头最可靠，
+ * 它走的是 demux 层，不依赖解码器。
+ *
+ * ## 判定口径
+ * 先把 MIME 收敛成一个候选集：拿到容器里的 `METADATA_KEY_MIMETYPE` 就只测它，
+ * 拿不到（部分 MKV/TS 不返回）才按 hevc → av1 → avc 依次试 —— **任一 MIME 有硬解能解就算能播**。
+ * 这比「猜一个 MIME 然后判死」安全得多：宁可让用户按原内核再试一次，
+ * 也不要把一个本可以硬解的片子推去做软解（软解 8K 只有个位数帧率）。
+ *
+ * @return 形如 `8192×4096` 的说明串（**确认超出**时）；未超出或探测失败返回 null。
+ */
+private fun probeOversizedVideo(context: Context, uri: Uri): String? {
+    val retriever = android.media.MediaMetadataRetriever()
+    return try {
+        val configured = try {
+            // 与「视频信息」面板同一套三分支：content/file 走 Context，其余当 URL/路径
+            if (uri.scheme == "content" || uri.scheme == "file") {
+                retriever.setDataSource(context, uri)
+            } else {
+                retriever.setDataSource(uri.toString(), hashMapOf<String, String>())
+            }
+            true
+        } catch (e: Exception) {
+            try {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use {
+                    retriever.setDataSource(it.fileDescriptor)
+                }
+                true
+            } catch (e2: Exception) {
+                false
+            }
+        }
+        if (!configured) return null
+
+        val w = retriever
+            .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            ?.toIntOrNull() ?: return null
+        val h = retriever
+            .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            ?.toIntOrNull() ?: return null
+        if (w <= 0 || h <= 0) return null
+
+        val containerMime = retriever
+            .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+        val candidates = if (containerMime != null && containerMime.startsWith("video/")) {
+            listOf(containerMime)
+        } else {
+            listOf("video/hevc", "video/av1", "video/avc")
+        }
+        val anySupported = candidates.any {
+            DecoderCapabilities.findHardwareFit(it, w, h).supported
+        }
+        if (anySupported) null else "$w×$h"
+    } catch (e: Exception) {
+        Log.w("VRPlayerScreen", "probeOversizedVideo 失败：${e.javaClass.simpleName}")
+        null
+    } finally {
+        try {
+            retriever.release()
+        } catch (_: Exception) {
+        }
     }
 }

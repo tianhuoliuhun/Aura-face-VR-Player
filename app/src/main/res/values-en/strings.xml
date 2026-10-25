@@ -191,6 +191,7 @@
     <string name="codec_probe_failed">Check failed: MediaCodec returned nothing usable (see log tag CodecCapabilityProbe)</string>
     <string name="codec_probe_best">Best hardware decode</string>
     <string name="codec_probe_best_codec">Codec</string>
+    <string name="codec_probe_vr_tiers">VR panorama tiers</string>
     <string name="codec_probe_counts">Codec count</string>
     <string name="codec_probe_counts_value">%1$d decode · %2$d encode · %3$d audio</string>
     <string name="codec_probe_device">Device</string>
@@ -383,6 +384,7 @@
     <string name="toast_8k_hint">This is %1$dx%2$d 8K - enable decode limits if it stutters.</string>
     <string name="toast_8k_patching">%1$dx%2$d exceeds HW decoder limits - patching headers</string>
     <string name="toast_hw_failed_sw">Hardware decode failed - switched to software</string>
+    <string name="toast_oversize_soft_switch">%1$s exceeds the hardware decoder limit of this device - switched to software decoding (frames may drop)</string>
 
     <!-- ===== batch ===== -->
     <string name="privacy_dialog_title">Privacy &amp; analytics</string>
