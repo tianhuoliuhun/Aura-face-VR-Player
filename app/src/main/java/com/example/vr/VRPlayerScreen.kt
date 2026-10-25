@@ -6889,6 +6889,15 @@ fun VRPlayerScreen(
                                     accentOnColor = AccentOnColor
                                 )
 
+                                // v2.6.12：系统编解码能力检测（读取 MediaCodec 上报的能力，
+                                // 列出支持的编码/封装/最大分辨率）。点按钮才扫描，不拖慢设置面板。
+                                CodecCapabilitySection(
+                                    accentColor = AccentColor,
+                                    accentOnColor = AccentOnColor,
+                                    decoderEngine = decoderEngine,
+                                    onInteract = { keepUiAlight() }
+                                )
+
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
