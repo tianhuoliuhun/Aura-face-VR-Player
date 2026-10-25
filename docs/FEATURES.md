@@ -18,6 +18,8 @@
   - Gyro orientation: handheld landscape / VR-box modes, plus a direction-inversion toggle (v125)
 - 8K 硬解实验（默认关闭，设置内按需开启）：SPS level 适配、强制硬解选择器、分辨率头欺骗、缩小输出缓冲、补充解码参数注入、硬解失败自动切软解
   - Experimental 8K decoding (off by default): SPS level patch, forced hardware selector, resolution spoofing, downscaled output, codec param injection, auto software fallback
+- **系统编解码能力检测**（设置 → 实验性功能，v2.6.12）：点「开始检测」才扫描，列出每个编解码器的硬/软标记、**实测最大分辨率与对应帧率**、标称上限、码率范围、profile、secure/adaptive/tunneled、最大实例数；并给出 EXO / IJK / MPV 三内核的容器支持对照，可一键复制纯文本报告
+  - **System codec capability probe** (Settings → Experimental, v2.6.12): scans only on tap; per-codec hard/soft tag, **measured max resolution and frame rate for that tier**, nominal limit, bitrate, profile, secure/adaptive/tunneled, max instances, plus an EXO / IJK / MPV container-support matrix and one-tap plain-text report
 - 触控交互：单指拖曳查看、双指缩放、捏合旋转，UI 误操作 2 秒自动隐藏
   - Touch: drag to look around, pinch to zoom, UI auto-hides after 2s idle
 - 曲面沉浸：圆柱面曲率可调，双中心变形（Warp Dual Center）优化
