@@ -125,7 +125,7 @@ fun CodecCapabilitySection(
 
     val r = report ?: return
     val best = CodecCapabilityModel.bestHardwareDecoder(r)
-    val mpvReady = r.device.mpvInstalled
+    val mpvReady = r.device.mpvReady
 
     // ===== 摘要 =====
     InfoCard {
@@ -160,7 +160,7 @@ fun CodecCapabilitySection(
         SummaryLine(
             label = stringResource(R.string.codec_probe_engine),
             value = r.device.currentEngine +
-                if (r.device.mpvInstalled) "" else " · MPV ${stringResource(R.string.codec_probe_mpv_missing)}"
+                if (r.device.mpvReady) "" else " · MPV ${stringResource(R.string.codec_probe_mpv_missing)}"
         )
     }
 

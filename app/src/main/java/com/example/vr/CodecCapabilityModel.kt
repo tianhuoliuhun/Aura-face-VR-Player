@@ -128,7 +128,15 @@ object CodecCapabilityModel {
         val abi: String,
         /** 当前播放内核名（EXO / IJK / MPV / SYSTEM）。 */
         val currentEngine: String,
-        val mpvInstalled: Boolean
+        /**
+         * MPV 原生库**能不能用**（= `MpvLibLoader.isReady()`：先试 APK 内置的
+         * `System.loadLibrary`，失败才回退 `filesDir/mpv-libs` 的下载副本）。
+         *
+         * ⚠️ 这里**不能**用 `MpvLibLoader.isInstalled()` —— 那个只查「下载目录里
+         * 10 个 so 齐不齐」，而 v2.1.243 起库是**内置在 APK 里**的，下载目录本来就是空的。
+         * 用它会导致「库完全可用却显示未安装」（v2.6.14 前的实际 bug）。
+         */
+        val mpvReady: Boolean
     )
 
     /**
@@ -451,7 +459,7 @@ object CodecCapabilityModel {
         appendLine("Android: ${d.androidRelease} (API ${d.sdk})")
         appendLine("SoC: ${d.soc}")
         appendLine("ABI: ${d.abi}")
-        appendLine("当前内核: ${d.currentEngine}  |  MPV 原生库: ${if (d.mpvInstalled) "已安装" else "未安装"}")
+        appendLine("当前内核: ${d.currentEngine}  |  MPV 原生库: ${if (d.mpvReady) "可用" else "不可用"}")
         val best = bestHardwareDecoder(report)
         appendLine("最高硬件解码: ${tierSummary(best)}${best?.let { "  (${it.name})" } ?: ""}")
         appendLine("VR 全景档位: ${vrTiersText(best)}")

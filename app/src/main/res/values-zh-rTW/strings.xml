@@ -198,7 +198,7 @@
     <string name="codec_probe_counts_value">硬解 %1$d · 硬編 %2$d · 音訊 %3$d</string>
     <string name="codec_probe_device">裝置</string>
     <string name="codec_probe_engine">目前核心</string>
-    <string name="codec_probe_mpv_missing">未安裝</string>
+    <string name="codec_probe_mpv_missing">未就緒</string>
     <string name="codec_probe_video_dec">視訊解碼</string>
     <string name="codec_probe_video_enc">視訊編碼</string>
     <string name="codec_probe_audio">音訊編解碼</string>

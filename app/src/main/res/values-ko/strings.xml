@@ -176,7 +176,7 @@
     <string name="codec_probe_counts_value">디코딩 %1$d · 인코딩 %2$d · 오디오 %3$d</string>
     <string name="codec_probe_device">기기</string>
     <string name="codec_probe_engine">커널</string>
-    <string name="codec_probe_mpv_missing">미설치</string>
+    <string name="codec_probe_mpv_missing">준비 안 됨</string>
     <string name="codec_probe_video_dec">영상 디코딩</string>
     <string name="codec_probe_video_enc">영상 인코딩</string>
     <string name="codec_probe_audio">오디오</string>

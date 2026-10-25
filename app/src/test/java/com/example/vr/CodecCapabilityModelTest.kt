@@ -201,7 +201,7 @@ class CodecCapabilityModelTest {
         CodecCapabilityModel.CodecReport(
             device = CodecCapabilityModel.DeviceInfo(
                 model = "Test", androidRelease = "14", sdk = 34,
-                soc = "test", abi = "arm64-v8a", currentEngine = "EXO", mpvInstalled = true
+                soc = "test", abi = "arm64-v8a", currentEngine = "EXO", mpvReady = true
             ),
             entries = entries,
             containers = emptyList()
@@ -390,7 +390,7 @@ class CodecCapabilityModelTest {
         val r = CodecCapabilityModel.CodecReport(
             device = CodecCapabilityModel.DeviceInfo(
                 model = "MuMu", androidRelease = "12", sdk = 32,
-                soc = "arm64", abi = "arm64-v8a", currentEngine = "EXO", mpvInstalled = false
+                soc = "arm64", abi = "arm64-v8a", currentEngine = "EXO", mpvReady = false
             ),
             entries = listOf(
                 entry("c2.qti.hevc.decoder", "video/hevc", hw = true, v = video(8192, 8192, 7680, 4320, 30.0))

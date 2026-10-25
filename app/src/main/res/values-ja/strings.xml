@@ -176,7 +176,7 @@
     <string name="codec_probe_counts_value">デコード %1$d · エンコード %2$d · 音声 %3$d</string>
     <string name="codec_probe_device">端末</string>
     <string name="codec_probe_engine">カーネル</string>
-    <string name="codec_probe_mpv_missing">未インストール</string>
+    <string name="codec_probe_mpv_missing">未準備</string>
     <string name="codec_probe_video_dec">映像デコード</string>
     <string name="codec_probe_video_enc">映像エンコード</string>
     <string name="codec_probe_audio">音声</string>

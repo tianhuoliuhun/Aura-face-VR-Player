@@ -196,7 +196,7 @@
     <string name="codec_probe_counts_value">%1$d decode · %2$d encode · %3$d audio</string>
     <string name="codec_probe_device">Device</string>
     <string name="codec_probe_engine">Kernel</string>
-    <string name="codec_probe_mpv_missing">not installed</string>
+    <string name="codec_probe_mpv_missing">not ready</string>
     <string name="codec_probe_video_dec">Video decode</string>
     <string name="codec_probe_video_enc">Video encode</string>
     <string name="codec_probe_audio">Audio</string>

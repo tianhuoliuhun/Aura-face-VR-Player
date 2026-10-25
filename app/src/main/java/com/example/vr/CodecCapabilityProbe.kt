@@ -139,8 +139,12 @@ object CodecCapabilityProbe {
         } catch (e: Exception) {
             Build.CPU_ABI ?: "?"
         }
+        // ⚠️ 必须用 isReady（= 试加载：先 APK 内置，失败才回退下载目录），
+        //    **不能**用 isInstalled —— 后者只查 filesDir/mpv-libs 里 10 个 so 齐不齐，
+        //    而库自 v2.1.243 起是内置在 APK 里的，下载目录常态为空 →
+        //    用 isInstalled 会「库明明可用却显示未安装」（v2.6.14 修的实际 bug）。
         val mpv = try {
-            MpvLibLoader.isInstalled(context)
+            MpvLibLoader.isReady(context)
         } catch (e: Exception) {
             false
         }
@@ -151,7 +155,7 @@ object CodecCapabilityProbe {
             soc = soc ?: Build.HARDWARE ?: "?",
             abi = abis,
             currentEngine = engine.displayName,
-            mpvInstalled = mpv
+            mpvReady = mpv
         )
     }
 
