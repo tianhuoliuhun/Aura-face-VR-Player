@@ -228,6 +228,23 @@ object CodecCapabilityProbe {
             )
         }
 
+        // 4096 高度下实际能到多宽 —— 这是「能不能吃 8K 全景 2:1」的直接答案。
+        //
+        // 为什么值得单存一份常显：`vrTiers` 只回答「哪一档能过」，用户还得自己反推；
+        // 而这个数字把 block 预算的真相摊开了 —— 标称 8192×8192 的组件给 8192，
+        // 标称 8192×4320 却吃不下 8192×4096 的组件只给 7680。
+        // 高度本身到不了 4096 时无从谈起，保持 0（UI 不显示）。
+        val widthAtPanorama = try {
+            if (heights.upper >= CodecCapabilityModel.PANORAMA_HEIGHT) {
+                vc.getSupportedWidthsFor(CodecCapabilityModel.PANORAMA_HEIGHT)?.upper ?: 0
+            } else {
+                0
+            }
+        } catch (e: Exception) {
+            // getSupportedWidthsFor 在部分 ROM 上会对合法高度抛 IllegalArgumentException
+            0
+        }
+
         return CodecCapabilityModel.VideoCaps(
             minWidth = widths.lower,
             maxWidth = widths.upper,
@@ -248,7 +265,8 @@ object CodecCapabilityProbe {
             tierWidth = tierW,
             tierHeight = tierH,
             tierMaxFps = tierFps,
-            vrTiers = vrTiers
+            vrTiers = vrTiers,
+            widthAtPanoramaHeight = widthAtPanorama
         )
     }
 

@@ -211,6 +211,7 @@
     <string name="codec_probe_enc_tag">編碼</string>
     <string name="codec_probe_tier_line">實測 %1$s @ %2$s（標稱 %3$s）</string>
     <string name="codec_probe_enc_line">最大 %1$s · %2$s · %3$s</string>
+    <string name="codec_probe_panorama_width">%1$d 高可達 %2$d 寬</string>
     <string name="codec_probe_audio_line">%1$d 聲道 · %2$d–%3$d Hz · %4$s · 實例 %5$d</string>
     <string name="codec_probe_expand_all">展開全部（另有 %1$d 條）</string>
     <string name="codec_probe_collapse">收合</string>

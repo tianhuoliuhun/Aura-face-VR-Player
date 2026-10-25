@@ -54,7 +54,20 @@ object CodecCapabilityModel {
          * 与 [tierWidth]/[tierHeight] 的区别：那组只回答「最高能吃哪一档」，
          * 这组回答「这个具体的 2:1 尺寸能不能解」，是 VR 全景选片的关键依据。
          */
-        val vrTiers: List<VrSupport> = emptyList()
+        val vrTiers: List<VrSupport> = emptyList(),
+        /**
+         * 在 [PANORAMA_HEIGHT] 这个高度下，该组件实际能到多宽
+         * （`getSupportedWidthsFor(PANORAMA_HEIGHT).upper`）；0 = 无信息。
+         *
+         * ## 为什么它比「实测档位」更该常显
+         * 「实测档位」只回答「最高能过哪一档」，用户还得自己反推出「那 8192×4096 到底行不行」。
+         * 而这个数字直接就是答案：**4096 高度下能到 8192 宽 ⇔ 能吃 8K 全景 2:1**。
+         * 它也是唯一能把「block 预算」暴露出来的问法 —— 标称 8192×8192 的组件这里会给 8192，
+         * 而标称 8192×4320 却吃不下 8192×4096 的组件这里只给 7680。
+         *
+         * ⚠️ 高度本身到不了 [PANORAMA_HEIGHT] 时无从谈起，保持 0（UI 不显示）。
+         */
+        val widthAtPanoramaHeight: Int = 0
     )
 
     /** 一个 VR 全景档位的实测结果。 */
@@ -169,7 +182,7 @@ object CodecCapabilityModel {
     )
 
     /**
-     * VR 全景片源的两个主流分辨率，**与上面 [KNOWN_TIERS] 分开单列**。
+     * VR 全景片源的主流分辨率，**与上面 [KNOWN_TIERS] 分开单列**。
      *
      * 为什么不只是「加两档进 KNOWN_TIERS 就完事」：等比 2:1 的片子在解码器上的
      * 落点与 16:9 完全不同 —— 宽度 8192 常常先撞到 `supportedWidths.upper`
@@ -177,12 +190,27 @@ object CodecCapabilityModel {
      * 4096×2048 同理，它可能被支持、而 3840×2160 被对齐规则判否。
      * 而 [KNOWN_TIERS] 的语义是「最高能吃哪一档」，只会保留一个命中项，
      * 回答不了「8192×4096 这张全景到底能不能硬解」。
-     * 所以这两档**逐项各测一次**，结果存 [VideoCaps.vrTiers]。
+     * 所以这几档**逐项各测一次**，结果存 [VideoCaps.vrTiers]。
+     *
+     * ⚠️ 第三档 `8192×8192` 是**方形 8K**（鱼眼 / VR180 展开 / cube map 摊平），
+     * 不是 2:1 等距柱状。它存在的目的不是「常见」，而是**作为能力标尺**：
+     * 能吃这一档的组件，其 block 预算足以覆盖任何 8192 宽的 2:1 全景；
+     * 反过来标称 `8192×8192` 的组件必然能吃 `8192×4096`。放在最后，避免抢 2:1 的版面。
      */
     val VR_PANORAMA_TIERS: List<Pair<Int, Int>> = listOf(
-        8192 to 4096,   // 8K 全景
-        4096 to 2048    // 4K 全景
+        8192 to 4096,   // 8K 全景（等距柱状 2:1）
+        4096 to 2048,   // 4K 全景（等距柱状 2:1）
+        8192 to 8192    // 8K 方形（鱼眼 / VR180 / cube map）
     )
+
+    /**
+     * [VideoCaps.widthAtPanoramaHeight] 的探测高度。
+     *
+     * 取 4096 而不是 8192：8K 全景的标准形态是 `8192×4096`，**「4096 高能到多宽」
+     * 就是「能不能吃 8K 全景」的直接答案**；而 8192 高度在移动 SoC 上几乎无人能到，
+     * 拿它当尺子会让所有解码器都显示 0（无信息）。
+     */
+    const val PANORAMA_HEIGHT: Int = 4096
 
     fun pixels(w: Int, h: Int): Long = w.toLong() * h.toLong()
 

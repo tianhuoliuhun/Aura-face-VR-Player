@@ -209,6 +209,7 @@
     <string name="codec_probe_enc_tag">enc</string>
     <string name="codec_probe_tier_line">Verified %1$s @ %2$s (claims %3$s)</string>
     <string name="codec_probe_enc_line">Max %1$s · %2$s · %3$s</string>
+    <string name="codec_probe_panorama_width">%2$d wide at %1$d tall</string>
     <string name="codec_probe_audio_line">%1$d ch · %2$d–%3$d Hz · %4$s · %5$d inst</string>
     <string name="codec_probe_expand_all">Show all (%1$d more)</string>
     <string name="codec_probe_collapse">Collapse</string>

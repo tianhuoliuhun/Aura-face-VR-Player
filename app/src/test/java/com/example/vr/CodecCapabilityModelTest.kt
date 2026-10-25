@@ -80,11 +80,18 @@ class CodecCapabilityModelTest {
     }
 
     @Test
-    fun `vr panorama tiers are the two equirect sizes in fixed order`() {
+    fun `vr panorama tiers list the equirect sizes and the square 8k yardstick`() {
+        // 前两档是 2:1 等距柱状（真实片源形态），第三档 8192×8192 是方形 8K 能力标尺
         assertEquals(
-            listOf(8192 to 4096, 4096 to 2048),
+            listOf(8192 to 4096, 4096 to 2048, 8192 to 8192),
             CodecCapabilityModel.VR_PANORAMA_TIERS
         )
+    }
+
+    @Test
+    fun `panorama probe height is 4k so the answer maps to 8k equirect`() {
+        // 「4096 高能到 8192 宽」⇔ 能吃 8K 全景 2:1；改成别的值这个等价关系就不成立
+        assertEquals(4096, CodecCapabilityModel.PANORAMA_HEIGHT)
     }
 
     @Test
@@ -277,6 +284,24 @@ class CodecCapabilityModelTest {
         val e = entry("c2.qti.hevc.decoder", "video/hevc", hw = true, v = v)
         assertEquals(
             "8192×4096 @ 30 fps · 4096×2048 @ 60 fps",
+            CodecCapabilityModel.vrTiersText(e)
+        )
+    }
+
+    @Test
+    fun `vr tiers text also renders the square 8k yardstick tier`() {
+        // 方形档放最后：2:1 的真实片源档位要排在最前，不能被标尺抢版面
+        val v = video(
+            8192, 8192, 8192, 4096, 30.0,
+            vr = listOf(
+                CodecCapabilityModel.VrSupport(8192, 4096, true, 30.0),
+                CodecCapabilityModel.VrSupport(4096, 2048, true, 60.0),
+                CodecCapabilityModel.VrSupport(8192, 8192, false, 0.0)
+            )
+        )
+        val e = entry("c2.qti.hevc.decoder", "video/hevc", hw = true, v = v)
+        assertEquals(
+            "8192×4096 @ 30 fps · 4096×2048 @ 60 fps · 8192×8192 —",
             CodecCapabilityModel.vrTiersText(e)
         )
     }

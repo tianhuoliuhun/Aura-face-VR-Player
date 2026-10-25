@@ -189,6 +189,7 @@
     <string name="codec_probe_enc_tag">인코딩</string>
     <string name="codec_probe_tier_line">실측 %1$s @ %2$s(공칭 %3$s)</string>
     <string name="codec_probe_enc_line">최대 %1$s · %2$s · %3$s</string>
+    <string name="codec_probe_panorama_width">높이 %1$d에서 너비 %2$d까지</string>
     <string name="codec_probe_audio_line">%1$d ch · %2$d–%3$d Hz · %4$s · 인스턴스 %5$d</string>
     <string name="codec_probe_expand_all">전체 보기(%1$d개 더)</string>
     <string name="codec_probe_collapse">접기</string>

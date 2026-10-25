@@ -189,6 +189,7 @@
     <string name="codec_probe_enc_tag">エンコード</string>
     <string name="codec_probe_tier_line">実測 %1$s @ %2$s（公称 %3$s）</string>
     <string name="codec_probe_enc_line">最大 %1$s · %2$s · %3$s</string>
+    <string name="codec_probe_panorama_width">高さ %1$d で幅 %2$d まで</string>
     <string name="codec_probe_audio_line">%1$d ch · %2$d–%3$d Hz · %4$s · インスタンス %5$d</string>
     <string name="codec_probe_expand_all">すべて表示（残り %1$d 件）</string>
     <string name="codec_probe_collapse">折りたたむ</string>

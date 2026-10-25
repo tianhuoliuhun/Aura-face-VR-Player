@@ -417,6 +417,18 @@ private fun CodecRow(
                     lineHeight = 12.sp
                 )
             }
+            // 4096 高时能到多宽 —— 「能否吃 8K 全景 2:1」的直接答案，任一视频组件只要测得
+            // 就常显（不再只在「不支持」时才给），这样不用先失败一次才知道边界在哪。
+            // ⚠️ 先算成 val 再进 buildList：@Composable 调用不塞进 lambda 实参（本项目踩过）。
+            val panoramaWidthLine = if (v.widthAtPanoramaHeight > 0) {
+                stringResource(
+                    R.string.codec_probe_panorama_width,
+                    CodecCapabilityModel.PANORAMA_HEIGHT,
+                    v.widthAtPanoramaHeight
+                )
+            } else {
+                ""
+            }
             val extra = buildList {
                 if (v.profiles.isNotEmpty()) add(v.profiles.joinToString("/"))
                 if (v.secure) add("secure")
@@ -425,6 +437,7 @@ private fun CodecRow(
                 if (v.maxInstances > 0) add("×${v.maxInstances}")
                 val vrOk = CodecCapabilityModel.vrTiersSupportedText(v)
                 if (vrOk.isNotEmpty()) add("VR $vrOk")
+                if (panoramaWidthLine.isNotEmpty()) add(panoramaWidthLine)
             }
             if (extra.isNotEmpty()) {
                 Text(
