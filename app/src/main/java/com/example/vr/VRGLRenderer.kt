@@ -287,10 +287,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var mouthAngleUniform = 0f
 
     // Face detection sampling resolution. The GL thread reads a larger center
-    // region (512) so faces off-center are still captured, then it is downscaled
-    // to 256x256 for the MediaPipe landmarker.
+    // region (512) so faces off-center are still captured. v2.6.17: that region is
+    // now downscaled by **the GPU** (glBlitFramebuffer) before readback, so the
+    // CPU side gets a ≤256 image directly instead of a 512 one it must shrink.
     private val faceSampleSize = 256
-    private val faceSampleArea = 256 * 256
     private val faceReadSize = 512
 
     // ===== v2.0.156：美颜链路的坐标与开销修复 =====
@@ -414,6 +414,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var faceArgBuffer: IntArray? = null
     private var faceBmp: Bitmap? = null
     private var faceScaledBmp: Bitmap? = null
+
+    /**
+     * v2.6.17：`glReadPixels(GL_RGBA)` 的输出能否**直接** `copyPixelsFromBuffer` 进
+     * ARGB_8888 位图（省掉 262144 次逐像素重排）。
+     *
+     * 取值：0 = 未探测，1 = 可直拷，2 = 需回退逐像素重排。探测只做一次（1×1 位图）。
+     */
+    private var faceDirectCopy = 0
+
+    // v2.6.17：GLSL 检测段的分段计时（每 60 次输出一行）—— 用于真机确认
+    // 「前置 CPU 段（回读字节 → Bitmap）已压到底」，即 prep 应远小于 detect。
+    private var faceProfCount = 0
+    private var faceProfPrepNanos = 0L
+    private var faceProfDetectNanos = 0L
 
     // Frame transfer between the GL thread and the face-detection executor.
     // The GL thread publishes a freshly allocated frame, and the executor consumes it,
@@ -5168,6 +5182,39 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     /**
+     * v2.6.17 一次性探测：`Config.ARGB_8888` 的内存字节序是否等于 R,G,B,A。
+     *
+     * 依据：Android 的 N32 在小端机器上按 R,G,B,A 字节落盘，与 `glReadPixels` 的
+     * `GL_RGBA` + `GL_UNSIGNED_BYTE` 输出一致 —— 因此「回读字节 → 位图」本可零转换。
+     * 但这属平台实现细节，故用 1×1 位图实测：写入**纯红**的 RGBA 字节后读回像素，
+     * 得到 `0xFFFF0000` 才算成立；若读到 `0xFF0000FF`（红蓝互换）则回退逐像素重排。
+     */
+    private fun probeFaceDirectCopy(): Boolean = try {
+        val bmp = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        bmp.setHasAlpha(false)
+        val probe = java.nio.ByteBuffer.allocateDirect(4)
+            .order(java.nio.ByteOrder.nativeOrder())
+        probe.put(0, 0xFF.toByte())  // R
+        probe.put(1, 0x00.toByte())  // G
+        probe.put(2, 0x00.toByte())  // B
+        probe.put(3, 0xFF.toByte())  // A
+        probe.position(0)
+        bmp.copyPixelsFromBuffer(probe)
+        val px = bmp.getPixel(0, 0)
+        bmp.recycle()
+        val ok = px == 0xFFFF0000.toInt()
+        Log.i(
+            TAG,
+            "face direct-copy probe: pixel=0x${Integer.toHexString(px)} → " +
+                if (ok) "direct (零转换)" else "convert (回退逐像素重排)"
+        )
+        ok
+    } catch (e: Throwable) {
+        Log.w(TAG, "face direct-copy probe failed", e)
+        false
+    }
+
+    /**
      * 视情况采一帧屏幕内容交给后台做人脸检测 / GPUPixel 处理（v2.0.156 重构，v2.0.177 收窄 ROI）。
      */
     private fun maybeScheduleFaceSampling() {
@@ -5274,6 +5321,31 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             gpReadUvW = rw.toFloat() / w
             gpReadUvH = rh.toFloat() / h
         }
+
+        // ===== v2.6.17：GLSL 检测路径改用「GPU 预缩放 + 零拷贝直拷」 =====
+        // 采样**区域**仍是视口中央 faceReadSize×faceReadSize（覆盖范围不变，脸偏一点也能抓到），
+        // 但回读尺寸先由 GPU 缩到检测输入尺寸（≤faceSampleSize，等比 letterbox）：
+        //   ① glReadPixels 是 GL 线程上的同步阻塞，数据量 1 MB → 约 0.25 MB（↓75%）；
+        //   ② 后台线程不必再做 512→256 的 Skia 缩放（原先每 8 帧一次 Canvas.drawBitmap）。
+        // blit 失败时保持原全尺寸回读，正确性不受影响（只是慢回旧路径）。
+        var readW = rw
+        var readH = rh
+        var readFromHalfFbo = false
+        if (!gpFullFrame) {
+            // 等比缩到长边 ≤ faceSampleSize（复用 ImageScale.fitLongSide，已有单测覆盖）；
+            // 采样区本就比检测尺寸还小时不放大（放大只会徒增回读字节，letterbox 会补回尺寸）。
+            val fit = ImageScale.fitLongSide(rw, rh, faceSampleSize)
+            val wantW = minOf(fit[0], rw)
+            val wantH = minOf(fit[1], rh)
+            if (wantW != rw || wantH != rh) {
+                if (blitFboToHalf(gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, wantW, wantH)) {
+                    readW = wantW
+                    readH = wantH
+                    readFromHalfFbo = true
+                }
+            }
+        }
+
         // v2.0.182：scale 的语义分两种（这是全覆盖与人脸 ROI 的关键差异）
         //   - 全覆盖：回读区（降采样）覆盖整个视口 → 裁剪图坐标 = 视口坐标，scale = 1
         //   - 人脸 ROI：回读区只覆盖视口一小块 → scale = rw/w，需放大回全域
@@ -5303,7 +5375,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
 
         try {
-            val need = rw * rh * 4
+            // v2.6.17：按**实际回读尺寸**（readW×readH）算字节数 —— GLSL 路径下它已是
+            // GPU 预缩放后的检测尺寸，比采样区 rw×rh 小得多。
+            val need = readW * readH * 4
 
             // v2.0.183：降采样回读必须先「真正缩放」再读 —— glReadPixels 只裁剪不缩放。
             // 用 glBlitFramebuffer 把主 FBO 的 [gpReadUv*] 区域缩小渲染到降采样 FBO，
@@ -5342,14 +5416,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         triggerBackgroundFaceDetection()
                     }
                     // 本帧的降采样 blit 必须在提交回读之前完成
-                    if (needsDownscale && !blitFboToHalf(
+                    // （v2.6.17：GLSL 路径已在函数开头预缩放过，readFromHalfFbo 时跳过）
+                    if (!readFromHalfFbo && needsDownscale && !blitFboToHalf(
                             gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
                         )
                     ) {
                         gpSkipReadThisFrame = true
                         return
                     }
-                    pboHandled = submitGpPboRead(needsDownscale, x0, y0, rw, rh, need)
+                    pboHandled = submitGpPboRead(
+                        readFromHalfFbo || needsDownscale,
+                        if (readFromHalfFbo) 0 else x0,
+                        if (readFromHalfFbo) 0 else y0,
+                        readW, readH, need
+                    )
                     if (!pboHandled) {
                         Log.w(TAG, "PBO submit failed, fallback to sync readback")
                         gpPboEnabled = false
@@ -5367,7 +5447,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         .also { faceReadBuffer = it }
                 buf.clear()
 
-                if (needsDownscale && !blitFboToHalf(
+                if (!readFromHalfFbo && needsDownscale && !blitFboToHalf(
                         gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
                     )
                 ) {
@@ -5375,14 +5455,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     return
                 }
                 // 降采样成功 → 从降采样 FBO 全图读；否则（本就 1:1）从 gpFbo 的 (x0,y0) 读同尺寸区域
+                val srcIsHalf = readFromHalfFbo || needsDownscale
                 GLES20.glBindFramebuffer(
                     GLES20.GL_FRAMEBUFFER,
-                    if (needsDownscale) gpHalfFboId else gpFboId
+                    if (srcIsHalf) gpHalfFboId else gpFboId
                 )
                 GLES20.glReadPixels(
-                    if (needsDownscale) 0 else x0,
-                    if (needsDownscale) 0 else y0,
-                    rw, rh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+                    if (srcIsHalf) 0 else x0,
+                    if (srcIsHalf) 0 else y0,
+                    readW, readH, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
                 )
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
                 buf.rewind()
@@ -5397,8 +5478,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
                 synchronized(faceFrameLock) {
                     pendingFaceFrame = frame
-                    pendingFaceFrameW = rw
-                    pendingFaceFrameH = rh
+                    pendingFaceFrameW = readW
+                    pendingFaceFrameH = readH
                 }
                 triggerBackgroundFaceDetection()
             }
@@ -5550,63 +5631,102 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // ===== MediaPipe（GLSL 引擎）路径：单线程，原逻辑 =====
         isDetectingFace.set(true)
         faceExecutor.execute {
+            // v2.6.17：前置段（回读字节 → Bitmap）起点
+            val facePrepStartNs = System.nanoTime()
             try {
-                // v84 性能优化：复用 Bitmap/数组缓冲（faceExecutor 单线程，安全）
-                val area = fw * fh
-                if (faceArgBuffer == null || faceArgBuffer!!.size < area) {
-                    faceArgBuffer = IntArray(area)
-                }
-                val argb = faceArgBuffer!!
-                for (i in 0 until area) {
-                    val r = rgbaData[i * 4].toInt() and 0xff
-                    val g = rgbaData[i * 4 + 1].toInt() and 0xff
-                    val b = rgbaData[i * 4 + 2].toInt() and 0xff
-                    argb[i] = (0xff shl 24) or (r shl 16) or (g shl 8) or b
-                }
+                // ===== v2.6.17：回读数据**零转换**直拷进 Bitmap =====
+                // 旧实现逐像素做 RGBA→ARGB 重排（512×512 = 262144 次字节读取 + 移位），
+                // 再 setPixels 二次遍历（又一次 262144 次写）—— 检测前置的纯 CPU 段里最贵的一环。
+                // 事实依据：`Bitmap.Config.ARGB_8888` 的**内存字节序就是 R,G,B,A**
+                // （小端 N32 == RGBA8888），与 `glReadPixels(GL_RGBA, GL_UNSIGNED_BYTE)` 的
+                // 输出完全一致 → `copyPixelsFromBuffer` 一次 memcpy 即可，循环整个消失。
+                // 首次使用前用 1×1 位图探测一次（见 probeFaceDirectCopy），探测失败自动回退旧循环。
+                if (faceDirectCopy == 0) faceDirectCopy = if (probeFaceDirectCopy()) 1 else 2
                 if (faceBmp == null || faceBmp!!.width != fw || faceBmp!!.height != fh) {
                     faceBmp?.recycle()
                     faceBmp = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
+                    // glReadPixels 的 alpha 通道不可靠（未开混合时常为 0）→ 按不透明处理。
+                    // 否则直拷出来的位图全透明，drawBitmap 后 MediaPipe 看到的是一张全黑图。
+                    faceBmp!!.setHasAlpha(false)
                 }
                 val srcBmp = faceBmp!!
-                srcBmp.setPixels(argb, 0, fw, 0, 0, fw, fh)
-                // Downscale the larger sampled region to the landmarker input size
-                if (faceScaledBmp == null) {
-                    faceScaledBmp = Bitmap.createBitmap(faceSampleSize, faceSampleSize, Bitmap.Config.ARGB_8888)
+                if (faceDirectCopy == 1) {
+                    srcBmp.copyPixelsFromBuffer(
+                        java.nio.ByteBuffer.wrap(rgbaData, 0, fw * fh * 4)
+                            .order(java.nio.ByteOrder.nativeOrder())
+                    )
+                } else {
+                    // ===== 回退路径（探测失败）：逐像素重排 + setPixels =====
+                    val area = fw * fh
+                    if (faceArgBuffer == null || faceArgBuffer!!.size < area) {
+                        faceArgBuffer = IntArray(area)
+                    }
+                    val argb = faceArgBuffer!!
+                    for (i in 0 until area) {
+                        val r = rgbaData[i * 4].toInt() and 0xff
+                        val g = rgbaData[i * 4 + 1].toInt() and 0xff
+                        val b = rgbaData[i * 4 + 2].toInt() and 0xff
+                        argb[i] = (0xff shl 24) or (r shl 16) or (g shl 8) or b
+                    }
+                    srcBmp.setPixels(argb, 0, fw, 0, 0, fw, fh)
                 }
-                val scaledBmp = faceScaledBmp!!
-                val canvas = android.graphics.Canvas(scaledBmp)
-                // v2.4.38（美颜审查 #9）：**等比缩放 + 居中填充**（letterbox），不再把非方形采样区
-                // 直接拉伸成 256×256 —— 后者会让 MediaPipe 看到宽高比失真的脸，在 16:9 / 4:3 或
-                // 窄视口下检出率与五官定位精度下降。采样区本就是正方形时（常见情形，faceReadSize=512）
-                // 退化为整幅缩放，行为与旧实现完全一致。
-                val scaledSizeF = faceSampleSize.toFloat()
-                val fitScale = minOf(scaledSizeF / fw, scaledSizeF / fh)
-                val drawW = (fw * fitScale).toInt().coerceAtLeast(1)
-                val drawH = (fh * fitScale).toInt().coerceAtLeast(1)
-                val lbOffX = (faceSampleSize - drawW) / 2
-                val lbOffY = (faceSampleSize - drawH) / 2
-                // 黑边区域先擦除，否则复用位图会残留上一帧内容
-                scaledBmp.eraseColor(android.graphics.Color.BLACK)
-                canvas.drawBitmap(
-                    srcBmp,
-                    android.graphics.Rect(0, 0, fw, fh),
-                    android.graphics.Rect(lbOffX, lbOffY, lbOffX + drawW, lbOffY + drawH),
-                    null
-                )
-                // MediaPipe 返回的是「含黑边的整张 256×256 画布」归一化坐标，须先换算回内容子矩形
-                // 再套 mapCrop*ToViewport 得到视口 UV。lbW/lbH 为内容在画布中的归一化占比。
-                val lbX0 = lbOffX / scaledSizeF
-                val lbY0 = lbOffY / scaledSizeF
-                val lbW = drawW / scaledSizeF
-                val lbH = drawH / scaledSizeF
+
+                // ===== v2.6.17：采样区已是检测尺寸 → 免缩放、免居中 =====
+                // GPU 预缩放已把回读尺寸降到 ≤ faceSampleSize；方形采样区（常见情形）直接
+                // 就是 256×256 → 跳过 eraseColor（每帧 256 KB 擦写）+ Canvas 缩放。
+                val scaledBmp: Bitmap
+                val lbX0: Float
+                val lbY0: Float
+                val lbW: Float
+                val lbH: Float
+                if (fw == faceSampleSize && fh == faceSampleSize) {
+                    scaledBmp = srcBmp
+                    lbX0 = 0f; lbY0 = 0f; lbW = 1f; lbH = 1f
+                } else {
+                    // Downscale the larger sampled region to the landmarker input size
+                    if (faceScaledBmp == null) {
+                        faceScaledBmp = Bitmap.createBitmap(faceSampleSize, faceSampleSize, Bitmap.Config.ARGB_8888)
+                    }
+                    val canvasBmp = faceScaledBmp!!
+                    // v2.4.38（美颜审查 #9）：**等比缩放 + 居中填充**（letterbox），不再把非方形采样区
+                    // 直接拉伸成 256×256 —— 后者会让 MediaPipe 看到宽高比失真的脸，在 16:9 / 4:3 或
+                    // 窄视口下检出率与五官定位精度下降。
+                    // v2.6.17：GLSL 路径的等比缩小已由 GPU 完成（长边已 = faceSampleSize），
+                    // 故此处 fitScale 通常为 1，只剩「居中填充黑边」；GPUPixel 关闭且采样区为方形时
+                    // 走上面的直通分支，压根不进来。
+                    val scaledSizeF = faceSampleSize.toFloat()
+                    val fitScale = minOf(scaledSizeF / fw, scaledSizeF / fh)
+                    val drawW = (fw * fitScale).toInt().coerceAtLeast(1)
+                    val drawH = (fh * fitScale).toInt().coerceAtLeast(1)
+                    val lbOffX = (faceSampleSize - drawW) / 2
+                    val lbOffY = (faceSampleSize - drawH) / 2
+                    // 黑边区域先擦除，否则复用位图会残留上一帧内容
+                    canvasBmp.eraseColor(android.graphics.Color.BLACK)
+                    android.graphics.Canvas(canvasBmp).drawBitmap(
+                        srcBmp,
+                        android.graphics.Rect(0, 0, fw, fh),
+                        android.graphics.Rect(lbOffX, lbOffY, lbOffX + drawW, lbOffY + drawH),
+                        null
+                    )
+                    scaledBmp = canvasBmp
+                    // MediaPipe 返回的是「含黑边的整张 256×256 画布」归一化坐标，须先换算回内容子矩形
+                    // 再套 mapCrop*ToViewport 得到视口 UV。lbW/lbH 为内容在画布中的归一化占比。
+                    lbX0 = lbOffX / scaledSizeF
+                    lbY0 = lbOffY / scaledSizeF
+                    lbW = drawW / scaledSizeF
+                    lbH = drawH / scaledSizeF
+                }
                 val mpX: (Float) -> Float = { px -> mapCropXToViewport((px - lbX0) / lbW) }
                 val mpY: (Float) -> Float = { py -> mapCropYToViewport((py - lbY0) / lbH) }
                 val mpLenX: (Float) -> Float = { len -> mapCropLenToViewport(len / lbW) }
 
                 // Track face landmarks using Google MediaPipe (with legacy fallback)
                 val manager = mediaPipeManager
+                val faceDetectStartNs = System.nanoTime()
+                faceProfPrepNanos += faceDetectStartNs - facePrepStartNs
                 if (manager != null) {
                     val result = manager.detectFace(scaledBmp)
+                    faceProfDetectNanos += System.nanoTime() - faceDetectStartNs
                     if (result.detected) {
                         // v2.0.156：MediaPipe 给的是「采样裁剪图」空间的坐标，必须换算成视口 UV
                         // 再喂给 shader —— 否则人脸一偏离画面中心，妆容与变形就整体错位
@@ -5663,6 +5783,21 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             } catch (e: Throwable) {
                 Log.e(TAG, "Background Google MediaPipe face tracking failed", e)
             } finally {
+                // v2.6.17：分段统计（每 60 次一行）。prep = 回读字节 → Bitmap 的纯 CPU 前置，
+                // detect = MediaPipe 推理。改动的目标就是让 prep 相对 detect 可忽略。
+                faceProfCount++
+                if (faceProfCount >= 60) {
+                    val n = faceProfCount
+                    Log.i(
+                        TAG,
+                        "face profile(${n}x): prep=${faceProfPrepNanos / n / 1_000_000} ms, " +
+                            "detect=${faceProfDetectNanos / n / 1_000_000} ms, " +
+                            "read=${fw}x${fh}, copy=${if (faceDirectCopy == 1) "direct" else "convert"}"
+                    )
+                    faceProfCount = 0
+                    faceProfPrepNanos = 0
+                    faceProfDetectNanos = 0
+                }
                 // v2.0.156：把这一帧的数组还给池，下一次采样即可复用（省掉每 8 帧 1MB 的分配）
                 synchronized(faceFrameLock) { faceFramePool = rgbaData }
                 isDetectingFace.set(false)
