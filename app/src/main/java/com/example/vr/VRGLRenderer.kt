@@ -1878,6 +1878,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             lastFrameTimeMs = android.os.SystemClock.uptimeMillis()
         }
 
+        // v2.6.16（P0）：渲染帧度量。**必须放在限帧 sleep 之后** —— 放在前面会把等待时间
+        // 算进 CPU 耗时（30 fps 限帧时凭空多 16ms）。帧间隔由两次 begin 之差得出，
+        // 天然包含限帧等待，因此 fps 反映的是用户真正看到的帧率。
+        // ⚠️ 华为 VR 模式在上面的分支已 return（帧循环由 HuaweiVrActivity 驱动），
+        //    那条路径不参与统计，别把这里的 0 当成「渲染没跑」。
+        val frameBeginNs = RenderStats.onFrameBegin()
+
         // Apply inertia decay for smooth drag/fling
         if (flingVelocityYaw != 0f || flingVelocityPitch != 0f) {
             manualYaw = (manualYaw + flingVelocityYaw) % 360f
@@ -2176,6 +2183,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         captureBackdropIfNeeded()
         // v2.2.0（P3）：AI 弹幕取帧（低频、按需触发；未请求时零开销）
         captureDanmuFrameIfNeeded()
+
+        // v2.6.16（P0）：本帧结算。这是 onDrawFrame 的**唯一出口**（上面无提前 return）。
+        RenderStats.onFrameEnd(frameBeginNs, maxFps)
     }
 
     // ======================= 华为 VR（OpenXR）单眼绘制 =======================

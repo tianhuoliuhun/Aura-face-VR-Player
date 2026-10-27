@@ -827,6 +827,7 @@
     <string name="perf_ball_hud_all">パフォーマンス球：CPU / 温度 / FPS</string>
     <string name="perf_ball_hud_fps_only">パフォーマンス球：FPS のみ</string>
     <string name="perf_ball_hud_report">CPU %1$s%% · %2$s°C · %3$s fps</string>
+    <string name="perf_ball_hud_frame">描画 %1$s fps · %2$s ms（最大 %3$s）· ジャンク %4$s/%5$s フレーム</string>
     <string name="perf_ball_fps_unit">fps</string>
     <string name="info_ball_battery_desc">残量と充電状態を表示。タップで更新、ダブルタップで %/電圧を切替</string>
     <string name="info_ball_hud_clock_12h">時計：12 時間制</string>

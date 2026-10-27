@@ -827,6 +827,7 @@
     <string name="perf_ball_hud_all">성능 볼: CPU / 온도 / FPS</string>
     <string name="perf_ball_hud_fps_only">성능 볼: FPS만</string>
     <string name="perf_ball_hud_report">CPU %1$s%% · %2$s°C · %3$s fps</string>
+    <string name="perf_ball_hud_frame">렌더 %1$s fps · %2$s ms (최대 %3$s) · 끊김 %4$s/%5$s 프레임</string>
     <string name="perf_ball_fps_unit">fps</string>
     <string name="info_ball_battery_desc">배터리 잔량과 충전 상태 표시. 탭하면 새로고침, 두 번 탭하면 %/전압 전환</string>
     <string name="info_ball_hud_clock_12h">시계: 12시간제</string>

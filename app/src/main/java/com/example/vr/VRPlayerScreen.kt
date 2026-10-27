@@ -1205,8 +1205,17 @@ fun VRPlayerScreen(
     // v103：悬浮球按下时的速度提示条（仅显示 1 秒后自动隐藏）
     var showSpeedHud by remember { mutableStateOf(false) }
     // v104：LUT 视频滤镜状态
-    var lutName by remember { mutableStateOf(context.getString(R.string.lut_none)) }       // 当前滤镜名
-    var lutMix by remember { mutableFloatStateOf(0.8f) }       // 滤镜强度 0~1
+    // ⚠️ v2.6.16：这两个状态此前只是 `remember`，没有持久化 —— 每次进播放器都回落到
+    //    「无滤镜 + 0.8」，用户上次选的滤镜直接丢失。现在与美颜参数同组始终落盘。
+    //    `lut_name` 存的是**内置款的 fileName**（不是本地化名，避免切语言后对不上），
+    //    无滤镜 / 自定义款一律存空串：自定义款只记文件名、原始 Uri 权限会失效，
+    //    恢复时必然「名字在、纹理没了」，索性不落盘。
+    var lutName by remember {
+        mutableStateOf(prefs.getString("lut_name", "").orEmpty())
+    }
+    var lutMix by remember {
+        mutableFloatStateOf(prefs.getFloat("lut_mix", LutUtils.DEFAULT_MIX))
+    }
     var isLutLoading by remember { mutableStateOf(false) }     // 解析中
     // v91：主界面字幕快捷面板
     var isSubtitleQuickPanelOpen by remember { mutableStateOf(false) }
@@ -1331,6 +1340,9 @@ fun VRPlayerScreen(
         addCodecParamsEnabled,
         autoFallbackSoftEnabled,
         beautyPreset,
+        // v2.6.16：LUT 滤镜（漏加进 key 列表 = 改了永不落盘，本项目头号坑）
+        lutName,
+        lutMix,
         // v2.4.58：投屏接收开关（漏加进 key 列表 → 改了不落盘，重启即丢）
         castReceiverEnabled
     ) {
@@ -1370,6 +1382,11 @@ fun VRPlayerScreen(
             putFloat("beauty_eyebrows", beautyEyebrows)
             putFloat("beauty_long_legs", beautyLongLegs)
             putFloat("beauty_small_head", beautySmallHead)
+            // v2.6.16：LUT 滤镜。与美颜参数同组「始终落盘」。
+            // 只存内置款的 fileName；无滤镜 / 自定义款存空串 —— 自定义款只记文件名、
+            // 原始 Uri 读权限会失效，恢复时必然「名字在、纹理没了」，不如不存。
+            putString("lut_name", if (LutUtils.findBuiltin(lutName) != null) lutName else "")
+            putFloat("lut_mix", lutMix)
             if (beautyPresetId >= 0) putInt("beauty_preset_id", beautyPresetId)
             if (isMemoryModeEnabled) {
                 putBoolean("cast_receiver_enabled", castReceiverEnabled)
@@ -2471,6 +2488,9 @@ fun VRPlayerScreen(
                     }
                     withContext(Dispatchers.Main) {
                         if (rgba != null) {
+                            // v2.6.16：与内置款同一口径 —— 强度为 0 时先恢复默认，
+                            // 否则「刚刚点了无滤镜 / 拖到 0」再选自选文件同样毫无效果。
+                            if (lutMix <= LutUtils.MIX_EPSILON) lutMix = LutUtils.DEFAULT_MIX
                             currentGlSurfaceView?.renderer?.setLutTexture(rgba)
                             currentGlSurfaceView?.renderer?.lutMix = lutMix
                             lutName = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')
@@ -2494,6 +2514,32 @@ fun VRPlayerScreen(
 
     LaunchedEffect(maxFps, currentGlSurfaceView) {
         currentGlSurfaceView?.renderer?.maxFps = maxFps
+    }
+
+    // v2.6.16：恢复上次选中的内置 LUT —— 光把名字读回来**不够**，纹理必须重新解析上传，
+    // 否则就是「名字亮着、画面没效果」的幽灵选中态（和强度被回写成 0 是同一类症状）。
+    // key 只放 `currentGlSurfaceView`：渲染器实例一换（首次就绪 / AndroidView 重建）就重放一次，
+    // 顺带补上「AndroidView.update 从不同步 LUT 纹理」这个漏洞 —— 之前 renderer 换了，
+    // 新 renderer 的 `lutMix` 是 0、纹理是 -1，LUT 静默消失而 UI 状态还在。
+    // ⚠️ 不要把这个 effect 的 key 加上 `lutName`/`lutMix`：那样每拖一次强度就会重新
+    //    解析一遍 .cube（33³→64³ 重采样），白费 CPU 还可能闪一下。
+    LaunchedEffect(currentGlSurfaceView) {
+        val view = currentGlSurfaceView ?: return@LaunchedEffect
+        val builtin = LutUtils.findBuiltin(lutName) ?: return@LaunchedEffect
+        val rgba = withContext(Dispatchers.IO) {
+            try {
+                context.assets.open("luts/${builtin.fileName}.cube").use {
+                    LutUtils.parseCubeToRgba(it)
+                }
+            } catch (e: Exception) {
+                Log.e("VRPlayerScreen", "恢复 LUT 失败：${builtin.fileName}", e)
+                null
+            }
+        } ?: return@LaunchedEffect
+        // 强度为 0 而滤镜名非空 → 是「拖到底」留下的死状态，恢复成默认强度才会有效果
+        if (lutMix <= LutUtils.MIX_EPSILON) lutMix = LutUtils.DEFAULT_MIX
+        view.renderer.setLutTexture(rgba)
+        view.renderer.lutMix = lutMix
     }
 
     // v2.0.206：画质增强（MEMC / FSR）参数实时同步到渲染器。

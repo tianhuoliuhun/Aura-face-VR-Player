@@ -153,6 +153,17 @@ fun PerfFloatingBall(
     var fps by remember { mutableIntStateOf(0) }
     var fpsOnly by remember { mutableStateOf(false) }       // 单击切换
 
+    // v2.6.16（P0）：GL 渲染帧度量。上面那个 [fps] 是 Choreographer 的**主线程 UI 帧**，
+    // 渲染掉到 20 fps 时它照样报 60（只要还有动画在跑），拿它判断性能会被骗。
+    // 这里取 [RenderStats] 的真实渲染帧率，有数据就用它，没有才回退 UI 帧率。
+    var renderSnap by remember { mutableStateOf(RenderStats.snapshot) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500)
+            renderSnap = RenderStats.snapshot
+        }
+    }
+
     // CPU：每秒取一次差值
     LaunchedEffect(Unit) {
         var prev = PerfSampler.readCpuTimes()
@@ -196,14 +207,29 @@ fun PerfFloatingBall(
     }
 
     // HUD 文案在语句位置取好 —— @Composable 调用不能塞进手势 lambda
+    val shownFps = if (renderSnap.hasData) renderSnap.fps else fps
     val hudAll = stringResource(R.string.perf_ball_hud_all)
     val hudFpsOnly = stringResource(R.string.perf_ball_hud_fps_only)
     val hudReport = stringResource(
         R.string.perf_ball_hud_report,
         if (cpuPct >= 0) cpuPct.toString() else "-",
         tempC?.let { String.format("%.1f", it) } ?: "-",
-        fps.toString()
+        shownFps.toString()
     )
+    // v2.6.16：双击报告追加第二段 —— 渲染侧的真实口径（帧率 / CPU 耗时 / 抖动）。
+    // 只在拿到有效数据时追加，避免渲染器还没跑就报一串 0。
+    val hudFrame = if (renderSnap.hasData) {
+        stringResource(
+            R.string.perf_ball_hud_frame,
+            renderSnap.fps.toString(),
+            String.format("%.1f", renderSnap.cpuAvgMs),
+            String.format("%.1f", renderSnap.cpuMaxMs),
+            renderSnap.jankFrames.toString(),
+            renderSnap.frames.toString()
+        )
+    } else {
+        ""
+    }
 
     val ballDp = 54.dp
 
@@ -260,7 +286,9 @@ fun PerfFloatingBall(
                     fpsOnly = !fpsOnly
                     onFeedback(if (fpsOnly) hudFpsOnly else hudAll)
                 },
-                onDoubleTap = { onFeedback(hudReport) },
+                onDoubleTap = {
+                    onFeedback(if (hudFrame.isEmpty()) hudReport else "$hudReport\n$hudFrame")
+                },
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -270,7 +298,7 @@ fun PerfFloatingBall(
         ) {
             if (fpsOnly) {
                 Text(
-                    text = fps.toString(),
+                    text = shownFps.toString(),
                     color = Color.White,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
@@ -296,7 +324,7 @@ fun PerfFloatingBall(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "$fps fps",
+                    text = "$shownFps fps",
                     color = accentColor,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Medium,

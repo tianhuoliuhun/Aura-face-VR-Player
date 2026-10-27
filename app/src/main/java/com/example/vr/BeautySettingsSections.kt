@@ -2,6 +2,7 @@ package com.example.vr
 
 import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -174,14 +175,14 @@ fun LutFilterSection(
     val context: Context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val ctx = LocalContext.current
-
     // 点击某款内置 LUT：异步解析 → 交渲染器
     fun applyBuiltin(lut: LutUtils.BuiltinLut) {
         if (isLutLoading) return
         val file = lut.fileName
         onLutLoadingChange(true)
-        onLutNameChange(file)
+        // ⚠️ v2.6.16：`onLutNameChange` **必须放在解析成功之后**。
+        //    原来在这里先改名，失败时（见 catch）名字已变、纹理没设 → UI 显示已选中、
+        //    画面毫无效果，且没有任何提示。
         scope.launch(Dispatchers.IO) {
             try {
                 val rgba = context.assets.open("luts/$file.cube").use {
@@ -189,16 +190,41 @@ fun LutFilterSection(
                 }
                 withContext(Dispatchers.Main) {
                     onApplyLutRgba(rgba)
-                    onLutMixChange(lutMix)
+                    // ⚠️ v2.6.16：这里**不能**原样回写 `lutMix`。
+                    //    「无滤镜」会把强度置 0（关闭），用户随后选任意一款时，
+                    //    `lutMix` 就是 0 → 回写 0 → shader 里 `uLutMix <= 0.001` 直接跳过
+                    //    → 选中态亮着、画面完全不变。这正是「感觉 LUT 不生效」的主要成因。
+                    //    现在：为 0 就恢复成默认强度，非 0 才尊重用户设定的值。
+                    onLutMixChange(
+                        if (lutMix <= LutUtils.MIX_EPSILON) LutUtils.DEFAULT_MIX else lutMix
+                    )
+                    onLutNameChange(file)
                 }
             } catch (e: Exception) {
                 Log.e("LutFilterSection", "LUT $file load failed", e)
+                // v2.6.16：失败不再是静默的（此前只有 Log）。名字未改，选中态不会说谎。
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        context.getString(
+                            R.string.toast_lut_load_failed,
+                            e.message ?: e.javaClass.simpleName
+                        ),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             } finally {
                 withContext(Dispatchers.Main) { onLutLoadingChange(false) }
             }
         }
         onUserInteraction()
     }
+
+    // v2.6.16：状态层约定 —— **空串 = 无滤镜**（不要用本地化名当状态值，
+    // 否则切语言后存下来的「无滤镜」对不上任何资源）。
+    // UI 显示时才把它翻译成本地化名。
+    val noneLabel = stringResource(R.string.lut_none)
+    val displayName = lutName.ifEmpty { noneLabel }
 
     Column(modifier = modifier) {
         SectionTitle(stringResource(R.string.lut_section_title), accentColor)
@@ -209,13 +235,13 @@ fun LutFilterSection(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val noneSelected = lutName == stringResource(R.string.lut_none) || lutName.isEmpty()
+            val noneSelected = lutName.isEmpty() || lutName == noneLabel
             LutChip(
-                text = stringResource(R.string.lut_none),
+                text = noneLabel,
                 selected = noneSelected,
                 accentColor = accentColor,
                 onClick = {
-                    onLutNameChange(ctx.getString(R.string.lut_none))
+                    onLutNameChange("")
                     onApplyLutRgba(null)
                     onLutMixChange(0f)
                     onUserInteraction()
@@ -308,7 +334,7 @@ fun LutFilterSection(
             }
         }
         Text(
-            text = stringResource(R.string.lut_current, LutUtils.lutDisplayName(lutName, context)),
+            text = stringResource(R.string.lut_current, LutUtils.lutDisplayName(displayName, context)),
             color = Color.White.copy(alpha = 0.45f),
             fontSize = 11.sp
         )

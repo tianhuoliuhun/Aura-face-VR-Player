@@ -869,6 +869,7 @@
     <string name="perf_ball_hud_all">效能球：顯示 CPU / 溫度 / 幀率</string>
     <string name="perf_ball_hud_fps_only">效能球：僅顯示幀率</string>
     <string name="perf_ball_hud_report">CPU %1$s%% · %2$s°C · %3$s fps</string>
+    <string name="perf_ball_hud_frame">渲染 %1$s fps · 幀耗 %2$s ms（峰值 %3$s）· 抖動 %4$s/%5$s 幀</string>
     <string name="perf_ball_fps_unit">fps</string>
     <string name="info_ball_battery_desc">顯示電量與充電狀態；單擊刷新，雙擊切百分比/電壓</string>
     <string name="info_ball_hud_clock_12h">時鐘：12 小時制</string>

@@ -22,6 +22,18 @@ object LutUtils {
     const val GRID = 8              // 每行格数
     const val TEX_SIZE = 512        // 输出纹理尺寸（GRID * LUT_OUT）
 
+    /**
+     * LUT 强度的默认值 / 「有滤镜」的基准强度（v2.6.16）。
+     *
+     * ⚠️ 语义要点：**0 = 关闭**（「无滤镜」把它置 0，shader 里 `uLutMix <= 0.001` 直接跳过），
+     * 所以「选中某款滤镜」时强度绝不能是 0 —— 那会得到「UI 已选中、画面却毫无变化」的幽灵状态。
+     * 选滤镜时若当前强度为 0，统一恢复成这个值。
+     */
+    const val DEFAULT_MIX = 0.8f
+
+    /** 强度低于这个值就当作「关闭」，用于「选滤镜时要不要恢复默认强度」的判断 */
+    const val MIX_EPSILON = 0.01f
+
     /** 内置 LUT 预设列表（assets/luts/ 下的文件名 → 本地化名称资源 ID） */
     data class BuiltinLut(val fileName: String, val nameResId: Int)
     val builtinLuts: List<BuiltinLut> = listOf(
@@ -111,6 +123,17 @@ object LutUtils {
     fun lutDisplayName(fileName: String, context: Context): String {
         return builtinLuts.firstOrNull { it.fileName == fileName }?.let { context.getString(it.nameResId) } ?: fileName
     }
+
+    /**
+     * 按 [BuiltinLut.fileName] 找内置款；找不到返回 null。
+     *
+     * 用途（v2.6.16）：LUT 选择要持久化，但**只持久化内置款** ——
+     * 内置款下次启动能从 `assets/luts/<fileName>.cube` 重新解析出纹理；
+     * 自定义款只记了文件名、原始 Uri 的读权限会失效，恢复时必然出现
+     * 「名字还在、纹理没了」的幽灵选中态，所以自定义款不落盘。
+     */
+    fun findBuiltin(fileName: String): BuiltinLut? =
+        builtinLuts.firstOrNull { it.fileName == fileName }
 
     /**
      * 解析 .cube 流并返回 512x512 RGBA（每像素 4 字节，自上而下）。

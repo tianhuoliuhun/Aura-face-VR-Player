@@ -867,6 +867,7 @@
     <string name="perf_ball_hud_all">Perf ball: CPU / temp / FPS</string>
     <string name="perf_ball_hud_fps_only">Perf ball: FPS only</string>
     <string name="perf_ball_hud_report">CPU %1$s%% · %2$s°C · %3$s fps</string>
+    <string name="perf_ball_hud_frame">Render %1$s fps · %2$s ms (peak %3$s) · jank %4$s/%5$s frames</string>
     <string name="perf_ball_fps_unit">fps</string>
     <string name="info_ball_battery_desc">Shows battery and charging; tap to refresh, double-tap for percent/voltage</string>
     <string name="info_ball_hud_clock_12h">Clock: 12-hour</string>
