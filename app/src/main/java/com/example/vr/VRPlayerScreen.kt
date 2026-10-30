@@ -4505,7 +4505,17 @@ fun VRPlayerScreen(
         //   · 液态档改成真半透明后，透出的是 SurfaceView 的全分辨率视频 —— 不再需要那张降采样帧；
         //   · 磨砂档要用它做"被漫射掉的背后内容"（模糊层作用于它）。
         // 副作用：液态档不再有 GL 线程每 30ms 的 blit + glReadPixels，省一份持续开销。
-        val needsBackdrop = glassMode == 2 && Build.VERSION.SDK_INT >= 31
+        // v2.6.18：**液态档（=1）也要采样** —— 真液态玻璃的 lens 折射/模糊必须作用于真实视频帧，
+        // 否则 backdrop 里只有 ThemeBgColor 纯色，折射会退化成一圈灰边（与磨砂档"看不出模糊"同源）。
+        // v2.6.18：门控跟着"该档位真正要用的特效"走 ——
+        //   · 液态（1）：去掉全局模糊后只剩 lens（AGSL），33+ 才可用 → 用 supportsLens；
+        //     31/32 会走纯 Canvas 降级分支、根本不读 backdrop，再采样就是纯浪费。
+        //   · 磨砂（2）：模糊层走 RenderEffect，31+ 即可。
+        val needsBackdrop = when (glassMode) {
+            1 -> GlassCapability.supportsLens
+            2 -> Build.VERSION.SDK_INT >= 31
+            else -> false
+        }
         // v2.1.233：背景采样只在需要的档位开着时才做（纯色/液态档不需要，白白费电）
         LaunchedEffect(needsBackdrop) {
             VideoBackdrop.enabled = needsBackdrop

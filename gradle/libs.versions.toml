@@ -38,8 +38,8 @@ robolectric = "4.16.1"
 roborazzi = "1.59.0"
 firebaseBom = "34.12.0"
 secretsGradlePlugin = "2.0.1"
-mediapipe = "0.10.14"
-backdrop = "1.0.6"
+mediapipe = "0.10.29"
+backdrop = "2.0.0-alpha03"
 # v2.4.58：DLNA/UPnP-AV 接收端（投屏）——jUPnP 3.x + Jetty 9（"jUPnP on Android" 官方要求）
 jupnp = "3.0.4"
 # ⚠️ v2.4.58：Jetty 9.x 使用 java.lang.invoke.MethodHandle，D8 要求 minSdk>=26

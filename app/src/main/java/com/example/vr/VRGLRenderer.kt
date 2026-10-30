@@ -3586,7 +3586,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         bdLastCaptureMs = nowMs
 
         val tw = VideoBackdrop.TARGET_W
-        val th = (tw * dh / dw).coerceIn(1, 256)
+        // v2.6.18：上限 256 → 1280 —— TARGET_W 提高到 640 后，竖屏/极端比例的高度会超过旧上限
+        //（截断会让 backdrop 变形 → 折射方向错乱）。1280 覆盖 640 宽下的所有常见长宽比。
+        val th = (tw * dh / dw).coerceIn(1, 1280)
         try {
             ensureBackdropTarget(tw, th)
             if (bdFboId == 0) {

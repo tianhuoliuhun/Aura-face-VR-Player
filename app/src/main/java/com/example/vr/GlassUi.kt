@@ -15,7 +15,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
 
 /**
  * v2.1.217：**玻璃效果的统一实现**，支持两种风格。
@@ -51,9 +55,11 @@ enum class GlassStyle {
 }
 
 /**
- * 主控栏 / 大面板：模糊半径（按风格分档）。
- * v2.4.57：玻璃已**去掉模糊层**（不再对背景做 RenderEffect 高斯模糊），
- * 半径常量保留仅为 API 兼容，实际不再使用。
+ * 历史：主控栏 / 大面板的模糊半径。
+ *
+ * ⚠️ **v2.6.18 起已无任何调用点**（液态档去掉全局模糊 → 面板不再需要半径；
+ * 磨砂档用自己的 [GlassPanelBlurFrosted]）。常量保留仅为二进制/调用兼容，
+ * 新代码不要再引用它。
  */
 val GlassPanelBlur: Dp = 22.dp
 
@@ -69,7 +75,12 @@ val GlassPanelBlur: Dp = 22.dp
  */
 internal val GlassPanelBlurFrosted: Dp = 32.dp
 
-/** 悬浮球 / 小控件：模糊半径（按风格分档） */
+/**
+ * 悬浮球 / 小控件：模糊半径（按风格分档）。
+ *
+ * ⚠️ v2.6.18：液态档已去掉全局模糊 → `Liquid -> GlassSmallBlur` 传下去的值会被
+ * [glassPanel] 忽略（分支保留只为方便回滚）。当前真正生效的只有磨砂档那一档。
+ */
 val GlassSmallBlur: Dp = 11.dp
 private val GlassSmallBlurFrosted: Dp = 18.dp
 
@@ -155,6 +166,102 @@ fun Modifier.glassPanel(
     //    54dp 的球透出的永远是画面里某个高对比色块，看起来就像"球上贴了个多边形"，
     //    球里的数字也跟着糊。面板面积大、透出的是整片画面，所以面板仍用 18%。
     //    材质语言（受光/棱边/厚度）两处完全一致，只有"底子厚度"按面积区分。
+    // ============ v2.6.18：**真液态玻璃** ============
+    // 走 Kyant0 backdrop 的完整效果链（这就是 iOS 26 Liquid Glass 的开源实现）：
+    //   vibrancy + 增饱和 + lens 边缘折射（含逐通道色散）+ Ambient 环境高光 + 内侧阴影。
+    // ⚠️ v2.6.18：链上的**模糊一环已移除**（见下方 effects 内的说明）——
+    //   真液态玻璃是"清晰背景 + 边缘 SDF 折射"，不是"糊背景 + 亮描边"。
+    // 前提：VideoBackdrop 必须在采样（VRPlayerScreen 已对液态档开启），
+    // 否则 backdrop 只有纯色，折射无从谈起（lens 作用在 backdrop 位图上）。
+    if (GlassCapability.supportsLens) {
+        return this
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = shape,
+                onDrawSurface = {
+                    // 薄底色保证文字可读（叠在**清晰**背景上，只做轻度压暗）
+                    drawRect(if (isCircle) LiquidGlassBallTint else LiquidGlassTint)
+                    onDrawSurface()
+                },
+                effects = {
+                    // 🔴 v2.6.18（用户对比 Liquid Glass 2.0 后指出）：**去掉全局模糊**。
+                    //
+                    // 这一条是「液态玻璃 2.0 单 pass AGSL lens pipeline」与
+                    // 「Classic 毛玻璃 pipeline（API 24+）」之间最本质的分界：
+                    //   · 毛玻璃（Classic）= 全局高斯模糊 + 色差 + 边缘画一圈亮边。
+                    //     整块玻璃是一张**糊掉的照片**，边缘高光只是贴在糊图上的描边；
+                    //   · 液态玻璃（AGSL lens，API 33+）= 只有一次由 SDF 驱动的成像：
+                    //     玻璃本体**保持背景原有清晰度**，只有边缘那一圈被 SDF 折射"掰弯"
+                    //     （edge compression ring），并沿法线做逐通道色散。
+                    //     于是看到的是"一块透镜压在画面上"，而不是"一块磨砂塑料"。
+                    //
+                    // 再叠一层全局模糊的后果不是"更润"，而是把透镜又糊回磨砂：
+                    // lens 掰出来的边缘结构被糊平、色散细边被抹掉，
+                    // 只剩"一块半透明毛玻璃 + 一圈看不出名堂的亮边" —— 就是仍然叠着模糊那版的观感。
+                    // 顺带：每帧省掉一次 RenderEffect blur pass。
+                    runCatching {
+                        // 通透感：背景增饱和（对应 iOS 的 vibrancy）
+                        vibrancy()
+                        // brightness 是"偏移量"（0 = 不变），不是倍数：+2% 提亮、+5% 对比、1.2 饱和
+                        // 对应 Liquid Glass 2.0 的 "Adaptive Luminance Tint"：
+                        // 玻璃自身不糊背景，只对透过的光做色度/亮度适配。
+                        //
+                        // ⚠️ v2.6.18：饱和 **1.4 → 1.2**。1.4 是当年"背景已被糊成一片色块、
+                        // 靠拉饱和把画面救回来"的补偿值；现在背景是清晰的，
+                        // 再拉 1.4 会让玻璃内的画面明显比玻璃外艳一圈，一眼就看得出"盖了块东西"。
+                        colorControls(0.02f, 1.05f, 1.2f)
+                    }.onFailure {
+                        android.util.Log.w("GlassUi", "液态色调链不可用，跳过：${it.message}")
+                    }
+                    // 边缘折射 —— 液态玻璃最标志性的效果：玻璃把背景"掰弯"。
+                    // 🔴 v2.6.18：去掉全局模糊后，**lens 就是这条链唯一的成像来源**。
+                    //   它依赖 AGSL RuntimeShader（Android 13 / API 33+，见 `supportsLens`）；
+                    //   在 31/32 上它不可用，而此刻又已经没有模糊兜底 ——
+                    //   所以门控必须跟着抬到 33，否则 31/32 会得到"既没糊也没折射"的半透明板，
+                    //   还不如走下面的纯 Canvas 体感层降级。
+                    //
+                    // v2.6.18（backdrop 2.0.0）：**打开色散**（chromaticAberration）。
+                    // 这是 iOS 26 Liquid Glass 与普通"毛玻璃"最本质的区别 ——
+                    // 2.x 会切到 `RoundedRectRefractionWithDispersion` 这张专用 shader，
+                    // 沿法线对 R/G/B 用**不同折射量**，于是玻璃边缘出现细窄的光谱色边。
+                    // 关掉它，边缘只是"被掰弯"，观感仍是 iOS 13 的薄玻璃。
+                    //
+                    // 折射高度按件型分档：面板边缘厚（20dp），球体小（7dp）——
+                    // 球上套 20dp 的折射带会把整个球吃掉，看起来像一颗色块。
+                    runCatching {
+                        lens(
+                            refractionHeight = (if (isCircle) 7.dp else 20.dp).toPx(),
+                            refractionAmount = if (isCircle) 0.9f else 0.75f,
+                            depthEffect = true,
+                            chromaticAberration = true,
+                        )
+                    }.onFailure {
+                        android.util.Log.w("GlassUi", "lens 折射不可用，跳过：${it.message}")
+                    }
+                },
+                // 环境光高光：库内置 Ambient 风格（比手写 glassBody 更接近 iOS 26）
+                highlight = { Highlight.Ambient },
+                // 内侧阴影：玻璃厚度感
+                innerShadow = { InnerShadow.Default },
+            )
+            .border(
+                width = 0.8.dp,
+                // 极细轮廓：上/左偏亮、下/右偏暗，模拟环境光从上方来
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.55f),
+                        Color.White.copy(alpha = 0.10f),
+                        Color.White.copy(alpha = 0.04f),
+                    ),
+                    start = androidx.compose.ui.geometry.Offset.Zero,
+                    end = androidx.compose.ui.geometry.Offset.Infinite,
+                ),
+                shape = shape(),
+            )
+    }
+
+    // ============ 降级：无 RenderEffect 能力（SDK<31 / ROM 屏蔽实时模糊）============
+    // 保留 v2.4.68 的「真半透明 + 纯 Canvas 体感层」—— 不依赖任何系统特效，全平台可用。
     return this
         .background(if (isCircle) LiquidGlassBallTint else LiquidGlassTint, shape = shape())
         .border(
@@ -266,6 +373,22 @@ object GlassCapability {
             )
             false
         }
+    }
+
+    /**
+     * v2.6.18：**真液态玻璃（AGSL lens）是否可用** —— 液态档的新门控。
+     *
+     * 去掉全局模糊之后，液态档的全部视觉重量都压在 `lens()` 上：
+     * 它是 `RuntimeShader`（AGSL）驱动的 SDF 折射，**API 33+ 才完整可用**。
+     * 若仍按老门控（[supportsBlur]，31+）放行，31/32 的机器会拿到一块
+     * "清晰背景 + 18% 深色"的板子 —— 既没有模糊也没有折射，
+     * 反而不如走 [glassPanel] 末尾那套纯 Canvas 体感层（棱边高光/厚度/光泽）。
+     *
+     * 与 [supportsBlur] 串联：后者已验证本机 RenderEffect 通路没被 ROM 屏蔽，
+     * 是 lens 能出图的前提条件之一。
+     */
+    val supportsLens: Boolean by lazy {
+        Build.VERSION.SDK_INT >= 33 && supportsBlur
     }
 
     /** 是否运行在小米系 ROM 上（HyperOS / MIUI）—— 仅用于诊断日志 */

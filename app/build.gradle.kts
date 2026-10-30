@@ -8,6 +8,28 @@ plugins {
   id("com.google.gms.google-services") version "4.4.2" apply false
 }
 
+// ==========================================================================
+// v2.6.18：**ABI 参数化** —— 32 位 / 64 位分开出包
+// --------------------------------------------------------------------------
+// 需求：32 位（armeabi-v7a）与 64 位（arm64-v8a）**各出一个独立 APK**，不做 universal 包。
+// 旧做法是每次手改下面 `abiFilters` 再 `git checkout` 还原（2026-10-28 发 v7a 包即如此），
+// 容易忘还原 —— 一旦漏了，发出去的主线包会变成 32 位。
+//
+// 用法：
+//   ./gradle :app:assembleAllRelease -x lintVitalAllRelease                        → arm64-v8a（默认）
+//   ./gradle :app:assembleAllRelease -x lintVitalAllRelease -PtargetAbi=armeabi-v7a → 32 位，产物名带 -v7a
+//
+// ⚠️ 默认值必须是 arm64-v8a：这是用户确认的"仅 arm64"主线策略，参数只是临时出口。
+val targetAbi: String = (project.findProperty("targetAbi") as String?)
+  ?.trim()?.takeIf { it.isNotEmpty() } ?: "arm64-v8a"
+// 产物名后缀：主线 arm64 保持原名（与历史 Release 一致），非默认 ABI 才加短标记
+val abiSuffix: String = when (targetAbi) {
+  "arm64-v8a" -> ""
+  "armeabi-v7a" -> "-v7a"
+  "armeabi" -> "-v5"
+  else -> "-" + targetAbi.replace("-", "")
+}
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -20,8 +42,8 @@ android {
     // 代价：不再支持 Android 7.x（7.0/7.1）。已与用户确认。
     minSdk = 26
     targetSdk = 36
-    versionCode = 336
-    versionName = "2.6.17"
+    versionCode = 337
+    versionName = "2.6.18"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -206,7 +228,7 @@ android {
     //   ⚠️ 也不要「为了让模拟器用原生库」而加 x86_64：一旦 APK 里存在 x86_64 目录，
     //      x86_64 设备会优先选它 → 从「arm64 转译正常跑」退化成「缺库直接崩」。
     ndk {
-      abiFilters += listOf("arm64-v8a")
+      abiFilters += listOf(targetAbi)
     }
     externalNativeBuild {
       cmake {
@@ -373,9 +395,10 @@ android {
 
   // v111：ABI 分包（当前注释掉）
   // ⚠️ v2.1.233 更正：原先这里写着「当前注释掉 = 构建全架构 universal 包，约 391MB」——
-  //    但 defaultConfig.ndk.abiFilters 已经锁死 arm64-v8a，**不可能**再产出 universal 包。
+  //    但 defaultConfig.ndk.abiFilters 已经锁死单 ABI，**不可能**再产出 universal 包。
   //    所以这个 splits 块现在**即使取消注释也没有额外效果**（包含集被 abiFilters 先一步裁掉）。
-  //    真要出多 ABI 包，得先放开上面的 abiFilters，再启用这里。
+  // ⚠️ v2.6.18：现在 `abiFilters` 由 `-PtargetAbi=` 决定（见文件顶部），**单次构建仍只出 1 个 ABI**。
+  //    32/64 位的做法是**跑两次构建、各出一个包**，不是打开这个 splits 块。
   //    保留这段是为了记住历史上的分包做法，不是"打开就能用"的开关。
   // splits {
   //   abi {
@@ -426,6 +449,24 @@ tasks.register("dumpDependencies") {
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
+
+// ==========================================================================
+// v2.6.18：Android 15 的 **16 KB 页大小**兼容 —— 排除 4 KB 对齐的 rtmp-client
+// --------------------------------------------------------------------------
+// `io.antmedia:rtmp-client:3.2.0` 是 media3-datasource-rtmp 的传递依赖，也是该库
+// **唯一的发行版本**（Maven Central 上只有 3.2.0，无新版可升）。它内部的
+// `jni/arm64-v8a/librtmp-jni.so` 是 `p_align=0x1000` 的老产物，在 16 KB 页设备上
+// dlopen 会失败（Android 15+ 安装时也会被判定"不符合 16 KB 对齐要求"）。
+//
+// 这里改成用 `app/libs/rtmp-client-3.2.0-patched.aar`：除该 .so 被重排为
+// `p_align=0x4000` 外，**其余条目逐字节不变**（classes.jar 同原版）。
+// 重排原理见 `.workbuddy/memory/topics/16kb-page-alignment.md`：
+// 只改文件偏移、不动任何 p_vaddr，因此动态链接所需的地址全部保持有效。
+// ==========================================================================
+configurations.configureEach {
+  exclude(group = "io.antmedia", module = "rtmp-client")
+}
+
 dependencies {
   // v102 曾移除 GPUPixel；v2.0.160 按双引擎规划重新引入为「可选方案」（默认仍是 GLSL）。
   // AAR 取自官方 Release v1.3.1：自带 arm64-v8a / armeabi-v7a 两个 ABI 的 .so，
@@ -544,6 +585,10 @@ dependencies {
   implementation("androidx.media3:media3-exoplayer-rtsp:1.7.1")
   implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.7.1")
   implementation("androidx.media3:media3-datasource-rtmp:1.7.1")
+  // v2.6.18：替代上述依赖里传递引入的 io.antmedia:rtmp-client:3.2.0（已被
+  // configurations.exclude 排掉）。内容等同原版，仅把 librtmp-jni.so 的段
+  // 重排为 16 KB 对齐 —— 解决 Android 15+ "不符合 16 KB 对齐要求"。
+  implementation(files("libs/rtmp-client-3.2.0-patched.aar"))
   implementation("androidx.media3:media3-datasource-okhttp:1.7.1")
 
   // ========================================================================
@@ -744,6 +789,9 @@ dependencies {
 afterEvaluate {
   val buildDirPath = layout.buildDirectory.asFile.get().absolutePath
   val ver = android.defaultConfig.versionName ?: "unknown"
+  // v2.6.18：ABI 标记先落成**局部 String** 再进闭包 —— 配置缓存下闭包不能捕获脚本属性/project，
+  // 与上面 ver 同一个套路（`-PtargetAbi=armeabi-v7a` 时产物名带 -v7a，避免覆盖主线 arm64 包）。
+  val abiTag = abiSuffix
   tasks.matching { t ->
     t.name.startsWith("assemble") &&
       (t.name.endsWith("Release") || t.name.endsWith("Debug"))
@@ -757,8 +805,8 @@ afterEvaluate {
     val dirPath = if (flavor.isEmpty()) "$buildDirPath/outputs/apk/$typeDir"
     else "$buildDirPath/outputs/apk/$flavor/$typeDir"
     val srcName = if (flavor.isEmpty()) "app-$typeDir.apk" else "app-$flavor-$typeDir.apk"
-    val dstName = if (flavor.isEmpty()) "Aura-Lens-v$ver$suffix.apk"
-    else "Aura-Lens-v$ver-$flavor$suffix.apk"
+    val dstName = if (flavor.isEmpty()) "Aura-Lens-v$ver$abiTag$suffix.apk"
+    else "Aura-Lens-v$ver-$flavor$abiTag$suffix.apk"
     doLast {
       val src = File(dirPath, srcName)
       val dst = File(dirPath, dstName)

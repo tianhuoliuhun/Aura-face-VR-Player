@@ -156,3 +156,11 @@
 #   · com.unity3d.player.UnityPlayer —— 来自 hvrbridge.jar 里的 Unity 样例 Activity
 -dontwarn com.google.mediapipe.proto.**
 -dontwarn com.unity3d.player.**
+
+# v2.6.18：mediapipe **0.10.14 → 0.10.29** 带来的新缺失类（release 构建首爆）。
+#   `com.google.mediapipe.framework.image.MPImageProperties.hashCode()` 引用了
+#   `com.google.auto.value.extension.memoized.Memoized` —— 那是 auto-value 的
+#   **编译期注解处理器**产物，不会随 AAR 发布，运行时也永远不会走到。
+#   不抑制的话 `minifyAllReleaseWithR8` 直接 FAILED（"Compilation failed to complete"），
+#   而 debug 构建不走 R8 → 只有发版时才发现（本次即如此）。
+-dontwarn com.google.auto.value.extension.memoized.Memoized
