@@ -4595,7 +4595,9 @@ fun VRPlayerScreen(
                 backdrop = liquidBackdrop,
                 style = glassStyle,
                 blurRadius = null,
-                onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.33f)) }
+                // v2.6.19：0.33 → 0.22，与面板同步（球体本身还有 62% 的 LiquidGlassBallTint，
+                // 透出度由那一层主导，这里只做轻微压暗）。
+                onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.22f)) }
             )
         } else {
             Modifier
@@ -5180,7 +5182,7 @@ fun VRPlayerScreen(
                                     // 导致磨砂虽配了 40dp 模糊、实际仍用旧值，与液态玻璃看不出差别。
                                     // null = 由 glassStyle 决定（面板 Liquid 22/Frosted 40，球体 Liquid 11/Frosted 20）。
                                     blurRadius = null,
-                                    onDrawSurface = { drawRect(ThemePanelBgColor.copy(alpha = 0.33f)) }
+                                onDrawSurface = { drawRect(ThemePanelBgColor.copy(alpha = 0.22f)) }
                                 ) else Modifier
                             )
                     ) {
@@ -8893,9 +8895,10 @@ fun VRPlayerScreen(
                         )
                     }
                     .size(ballDp)
-                    .shadow(
+                    // v2.6.22：液态档不投影 —— elevation 的圆形轮廓会被多边形近似，阴影渗进球内
+                    .ballShadow(
+                        isLiquid = isLiquidGlass,
                         elevation = if (isFloatingBallPressed) 12.dp else 6.dp,
-                        shape = CircleShape,
                         spotColor = if (isFloatingBallPressed) AccentColor else Color.Black
                     )
                     .background(

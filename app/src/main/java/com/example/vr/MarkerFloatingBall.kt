@@ -138,9 +138,10 @@ fun MarkerFloatingBall(
                 )
             }
             .size(ballDp)
-            .shadow(
+            // v2.6.22：液态档不投影 —— elevation 的圆形轮廓会被多边形近似，阴影渗进球内
+            .ballShadow(
+                isLiquid = isLiquidGlass,
                 elevation = if (pressed) 12.dp else 6.dp,
-                shape = CircleShape,
                 spotColor = if (pressed) accentColor else Color.Black
             )
             .background(

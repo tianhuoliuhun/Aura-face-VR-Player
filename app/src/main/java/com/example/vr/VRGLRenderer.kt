@@ -3530,12 +3530,21 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val bdRetryDelayMs = 30_000L
 
     /**
-     * v2.4.47（用户要求）：**背景采样间隔 = 30ms 一帧**（≈33fps）。
+     * v2.4.47（用户要求）：**背景采样间隔**（≈33fps）。
      *
      * 旧实现是「每 3 帧采一次」—— 节奏随屏幕刷新率漂移（120Hz 屏只有 25ms、60Hz 屏 50ms），
-     * 而且帧时间过短会让 backdrop 层频繁重录。改成固定 30ms 节流后节奏稳定、开销可控。
+     * 而且帧时间过短会让 backdrop 层频繁重录。改成固定节流后节奏稳定、开销可控。
+     *
+     * 🔴 v2.6.19：**30ms → 50ms**（33fps → 20fps），是「显化效果 + 显著降耗」的一半。
+     * 🔴 v2.6.20（用户指定）：**50ms → 40ms**（25fps）。
+     * 这个间隔同时是 Compose 侧的重录节奏（[VideoBackdrop.commit] 每提交一帧推进一次 tick），
+     * 所以它直接决定：整屏 backdrop layer 的录制次数、以及每个玻璃元素重跑 lens pass 的次数。
+     *
+     * v2.6.20 说明：分辨率已经从 960 砍到 320（回读量 1.66MB → 0.18MB），
+     * 单帧成本大幅下降，所以间隔可以回到 40ms 让边缘折射更跟手；
+     * 而玻璃**本体已全透明**（透出真实视频），本体不依赖这张位图，滞后完全不可见。
      */
-    private val bdCaptureIntervalMs = 30L
+    private val bdCaptureIntervalMs = 40L
 
     /** 上次采样时刻（elapsedRealtime）—— 与 [bdCaptureIntervalMs] 配合做时间节流 */
     private var bdLastCaptureMs = 0L
