@@ -103,7 +103,7 @@
     <string name="theme_name_rose">玫瑰</string>
     <string name="theme_name_amber">琥珀</string>
     <string name="theme_name_mint">薄荷</string>
-    <string name="theme_liquid_glass">液体玻璃</string>
+    <string name="theme_liquid_glass">玻璃</string>
     <string name="settings_group_projection">镜头投影与视角模式</string>
     <string name="projection_auto_detect">投影智能检测</string>
     <string name="projection_auto_detect_desc">自动识别 2:1 全景 / 普通 2D 内容并切换投影与立体模式</string>

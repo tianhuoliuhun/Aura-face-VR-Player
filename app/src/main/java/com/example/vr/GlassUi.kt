@@ -1,10 +1,17 @@
 package com.example.vr
 
 import android.os.Build
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
@@ -18,6 +25,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
@@ -27,6 +37,72 @@ import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
+
+/**
+ * v2.6.20（P2，用户选定）：**Liquid Press 按压进度**（0 = 松开，1 = 按到底）。
+ *
+ * 全局单值：悬浮球是单指交互，同一时刻至多一颗球被按；被按的球通过
+ * [Modifier.liquidPressFx] 把弹簧动画写进来，`glassPanel` 的 lens/裁剪环读取它做
+ * "按压鼓包"（折射增强 + 球体弹性放大）。用全局 state 而不是参数透传，是因为
+ * `ballMaterialModifier` 是 6 颗球**共用**的一份 Modifier —— 参数无法按球区分，
+ * 而按压本来就是"当前只有一颗球"的单值场景。
+ *
+ * ⚠️ lens / onDrawBackdrop 里读它的生效节奏受 backdrop 重录节拍限制（40ms 一次），
+ * 折射增强呈台阶状跟进；球体的 scale 弹性走 graphicsLayer，逐帧丝滑 —— 两者叠加
+ * 观感是"果冻感鼓包"。
+ */
+val GlassLiquidPress = mutableFloatStateOf(0f)
+
+/**
+ * v2.6.20（P2）：**液态球按压体感**（Liquid Press 的球侧入口）。
+ *
+ * 做三件事：
+ *  1. `pressed` → spring 动画（0.5 阻尼，回弹带"果冻"过冲）；
+ *  2. 动画值写入 [GlassLiquidPress]，驱动 `glassPanel` 的折射增强（按压时边缘"吸"得更深）；
+ *  3. graphicsLayer 弹性放大：最大 1 + 0.05 倍 —— 鼓包的主体由它承担，
+ *     逐帧更新不经重组，动画期间零重组开销。
+ *
+ * 非液态档（纯色球）直接返回原样：纯色球是实体，不做光学鼓包。
+ *
+ * ⚠️ @Composable 扩展（未用 `Modifier.composed`：该符号在本项目的 Compose BOM 下解析不到），
+ * 调用点必须在 composable 上下文 —— 6 个球组件的 Box modifier 链都满足。
+ *
+ * @param pressed 当前是否被按住（球组件的 `pressed` 状态，lambda 惰性读取）
+ */
+@androidx.compose.runtime.Composable
+fun Modifier.liquidPressFx(isLiquid: Boolean, pressed: () -> Boolean): Modifier {
+    if (!isLiquid) return this
+    // v2.6.20（P2）：顺带向 LiquidMergeBus 注册本球的位置/半径（拉丝融合膜的数据源）
+    val mergeNode = remember { LiquidBallNode() }
+    androidx.compose.runtime.DisposableEffect(mergeNode) {
+        LiquidMergeBus.register(mergeNode)
+        onDispose { LiquidMergeBus.unregister(mergeNode) }
+    }
+    val press = animateFloatAsState(
+        targetValue = if (pressed()) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = 0.5f,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "liquidPress",
+    )
+    // 在组合中读取 press.value：动画每帧都触发重组，SideEffect 因此逐帧同步到全局状态
+    val pressValue = press.value
+    androidx.compose.runtime.SideEffect { GlassLiquidPress.floatValue = pressValue }
+    return this
+        .onGloballyPositioned { coords ->
+            val origin = coords.positionInWindow()
+            val size = coords.size
+            mergeNode.center = Offset(origin.x + size.width / 2f, origin.y + size.height / 2f)
+            mergeNode.radiusPx = size.width / 2f
+        }
+        .graphicsLayer {
+            val s = 1f + 0.05f * press.value
+            scaleX = s
+            scaleY = s
+        }
+}
+
 
 /**
  * v2.1.217：**玻璃效果的统一实现**，支持两种风格。
@@ -130,6 +206,12 @@ fun Modifier.glassPanel(
      * 避免「多层 Path 描边」在球上三角化成多边形棱面。
      */
     isCircle: Boolean = false,
+    /**
+     * v2.6.20（P2）：`true` = 参与 **Liquid Press**（按压鼓包）。
+     * 只有悬浮球调用点传 true —— lens 折射会读取全局 [GlassLiquidPress] 做按压增强。
+     * 面板永远传 false（面板没有按压交互，读了也是恒 0，白多一次 state 读取）。
+     */
+    enableLiquidPress: Boolean = false,
     /** 在 backdrop 之上、border 之下再画一层（原本各调用点用它铺面板底色）。 */
     onDrawSurface: DrawScope.() -> Unit = {}
 ): Modifier {
@@ -339,10 +421,17 @@ fun Modifier.glassPanel(
                     // ⚠️ 改这里的值必须同步改上面 `refractionDp`，否则出现接缝（见上方说明）。
                     // ⚠️ amount 保持 1.0/1.15：带越窄，同样的 amount 换算出的 UV 位移越集中，
                     //   边缘的"吸进去"感反而更强，不需要再加；加太大反而会采样到环外的像素。
+                    //
+                    // 🔴 v2.6.20（P2）Liquid Press：按压时 amount 再加最多 0.65（1.15 → 1.8）。
+                    //   刻意**不加宽 refractionHeight**：带一旦超过裁剪环的 2dp，内边界会切在
+                    //   折射量非零处露接缝，而且球心会露出更多低分辨率位图（放大 7.5 倍的多边形
+                    //   会回来）。在固定带宽内加大 amount 是"吸得更深"而无副作用的表达；
+                    //   "鼓包"的体积感由 [Modifier.liquidPressFx] 的 graphicsLayer 弹性放大承担。
                     runCatching {
+                        val press = if (enableLiquidPress) GlassLiquidPress.floatValue else 0f
                         lens(
                             refractionHeight = refractionDp.toPx(),
-                            refractionAmount = if (isCircle) 1.15f else 1.0f,
+                            refractionAmount = (if (isCircle) 1.15f else 1.0f) + press * 0.65f,
                             depthEffect = true,
                             chromaticAberration = true,
                         )
@@ -467,6 +556,8 @@ fun Modifier.glassBall(
     backdrop: Backdrop,
     style: GlassStyle = GlassStyle.Liquid,
     blurRadius: Dp? = null,
+    /** v2.6.20（P2）：悬浮球调用点传 true，参与 Liquid Press 按压鼓包。 */
+    enableLiquidPress: Boolean = false,
     onDrawSurface: DrawScope.() -> Unit = {}
 ): Modifier = glassPanel(
     backdrop = backdrop,
@@ -482,6 +573,7 @@ fun Modifier.glassBall(
     },
     // v2.4.68：球 = 圆形 → 体感层走 drawCircle，避免 Path 描边三角化成多边形
     isCircle = true,
+    enableLiquidPress = enableLiquidPress,
     onDrawSurface = onDrawSurface,
 )
 
@@ -529,13 +621,39 @@ private inline fun DrawScope.clipToEdgeRing(
     val innerH = size.height - insetPx * 2f
     // 控件比环带还小（极小的按钮）→ 不做环，整块画，否则会裁成空
     if (innerW <= 0f || innerH <= 0f) { block(); return }
-    val outer = shape.createOutline(size, layoutDirection, this).toPathOrNull() ?: run { block(); return }
-    val inner = shape.createOutline(Size(innerW, innerH), layoutDirection, this).toPathOrNull()
-        ?: run { block(); return }
-    inner.translate(Offset(insetPx, insetPx))
-    clipPath(outer) {
-        clipPath(inner, clipOp = ClipOp.Difference) { block() }
+
+    // v2.6.20（P1，用户选定）：**Path 缓存**。
+    // 本函数在 `onDrawBackdrop` 里每帧调用 —— 原实现每帧 `createOutline` ×2 + 两次 Path 分配
+    // + 一次 `translate`。形状、尺寸、环宽在两次重组之间完全不变，纯重复劳动。
+    // 缓存键含 shape 实例（RoundedCornerShape 是 data class，equals 按圆角/尺寸比较）与
+    // 尺寸/环宽，值是**已经平移好的 inner**（inset 在键里，不会二次平移）。
+    // Path 只在绘制线程（UI 线程）使用，HashMap 即可；上限 16 个条目（同屏玻璃控件远少于此），
+    // 超出按插入序淘汰。
+    val key = RingKey(shape, size.width, size.height, insetPx)
+    val paths = synchronized(ringPathCache) { ringPathCache[key] } ?: run {
+        val outer = shape.createOutline(size, layoutDirection, this).toPathOrNull() ?: run { block(); return }
+        val inner = shape.createOutline(Size(innerW, innerH), layoutDirection, this).toPathOrNull()
+            ?: run { block(); return }
+        inner.translate(Offset(insetPx, insetPx))
+        val created = outer to inner
+        synchronized(ringPathCache) { ringPathCache[key] = created }
+        created
     }
+    clipPath(paths.first) {
+        clipPath(paths.second, clipOp = ClipOp.Difference) { block() }
+    }
+}
+
+/** [clipToEdgeRing] 的缓存键（shape 实例 + 控件尺寸 + 环宽）。 */
+private data class RingKey(val shape: Shape, val widthPx: Float, val heightPx: Float, val insetPx: Float)
+
+/**
+ * 环带 Path 缓存：`outer` 原样，`inner` **已平移** (inset, inset)。
+ * LinkedHashMap 按插入序淘汰最老条目（同屏玻璃控件一般 ≤ 6 个，16 上限绰绰有余）。
+ */
+private val ringPathCache = object : LinkedHashMap<RingKey, Pair<Path, Path>>(16, 0.75f, false) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<RingKey, Pair<Path, Path>>): Boolean =
+        size > 16
 }
 
 /**

@@ -93,7 +93,7 @@
     <string name="theme_name_rose">로즈</string>
     <string name="theme_name_amber">앰버</string>
     <string name="theme_name_mint">민트</string>
-    <string name="theme_liquid_glass">리퀴드 글래스</string>
+    <string name="theme_liquid_glass">유리</string>
     <string name="settings_group_projection">렌즈 투영과 시야 모드</string>
     <string name="projection_auto_detect">투영 자동 감지</string>
     <string name="projection_auto_detect_desc">2:1 파노라마/일반 2D를 자동 판별해 투영과 입체 모드를 전환</string>

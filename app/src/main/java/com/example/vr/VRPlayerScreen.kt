@@ -1988,6 +1988,74 @@ fun VRPlayerScreen(
         }
     }
 
+    // ==================================================================================
+    // v2.6.20（用户要求「应用切换到后台时暂停播放」）：**切后台暂停，回前台自动续播**
+    //
+    //   · 触发点是 `ON_STOP` 而不是 `ON_PAUSE`：设置面板、隐私弹窗、权限弹窗、分屏拖动
+    //     都会走 `ON_PAUSE`，但用户并没有离开应用，误伤概率高；`ON_STOP` 才是
+    //     "界面已经看不到"（Home / 最近任务 / 锁屏 / 被全屏应用覆盖）。
+    //   · 只在**确实在播**时才记暂停：用户手动暂停后再切后台，回来不会自动开播。
+    //   · 回前台（`ON_START`）自动续播 —— 视频 App 的常规行为；若要"回来仍保持暂停"，
+    //     删掉下面 `ON_START` 分支即可。
+    //   · 与投屏遥控共用 [playerInstance]：后台暂停后 DMC 仍可下发 Play 唤醒播放。
+    // ==================================================================================
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    var pausedByBackground by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycleOwner, playerInstance) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    val p = playerInstance
+                    if (p != null && p.isPlaying) {
+                        p.pause()
+                        isVideoPlaying = false
+                        pausedByBackground = true
+                    }
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    if (pausedByBackground) {
+                        pausedByBackground = false
+                        playerInstance?.play()
+                        isVideoPlaying = true
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // ==================================================================================
+    // v2.6.20（P0，用户选定）：**音频焦点 + 拔耳机 / 断蓝牙自动暂停**（`PlaybackInterruptions`）
+    //
+    //   · 来电 / 导航语音 / 其它 App 抢焦点 → 自动暂停；临时失去（transient）在焦点归还时
+    //     自动续播，永久失去（如用户去别处点了播放）不恢复 —— 规则详见该类注释。
+    //   · 拔耳机 / 断蓝牙（BECOMING_NOISY）→ 暂停且不恢复。
+    //   · ⚠️ 焦点在 [playerInstance] 就绪后一直持有到其释放，**不跟随播放状态启停**：
+    //     若"暂停即 abandon"，来电（transient loss → 我们 abandon）后系统不会把
+    //     GAIN 再发给我们，"挂电话续播"就断了 —— 宁可在选片期间多占一会儿焦点。
+    //   · 回调里同步 `isVideoPlaying`，让球面图标 / 弹幕冻结 / 控制条跟着走。
+    // ==================================================================================
+    val playbackInterruptions = remember {
+        PlaybackInterruptions(
+            context = context,
+            isPlaying = { playerInstance?.isPlaying == true },
+            pause = {
+                playerInstance?.pause()
+                isVideoPlaying = false
+            },
+            resume = {
+                playerInstance?.play()
+                isVideoPlaying = true
+            },
+        )
+    }
+    DisposableEffect(playbackInterruptions, playerInstance) {
+        if (playerInstance != null) playbackInterruptions.start()
+        onDispose { playbackInterruptions.stop() }
+    }
+
     LaunchedEffect(playerInstance) {
         while (true) {
             val p = playerInstance
@@ -4581,6 +4649,13 @@ fun VRPlayerScreen(
                 .testTag("liquid_backdrop_host")
         )
 
+        // 🔴 v2.6.20（P2）：Liquid Merge —— 两颗液态球靠近时的"拉丝融合膜"。
+        // 层级在 backdrop 之上、所有球之下（先写先画，球在后面的兄弟节点里）；
+        // 只绘制不消费触摸，球的手势不受影响。节点由各球的 `liquidPressFx` 注册。
+        if (isLiquidGlass) {
+            LiquidMergeOverlay(modifier = Modifier.fillMaxSize())
+        }
+
         // 🔴 v2.4.68（用户要求「球的材质要跟面板一致」）：
         // 球**直接复用面板的那一份实现**（`glassBall` 就是 `glassPanel` + CircleShape），
         // 不再为球单独定义任何配色/颗粒/透明度。
@@ -4597,7 +4672,10 @@ fun VRPlayerScreen(
                 blurRadius = null,
                 // v2.6.19：0.33 → 0.22，与面板同步（球体本身还有 62% 的 LiquidGlassBallTint，
                 // 透出度由那一层主导，这里只做轻微压暗）。
-                onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.22f)) }
+                onDrawSurface = { drawCircle(ThemePanelBgColor.copy(alpha = 0.22f)) },
+                // v2.6.20（P2）：悬浮球参与 Liquid Press —— 按压时边缘折射增强
+                // （球体的弹性放大由各球组件里的 `liquidPressFx` 负责）。
+                enableLiquidPress = true
             )
         } else {
             Modifier
@@ -8895,6 +8973,8 @@ fun VRPlayerScreen(
                         )
                     }
                     .size(ballDp)
+                    // v2.6.20（P2）：Liquid Press 按压体感（与 5 颗悬浮球同款）
+                    .liquidPressFx(isLiquidGlass) { isFloatingBallPressed }
                     // v2.6.22：液态档不投影 —— elevation 的圆形轮廓会被多边形近似，阴影渗进球内
                     .ballShadow(
                         isLiquid = isLiquidGlass,

@@ -185,6 +185,24 @@ fun PerfFloatingBall(
         }
     }
 
+    /**
+     * v2.6.20：**CPU 采样不可用时，让温度接管主行并放大**。
+     *
+     * 什么时候会发生：[PerfSampler.readCpuTimes] 读不到 `/proc/stat`
+     * （部分定制 ROM 屏蔽该节点），或首行格式不认识、`total` 差值恒为 0 ——
+     * 此时 [cpuPct] 永远是 -1，球上顶着一行 `--` 占主位却没有任何信息量。
+     * 与其留一个空槽，不如把**唯一还在的实测值（温度）放大到主行字号**。
+     *
+     * 宽限 3 秒是必要的：CPU 使用率要用**两次采样的差值**才算得出来，
+     * 刚进播放页的第一秒 [cpuPct] 必然还是 -1 —— 不加宽限会先"跳大"再"跳回"，看起来像闪一下。
+     */
+    var cpuGracePassed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(3000)
+        cpuGracePassed = true
+    }
+    val cpuUnavailable = cpuPct < 0 && cpuGracePassed
+
     // 帧率：Choreographer 主线程回调，1 秒窗口
     DisposableEffect(Unit) {
         val choreographer = android.view.Choreographer.getInstance()
@@ -242,6 +260,9 @@ fun PerfFloatingBall(
                 )
             }
             .size(ballDp)
+            // v2.6.20（P2）：Liquid Press 按压体感 —— 弹性放大 + 写入全局按压状态
+            // （glassPanel 的 lens 据此在按压时增强边缘折射；非液态档原样返回）
+            .liquidPressFx(isLiquidGlass) { pressed }
             // v2.6.22：液态档不投影 —— elevation 的圆形轮廓会被多边形近似，阴影渗进球内
             .ballShadow(
                 isLiquid = isLiquidGlass,
@@ -309,6 +330,23 @@ fun PerfFloatingBall(
                     text = stringResource(R.string.perf_ball_fps_unit),
                     color = Color.White.copy(alpha = 0.55f),
                     fontSize = 8.sp
+                )
+            } else if (cpuUnavailable) {
+                // v2.6.20：CPU 取不到 → 温度顶到主行，用与 CPU 相同的 13sp 粗体；
+                // 原来那行 9sp 的小字温度不再画（否则同一个数出现两次）。
+                Text(
+                    text = tempC?.let { String.format("%.1f°C", it) } ?: "--°C",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "$shownFps fps",
+                    color = accentColor,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
                 )
             } else {
                 Text(

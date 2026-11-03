@@ -1732,6 +1732,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         bdBuffer = null
         bdPixels = null
         bdRow = null
+        // v2.6.20：PBO / fence 同属旧上下文 —— 只清状态，不调 glDelete（理由同上）
+        bdPboIds[0] = 0
+        bdPboIds[1] = 0
+        bdPboFence[0] = 0L
+        bdPboFence[1] = 0L
+        bdPboCapBytes = 0
+        bdPboIdx = 0
         resetBackdropCapture()
         // v2.4.47：把采样间隔暴露给设置页「玻璃诊断」（便于核对「30ms 一帧」是否生效）
         VideoBackdrop.captureIntervalMs = bdCaptureIntervalMs
@@ -3470,6 +3477,48 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
     }
 
+    // ===== v2.6.20（P1，用户选定）：backdrop 回读 PBO 双缓冲 =====
+    // 与美颜链路的 gpPbo* 同一套思路（fence + 双槽轮转），但状态独立：
+    // 美颜的回读尺寸/节奏与玻璃采样完全不同，共用状态机只会互相绊倒。
+    // 玻璃采样 40ms 一次，每次收割的是"上一帧提交"的 PBO —— 40ms 足够 GPU 完成
+    // blit+copy，glClientWaitSync 几乎必然立即返回，GL 线程不再被管线 flush 阻塞。
+    private val bdPboIds = IntArray(2)
+    private val bdPboFence = LongArray(2)
+    private var bdPboCapBytes = 0
+    /** 下一个要写入的 PBO 槽（收割 1 - bdPboIdx） */
+    private var bdPboIdx = 0
+    /** PBO 异步回读总开关：任何一步 GL 异常 / fence 异常 → 永久回退同步读（护旧驱动） */
+    @Volatile private var bdPboEnabled = true
+
+    private fun ensureBdPbo(needBytes: Int) {
+        if (!bdPboEnabled) return
+        if (bdPboIds[0] == 0) GLES30.glGenBuffers(2, bdPboIds, 0)
+        if (bdPboCapBytes < needBytes) {
+            for (id in bdPboIds) {
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, id)
+                GLES30.glBufferData(GLES30.GL_PIXEL_PACK_BUFFER, needBytes, null, GLES30.GL_STREAM_READ)
+            }
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+            bdPboCapBytes = needBytes
+            bdPboIdx = 0
+            bdPboFence[0] = 0L
+            bdPboFence[1] = 0L
+        }
+    }
+
+    private fun releaseBdPbo() {
+        for (f in bdPboFence) if (f != 0L) GLES30.glDeleteSync(f)
+        bdPboFence[0] = 0L
+        bdPboFence[1] = 0L
+        if (bdPboIds[0] != 0) {
+            GLES30.glDeleteBuffers(2, bdPboIds, 0)
+            bdPboIds[0] = 0
+            bdPboIds[1] = 0
+        }
+        bdPboCapBytes = 0
+        bdPboIdx = 0
+    }
+
     private fun releaseBackdropTarget() {
         if (bdFboId != 0) {
             GLES20.glDeleteFramebuffers(1, intArrayOf(bdFboId), 0)
@@ -3484,6 +3533,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         bdBuffer = null
         bdPixels = null
         bdRow = null
+        releaseBdPbo()
     }
 
     private fun ensureBackdropTarget(w: Int, h: Int) {
@@ -3521,6 +3571,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         bdBuffer = java.nio.IntBuffer.allocate(w * h)
         bdPixels = IntArray(w * h)
         bdRow = IntArray(w)
+        ensureBdPbo(w * h * 4)
     }
 
     /** v2.4.46（审查 #1）：采样失败最多重试次数 */
@@ -3618,42 +3669,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 return
             }
             GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, bdFboId)
-            val buf = bdBuffer!!
-            buf.position(0)
-            GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
-            val err2 = GLES20.glGetError()
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            if (err2 != GLES20.GL_NO_ERROR) {
-                bdFail("readPixels 失败 err=$err2")
-                return
-            }
-            // GL 的行序是自下而上，Bitmap 是自上而下 —— 必须翻转，否则背景是倒的
-            buf.position(0)
             val px = bdPixels!!
-            buf.get(px)
-            // 🔴 v2.4.62：**补红蓝交换** —— 与 danmu 回读路径（见上方 `swapRedBlueInPlace` 调用）保持一致。
-            //    `glReadPixels` 按 **R,G,B,A** 字节序写入；`IntBuffer`（小端）逐元素取出后是 **ABGR**。
-            //    而 `VideoBackdrop.commit` 的契约是 **ARGB**（它直接 `Bitmap.setPixels` 进
-            //    `ARGB_8888` 位图）—— 漏掉这一步，玻璃/模糊面板背后的画面会**红蓝颠倒**：
-            //    低饱和/灰调画面下潜伏（看不出来），高饱和画面（如红色场景）会明显偏蓝。
-            //    ⚠️ 这正是 v2.4.54 那段诊断统计「把 B 当 R 打」的原因（它假设 px 已是 ARGB）。
-            ImageScale.swapRedBlueInPlace(px, tw * th)
-            val row = bdRow!!
-            var y = 0
-            while (y < th / 2) {
-                val a = y * tw
-                val b = (th - 1 - y) * tw
-                System.arraycopy(px, a, row, 0, tw)
-                System.arraycopy(px, b, px, a, tw)
-                System.arraycopy(row, 0, px, b, tw)
-                y++
+            // v2.6.20（P1）：优先走 PBO 异步回读；链路异常时本帧立即用同步路径兜底并永久回退
+            var committed = false
+            if (bdPboEnabled) {
+                committed = captureBackdropPbo(tw, th, px)
+                if (!bdPboEnabled) committed = captureBackdropSync(tw, th, px)
+            } else {
+                committed = captureBackdropSync(tw, th, px)
             }
-            VideoBackdrop.commit(px, tw, th)
             // v2.1.233：低频统计日志（约每 120 次采样一行 = 每 360 帧一次）。
             // 用途：确认「给玻璃/模糊效果喂画面」这条链路真的在跑 —— 高斯模糊
             // 「看不出效果」的根因就是这条链路没内容可糊（backdrop 只有一层纯色）。
             // 保留它是为了让下次排查能一眼分辨「没采样」与「采样了但糊得不对」。
-            if (bdFrame % 360 == 0) {
+            if (committed && bdFrame % 360 == 0) {
                 // v2.4.53 诊断：顺带统计采样帧的平均亮度，用于区分「玻璃惨白」的两类根因——
                 // 若平均RGB 接近 255 说明喂给玻璃的视频帧本身就是白的（需靠面板薄遮罩压住）；
                 // 若平均RGB 偏暗但玻璃仍白，则问题在合成层而非视频帧。
@@ -3700,6 +3729,128 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private fun resetBackdropCapture() {
         bdDisabled = false
         bdFrame = 0
+    }
+
+    /**
+     * 同步回读（兜底路径）：`glReadPixels` 直达 heap IntBuffer → 统一处理 → commit。
+     * PBO 链路异常时 [captureBackdropIfNeeded] 会退到这里。
+     */
+    private fun captureBackdropSync(tw: Int, th: Int, px: IntArray): Boolean {
+        val buf = bdBuffer!!
+        buf.position(0)
+        GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+        val err = GLES20.glGetError()
+        if (err != GLES20.GL_NO_ERROR) {
+            bdFail("readPixels 失败 err=$err")
+            return false
+        }
+        buf.position(0)
+        buf.get(px)
+        processAndCommitBackdrop(px, tw, th)
+        return true
+    }
+
+    /**
+     * v2.6.20（P1，用户选定）：**PBO 双缓冲异步回读**。
+     *
+     * 每次采样（40ms）做两件事：
+     *   1. **收割上一帧**：`glClientWaitSync`（40ms 间隔下 GPU 早已完成，几乎必立即返回）
+     *      → `glMapBufferRange` 拷出像素 → 走统一后处理 → commit；
+     *   2. **提交本帧**：`glReadPixels(offset=0)` 写进另一个 PBO（异步，不阻塞管线）+ 挂 fence。
+     *
+     * 任何一步 GL 出错 / fence 8ms 内仍未就绪 → 关闭 [bdPboEnabled] 永久回退同步路径
+     * （调用方本帧立即用 [captureBackdropSync] 兜底，采样不中断）。
+     *
+     * ⚠️ 代价：commit 的内容比同步路径旧一个提交间隔（40ms → 视觉滞后 ≈80ms）。
+     * 折射带只有 2dp，环带内容滞后不可感知；本体又是全透明的，无影响。
+     *
+     * @return 是否 commit 了像素（首帧只提交、无上一帧可收割 → false 但不算失败）
+     */
+    private fun captureBackdropPbo(tw: Int, th: Int, px: IntArray): Boolean {
+        var harvested = false
+        val readSlot = 1 - bdPboIdx
+        val fence = bdPboFence[readSlot]
+        if (fence != 0L) {
+            val status = GLES30.glClientWaitSync(fence, 0, 8_000_000L)
+            GLES30.glDeleteSync(fence)
+            bdPboFence[readSlot] = 0L
+            if (status == GLES30.GL_ALREADY_SIGNALED || status == GLES30.GL_CONDITION_SATISFIED) {
+                val need = tw * th * 4
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, bdPboIds[readSlot])
+                val mapped = GLES30.glMapBufferRange(
+                    GLES30.GL_PIXEL_PACK_BUFFER, 0, need, GLES30.GL_MAP_READ_BIT
+                )
+                if (mapped != null) {
+                    val ib = (mapped as java.nio.ByteBuffer)
+                        .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        .asIntBuffer()
+                    ib.position(0)
+                    ib.get(px, 0, tw * th)
+                    GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER)
+                    harvested = true
+                }
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+                if (GLES20.glGetError() != GLES20.GL_NO_ERROR) harvested = false
+            } else {
+                Log.w(TAG, "backdrop PBO fence 未就绪(status=$status) → 回退同步回读")
+            }
+        } else {
+            // 首帧：没有上一帧可收割，只做提交
+            harvested = false
+        }
+        if (!harvested && bdPboFence[readSlot] != 0L) {
+            // 走到这说明收割失败且 fence 已删 —— 保守起见整体回退同步
+            bdPboEnabled = false
+            return false
+        }
+        if (GLES20.glGetError() != GLES20.GL_NO_ERROR) {
+            bdPboEnabled = false
+            return false
+        }
+
+        // 本帧异步提交到另一个槽
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, bdPboIds[bdPboIdx])
+        GLES30.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, 0)
+        val err = GLES20.glGetError()
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        if (err != GLES20.GL_NO_ERROR) {
+            Log.w(TAG, "backdrop PBO glReadPixels 失败 err=$err → 回退同步回读")
+            bdPboEnabled = false
+            return false
+        }
+        bdPboFence[bdPboIdx] = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        if (bdPboFence[bdPboIdx] == 0L) {
+            bdPboEnabled = false
+            return false
+        }
+        bdPboIdx = 1 - bdPboIdx
+
+        if (harvested) processAndCommitBackdrop(px, tw, th)
+        return harvested
+    }
+
+    /**
+     * 回读像素的统一后处理：红蓝交换 → 垂直翻转 → 提交 [VideoBackdrop.commit]。
+     * 同步与 PBO 两条路径共用（红蓝/翻转的完整机理说明见原内联版本的 v2.4.62 注释，
+     * 已随代码移到此处）。
+     */
+    private fun processAndCommitBackdrop(px: IntArray, tw: Int, th: Int) {
+        // 🔴 v2.4.62：**补红蓝交换** —— `glReadPixels` 按 R,G,B,A 字节序写入，IntBuffer（小端）
+        //    逐元素取出后是 ABGR；而 `VideoBackdrop.commit` 的契约是 ARGB（直接 setPixels 进
+        //    ARGB_8888 位图）。漏掉这步，玻璃背后的画面红蓝颠倒（高饱和画面明显偏蓝）。
+        ImageScale.swapRedBlueInPlace(px, tw * th)
+        // GL 的行序是自下而上，Bitmap 是自上而下 —— 必须翻转，否则背景是倒的
+        val row = bdRow!!
+        var y = 0
+        while (y < th / 2) {
+            val a = y * tw
+            val b = (th - 1 - y) * tw
+            System.arraycopy(px, a, row, 0, tw)
+            System.arraycopy(px, b, px, a, tw)
+            System.arraycopy(row, 0, px, b, tw)
+            y++
+        }
+        VideoBackdrop.commit(px, tw, th)
     }
 
     private fun snapshotGpResult() {

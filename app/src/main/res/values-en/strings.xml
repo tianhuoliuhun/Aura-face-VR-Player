@@ -104,7 +104,7 @@
     <string name="theme_name_rose">Rose</string>
     <string name="theme_name_amber">Amber</string>
     <string name="theme_name_mint">Mint</string>
-    <string name="theme_liquid_glass">Liquid glass</string>
+    <string name="theme_liquid_glass">Glass</string>
     <string name="settings_group_projection">Lens projection &amp; view mode</string>
     <string name="projection_auto_detect">Smart projection detection</string>
     <string name="projection_auto_detect_desc">Detects 2:1 panorama / plain 2D and switches projection &amp; stereo mode</string>

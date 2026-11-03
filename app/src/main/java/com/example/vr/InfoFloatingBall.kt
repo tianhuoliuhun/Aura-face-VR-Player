@@ -308,6 +308,9 @@ fun InfoFloatingBall(
                 )
             }
             .size(ballDp)
+            // v2.6.20（P2）：Liquid Press 按压体感 —— 弹性放大 + 写入全局按压状态
+            // （glassPanel 的 lens 据此在按压时增强边缘折射；非液态档原样返回）
+            .liquidPressFx(isLiquidGlass) { pressed }
             // v2.6.22：液态档不投影 —— elevation 的圆形轮廓会被多边形近似，阴影渗进球内
             .ballShadow(
                 isLiquid = isLiquidGlass,
