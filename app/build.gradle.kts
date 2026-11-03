@@ -42,8 +42,8 @@ android {
     // 代价：不再支持 Android 7.x（7.0/7.1）。已与用户确认。
     minSdk = 26
     targetSdk = 36
-    versionCode = 339
-    versionName = "2.6.20"
+    versionCode = 340
+    versionName = "2.6.21"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

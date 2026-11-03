@@ -138,6 +138,23 @@ object MpvPlayerFactory {
             MPVLib.setOptionString("framedrop", if (options.frameDrop) "decoder" else "no")
             // 只收 error 级日志，避免 logcat 被 mpv 刷屏
             MPVLib.setOptionString("msg-level", "all=error")
+            // 🔴 v2.6.21（用户：「MPV 内核播完拖动进度条不能播」的**正解**）：
+            //    **keep-open=yes —— 播完保留文件、保留 vo，画面停在末帧。**
+            //
+            // 为什么不是 loop-file：
+            //   我最初图省事设了 `loop-file=inf`（对齐 EXO 的 REPEAT_MODE_ALL），
+            //   结果**整机闪退**：
+            //     `vo_mediacodec_embed.c:40: assertion "vo->opts->WinID != 0 && vo->opts->WinID != -1" failed`
+            //   原因：循环到片尾时 mpv 会卸载再重开文件 → **video output 重建**，而本项目是
+            //   通过 `attachSurface()` 从外部喂 Surface（没有走 `--wid` 窗口句柄），
+            //   重建那一刻 WinID 是 0/-1 → mediacodec_embed 断言直接 abort（native 崩溃，Java 兜不住）。
+            //
+            // keep-open 不重开文件、不重建 vo，因此：
+            //   · 播完时文件和播放核心都还在 → 此后 `seek` 依然有效（这正是用户要的"能拖"）；
+            //   · 画面停在末帧（而不是黑屏/idle）；
+            //   · `eof-reached` 变 true —— 由下方属性观察触发 `onCompletion()`，
+            //     界面据此置"播完态"，用户拖动时由 UI 层补一次 play() 即可续播。
+            MPVLib.setOptionString("keep-open", "yes")
 
             // ===== 2. 初始化 =====
             MPVLib.init()
@@ -146,6 +163,9 @@ object MpvPlayerFactory {
             // ===== 3. 事件订阅 =====
             MPVLib.observeProperty("video-params/w", MPVLib.MpvFormat.MPV_FORMAT_INT64)
             MPVLib.observeProperty("video-params/h", MPVLib.MpvFormat.MPV_FORMAT_INT64)
+            // v2.6.21：`keep-open=yes` 下播完**不会**再发 MPV_EVENT_END_FILE，
+            // 「播完」的唯一信号是 `eof-reached` 变为 true → 由下面的 Boolean 回调上报。
+            MPVLib.observeProperty("eof-reached", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
 
             backend.observer = object : MPVLib.EventObserver {
                 override fun eventProperty(property: String) { /* 未使用 */ }
@@ -153,7 +173,13 @@ object MpvPlayerFactory {
                     // 宽或高任一变化都走到这里，交给同一处理函数去重
                     if (property.startsWith("video-params")) backend.onVideoParamsChanged()
                 }
-                override fun eventProperty(property: String, value: Boolean) { /* 进度靠轮询 */ }
+                override fun eventProperty(property: String, value: Boolean) {
+                    // v2.6.21：keep-open 模式下的"播完"事件（见上）。mpv 只在值**变化**时通知，
+                    // 所以这里不必再做去重；重复 seek 回到片尾会再触发一次，正是期望行为。
+                    if (property == "eof-reached" && value) {
+                        backend.post { callbacks.onCompletion() }
+                    }
+                }
                 override fun eventProperty(property: String, value: String) { /* 同上 */ }
                 override fun eventProperty(property: String, value: Double) { /* 同上 */ }
                 override fun eventProperty(property: String, value: MPVNode) { /* 同上 */ }
@@ -213,6 +239,13 @@ object MpvPlayerFactory {
             } else {
                 uri.toString()
             }
+
+            // 🔴 v2.6.21（用户报「MPV 内核播完一个视频后拖动进度条无法播放」）：
+            // **不要再设 `loop-file=inf`** —— 实测在 `vo=mediacodec_embed` 下会 native 崩溃：
+            //   `vo_mediacodec_embed.c:40: assertion "vo->opts->WinID != 0 && vo->opts->WinID != -1" failed`
+            // 循环重开文件会重建 vo，而本项目用 attachSurface() 从外部喂 Surface（无 --wid 窗口句柄），
+            // 重建瞬间 WinID 为 0 → 断言 abort。改用上面 init 之前的 `keep-open=yes`：
+            // 播完保留文件与 vo，seek 仍有效，由 UI 层 playbackEnded 补 play 续播。
             // ⚠️ command 是 vararg，不是数组参数
             MPVLib.command("loadfile", target)
 

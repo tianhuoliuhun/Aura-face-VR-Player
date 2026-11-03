@@ -373,6 +373,18 @@ fun VRPlayerScreen(
 
     // Playback state
     var isVideoPlaying by remember { mutableStateOf(false) }
+    /**
+     * v2.6.20：**当前是否处于「已播完」态**。
+     *
+     * 播完（`onCompletion` / Exo `STATE_ENDED`）之后，各内核都不会因为 `seekTo` 自动开始播放：
+     *   · EXO：仅当 `playWhenReady == true` 时 seek 后才会续播；
+     *   · IJK / MPV：`seekTo` 只把播放头挪过去，完成态下仍需一次 `start`；
+     *   · 系统 MediaPlayer：`PlaybackCompleted` 状态下 `seekTo` 本来就无效。
+     * 于是「播完 → 拖进度条 → 停在目标画面不动」。
+     * 这个标志让进度条松手时知道"这不是普通暂停，而是播完了"，从而补一次 play()。
+     * 任何一次真正的开播（播放按钮 / 新播放器就绪 / 换片）都要把它清掉。
+     */
+    var playbackEnded by remember { mutableStateOf(false) }
     var videoPlaybackProgress by remember { mutableFloatStateOf(0f) }
     var videoDurationText by remember { mutableStateOf("00:00 / 00:00") }
 
@@ -3633,9 +3645,16 @@ fun VRPlayerScreen(
                             }
                             backend.play()
                             isVideoPlaying = true
+                            playbackEnded = false
                         }
 
                         override fun onCompletion() {
+                            // v2.6.20：播完把播放态归位。否则 isVideoPlaying 恒为 true，
+                            // 1 秒进度轮询每秒把进度写回 current/duration = 1.0，
+                            // 用户拖动进度条会被轮询立即弹回片尾 ——
+                            // 「播完后进度条拖不动」的直接根因就是它。
+                            isVideoPlaying = false
+                            playbackEnded = true
                             PlaybackPositions.clear(prefs, videoUriStr)
                             resumeMs = 0L
                         }
@@ -3685,6 +3704,7 @@ fun VRPlayerScreen(
 
                         override fun onFirstFrame() {
                             isVideoPlaying = true
+                            playbackEnded = false
                         }
                     }
                 )
@@ -3743,9 +3763,16 @@ fun VRPlayerScreen(
                             }
                             backend.play()
                             isVideoPlaying = true
+                            playbackEnded = false
                         }
 
                         override fun onCompletion() {
+                            // v2.6.20：播完把播放态归位。否则 isVideoPlaying 恒为 true，
+                            // 1 秒进度轮询每秒把进度写回 current/duration = 1.0，
+                            // 用户拖动进度条会被轮询立即弹回片尾 ——
+                            // 「播完后进度条拖不动」的直接根因就是它。
+                            isVideoPlaying = false
+                            playbackEnded = true
                             PlaybackPositions.clear(prefs, videoUriStr)
                             resumeMs = 0L
                         }
@@ -3770,6 +3797,7 @@ fun VRPlayerScreen(
 
                         override fun onFirstFrame() {
                             isVideoPlaying = true
+                            playbackEnded = false
                         }
                     }
                 )
@@ -3832,9 +3860,16 @@ fun VRPlayerScreen(
                             }
                             backend.play()
                             isVideoPlaying = true
+                            playbackEnded = false
                         }
 
                         override fun onCompletion() {
+                            // v2.6.20：播完把播放态归位。否则 isVideoPlaying 恒为 true，
+                            // 1 秒进度轮询每秒把进度写回 current/duration = 1.0，
+                            // 用户拖动进度条会被轮询立即弹回片尾 ——
+                            // 「播完后进度条拖不动」的直接根因就是它。
+                            isVideoPlaying = false
+                            playbackEnded = true
                             PlaybackPositions.clear(prefs, videoUriStr)
                             resumeMs = 0L
                         }
@@ -3853,6 +3888,7 @@ fun VRPlayerScreen(
 
                         override fun onFirstFrame() {
                             isVideoPlaying = true
+                            playbackEnded = false
                         }
                     }
                 )
@@ -4036,6 +4072,10 @@ fun VRPlayerScreen(
                                 }
                             }
                             Player.STATE_ENDED -> {
+                                // v2.6.20：同 onCompletion —— 归位播放态，停掉进度轮询，
+                                // 否则轮询每秒把进度写回 1.0、进度条拖不动。
+                                isVideoPlaying = false
+                                playbackEnded = true
                                 PlaybackPositions.clear(prefs, videoUriStr)
                                 resumeMs = 0L
                             }
@@ -4200,7 +4240,17 @@ fun VRPlayerScreen(
                     setupVideoPlayer(existingST, uriStr)
                 }
                 view.renderer.onVideoSurfaceCreated = { surfaceTexture ->
-                    setupVideoPlayer(surfaceTexture, uriStr)
+                    // 🔴 v2.6.20 修：**这个回调来自 GL 线程**（`VRGLRenderer.onSurfaceCreated`
+                    // 里直接 `onVideoSurfaceCreated?.invoke(...)`），而 ExoPlayer 只允许在
+                    // **创建它的主线程**访问 —— 以前这里直接调 setupVideoPlayer，结果是：
+                    //   `IllegalStateException: Player is accessed on the wrong thread`
+                    //   抛在 `apply {}` 的最前面（setSeekParameters），于是后面的
+                    //   setVideoSurface / setMediaItem / addListener / prepare **全都没执行** →
+                    //   播放器是个空壳（duration=0、黑屏、进度条 00:00、拖不动也播不了）。
+                    // 现在改成 post 到主线程执行；表面纹理对象本身跨线程传递是安全的。
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        setupVideoPlayer(surfaceTexture, uriStr)
+                    }
                 }
             }
         } else {
@@ -4431,7 +4481,10 @@ fun VRPlayerScreen(
                 try {
                     val current = mp.currentPosition
                     val duration = mp.duration
-                    if (duration > 0) {
+                    // v2.6.20：**拖动中绝不覆盖**。轮询每秒把"真实位置"写进进度 state，
+                    // 用户正在拖的 thumb 会被立即拉回去 —— 播完后位置恒等于 duration，
+                    // 覆盖幅度最大（从拖到的位置直接弹回片尾），表象就是"进度条拖不动"。
+                    if (!isSeekingActive && duration > 0) {
                         videoPlaybackProgress = current.toFloat() / duration.toFloat()
                         val curSec = (current / 1000).toInt()
                         val durSec = (duration / 1000).toInt()
@@ -4482,7 +4535,7 @@ fun VRPlayerScreen(
                         if (p.isPlaying) {
                             p.pause(); isVideoPlaying = false
                         } else {
-                            p.play(); isVideoPlaying = true
+                            p.play(); isVideoPlaying = true; playbackEnded = false
                         }
                     }
                     true
@@ -5405,6 +5458,23 @@ fun VRPlayerScreen(
                                                 // 否则会出现「松手后进度条先弹回旧位置、1 秒后才跳过去」的错觉。
                                                 if (seekIssued) {
                                                     videoPlaybackProgress = finalProgress
+                                                    // ==================================================
+                                                    // v2.6.20：**播完态的拖动必须补一次 play()**
+                                                    // --------------------------------------------------
+                                                    // 视频播完后（onCompletion / Exo ENDED），三种内核都不会
+                                                    // 因为 seekTo 自动开播：EXO 只在 playWhenReady=true 时续播，
+                                                    // IJK/MPV 完成态下要显式 start，系统 MediaPlayer 的
+                                                    // PlaybackCompleted 态 seekTo 本身无效。
+                                                    // 于是用户拖到中间后画面停在那一帧不动 —— 就是
+                                                    // 「播完一个视频后拖动进度条无法播放」。
+                                                    // 判据用 [playbackEnded] 而不是"当前没在播"：
+                                                    // 用户**手动暂停**后拖动应当保持暂停，不能替他开播。
+                                                    // ==================================================
+                                                    if (playbackEnded) {
+                                                        playbackEnded = false
+                                                        playerInstance?.play()
+                                                        isVideoPlaying = true
+                                                    }
                                                 }
                                                 // Verify the seek took effect: some containers
                                                 // (moov-at-end / fragmented / AVI without idx1) reset the
@@ -5596,6 +5666,7 @@ fun VRPlayerScreen(
                                             } else {
                                                 mp.play()
                                                 isVideoPlaying = true
+                                                playbackEnded = false
                                             }
                                         }
                                     }
