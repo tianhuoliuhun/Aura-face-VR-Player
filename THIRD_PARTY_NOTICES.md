@@ -30,6 +30,8 @@
 2. **提供源码获取方式**：上述三个上游仓库地址即为源码位置；本项目**未修改**这些库的源码，
    使用的是其公开预编译产物（`third_party/ffmpeg-libs/`、`app/libs/ijkplayer-k0.8.9-release.aar`、
    `io.github.marlboro-advance:mpv-android:1.0.0`）。若需重新构建，按各上游的构建说明即可。
+   另：`libmpv.so` 等 mpv 运行库的预编译产物同时以 zip 形式放在本仓库 **`mpv-libs/`** 目录
+   （v2.6.22 起从 GitHub Release 迁入），作为 APK 漏装 so 时的下载兜底，内容与上游一致。
 3. **允许用户替换库**：这些库以**独立的动态库文件（`.so`）**形式链接，未做静态链接或代码内联；
    用户可自行重新打包 APK 替换 `libmpv.so` / `libavcodec.so` 等文件。
 
@@ -119,7 +121,7 @@
 
 ## 三、商标声明
 
-本项目使用的产品名与商标——包括但不限于 **Huawei VR Glass**、**Pico**、**Quest**、**OpenAI**、
+本项目使用的产品名与商标——包括但不限于 **Pico**、**Quest**、**OpenAI**、
 **Bilibili（B 站）**、**MiSans**、**OPPO Sans**、**Dolby / DTS**（如涉及）——均为其各自所有者的商标或注册商标，
 本项目仅在**描述兼容性 / 文件格式**的意义上使用，**不代表任何形式的隶属、合作、赞助或背书**。
 
@@ -206,7 +208,21 @@ SMB / DLNA 推送）均由用户自行提供，**用户须确保拥有合法权�
 由 OpenRouter 及上游 provider 单方决定、可能随时变化。启用该引擎时字幕文本会发送至
 OpenRouter 及其上游 provider，请勿翻译敏感内容。
 
-### 4.7 用户自配置的 AI 服务
+### 4.7 Index-Translate 翻译（B 站免费 API）
+
+「字幕在线翻译」的 Index-Translate 引擎调用 **B 站 Index-Translate 模型家族的官方免费 API**
+（`POST index-translate.bilibili.com/v1/chat/completions`，OpenAI 兼容协议，模型
+`Index-Translate-35B-A3B`）。模型本体（**Apache-2.0** 开源，基于 Qwen3.5）由 **哔哩哔哩（B 站）
+Index 团队**训练并托管，**无需注册与 API Key**（Key 字段任意填写即可）。本项目与
+**哔哩哔哩 / Index-Translate 团队无关联、未获授权与背书**；"Index-Translate" 为其名称，
+仅用于描述所调用服务。
+
+⚠️ 该免费 API 为**预览性质**（模型 35B-A3B 为 preview），无服务等级承诺（SLA）；
+可用性、速率限制与输出内容均由服务方单方决定、可能随时变化。本应用将其定位为
+免密兜底通道并保留通用重试。启用该引擎时字幕文本会发送至该服务，请勿翻译敏感内容；
+重要内容建议改用自配 Key 的接口（DeepL 官方 API / OpenAI 兼容）或本地离线模型。
+
+### 4.8 用户自配置的 AI 服务
 
 应用可连接用户自行配置的 OpenAI 兼容接口（含第三方聚合网关）。
 这些请求由用户发起、使用用户自己的凭据，须遵守对应服务商的服务条款与隐私政策；

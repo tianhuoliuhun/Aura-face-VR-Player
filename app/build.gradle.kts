@@ -42,8 +42,8 @@ android {
     // 代价：不再支持 Android 7.x（7.0/7.1）。已与用户确认。
     minSdk = 26
     targetSdk = 36
-    versionCode = 340
-    versionName = "2.6.21"
+    versionCode = 341
+    versionName = "2.6.22"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -145,7 +145,7 @@ android {
   //    这里不再读它 —— 「接不接 VR 眼镜」现在由选哪个 flavor 决定。
   //    ⚠️ local.properties 里那行现在**不会**再影响构建（保留仅为兼容旧文档）。
   //
-  // SDK 路径仍然需要：huawei / pico / quest / all 四个 flavor 都要拿它取
+  // SDK 路径仍然需要：pico / quest / all 三个 flavor 都要拿它取
   // **Khronos 标准 OpenXR 头文件**（三家共用同一套标准头，差异只在 loader 二进制）。
   val huaweiVrSdkDir: String = run {
     val f = project.rootProject.file("local.properties")
@@ -162,12 +162,11 @@ android {
   //   构建」耦合在同一个开关之下 —— 关掉它，连 `libauravr.so`（核心：GL 渲染管线
   //   + llama JNI）都不会再构建，属于「要么全要、要么全丢」。本次按 flavor 拆开。
   //
-  // 五个 flavor（`standard` 为**主线**）：
+  // 四个 flavor（`standard` 为**主线**）：
   //   standard —— 普通手机 / 平板：**不含**任何 VR 眼镜接入，也不需要 VR SDK
-  //   huawei   —— 华为 VR Glass（官方 Java 桥 hvrbridge.jar + 华为 loader `libxr_loader.so`）
   //   pico     —— PICO（Khronos 标准 OpenXR loader）
   //   quest    —— Meta Quest（同 Khronos loader）
-  //   all      —— 三家全含（一台设备通吃 / 回归测试用）
+  //   all      —— 全含（一台设备通吃 / 回归测试用）
   //
   // ⚠️ **核心 native（libauravr.so）永远构建**，与 flavor 无关 ——
   //    它承载 GL 渲染管线与 llama JNI，任何 flavor 都必须有。
@@ -186,10 +185,6 @@ android {
       //   → CMake 不去找 VR SDK、不编 OpenXR 会话代码、也不复制任何 VR loader
       //   → 主线包因此**不需要 VR SDK 就能构建**，且少约 4.1MB
     }
-    create("huawei") {
-      dimension = "vr"
-      externalNativeBuild { cmake { arguments += listOf("-DAURA_HAVE_OPENXR=1") } }
-    }
     create("pico") {
       dimension = "vr"
       externalNativeBuild { cmake { arguments += listOf("-DAURA_HAVE_OPENXR=1") } }
@@ -207,7 +202,7 @@ android {
   // ==========================================================================
   // 核心 native 构建 —— **永远启用**（不再受任何开关 / flavor 影响）
   // --------------------------------------------------------------------------
-  // 历史：这一整块原被包在 `if (huawei.vr.enable)` 里 → 关掉华为支持就等于
+  // 历史：这一整块原被包在某个 VR 开关里 → 关掉 VR 支持就等于
   //       连核心 native 一起关掉（架构缺陷，v2.4.16 修正）。
   //
   // ⚠️ `useLegacyPackaging = true`（见上方 packaging 块）让 .so 以压缩形式打包，
@@ -225,7 +220,7 @@ android {
     //      而 cpp/CMakeLists.txt 对它有一条**硬校验**（缺失即 FATAL_ERROR）
     //      → 加 x86 会让 CMake **直接报错终止构建**。
     //   2. `libmediapipe_tasks_vision_jni.so`（Google 闭源 AAR）也没有 x86_64。
-    //   3. VR SDK 的 `libxr_loader.so` 同样只有 arm64-v8a / armeabi-v7a。
+    //   3. OpenXR 头文件来源的 SDK 只提供 arm64-v8a / armeabi-v7a 的二进制。
     //   ⚠️ 也不要「为了让模拟器用原生库」而加 x86_64：一旦 APK 里存在 x86_64 目录，
     //      x86_64 设备会优先选它 → 从「arm64 转译正常跑」退化成「缺库直接崩」。
     ndk {
@@ -239,7 +234,7 @@ android {
           // 预编译的 libmars-face-kit.so。目的：接入 fork 的 texture 通道
           //（共享 EGLContext + SinkTexture），免去每帧「回读→上传」的跨界搬运。
           "-DGPUPIXEL_FORK_DIR=" + rootProject.file("third_party/gpupixel").absolutePath,
-          // VR 眼镜 SDK 路径 —— 只有 huawei/pico/quest/all flavor 真的用到它
+          // OpenXR 头文件所在的 SDK 路径 —— 只有 pico/quest/all flavor 真的用到它
           // （提供 Khronos 标准 OpenXR 头文件）。主线传空串时 CMake 直接跳过。
           "-DHUAWEI_VR_SDK_DIR=" + huaweiVrSdkDir
         )
@@ -257,20 +252,16 @@ android {
   // ==========================================================================
   // VR 眼镜 loader 的 jniLibs 源集 —— **只挂给需要的 flavor**（v2.4.16）
   // --------------------------------------------------------------------------
-  // `src/main/cpp/libs/<abi>/libxr_loader.so` 是 CMake POST_BUILD 从 VR SDK
+  // 【历史】`src/main/cpp/libs/<abi>/libxr_loader.so` 曾是 CMake POST_BUILD 从 VR SDK
   // 复制出来的产物（**不入仓** —— 华为许可禁止再分发 SDK 二进制）。
   //
   // ⚠️ 以前是 `sourceSets["main"].jniLibs.directories.add("src/main/cpp/libs")`：
   //    **无条件**给所有变体打包，主线包也白白带着它。
-  //    现在只挂到 huawei / all（pico/quest 的 loader 来自 Khronos AAR，见 dependencies）。
+  //    现在只挂到 all（pico/quest 的 loader 来自 Khronos AAR，见 dependencies）。
   // ==========================================================================
-  sourceSets {
-    // ⚠️ 用 `directories` 而不是 `srcDir(...)` —— 后者已废弃
-    //    （`'fun srcDir(srcDir: Any)' is deprecated. Use directories mutable set instead`），
-    //    沿用项目原有写法（`sourceSets["main"].jniLibs.directories.add(...)`）。
-    getByName("huawei") { jniLibs.directories.add("src/main/cpp/libs") }
-    getByName("all") { jniLibs.directories.add("src/main/cpp/libs") }
-  }
+  // v2.6.22（用户要求「去除对华为眼镜的兼容」）：原来这里给 huawei / all 两个 flavor
+  // 挂过 `src/main/cpp/libs`（CMake POST_BUILD 把华为 SDK 的 libxr_loader.so 拷进去）。
+  // 华为通路与那段 POST_BUILD 都已删除，目录不再产生任何产物，挂载一并去掉。
 
   logger.lifecycle(
     "[VR-flavor] flavor 维度 vr 已启用｜主线包 :app:assembleStandardRelease｜" +
@@ -482,27 +473,6 @@ dependencies {
   //    但注意此时 **不能**再加 add_subdirectory(GPUPixel)，否则 libgpupixel.so 会重复。
   // implementation(files("libs/gpupixel-release.aar"))
   //
-  // v2.0.174：华为 VR Engine 官方 Java 桥（hvrbridge.jar）。
-  // 提供 com.huawei.hvr.LibUpdateClient（确保设备已装/已更新华为 VR Runtime）
-  // 与 com.huawei.vrlab.HVRActivity（官方 2D→VR 通道）。
-  // ⚠️ 这是华为 SDK 的一部分，**不入仓**（已在 .gitignore 忽略）；
-  //    本地构建前需从 SDK 的 sdkDemo/openXRsdk/libs/ 复制到 app/libs/。
-  //    文件缺失时不报错（普通构建不受影响），仅华为 VR 功能不可用。
-  // ⚠️ v2.4.16：**暂时仍对所有 flavor 引入**，原因如实说明 ——
-  //    Java 侧的 VR 接入代码（`com.example.vr.huawei.*`）目前仍放在 `src/main`，
-  //    而**核心**的 VRGLRenderer / VRPlayerScreen / MainActivity **直接 import 了它**
-  //    （合计 40+ 处引用），并非独立的一块。
-  //    → 若按 flavor 摘掉，standard 变体会**立刻编译失败**。
-  //    → 要真正条件化，必须先做「VR 接入**接口抽象**」：
-  //        核心只依赖接口（如 VrGlassBridge），实现由 flavor 提供、standard 给空实现。
-  //      那是**下一阶段**的工作。
-  //    好在它只有约 19KB，对包体积无实质影响。
-  val hvrBridgeJar = file("libs/hvrbridge.jar")
-  if (hvrBridgeJar.exists()) {
-    implementation(files("libs/hvrbridge.jar"))
-  } else {
-    logger.lifecycle("[VR-flavor] app/libs/hvrbridge.jar 不存在 → 官方 Java 桥不可用")
-  }
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
@@ -782,7 +752,7 @@ dependencies {
 //    layout，否则会报 cannot serialize DefaultProject。因此路径与版本号必须在配置期
 //    先算成纯 String，闭包内只用这些字符串。
 // 🔴 v2.4.43：**flavor 化后原名改任务从未触发** —— 判据是 `name == "assembleRelease" /
-//    "assembleDebug"`，而本工程有 5 个 flavor（standard / huawei / pico / quest / all），
+//    "assembleDebug"`，而本工程有 4 个 flavor（standard / pico / quest / all），
 //    实际发版命令是 **`assembleAllRelease`** → 一个都不匹配 → 产物始终是 AGP 默认的
 //    `app-all-release.apk`（**不含版本号**）。用户反馈「构建的 APK 忘改版本号」即此。
 //    现改为匹配 `assemble*Release` / `assemble*Debug`，并按 flavor 名定位输出目录

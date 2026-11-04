@@ -1,9 +1,11 @@
 package com.example.vr
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,18 +67,53 @@ fun LocalModelSection(
     val downloadedMb = remember(refreshKey) { LocalLlmManager.downloadedMb(context, model) }
 
     Column(modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(
-            text = stringResource(R.string.local_model_title),
-            color = Color.White,
-            // v2.4.44：区块标题对齐设置面板的 12sp（原 13sp 介于两级之间，不属任何一档）
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium
-        )
+        // 🔴 v2.6.22（用户要求）：**本地 AI 标注为「未完成，请勿使用」**。
+        //    该功能（MiniCPM-V 端侧推理）目前下载链路与 CPU 推理都还不稳定/极慢，
+        //    放出去只会让用户以为"功能坏了"。故在设置页两处入口（字幕面板 + 弹幕面板，
+        //    都调本组件）统一挂一个橙色「未完成」标签 + 一段警告条。
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.local_model_title),
+                color = Color.White,
+                // v2.4.44：区块标题对齐设置面板的 12sp（原 13sp 介于两级之间，不属任何一档）
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .background(Color(0x33E0A030), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.local_ai_wip_tag),
+                    color = Color(0xFFE0A030),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
         Text(
             text = stringResource(R.string.local_model_desc),
             color = Color.White.copy(alpha = 0.45f),
             fontSize = 11.sp
         )
+        Spacer(modifier = Modifier.height(6.dp))
+        // 警告条：与「VR 接管提示」同款视觉语言（橙底 + 橙边 + 细字）
+        Surface(
+            color = Color(0x1AE0A030),
+            shape = RoundedCornerShape(6.dp),
+            border = BorderStroke(1.dp, Color(0x66E0A030)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = stringResource(R.string.local_ai_wip_warning),
+                color = Color(0xFFE0A030),
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+            )
+        }
         Spacer(modifier = Modifier.height(6.dp))
 
         // 模型名 + 体积

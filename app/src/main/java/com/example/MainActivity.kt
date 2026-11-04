@@ -42,16 +42,12 @@ class MainActivity : ComponentActivity(), LanguageManager.LanguageHost {
     }
 
     /**
-     * v2.0.181：华为 VR Glass 通路（[com.example.vr.huawei.HuaweiVrActivity]）进入时会把
-     * 内置测试卡切到低清档（它每帧回读人脸 ROI，扛不住 4096×2048）。回到主界面时复位为高清，
-     * 否则用户从眼镜里退出后再看主界面会一直是低清图。
+     * v2.6.22（用户要求「去除对华为眼镜的兼容」）：原来这里有一个 `onResume`，
+     * 作用是把内置测试卡从低清档复位回高清 —— 因为华为 VR Glass 通路
+     * （`HuaweiVrActivity`）进入时会主动切低清（它每帧回读人脸 ROI，扛不住 4096×2048）。
+     * 该通路已整体移除，`DemoMediaProvider.setHighResEnabled(false)` 再无调用方，
+     * 这个复位钩子也就没有存在意义，一并删掉。
      */
-    override fun onResume() {
-        super.onResume()
-        if (com.example.vr.DemoMediaProvider.setHighResEnabled(true)) {
-            Log.i("MainActivity", "DemoMediaProvider 复位为高清档")
-        }
-    }
 
     /**
      * v2.1.210：**VR 手柄按键转发**（当前主要面向奇遇一体机的追光手柄）。

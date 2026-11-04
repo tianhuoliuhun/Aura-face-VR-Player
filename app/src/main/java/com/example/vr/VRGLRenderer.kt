@@ -10,7 +10,6 @@ import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.Log
-import com.example.vr.huawei.HuaweiVrNative
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -66,93 +65,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      */
     @Volatile var beautyTextureDetail = 0.88f
     @Volatile var isSplitScreenVR = false // Cardboard mode
-
-    // ======================= 华为 VR Glass（OpenXR）=======================
-    /**
-     * v2.0.175：华为 OpenXR 渲染模式。
-     *
-     * 开启后 onDrawFrame 走**双眼 swapchain 直渲**通路：
-     *   native acquire → 本渲染器把第 i 眼画面画进 eye[i] 的 FBO → native release + endFrame
-     *
-     * 与 [isSplitScreenVR] 的区别：
-     * - 分屏 VR：自己把屏幕切成左右两半，用估算的 IPD 偏移，**没有真实头姿**
-     * - 华为 VR：每眼一块独立 swapchain，投影矩阵/FOV/头姿全部来自 OpenXR Runtime
-     *
-     * ⚠️ 开启时必须由 `HuaweiVrActivity` 驱动帧循环（native 侧 external 模式）。
-     */
-    @Volatile var huaweiVrMode = false
-
-    /**
-     * 上一帧从 native 取回的双眼渲染参数（长度 40）：
-     * 眼 0 占 `[0..19]`，眼 1 占 `[20..39]`；
-     * 每眼前 16 = 视图矩阵（列主序），后 4 = FOV `{left, right, up, down}`（弧度）。
-     *
-     * 由 `HuaweiVrActivity` 在每帧渲染前通过 [updateHuaweiEyeTargets] 写入。
-     */
-    @Volatile private var huaweiEyeTargets: FloatArray? = null
-
-    /** 每眼 swapchain 尺寸（由 [updateHuaweiEyeSize] 写入，用于 aspect 计算） */
-    @Volatile private var huaweiEyeWidth = 0
-    @Volatile private var huaweiEyeHeight = 0
-
-    /** 由 HuaweiVrActivity 每帧写入 OpenXR 双眼参数；传 null 表示本帧无新数据（保留上一帧） */
-    fun updateHuaweiEyeTargets(targets: FloatArray?) {
-        if (targets != null) huaweiEyeTargets = targets
-    }
-
-    /** 由 HuaweiVrActivity 告知每眼 swapchain 尺寸 */
-    fun updateHuaweiEyeSize(width: Int, height: Int) {
-        huaweiEyeWidth = width
-        huaweiEyeHeight = height
-    }
-
-    /**
-     * 华为 VR 模式下的单帧绘制：逐眼绑 FBO → 用 OpenXR 矩阵画 → 解绑。
-     *
-     * 由 `HuaweiVrActivity` 在 native `acquireEyeTargets` 成功后调用；
-     * 返回 true 表示至少画了一只眼（调用方随后应调 `HuaweiVrNative.submitFrame()`）。
-     */
-    fun drawHuaweiVrFrame(): Boolean {
-        val targets = huaweiEyeTargets ?: return false
-        if (targets.size < 40) return false
-
-        // ⚠️ 必须先在 GL 线程消费 SurfaceTexture 的新帧，否则画的是上一次的内容
-        //    （内置路径在 onDrawFrame 里做，华为路径由本函数自己负责）
-        synchronized(this) {
-            if (isVideoFrameAvailable) {
-                videoSurfaceTexture?.updateTexImage()
-                isVideoFrameAvailable = false
-            }
-        }
-
-        var drewAny = false
-        for (eye in 0 until 2) {
-            val fbo = HuaweiVrNative.bindEyeFramebuffer(eye)
-            if (fbo == 0) {
-                // 该眼未 acquire 到 image → 跳过（保留上一帧，不要清屏）
-                continue
-            }
-            try {
-                val w = if (huaweiEyeWidth > 0) huaweiEyeWidth else displayWidth
-                val h = if (huaweiEyeHeight > 0) huaweiEyeHeight else displayHeight
-                GLES20.glViewport(0, 0, w, h)
-                drawEyeWithOpenXrMatrices(eye, w, h, targets)
-
-                // v2.0.203：叠加 VR UI（准星 + 控制条）。
-                // ⚠️ 必须在 drawEyeWithOpenXrMatrices **之后** —— 否则会被视频画面盖住。
-                // UI 顶点在**视图空间**定义，靠该眼的 view×projection 投到裁剪空间；
-                // 两个矩阵是 renderer 的字段，刚刚在上面那次绘制里被填好。
-                val eyeVp = FloatArray(16)
-                Matrix.multiplyMM(eyeVp, 0, projectionMatrix, 0, viewMatrix, 0)
-                HuaweiVrNative.vrUiRender(eyeVp)
-
-                drewAny = true
-            } finally {
-                HuaweiVrNative.unbindEyeFramebuffer()
-            }
-        }
-        return drewAny
-    }
 
     @Volatile var gyroEnabled = true
     @Volatile var isVideoActive = false
@@ -268,10 +180,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     // Real-time Face Detection parameters updated smoothly via background thread
     @Volatile var faceDetectedUniform = 0
+    // ---- v2.6.22（多脸）：主脸（第 0 张）的单值镜像 ----
+    // 这两个不只是「历史遗留」：GPUPixel 的 ROI 计算（gpRoiPx / 待检测区域）就靠它们，
+    // 在多脸模式下应该以**主脸**为准（离镜头最近、面积最大的一张）。
     @Volatile var faceCenterXUniform = 0.5f
     @Volatile var faceCenterYUniform = 0.45f
     @Volatile var eyeDistanceUniform = 0.14f
-    // Precise MediaPipe 468-point features (normalized UV space)
+    // Precise MediaPipe 468-point features (normalized UV space) —— 同样只是主脸镜像
     @Volatile var hasDetailedLandmarks = 0
     @Volatile var eyeLeftXUniform = 0f
     @Volatile var eyeLeftYUniform = 0f
@@ -286,20 +201,57 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var mouthHalfHeightUniform = 0f
     @Volatile var mouthAngleUniform = 0f
 
-    // Face detection sampling resolution. The GL thread reads a larger center
-    // region (512) so faces off-center are still captured. v2.6.17: that region is
-    // now downscaled by **the GPU** (glBlitFramebuffer) before readback, so the
-    // CPU side gets a ≤256 image directly instead of a 512 one it must shrink.
-    private val faceSampleSize = 256
-    private val faceReadSize = 512
+    // ===== v2.6.22（多脸）：shader 直接消费的数组 uniform（最多 MAX_FACES 张）=====
+    // 每张脸一组，索引 0 是主脸。用「交错数组」而非 List<数组>：glUniform2fv 一次传一整组，
+    // 每帧零分配（这些数组长期复用）。
+    @Volatile private var faceCountUniform = 0
+    /** 各脸中心 (x,y) 交错 */
+    private val faceCentersXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    /** 各脸两眼距离（视口 UV 尺度） */
+    private val eyeDistancesArr = FloatArray(MediaPipeFaceManager.MAX_FACES) { 0.14f }
+    /** 各脸是否有精细点位（0/1） */
+    private val hasDetailedsArr = IntArray(MediaPipeFaceManager.MAX_FACES)
+    private val eyeLeftsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    private val eyeRightsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    private val mouthPossXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    private val chinsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    private val mouthHalfWsArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
+    private val mouthHalfHsArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
+    private val mouthAnglesArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
+
+    // 人脸检测的**回读长边**（检测输入尺寸）。
+    // v2.6.22（用户要求对齐 AI 弹幕链路）：采样区从「视口中央 512×512 裁剪」改成
+    // **整帧**，所以这里不能再是 256 —— 整帧缩到 256 长边时，人脸只占画面 1/10 的话
+    // 只剩 ~25px，MediaPipe 检出率骤降（那是"改完反而更差"的陷阱）。
+    // 取 512：人脸占画面 1/10 时仍有 ~51px，与旧的"中央块"方案精度相当；
+    // 而回读字节数反而更少（1920×1080 → 512×288 = 590KB，旧的 512×512 = 1MB）。
+    private val faceSampleSize = 512
+
+    // 历史：faceReadSize（中央块边长 512）已随 v2.6.22 的整帧采样一并废弃，
+    // 保留此说明避免后来者再去"恢复"中央块裁剪 —— 那会重新引入「脸不在中心就采不到」。
 
     // ===== v2.0.156：美颜链路的坐标与开销修复 =====
 
-    /** 采样间隔（帧）：每 N 帧回读一次屏幕内容做人脸检测 */
-    private val faceSampleInterval = 8
+    /**
+     * 采样间隔（帧）：每 N 帧回读一次屏幕内容做人脸检测。
+     *
+     * v2.6.23：从固定 8 帧改成**按检出脸数动态调整** —— MediaPipe 的 478 点 landmark 回归
+     * 是**逐脸**做的，实测（模拟器 1920×1080）：
+     *   · 0 张脸：detect ≈ 40~60 ms（只有检测器前向）
+     *   · 3 张脸：detect ≈ **102~112 ms**（检测器 + 3 次 landmark 回归）
+     * 每 8 帧一次 100ms+ 的后台推理会跟渲染抢 CPU（尤其 VR 分屏时每眼都要跑）。
+     *
+     * 折中：脸越多间隔越长（1 张 8 帧 / 2 张 10 帧 / 3 张 12 帧）。代价是妆容跟随略滞后
+     * （12 帧 ≈ 0.2~0.4 s @30~60fps），但多脸场景下三张脸同时快速移动本身就少见，
+     * 观感上主要是「转头时妆容跟得稍慢」。
+     */
+    private var faceSampleInterval = 8
 
     /** v2.0.173：人脸检测连续失败计数 —— 连续 3 次失败才把 faceDetectedUniform 置 0（防妆容闪烁） */
     private var faceMissStreak = 0
+
+    /** v2.6.22（多脸）：多脸检测成功计数，每 60 次打一行诊断（确认检出张数） */
+    private var faceDiagCount = 0
 
     /**
      * 采样窗口相对**单个视口**的缩放比例（`rw/vpW`、`rh/vpH`）。
@@ -342,6 +294,22 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val gpDetectExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /**
+     * v2.6.22（美颜审查 P0-1）：线程池是否已 `shutdownNow()`。
+     *
+     * 背景 —— 之前所有提交点都是裸 `executor.execute {}`，没有捕获
+     * `RejectedExecutionException`：
+     *  - 退出播放页时 [release] 调 `shutdownNow`，若 GL 线程恰好在 [maybeScheduleFaceSampling]
+     *    里提交任务，异常会冒到 `onDrawFrame`；
+     *  - 更严重的是**计数泄漏**：`gpInFlight` 在提交前已 `addAndGet`，任务没提交成功就永远不减；
+     *    `isDetectingFace` 同理（在 finally 里才复位）。计数再也不归零 →
+     *    [maybeScheduleFaceSampling] 的「忙」判据恒真 → **本渲染器生命周期内检测彻底停摆**
+     *    （表现：切回来美颜形变再也不生效，必须退出播放页重进）。
+     *
+     * 修法：置位后所有提交点提前返回；提交本身也统一走 [submitSafely] 捕获拒绝异常并回滚计数。
+     */
+    @Volatile private var executorsClosed = false
+
+    /**
      * GPUPixel 路径的在途任务计数（检测 + GL 处理各算 1）。
      *
      * ⚠️ 这就是 GPUPixel 路径的「忙」判据（替代原先的 [isDetectingFace]）：
@@ -356,6 +324,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     /** 连续检测失败次数：达阈值才清缓存（对齐 GLSL 路径 faceMissStreak 的防抖思想） */
     private var gpDetectMissStreak = 0
+
+    /** v2.6.23：GPUPixel 检测低频诊断计数（每 60 次打一行检出张数） */
+    private var gpDiagCount = 0
 
     /** 检测降频计数器与间隔（每 N 帧真检一次；其余帧复用上次 landmarks） */
     private var gpFrameTick = 0
@@ -538,16 +509,19 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val hLongLegs: Int,
         val hSmallHead: Int,
         val hFaceDetected: Int,
-        val hFaceCenter: Int,
-        val hEyeDistance: Int,
-        val hHasDetailed: Int,
-        val hEyeLeft: Int,
-        val hEyeRight: Int,
-        val hMouthPos: Int,
-        val hMouthHalfW: Int,
-        val hMouthHalfH: Int,
-        val hMouthAngle: Int,
-        val hChin: Int,
+        // v2.6.22（多脸）：全部改成数组 uniform 的位置（数组首元素的 location 即可，
+        // glUniform*v 会连续写入 N 个元素）。
+        val hFaceCount: Int,
+        val hFaceCenters: Int,
+        val hEyeDistances: Int,
+        val hHasDetaileds: Int,
+        val hEyeLefts: Int,
+        val hEyeRights: Int,
+        val hMouthPoss: Int,
+        val hMouthHalfWs: Int,
+        val hMouthHalfHs: Int,
+        val hMouthAngles: Int,
+        val hChins: Int,
         val hWarpDualCenter: Int,
         val hLutTexture: Int,
         val hLutMix: Int
@@ -695,11 +669,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         } else {
             beautyEngineType
         }
-    // ---- GPUPixel 引擎参数（与 GLSL 参数独立，prefs 前缀 beauty_gp_*）----
-    @Volatile var beautyGpSmooth = 0.7f
-    @Volatile var beautyGpWhite = 0.4f
-    @Volatile var beautyGpSlim = 0.4f
-    @Volatile var beautyGpEyeZoom = 0.3f
+    // ---- v2.6.22（美颜审查 P1-4）：GPUPixel 参数**并入通用参数** ----
+    // 旧实现在这里另有 beautyGpSmooth / beautyGpWhite / beautyGpSlim / beautyGpEyeZoom 四个字段
+    // （默认 0.7 / 0.4 / 0.4 / 0.3，prefs 前缀 beauty_gp_*），与 GLSL 的
+    // beautyLevel / beautyWhitening / beautyFaceSlimming / beautyBigEyes 完全独立。
+    // 后果：同一用户切引擎，四项效果直接跳变（两套默认值、两套滑条），
+    // 面板上还会出现「两处都在调磨皮」的困惑。
+    //
+    // 现在只有**一套参数**：GPUPixel 路径直接读 beautyLevel（磨皮）/ beautyWhitening（美白）/
+    // beautyFaceSlimming（瘦脸）/ beautyBigEyes（大眼），量纲本来就一致（都是 0~1），
+    // 无需换算。GPUPixel 不支持的项（妆容 / 去黑眼圈 / 瘦鼻 / 嘴型 / 牙齿 / 长腿 / 小头）
+    // 由 UI 明确标注，不再静默失效。
     /**
      * v2.0.160（P3）：GPUPixel 是否在 VR / 全景（非平面投影）下也生效。
      * v2.0.184：恢复为**真开关**且**默认开** —— v2.0.182 曾把它从 [isGpuPixelActive] 里拿掉
@@ -928,8 +908,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *   降采样 FBO（GPU 线性滤波完成缩小），再从降采样 FBO 读像素 —— 这时读到的
      *   才是「整屏的缩略图」，坐标与视口 UV 一一对应。
      *
-     * 本项目 EGL 上下文是 ES3（`VRGLSurfaceView` / `HuaweiVrActivity` 均
-     * `setEGLContextClientVersion(3)`），故 `glBlitFramebuffer` 可用。
+     * 本项目 EGL 上下文是 ES3（`VRGLSurfaceView` 用 `setEGLContextClientVersion(3)`），
+     * 故 `glBlitFramebuffer` 可用。
      */
     private var gpHalfFboId = 0
     private var gpHalfFboTexId = 0
@@ -1035,6 +1015,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     // Uniform setters that skip locations optimized out by strict device drivers
     // (Adreno frequently removes unused uniforms, leaving location = -1)
+    /**
+     * v2.6.22（多脸）：查询**数组 uniform** 的位置。
+     *
+     * 驱动差异：部分实现只认 "name[0]"，也有只认不带下标的 "name"（取数组首元素位置）。
+     * 两种都试一遍，命中即用 —— 读不到就是 -1，调用侧会跳过下发（不会抛 GL 错误）。
+     */
+    private fun uniformArrayLocation(progId: Int, name: String): Int {
+        val withIndex = GLES20.glGetUniformLocation(progId, "$name[0]")
+        return if (withIndex != -1) withIndex else GLES20.glGetUniformLocation(progId, name)
+    }
+
     private fun uniform1i(loc: Int, v: Int) {
         if (loc != -1) GLES20.glUniform1i(loc, v)
     }
@@ -1105,20 +1096,22 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         
         // Face recognition tracking uniforms
         uniform int uFaceDetected;
-        uniform vec2 uFaceCenter;
-        uniform float uEyeDistance;
+        uniform int uFaceCount;
+        // v2.6.22（多脸）：每张脸一组锚点，最多 3 张（与 MediaPipe setNumFaces(3) 一致）
+        uniform vec2 uFaceCenters[3];
+        uniform float uEyeDistances[3];
         
         // Precise MediaPipe 468-point features (normalized UV space)
-        uniform int uHasDetailed;
-        uniform vec2 uEyeLeft;
-        uniform vec2 uEyeRight;
-        uniform vec2 uMouthPos;
+        uniform int uHasDetaileds[3];
+        uniform vec2 uEyeLefts[3];
+        uniform vec2 uEyeRights[3];
+        uniform vec2 uMouthPoss[3];
         // v2.0.159：嘴部形状参数（由 MediaPipe 唇部关键点算出）—— 供椭圆 mask 使用，
         // 取代原先「以嘴中心为圆心的正圆」。值为 0 表示未取到（shader 内回退到 fUnit 比例）。
-        uniform float uMouthHalfW;
-        uniform float uMouthHalfH;
-        uniform float uMouthAngle;
-        uniform vec2 uChin;
+        uniform float uMouthHalfWs[3];
+        uniform float uMouthHalfHs[3];
+        uniform float uMouthAngles[3];
+        uniform vec2 uChins[3];
         uniform int uWarpDualCenter;
         
         // v104 LUT 视频滤镜（512x512 RGBA 打包：8x8 网格，每格 64x64）
@@ -1320,29 +1313,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // long legs / small head) only apply when a face is actually tracked,
             // otherwise a flat 2D picture gets squeezed/stretched for no reason.
             if (uProjectionMode == 0 && uFaceDetected == 1) {
-                // Initialize landmarks
-                vec2 fCenter = vec2(0.5, 0.45);
-                float fUnit = 0.14;
-                if (uFaceDetected == 1) {
-                    fCenter = uFaceCenter;
-                    // v2.0.156：uEyeDistance 现在是**视口 UV 空间**的尺度（此前误用采样裁剪图空间，
-                    // 数值偏大约 3.7 倍、总被下面的 clamp 顶到上限），故上下限整体下移。
-                    fUnit = clamp(uEyeDistance, 0.02, 0.25);
-                }
-
-                // Derive facial feature anchors. When MediaPipe 468-point landmarks are
-                // available, use them for pixel-accurate cosmetic placement.
-                vec2 eyeL = fCenter + vec2(-0.5 * fUnit, 0.0);
-                vec2 eyeR = fCenter + vec2(0.5 * fUnit, 0.0);
-                vec2 mouthC = fCenter + vec2(0.0, 0.75 * fUnit);
-                float chinY = fCenter.y + fUnit;
-                if (uHasDetailed == 1) {
-                    eyeL = uEyeLeft;
-                    eyeR = uEyeRight;
-                    mouthC = uMouthPos;
-                    chinY = uChin.y;
-                }
-
+                // ===== v2.6.22（多脸）：长腿是**全屏**形变，必须先于逐脸循环 =====
+                // 它只依赖 tc.y，与具体哪张脸无关。放进 per-face 循环会被每张脸各拉伸一次，
+                // 3 张脸叠加后人物会被拉成面条。
                 float normY = (tc.y - center.y) / scale.y;
                 
                 // 1. Long Legs vertical stretch (bottom part of standard flat video projection)
@@ -1350,51 +1323,75 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     normY = normY - (normY - 0.05) * (uLongLegs * 0.08);
                     tc.y = center.y + normY * scale.y;
                 }
-                
-                // 2. Face Slimming (centered around the chin/jawline relative to tracked face center)
-                float jawY = uHasDetailed == 1 ? chinY - 0.15 * fUnit : fCenter.y + 0.5 * fUnit;
-                float distYFace = abs(tc.y - jawY);
-                if (distYFace < 1.1 * fUnit) {
-                    float factor = (1.0 - distYFace / (1.1 * fUnit)) * uFaceSlimming * 0.08;
-                    tc.x = mix(tc.x, fCenter.x, factor);
-                }
-                
-                // Small Head (squeezing forehead region horizontally)
-                float headY = uHasDetailed == 1 ? (eyeL.y + eyeR.y) * 0.5 - 0.55 * fUnit : fCenter.y - 0.7 * fUnit;
-                float distYHead = abs(tc.y - headY);
-                if (distYHead < 1.1 * fUnit) {
-                    float factor = (1.0 - distYHead / (1.1 * fUnit)) * uSmallHead * 0.08;
-                    tc.x = mix(tc.x, fCenter.x, factor);
-                }
-                
-                // 3. Big Eyes radial expansion around tracked pupils
-                float distEyeL = distance(tc, eyeL);
-                if (distEyeL < 0.5 * fUnit) {
-                    float f = (1.0 - distEyeL / (0.5 * fUnit)) * uBigEyes * 0.15;
-                    tc = mix(tc, eyeL, -f);
-                }
-                float distEyeR = distance(tc, eyeR);
-                if (distEyeR < 0.5 * fUnit) {
-                    float f = (1.0 - distEyeR / (0.5 * fUnit)) * uBigEyes * 0.15;
-                    tc = mix(tc, eyeR, -f);
-                }
-                
-                // 4. Nose Slimming inside tracked nasal bridge
-                vec2 noseCenter = uHasDetailed == 1
-                    ? vec2((eyeL.x + eyeR.x) * 0.5, mix((eyeL.y + eyeR.y) * 0.5, chinY, 0.35))
-                    : fCenter + vec2(0.0, 0.25 * fUnit);
-                float distNoseWidth = abs(tc.x - noseCenter.x);
-                float distNoseHeight = abs(tc.y - noseCenter.y);
-                if (distNoseWidth < 0.4 * fUnit && distNoseHeight < 0.4 * fUnit) {
-                    float f = (1.0 - distNoseWidth / (0.4 * fUnit)) * uNoseSlimming * 0.12;
-                    tc.x = mix(tc.x, noseCenter.x, f);
-                }
-                
-                // 5. Mouth resizing (squeeze slightly around mouth lip centroid)
-                float distMouthArea = distance(tc, mouthC);
-                if (distMouthArea < 0.45 * fUnit) {
-                    float f = (1.0 - distMouthArea / (0.45 * fUnit)) * uMouth * 0.10;
-                    tc = mix(tc, mouthC, f);
+
+                // ===== v2.6.22（多脸）：逐脸形变，最多 3 张 =====
+                // 每张脸先做包围盒剔除：形变影响半径 ≤ 1.1 * fUnit，盒外像素直接跳过。
+                for (int fi = 0; fi < 3; fi++) {
+                    if (fi >= uFaceCount) break;
+                    vec2 fCenter = uFaceCenters[fi];
+                    float fUnit = clamp(uEyeDistances[fi], 0.02, 0.25);
+                    // 包围盒剔除（形变最大影响半径 1.1 * fUnit，宽高各留余量）
+                    if (abs(tc.x - fCenter.x) > 1.4 * fUnit || abs(tc.y - fCenter.y) > 1.5 * fUnit) continue;
+
+                    // Derive facial feature anchors. When MediaPipe 468-point landmarks are
+                    // available, use them for pixel-accurate cosmetic placement.
+                    vec2 eyeL = fCenter + vec2(-0.5 * fUnit, 0.0);
+                    vec2 eyeR = fCenter + vec2(0.5 * fUnit, 0.0);
+                    vec2 mouthC = fCenter + vec2(0.0, 0.75 * fUnit);
+                    float chinY = fCenter.y + fUnit;
+                    if (uHasDetaileds[fi] == 1) {
+                        eyeL = uEyeLefts[fi];
+                        eyeR = uEyeRights[fi];
+                        mouthC = uMouthPoss[fi];
+                        chinY = uChins[fi].y;
+                    }
+
+
+                    // 2. Face Slimming (centered around the chin/jawline relative to tracked face center)
+                    float jawY = uHasDetaileds[fi] == 1 ? chinY - 0.15 * fUnit : fCenter.y + 0.5 * fUnit;
+                    float distYFace = abs(tc.y - jawY);
+                    if (distYFace < 1.1 * fUnit) {
+                        float factor = (1.0 - distYFace / (1.1 * fUnit)) * uFaceSlimming * 0.08;
+                        tc.x = mix(tc.x, fCenter.x, factor);
+                    }
+
+                    // Small Head (squeezing forehead region horizontally)
+                    float headY = uHasDetaileds[fi] == 1 ? (eyeL.y + eyeR.y) * 0.5 - 0.55 * fUnit : fCenter.y - 0.7 * fUnit;
+                    float distYHead = abs(tc.y - headY);
+                    if (distYHead < 1.1 * fUnit) {
+                        float factor = (1.0 - distYHead / (1.1 * fUnit)) * uSmallHead * 0.08;
+                        tc.x = mix(tc.x, fCenter.x, factor);
+                    }
+
+                    // 3. Big Eyes radial expansion around tracked pupils
+                    float distEyeL = distance(tc, eyeL);
+                    if (distEyeL < 0.5 * fUnit) {
+                        float f = (1.0 - distEyeL / (0.5 * fUnit)) * uBigEyes * 0.15;
+                        tc = mix(tc, eyeL, -f);
+                    }
+                    float distEyeR = distance(tc, eyeR);
+                    if (distEyeR < 0.5 * fUnit) {
+                        float f = (1.0 - distEyeR / (0.5 * fUnit)) * uBigEyes * 0.15;
+                        tc = mix(tc, eyeR, -f);
+                    }
+
+                    // 4. Nose Slimming inside tracked nasal bridge
+                    vec2 noseCenter = uHasDetaileds[fi] == 1
+                        ? vec2((eyeL.x + eyeR.x) * 0.5, mix((eyeL.y + eyeR.y) * 0.5, chinY, 0.35))
+                        : fCenter + vec2(0.0, 0.25 * fUnit);
+                    float distNoseWidth = abs(tc.x - noseCenter.x);
+                    float distNoseHeight = abs(tc.y - noseCenter.y);
+                    if (distNoseWidth < 0.4 * fUnit && distNoseHeight < 0.4 * fUnit) {
+                        float f = (1.0 - distNoseWidth / (0.4 * fUnit)) * uNoseSlimming * 0.12;
+                        tc.x = mix(tc.x, noseCenter.x, f);
+                    }
+
+                    // 5. Mouth resizing (squeeze slightly around mouth lip centroid)
+                    float distMouthArea = distance(tc, mouthC);
+                    if (distMouthArea < 0.45 * fUnit) {
+                        float f = (1.0 - distMouthArea / (0.45 * fUnit)) * uMouth * 0.10;
+                        tc = mix(tc, mouthC, f);
+                    }
                 }
             }
             
@@ -1517,118 +1514,117 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // （否则会按默认中心 (0.5,0.45) 把口红/腮红画到画面中央，产生跳变）。
             // 与 Kotlin 侧的「连续 3 次失败才置 0」防抖配合，短暂检测失败不再闪。
             if (uProjectionMode == 0 && uFaceDetected == 1) {
-                // Initialize landmarks
-                vec2 fCenter = vec2(0.5, 0.45);
-                float fUnit = 0.14;
-                if (uFaceDetected == 1) {
-                    fCenter = uFaceCenter;
-                    // v2.0.156：uEyeDistance 现在是**视口 UV 空间**的尺度（此前误用采样裁剪图空间，
-                    // 数值偏大约 3.7 倍、总被下面的 clamp 顶到上限），故上下限整体下移。
-                    fUnit = clamp(uEyeDistance, 0.02, 0.25);
-                }
+                // ===== v2.6.22（多脸）：逐脸妆容，最多 3 张 =====
+                // 每张脸各自做包围盒剔除（妆容最远半径 1.5/1.8 * fUnit），
+                // 因此画面上大部分像素只会为「离自己最近的那张脸」付出算术开销。
+                for (int fi = 0; fi < 3; fi++) {
+                    if (fi >= uFaceCount) break;
+                    vec2 fCenter = uFaceCenters[fi];
+                    float fUnit = clamp(uEyeDistances[fi], 0.02, 0.25);
 
-                // ===== v2.0.177：妆容 gate 到人脸包围盒 =====
-                // 下方整段妆容（美白/黑眼圈/眉毛/口红/腮红/白牙）要跑 10+ 次 ellipseMask，
-                // 每次含 cos/sin/length/smoothstep —— 这些是**纯算术**开销（无纹理采样）。
-                // 但人脸通常只占画面一小部分，画面上 80%+ 的像素算完 mask 发现权重为 0 就丢弃。
-                // 这里先做一次包围盒剔除：最远的腮红中心距 fCenter 约 0.72*fUnit、半径约 0.46*fUnit，
-                // 再加上椭圆边界羽化，1.5*fUnit / 1.8*fUnit 的包围盒足以包住全部妆容区域且有余量。
-                // ⚠️ 注意：这只是算术优化的「快路径」，盒外像素直接跳过整段妆容计算。
-                bool inFaceBox =
-                    abs(tc.x - fCenter.x) < 1.5 * fUnit &&
-                    abs(tc.y - fCenter.y) < 1.8 * fUnit;
+                    // ===== v2.0.177：妆容 gate 到人脸包围盒 =====
+                    // 下方整段妆容（美白/黑眼圈/眉毛/口红/腮红/白牙）要跑 10+ 次 ellipseMask，
+                    // 每次含 cos/sin/length/smoothstep —— 这些是**纯算术**开销（无纹理采样）。
+                    // 但人脸通常只占画面一小部分，画面上 80%+ 的像素算完 mask 发现权重为 0 就丢弃。
+                    // 这里先做一次包围盒剔除：最远的腮红中心距 fCenter 约 0.72*fUnit、半径约 0.46*fUnit，
+                    // 再加上椭圆边界羽化，1.5*fUnit / 1.8*fUnit 的包围盒足以包住全部妆容区域且有余量。
+                    // ⚠️ 注意：这只是算术优化的「快路径」，盒外像素直接跳过整段妆容计算。
+                    bool inFaceBox =
+                        abs(tc.x - fCenter.x) < 1.5 * fUnit &&
+                        abs(tc.y - fCenter.y) < 1.8 * fUnit;
 
-                if (inFaceBox) {
-                // Derive facial feature anchors (MediaPipe 468-point aware)
-                vec2 eyeL = fCenter + vec2(-0.5 * fUnit, 0.0);
-                vec2 eyeR = fCenter + vec2(0.5 * fUnit, 0.0);
-                vec2 mouthC = fCenter + vec2(0.0, 0.75 * fUnit);
-                if (uHasDetailed == 1) {
-                    eyeL = uEyeLeft;
-                    eyeR = uEyeRight;
-                    mouthC = uMouthPos;
-                }
-                
-                // 2. Dark Circles removal (黑眼圈) just below the tracked eyes
-                vec2 bagL = eyeL + vec2(0.0, 0.3 * fUnit);
-                vec2 bagR = eyeR + vec2(0.0, 0.3 * fUnit);
-                float distBagL = distance(tc, bagL);
-                float distBagR = distance(tc, bagR);
-                // v2.0.159：正圆 → 横向椭圆（眼袋是横卧在眼下的月牙形），并保留「保高光提亮」
-                vec2 bagRadius = vec2(0.28 * fUnit, 0.13 * fUnit);
-                float bagMask = max(
-                    ellipseMask(tc, bagL, bagRadius, 0.0, 0.55),
-                    ellipseMask(tc, bagR, bagRadius, 0.0, 0.55)
-                );
-                if (bagMask > 0.001 && isSkin(color.rgb)) {
-                    color.rgb += vec3(uDarkCircles * 0.15) * (1.0 - color.rgb) * bagMask;
-                }
-                
-                // 3. Eyebrows definitions (眉毛) darkening directly above the eyes
-                vec2 browL = eyeL + vec2(0.0, -0.5 * fUnit);
-                vec2 browR = eyeR + vec2(0.0, -0.5 * fUnit);
-                float distBrowL = distance(tc, browL);
-                float distBrowR = distance(tc, browR);
-                // v2.0.159：正圆 → **横向椭圆**（眉是斜长条，正圆只会涂成一团）。
-                // 倾角用固定 ±0.14 rad（≈8°）近似眉毛走向。
-                vec2 browRadius = vec2(0.30 * fUnit, 0.115 * fUnit);
-                float browMaskL = ellipseMask(tc, browL, browRadius, -0.14, 0.45);
-                if (browMaskL > 0.001) {
-                    color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskL * uEyebrows * 0.70);
-                }
-                float browMaskR = ellipseMask(tc, browR, browRadius, 0.14, 0.45);
-                if (browMaskR > 0.001) {
-                    color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskR * uEyebrows * 0.70);
-                }
-                
-                // 4. Lipstick coloring (口红) around the tracked mouth
-                float distLip = distance(tc, mouthC);
-                // v2.0.159：正圆 → **贴合唇形的椭圆**。宽/高/倾角来自 MediaPipe 唇部关键点
-                // （uMouthHalfW 为 0 表示未取到，回退按 fUnit 估算，兼容 FaceDetector 兜底路径）。
-                // 采样图 y 与视口 UV 的 y 方向相反，所以倾角取负。
-                vec2 mouthRadius = (uMouthHalfW > 0.0001)
-                    ? vec2(uMouthHalfW * 1.18, max(uMouthHalfH, uMouthHalfW * 0.30) * 1.60)
-                    : vec2(0.34 * fUnit, 0.13 * fUnit);
-                float lipMask = ellipseMask(tc, mouthC, mouthRadius, -uMouthAngle, 0.35);
-                if (lipMask > 0.001) {
-                    // soft-light 上色：保留唇部原有明暗与高光（不再三通道硬拉）
-                    color.rgb = mix(
-                        color.rgb,
-                        softLight(color.rgb, vec3(0.74, 0.16, 0.26)),
-                        lipMask * uLipstick * 0.70
-                    );
-                }
-                
-                // 5. Cheek Blush coloring (腮红) on the cheeks outside the eyes
-                vec2 blushL = eyeL + vec2(-0.55 * fUnit, 0.55 * fUnit);
-                vec2 blushR = eyeR + vec2(0.55 * fUnit, 0.55 * fUnit);
-                float distBlushL = distance(tc, blushL);
-                float distBlushR = distance(tc, blushR);
-                // v2.0.159：正圆 → 椭圆（腮红是沿脸颊斜向下的大椭圆），并保留 soft-light 上色
-                vec2 blushRadius = vec2(0.46 * fUnit, 0.30 * fUnit);
-                float blushMaskL = ellipseMask(tc, blushL, blushRadius, -0.28, 0.50);
-                if (blushMaskL > 0.001 && isSkin(color.rgb)) {
-                    color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskL * uBlush * 0.75);
-                }
-                float blushMaskR = ellipseMask(tc, blushR, blushRadius, 0.28, 0.50);
-                if (blushMaskR > 0.001 && isSkin(color.rgb)) {
-                    color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskR * uBlush * 0.75);
-                }
-                
-                // 6. Teeth Whitening (白牙) inside the lip cavity
-                float distTeethSpace = distance(tc, mouthC);
-                // v2.0.159：正圆 → 细长椭圆（牙齿在嘴腔里是横条），并跟随嘴的倾角
-                vec2 teethRadius = (uMouthHalfW > 0.0001)
-                    ? vec2(uMouthHalfW * 0.72, max(uMouthHalfH, uMouthHalfW * 0.30) * 0.55)
-                    : vec2(0.20 * fUnit, 0.075 * fUnit);
-                float teethMask = ellipseMask(tc, mouthC, teethRadius, -uMouthAngle, 0.40);
-                if (teethMask > 0.001) {
-                    float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-                    if (luma > 0.45) {
-                        color.rgb = mix(color.rgb, vec3(luma + 0.12), teethMask * uTeethWhitening * 0.75);
+                    if (inFaceBox) {
+                    // Derive facial feature anchors (MediaPipe 468-point aware)
+                    vec2 eyeL = fCenter + vec2(-0.5 * fUnit, 0.0);
+                    vec2 eyeR = fCenter + vec2(0.5 * fUnit, 0.0);
+                    vec2 mouthC = fCenter + vec2(0.0, 0.75 * fUnit);
+                    if (uHasDetaileds[fi] == 1) {
+                        eyeL = uEyeLefts[fi];
+                        eyeR = uEyeRights[fi];
+                        mouthC = uMouthPoss[fi];
                     }
+
+                    // 2. Dark Circles removal (黑眼圈) just below the tracked eyes
+                    vec2 bagL = eyeL + vec2(0.0, 0.3 * fUnit);
+                    vec2 bagR = eyeR + vec2(0.0, 0.3 * fUnit);
+                    float distBagL = distance(tc, bagL);
+                    float distBagR = distance(tc, bagR);
+                    // v2.0.159：正圆 → 横向椭圆（眼袋是横卧在眼下的月牙形），并保留「保高光提亮」
+                    vec2 bagRadius = vec2(0.28 * fUnit, 0.13 * fUnit);
+                    float bagMask = max(
+                        ellipseMask(tc, bagL, bagRadius, 0.0, 0.55),
+                        ellipseMask(tc, bagR, bagRadius, 0.0, 0.55)
+                    );
+                    if (bagMask > 0.001 && isSkin(color.rgb)) {
+                        color.rgb += vec3(uDarkCircles * 0.15) * (1.0 - color.rgb) * bagMask;
+                    }
+
+                    // 3. Eyebrows definitions (眉毛) darkening directly above the eyes
+                    vec2 browL = eyeL + vec2(0.0, -0.5 * fUnit);
+                    vec2 browR = eyeR + vec2(0.0, -0.5 * fUnit);
+                    float distBrowL = distance(tc, browL);
+                    float distBrowR = distance(tc, browR);
+                    // v2.0.159：正圆 → **横向椭圆**（眉是斜长条，正圆只会涂成一团）。
+                    // 倾角用固定 ±0.14 rad（≈8°）近似眉毛走向。
+                    vec2 browRadius = vec2(0.30 * fUnit, 0.115 * fUnit);
+                    float browMaskL = ellipseMask(tc, browL, browRadius, -0.14, 0.45);
+                    if (browMaskL > 0.001) {
+                        color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskL * uEyebrows * 0.70);
+                    }
+                    float browMaskR = ellipseMask(tc, browR, browRadius, 0.14, 0.45);
+                    if (browMaskR > 0.001) {
+                        color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskR * uEyebrows * 0.70);
+                    }
+
+                    // 4. Lipstick coloring (口红) around the tracked mouth
+                    float distLip = distance(tc, mouthC);
+                    // v2.0.159：正圆 → **贴合唇形的椭圆**。宽/高/倾角来自 MediaPipe 唇部关键点
+                    // （uMouthHalfWs[fi] 为 0 表示未取到，回退按 fUnit 估算，兼容 FaceDetector 兜底路径）。
+                    // 采样图 y 与视口 UV 的 y 方向相反，所以倾角取负。
+                    vec2 mouthRadius = (uMouthHalfWs[fi] > 0.0001)
+                        ? vec2(uMouthHalfWs[fi] * 1.18, max(uMouthHalfHs[fi], uMouthHalfWs[fi] * 0.30) * 1.60)
+                        : vec2(0.34 * fUnit, 0.13 * fUnit);
+                    float lipMask = ellipseMask(tc, mouthC, mouthRadius, -uMouthAngles[fi], 0.35);
+                    if (lipMask > 0.001) {
+                        // soft-light 上色：保留唇部原有明暗与高光（不再三通道硬拉）
+                        color.rgb = mix(
+                            color.rgb,
+                            softLight(color.rgb, vec3(0.74, 0.16, 0.26)),
+                            lipMask * uLipstick * 0.70
+                        );
+                    }
+
+                    // 5. Cheek Blush coloring (腮红) on the cheeks outside the eyes
+                    vec2 blushL = eyeL + vec2(-0.55 * fUnit, 0.55 * fUnit);
+                    vec2 blushR = eyeR + vec2(0.55 * fUnit, 0.55 * fUnit);
+                    float distBlushL = distance(tc, blushL);
+                    float distBlushR = distance(tc, blushR);
+                    // v2.0.159：正圆 → 椭圆（腮红是沿脸颊斜向下的大椭圆），并保留 soft-light 上色
+                    vec2 blushRadius = vec2(0.46 * fUnit, 0.30 * fUnit);
+                    float blushMaskL = ellipseMask(tc, blushL, blushRadius, -0.28, 0.50);
+                    if (blushMaskL > 0.001 && isSkin(color.rgb)) {
+                        color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskL * uBlush * 0.75);
+                    }
+                    float blushMaskR = ellipseMask(tc, blushR, blushRadius, 0.28, 0.50);
+                    if (blushMaskR > 0.001 && isSkin(color.rgb)) {
+                        color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskR * uBlush * 0.75);
+                    }
+
+                    // 6. Teeth Whitening (白牙) inside the lip cavity
+                    float distTeethSpace = distance(tc, mouthC);
+                    // v2.0.159：正圆 → 细长椭圆（牙齿在嘴腔里是横条），并跟随嘴的倾角
+                    vec2 teethRadius = (uMouthHalfWs[fi] > 0.0001)
+                        ? vec2(uMouthHalfWs[fi] * 0.72, max(uMouthHalfHs[fi], uMouthHalfWs[fi] * 0.30) * 0.55)
+                        : vec2(0.20 * fUnit, 0.075 * fUnit);
+                    float teethMask = ellipseMask(tc, mouthC, teethRadius, -uMouthAngles[fi], 0.40);
+                    if (teethMask > 0.001) {
+                        float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                        if (luma > 0.45) {
+                            color.rgb = mix(color.rgb, vec3(luma + 0.12), teethMask * uTeethWhitening * 0.75);
+                        }
+                    }
+                    }   // v2.0.177: end if (inFaceBox)
                 }
-                }   // v2.0.177: end if (inFaceBox)
             }
             
             // Brightness
@@ -1696,16 +1692,17 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 hLongLegs = GLES20.glGetUniformLocation(progId, "uLongLegs"),
                 hSmallHead = GLES20.glGetUniformLocation(progId, "uSmallHead"),
                 hFaceDetected = GLES20.glGetUniformLocation(progId, "uFaceDetected"),
-                hFaceCenter = GLES20.glGetUniformLocation(progId, "uFaceCenter"),
-                hEyeDistance = GLES20.glGetUniformLocation(progId, "uEyeDistance"),
-                hHasDetailed = GLES20.glGetUniformLocation(progId, "uHasDetailed"),
-                hEyeLeft = GLES20.glGetUniformLocation(progId, "uEyeLeft"),
-                hEyeRight = GLES20.glGetUniformLocation(progId, "uEyeRight"),
-                hMouthPos = GLES20.glGetUniformLocation(progId, "uMouthPos"),
-                hMouthHalfW = GLES20.glGetUniformLocation(progId, "uMouthHalfW"),
-                hMouthHalfH = GLES20.glGetUniformLocation(progId, "uMouthHalfH"),
-                hMouthAngle = GLES20.glGetUniformLocation(progId, "uMouthAngle"),
-                hChin = GLES20.glGetUniformLocation(progId, "uChin"),
+                hFaceCount = GLES20.glGetUniformLocation(progId, "uFaceCount"),
+                hFaceCenters = uniformArrayLocation(progId, "uFaceCenters"),
+                hEyeDistances = uniformArrayLocation(progId, "uEyeDistances"),
+                hHasDetaileds = uniformArrayLocation(progId, "uHasDetaileds"),
+                hEyeLefts = uniformArrayLocation(progId, "uEyeLefts"),
+                hEyeRights = uniformArrayLocation(progId, "uEyeRights"),
+                hMouthPoss = uniformArrayLocation(progId, "uMouthPoss"),
+                hMouthHalfWs = uniformArrayLocation(progId, "uMouthHalfWs"),
+                hMouthHalfHs = uniformArrayLocation(progId, "uMouthHalfHs"),
+                hMouthAngles = uniformArrayLocation(progId, "uMouthAngles"),
+                hChins = uniformArrayLocation(progId, "uChins"),
                 hWarpDualCenter = GLES20.glGetUniformLocation(progId, "uWarpDualCenter"),
                 hLutTexture = GLES20.glGetUniformLocation(progId, "uLutTexture"),
                 hLutMix = GLES20.glGetUniformLocation(progId, "uLutMix")
@@ -1747,7 +1744,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glDisable(GLES20.GL_DEPTH_TEST) // 2D or spherically projected mapping, depth test is unneeded
 
         // 记录实际拿到的 GL 版本：上下文虽然按 ES3 请求，但真机上驱动可能仍回退到 ES2
-        // （VRGLSurfaceView / HuaweiVrActivity 均 setEGLContextClientVersion(3)）。
+        // （VRGLSurfaceView 按 setEGLContextClientVersion(3) 请求）。
         // 排查「shader 在 A 设备能编译、B 设备黑屏」这类问题时，第一手证据就是这行日志。
         // GL_MAJOR_VERSION / GL_MINOR_VERSION 在 ES2 上下文下查询无效，故只用 GL_VERSION 字符串。
         Log.i(TAG, "GL_VERSION = ${GLES20.glGetString(GLES20.GL_VERSION)}"
@@ -1876,16 +1873,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     override fun onDrawFrame(gl: GL10?) {
 
-        // 华为 VR 模式下帧循环由 HuaweiVrActivity 驱动（每帧要先 acquire swapchain 才能画），
-        // GLSurfaceView 自己的 onDrawFrame 只负责把默认 framebuffer 清成黑底，
-        // 否则会与双眼 FBO 渲染互抢 framebuffer 绑定与视频帧消费。
-        if (huaweiVrMode) {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            GLES20.glClearColor(0f, 0f, 0f, 1f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            return
-        }
-
         // Enforce frame rate limit if maxFps > 0
         if (maxFps > 0) {
             val targetMs = 1000L / maxFps
@@ -1902,8 +1889,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // v2.6.16（P0）：渲染帧度量。**必须放在限帧 sleep 之后** —— 放在前面会把等待时间
         // 算进 CPU 耗时（30 fps 限帧时凭空多 16ms）。帧间隔由两次 begin 之差得出，
         // 天然包含限帧等待，因此 fps 反映的是用户真正看到的帧率。
-        // ⚠️ 华为 VR 模式在上面的分支已 return（帧循环由 HuaweiVrActivity 驱动），
-        //    那条路径不参与统计，别把这里的 0 当成「渲染没跑」。
         val frameBeginNs = RenderStats.onFrameBegin()
 
         // Apply inertia decay for smooth drag/fling
@@ -1987,7 +1972,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             gpInitDispatched.compareAndSet(false, true)
         ) {
             val appCtx = context
-            gpInitExecutor.execute { runCatching { GpuPixelBeauty.init(appCtx) } }
+            // v2.6.22（P0-1）：提交失败时把「已派发」标记复位，否则本渲染器再也不会尝试初始化
+            submitSafely(
+                gpInitExecutor, "GPUPixel 初始化",
+                rollback = { gpInitDispatched.set(false) },
+            ) { runCatching { GpuPixelBeauty.init(appCtx) } }
         }
         val gpActive = isGpuPixelActive()
         // v2.0.177：磨皮半分辨率 pass 激活时，主渲染写到 downFbo（全分辨率纹理）而非屏幕，
@@ -2095,19 +2084,25 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform1f(prog.hLongLegs, beautyLongLegs * bc)
         uniform1f(prog.hSmallHead, beautySmallHead * bc)
         uniform1i(prog.hFaceDetected, if (bc > 0f) faceDetectedUniform else 0)
-        uniform2f(prog.hFaceCenter, faceCenterXUniform, faceCenterYUniform)
-        uniform1f(prog.hEyeDistance, eyeDistanceUniform)
 
-        // Precise MediaPipe 468-point landmarks (if the real model is active)
-        uniform1i(prog.hHasDetailed, hasDetailedLandmarks)
-        uniform2f(prog.hEyeLeft, eyeLeftXUniform, eyeLeftYUniform)
-        uniform2f(prog.hEyeRight, eyeRightXUniform, eyeRightYUniform)
-        uniform2f(prog.hMouthPos, mouthXUniform, mouthYUniform)
-        // v2.0.159：嘴形参数（0 表示尚未取到，shader 会回退到按 fUnit 估算）
-        uniform1f(prog.hMouthHalfW, mouthHalfWidthUniform)
-        uniform1f(prog.hMouthHalfH, mouthHalfHeightUniform)
-        uniform1f(prog.hMouthAngle, mouthAngleUniform)
-        uniform2f(prog.hChin, chinXUniform, chinYUniform)
+        // ===== v2.6.22（多脸）：数组 uniform 一次下发 =====
+        // 与旧的「单脸 8 个 uniform」相比只多了 glUniform*v 的 count 参数；
+        // 数组元素在 shader 里按 [fi] 索引，由 uFaceCount 控制循环轮数。
+        // 关闭美颜（bc == 0）时把张数置 0 —— shader 的 for 循环第一轮就 break。
+        val faceN = MediaPipeFaceManager.MAX_FACES
+        val drawFaces = if (bc > 0f) faceCountUniform else 0
+        uniform1i(prog.hFaceCount, drawFaces)
+        if (prog.hFaceCenters != -1) GLES20.glUniform2fv(prog.hFaceCenters, faceN, faceCentersXY, 0)
+        if (prog.hEyeDistances != -1) GLES20.glUniform1fv(prog.hEyeDistances, faceN, eyeDistancesArr, 0)
+        if (prog.hHasDetaileds != -1) GLES20.glUniform1iv(prog.hHasDetaileds, faceN, hasDetailedsArr, 0)
+        if (prog.hEyeLefts != -1) GLES20.glUniform2fv(prog.hEyeLefts, faceN, eyeLeftsXY, 0)
+        if (prog.hEyeRights != -1) GLES20.glUniform2fv(prog.hEyeRights, faceN, eyeRightsXY, 0)
+        if (prog.hMouthPoss != -1) GLES20.glUniform2fv(prog.hMouthPoss, faceN, mouthPossXY, 0)
+        if (prog.hChins != -1) GLES20.glUniform2fv(prog.hChins, faceN, chinsXY, 0)
+        // 嘴形参数（0 表示尚未取到，shader 会回退到按 fUnit 估算）
+        if (prog.hMouthHalfWs != -1) GLES20.glUniform1fv(prog.hMouthHalfWs, faceN, mouthHalfWsArr, 0)
+        if (prog.hMouthHalfHs != -1) GLES20.glUniform1fv(prog.hMouthHalfHs, faceN, mouthHalfHsArr, 0)
+        if (prog.hMouthAngles != -1) GLES20.glUniform1fv(prog.hMouthAngles, faceN, mouthAnglesArr, 0)
         uniform1i(prog.hWarpDualCenter, if (warpDualCenter) 1 else 0)
 
         // Pass texel dimensions (size of 1 pixel) to fragment shaders
@@ -2207,157 +2202,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // v2.6.16（P0）：本帧结算。这是 onDrawFrame 的**唯一出口**（上面无提前 return）。
         RenderStats.onFrameEnd(frameBeginNs, maxFps)
-    }
-
-    // ======================= 华为 VR（OpenXR）单眼绘制 =======================
-
-    /**
-     * 用 OpenXR Runtime 给出的 FOV / 头姿矩阵绘制第 [eye] 眼。
-     *
-     * OpenXR 的投影矩阵**不能**用 `Matrix.frustumM` 直接构造：
-     * `frustumM` 假设视锥关于光轴对称（left = -right），而 VR 眼镜的每眼视锥
-     * 是**倾斜**的（左右/上下不对称），必须用通用形式。
-     *
-     * 推导：设近裁面 `n`，则
-     *   l = n·tan(angleLeft)，r = n·tan(angleRight)
-     *   b = n·tan(angleDown)，t = n·tan(angleUp)
-     * 投影矩阵（列主序，与 GLSL mat4 一致）：
-     *   [ 2n/(r-l)      0           (r+l)/(r-l)      0        ]
-     *   [ 0             2n/(t-b)    (t+b)/(t-b)      0        ]
-     *   [ 0             0          -(f+n)/(f-n)     -2fn/(f-n) ]
-     *   [ 0             0          -1                0        ]
-     *
-     * 视图矩阵直接用 native 算好的（`R(q)^T · T(-p)`），已是列主序。
-     * model 矩阵保持与内置分屏 VR 相同的语义（几何/缩放/手动旋转仍生效），
-     * 这样球面/穹顶/盒面等投影模式在眼镜里表现一致。
-     */
-    private fun drawEyeWithOpenXrMatrices(eye: Int, w: Int, h: Int, targets: FloatArray) {
-        // 与内置路径一致：视频走视频变体、图片走图片变体
-        val prog = if (isVideoActive) videoProgram else imageProgram
-        if (prog == null) { drawFallbackFrame(); return }
-
-        GLES20.glUseProgram(prog.programId)
-
-        val base = eye * 20
-
-        // --- 1) 用 OpenXR FOV 构造倾斜视锥投影矩阵 ---
-        val fovL = targets[base + 16]
-        val fovR = targets[base + 17]
-        val fovU = targets[base + 18]
-        val fovD = targets[base + 19]
-        val near = 0.05f
-        val far = 100.0f
-        val tanL = StrictMath.tan(fovL.toDouble()).toFloat()
-        val tanR = StrictMath.tan(fovR.toDouble()).toFloat()
-        val tanU = StrictMath.tan(fovU.toDouble()).toFloat()
-        val tanD = StrictMath.tan(fovD.toDouble()).toFloat()
-
-        val l = near * tanL
-        val r = near * tanR
-        val b = near * tanD
-        val t = near * tanU
-
-        // 退化保护：极端 FOV 会让分母趋零 → 直接退出该眼（保留上一帧，别画花屏）
-        if (kotlin.math.abs(r - l) < 1e-6f || kotlin.math.abs(t - b) < 1e-6f) {
-            Log.w(TAG, "eye$eye FOV 退化，跳过（l=$l r=$r b=$b t=$t）")
-            return
-        }
-
-        val pm = projectionMatrix
-        java.util.Arrays.fill(pm, 0f)
-        pm[0] = 2f * near / (r - l)
-        pm[5] = 2f * near / (t - b)
-        pm[8] = (r + l) / (r - l)
-        pm[9] = (t + b) / (t - b)
-        pm[10] = -(far + near) / (far - near)
-        pm[11] = -1f
-        pm[14] = -2f * far * near / (far - near)
-
-        // --- 2) 视图矩阵：直接用 native 的 OpenXR 结果 ---
-        System.arraycopy(targets, base, viewMatrix, 0, 16)
-
-        // --- 3) model 矩阵：沿用内置逻辑（几何缩放 + 手动旋转），但不叠加陀螺仪 ---
-        //     ⚠️ 头姿已由 OpenXR 的 viewMatrix 提供，若再叠陀螺仪会「转两次」。
-        Matrix.setIdentityM(modelMatrix, 0)
-
-        // 2D 平面投影时按源宽高比做 letterbox / pillarbox
-        val isPlanarMode = projectionMode == ProjectionMode.STANDARD ||
-            projectionMode == ProjectionMode.FISHEYE
-        if (isPlanarMode) {
-            val srcW = if (isVideoActive) videoWidth else imageWidth
-            val srcH = if (isVideoActive) videoHeight else imageHeight
-            if (srcW > 0 && srcH > 0) {
-                val aScreen = if (h > 0) w.toFloat() / h.toFloat() else 1f
-                val aSrc = srcW.toFloat() / srcH.toFloat()
-                var scaleX = 1.0f
-                var scaleY = 1.0f
-                if (aSrc > aScreen) scaleY = aScreen / aSrc else scaleX = aSrc / aScreen
-                Matrix.scaleM(modelMatrix, 0, scaleX, scaleY, 1.0f)
-            }
-        }
-
-        // 手动拖拽视角（VR_360/180/BOX 下作为朝向微调；STANDARD 不旋转，与内置一致）
-        if (projectionMode != ProjectionMode.STANDARD) {
-            Matrix.rotateM(modelMatrix, 0, manualPitch, 1.0f, 0.0f, 0.0f)
-            Matrix.rotateM(modelMatrix, 0, manualYaw, 0.0f, 1.0f, 0.0f)
-        }
-
-        // --- 4) 合成 MVP ---
-        Matrix.multiplyMM(mvMatrix, 0, viewMatrix, 0, modelMatrix, 0)
-        Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvMatrix, 0)
-        uniformMatrix4fv(prog.hMVPMatrix, 1, false, mvpMatrix, 0)
-
-        // --- 5) 同步美颜 / 投影 / 立体等 uniform（与内置路径共用同一套着色器） ---
-        uniform1i(prog.hProjectionMode, projectionMode.id)
-        uniform1i(prog.hStereoMode, stereoMode.id)
-
-        val bc = if (beautyMasterEnabled && effectiveBeautyEngine == BEAUTY_ENGINE_GLSL) 1f else 0f
-        uniform1f(prog.hBeautyStrength, beautyLevel * bc)
-        uniform1f(prog.hTextureDetail, beautyTextureDetail)
-        uniform1f(prog.hBrightness, brightnessLevel)
-        uniform1f(prog.hContrast, contrastLevel)
-        uniform1i(prog.hIsMirrored, if (isMirrored) 1 else 0)
-        uniform1i(prog.hWarpMode, warpMode.id)
-        uniform1f(prog.hCurvature, cylinderCurvature)
-        uniform1f(prog.hFisheyeFov, fisheyeFov)
-        uniform1f(prog.hWhitening, beautyWhitening * bc)
-        uniform1f(prog.hFaceSlimming, beautyFaceSlimming * bc)
-        uniform1f(prog.hBigEyes, beautyBigEyes * bc)
-        uniform1f(prog.hDarkCircles, beautyDarkCircles * bc)
-        uniform1f(prog.hNoseSlimming, beautyNoseSlimming * bc)
-        uniform1f(prog.hMouth, beautyMouth * bc)
-        uniform1f(prog.hTeethWhitening, beautyTeethWhitening * bc)
-        uniform1f(prog.hLipstick, beautyLipstick * bc)
-        uniform1f(prog.hBlush, beautyBlush * bc)
-        uniform1f(prog.hEyebrows, beautyEyebrows * bc)
-        uniform1f(prog.hLongLegs, beautyLongLegs * bc)
-        uniform1f(prog.hSmallHead, beautySmallHead * bc)
-        uniform1i(prog.hFaceDetected, if (bc > 0f) faceDetectedUniform else 0)
-        uniform2f(prog.hFaceCenter, faceCenterXUniform, faceCenterYUniform)
-        uniform1f(prog.hEyeDistance, eyeDistanceUniform)
-        uniform1i(prog.hHasDetailed, hasDetailedLandmarks)
-        uniform2f(prog.hEyeLeft, eyeLeftXUniform, eyeLeftYUniform)
-        uniform2f(prog.hEyeRight, eyeRightXUniform, eyeRightYUniform)
-        uniform2f(prog.hMouthPos, mouthXUniform, mouthYUniform)
-        uniform1f(prog.hMouthHalfW, mouthHalfWidthUniform)
-        uniform1f(prog.hMouthHalfH, mouthHalfHeightUniform)
-        uniform1f(prog.hMouthAngle, mouthAngleUniform)
-        uniform2f(prog.hChin, chinXUniform, chinYUniform)
-        uniform1i(prog.hWarpDualCenter, if (warpDualCenter) 1 else 0)
-        // v2.0.181：同内置路径 —— 图片模式用图片自身 texel，视频用视口 texel
-        uniform2f(
-            prog.hTexelSize,
-            if (!isVideoActive && imageTexelW > 0f) imageTexelW else 1.0f / w.coerceAtLeast(1),
-            if (!isVideoActive && imageTexelH > 0f) imageTexelH else 1.0f / h.coerceAtLeast(1)
-        )
-
-        // uLeftEye：华为模式下每眼是独立渲染目标，填 1（左侧语义）——
-        // 部分几何（如半宽面片）会据此取纹理左半，但双眼各自全屏绘制时不受影响。
-        uniform1i(prog.hLeftEye, 1)
-
-        // --- 6) 绑纹理并绘制 ---
-        bindActiveTextures(prog)
-        drawActiveGeometry(prog)
     }
 
     /**
@@ -2831,6 +2675,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // ignore
         }
         try {
+            // v2.6.22（P0-1）：**先置位**再 shutdown —— 之后所有提交点直接放弃，
+            // 不再出现「刚 shutdown 就被提交 → RejectedExecutionException 冒到 onDrawFrame +
+            // gpInFlight / isDetectingFace 计数泄漏导致检测永久停摆」。
+            executorsClosed = true
             faceExecutor.shutdownNow()
             faceInitExecutor.shutdownNow()
             // v2.4.38（美颜审查 #10）：后台初始化线程一并关闭
@@ -4347,11 +4195,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /**
      * 是否启用「磨皮半分辨率 pass」。
      *
-     * 仅在**内置分屏/全屏通路**下启用（[huaweiVrMode] 与 GPUPixel 通路各走自己的渲染目标，
+     * 仅在**内置分屏/全屏通路**下启用（GPUPixel 通路走自己的渲染目标，
      * 混进来会把 FBO 绑定搞乱）。且必须磨皮真的在跑（GLSL 引擎 + 总开关 + 强度 > 0）。
      */
     private fun isHalfPassActive(): Boolean =
-        !huaweiVrMode &&
             !isGpuPixelActive() &&
             beautyMasterEnabled &&
             // v2.4.33（#1）：用 effectiveBeautyEngine —— GPUPixel 不可用时按 GLSL 跑半分辨率磨皮，
@@ -4628,9 +4475,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             lastEnhanceTexId = 0
             return 0
         }
-        // 华为 VR 走独立帧循环（HuaweiVrActivity 每帧先 acquire swapchain），
-        // 本帧循环不参与绘制，混进来只会把 FBO 绑定搞乱。
-        if (huaweiVrMode) return 0
 
         // ---- MEMC 目标帧率的节流 ----
         // 「目标帧率」是用户直接调的输出节奏，必须真的限制输出帧率，而不只是
@@ -5380,6 +5224,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 视情况采一帧屏幕内容交给后台做人脸检测 / GPUPixel 处理（v2.0.156 重构，v2.0.177 收窄 ROI）。
      */
     private fun maybeScheduleFaceSampling() {
+        // v2.6.22（P0-1）：渲染器已释放（线程池 shutdown）后不再回读 —— 白耗一次
+        // glReadPixels 与一次 1MB 拷贝，且提交必然被拒。
+        if (executorsClosed) return
         if (!isBeautyActive()) {
             faceFrameCounter = 0
             return
@@ -5473,20 +5320,38 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 gpReadUvH = rh.toFloat() / h
             }
         } else {
-            rw = minOf(faceReadSize, w)
-            rh = minOf(faceReadSize, h)
-            x0 = (w - rw) / 2
-            y0 = (h - rh) / 2
+            // ==========================================================================
+            // 🔴 v2.6.22（用户要求「采样参考已修复的 AI 弹幕取帧链路」）：
+            //    **从「视口中央 faceReadSize×faceReadSize 裁剪」改成「整帧（分屏取单眼）等比缩放」**。
+            //
+            // 旧实现的问题（实测体感：美颜"只有磨皮，瘦脸大眼没反应"）：
+            //   · 采样区只有屏幕正中的 512×512 —— **竖屏视频**（1080×2400）里人脸通常在
+            //     画面中上部，正中那一块经常**完全不含脸**；远景点的人脸、VR 里视线偏到
+            //     边缘时的脸、多人场景里非中心的那张脸，同理全部采不到；
+            //   · 每 8 帧采一次，一旦每次都落空 → faceMissStreak 持续增长 →
+            //     形变/妆容永远是 0（磨皮/美白不依赖检测，所以看起来"只有磨皮生效"）。
+            //
+            // 弹幕链路（captureDanmuFrameIfNeeded）早已改成「整帧 + 长边等比缩放 + blit 真缩放」，
+            // 所以任何位置的内容都能看到。这里对齐同一套做法：
+            //   · 采样区 = 整个视口（分屏时 w 已是半屏宽，见上方 vpW 的推导）；
+            //   · 由 blitFboToHalf 真缩放到长边 ≤ faceSampleSize（glReadPixels 只裁剪不缩放）；
+            //   · faceCropScale 自然退化为 1.0（rw/w），mapCrop*ToViewport 变成恒等映射，
+            //     坐标换算链路无需改动。
+            // ==========================================================================
+            rw = w
+            rh = h
+            x0 = 0
+            y0 = 0
             gpFullCoverageThisFrame = false
-            gpReadUvX0 = x0.toFloat() / w
-            gpReadUvY0 = y0.toFloat() / h
-            gpReadUvW = rw.toFloat() / w
-            gpReadUvH = rh.toFloat() / h
+            gpReadUvX0 = 0f
+            gpReadUvY0 = 0f
+            gpReadUvW = 1f
+            gpReadUvH = 1f
         }
 
         // ===== v2.6.17：GLSL 检测路径改用「GPU 预缩放 + 零拷贝直拷」 =====
-        // 采样**区域**仍是视口中央 faceReadSize×faceReadSize（覆盖范围不变，脸偏一点也能抓到），
-        // 但回读尺寸先由 GPU 缩到检测输入尺寸（≤faceSampleSize，等比 letterbox）：
+        // v2.6.22：采样**区域**已改为整帧（见上方 !gpFullFrame 分支），这里只负责把整帧
+        // 由 GPU 缩到检测输入尺寸（长边 ≤ faceSampleSize，等比）：
         //   ① glReadPixels 是 GL 线程上的同步阻塞，数据量 1 MB → 约 0.25 MB（↓75%）；
         //   ② 后台线程不必再做 512→256 的 Skia 缩放（原先每 8 帧一次 Canvas.drawBitmap）。
         // blit 失败时保持原全尺寸回读，正确性不受影响（只是慢回旧路径）。
@@ -5695,15 +5560,31 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             gpInFlight.addAndGet(if (doDetect) 2 else 1)
 
             if (doDetect) {
-                gpDetectExecutor.execute {
+                // v2.6.22（P0-1）：提交失败要回滚刚预支的那 1 个在途计数，
+                // 否则 gpInFlight 永不归零 → 「忙」判据恒真 → 检测永久停摆
+                submitSafely(
+                    gpDetectExecutor, "GPUPixel 人脸检测",
+                    rollback = { finishGpTask(null) },
+                ) {
                     try {
                         // v2.0.186：分段计时 —— 这一段是纯 Mars-Face 检测（含首次模型加载）
                         val td0 = System.nanoTime()
                         val lm = GpuPixelBeauty.getOrCreatePipeline().detect(rgbaData, fw, fh, stride)
                         gpProfLogDetect(System.nanoTime() - td0)
+                        // v2.6.23：低频诊断 —— Mars 一条日志都不打，出问题时只能靠这行判断
+                        // 「是没检出脸」还是「检出了但形变没下发」。
+                        gpDiagCount++
+                        if (gpDiagCount >= 60) {
+                            gpDiagCount = 0
+                            val n = (lm?.size ?: 0) / GpuPixelBeauty.FLOATS_PER_FACE
+                            Log.i(TAG, "GPUPixel 人脸检测：$n 张（输入 ${fw}x$fh）")
+                        }
                         if (lm != null && lm.isNotEmpty()) {
                             gpDetectMissStreak = 0
-                            gpCachedLandmarks = lm
+                            // v2.6.23：缓存的是**语义锚点**（每脸 6 个点），不是 Mars 原始 111 点。
+                            // FaceReshapeFilter 的 shader 只认这 6 个解剖锚点，绕开了
+                            // 「GPUPixel 106 点索引表 vs Mars 111 点」的点序不匹配问题。
+                            gpCachedLandmarks = GpuPixelBeauty.anchorsFromLandmarks(lm)
                         } else {
                             gpDetectMissStreak++
                             // v2.0.186 防抖：连续 3 次拿不到脸才清空缓存。
@@ -5719,7 +5600,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 }
             }
 
-            faceExecutor.execute {
+            // v2.6.22（P0-1）：同检测侧 —— 提交失败回滚在途计数（此时计数已是 1 或 2）
+            submitSafely(
+                faceExecutor, "GPUPixel 图像处理",
+                rollback = { finishGpTask(rgbaData) },
+            ) {
                 try {
                     // v2.0.185：实测处理耗时供自适应降采样使用。
                     // v2.0.186：这里只剩 **GL 段**（检测已移到 gpDetectExecutor），
@@ -5744,7 +5629,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         val ok = if (inTex != 0) {
                             pipeline.processFrameFromTexture(
                                 inTex, pendingInputTexW, pendingInputTexH,
-                                beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                                beautyLevel, beautyWhitening, beautyFaceSlimming, beautyBigEyes,
                                 gpCachedLandmarks
                             )
                         } else {
@@ -5752,7 +5637,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                             // → 退回 CPU 上传路径，保证仍有结果产出
                             pipeline.processFrameTexture(
                                 rgbaData, fw, fh, stride,
-                                beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                                beautyLevel, beautyWhitening, beautyFaceSlimming, beautyBigEyes,
                                 gpCachedLandmarks
                             )
                         }
@@ -5763,7 +5648,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         // ---- raw-data 通道（回退）：CPU 回读字节 ----
                         val out = pipeline.processFrame(
                             rgbaData, fw, fh, stride,
-                            beautyGpSmooth, beautyGpWhite, beautyGpSlim, beautyGpEyeZoom,
+                            beautyLevel, beautyWhitening, beautyFaceSlimming, beautyBigEyes,
                             gpCachedLandmarks
                         )
                         if (out != null) {
@@ -5792,7 +5677,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // ===== MediaPipe（GLSL 引擎）路径：单线程，原逻辑 =====
         isDetectingFace.set(true)
-        faceExecutor.execute {
+        // v2.6.22（P0-1）：提交被拒时必须把标志与帧缓冲都还回去 ——
+        // 否则 isDetectingFace 恒 true，「忙」判据永真 → 检测永久停摆
+        submitSafely(
+            faceExecutor, "MediaPipe 人脸检测",
+            rollback = {
+                synchronized(faceFrameLock) { faceFramePool = rgbaData }
+                isDetectingFace.set(false)
+            },
+        ) {
             // v2.6.17：前置段（回读字节 → Bitmap）起点
             val facePrepStartNs = System.nanoTime()
             try {
@@ -5833,53 +5726,54 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     srcBmp.setPixels(argb, 0, fw, 0, 0, fw, fh)
                 }
 
-                // ===== v2.6.17：采样区已是检测尺寸 → 免缩放、免居中 =====
-                // GPU 预缩放已把回读尺寸降到 ≤ faceSampleSize；方形采样区（常见情形）直接
-                // 就是 256×256 → 跳过 eraseColor（每帧 256 KB 擦写）+ Canvas 缩放。
-                val scaledBmp: Bitmap
-                val lbX0: Float
-                val lbY0: Float
-                val lbW: Float
-                val lbH: Float
-                if (fw == faceSampleSize && fh == faceSampleSize) {
-                    scaledBmp = srcBmp
-                    lbX0 = 0f; lbY0 = 0f; lbW = 1f; lbH = 1f
-                } else {
-                    // Downscale the larger sampled region to the landmarker input size
-                    if (faceScaledBmp == null) {
-                        faceScaledBmp = Bitmap.createBitmap(faceSampleSize, faceSampleSize, Bitmap.Config.ARGB_8888)
-                    }
-                    val canvasBmp = faceScaledBmp!!
-                    // v2.4.38（美颜审查 #9）：**等比缩放 + 居中填充**（letterbox），不再把非方形采样区
-                    // 直接拉伸成 256×256 —— 后者会让 MediaPipe 看到宽高比失真的脸，在 16:9 / 4:3 或
-                    // 窄视口下检出率与五官定位精度下降。
-                    // v2.6.17：GLSL 路径的等比缩小已由 GPU 完成（长边已 = faceSampleSize），
-                    // 故此处 fitScale 通常为 1，只剩「居中填充黑边」；GPUPixel 关闭且采样区为方形时
-                    // 走上面的直通分支，压根不进来。
-                    val scaledSizeF = faceSampleSize.toFloat()
-                    val fitScale = minOf(scaledSizeF / fw, scaledSizeF / fh)
-                    val drawW = (fw * fitScale).toInt().coerceAtLeast(1)
-                    val drawH = (fh * fitScale).toInt().coerceAtLeast(1)
-                    val lbOffX = (faceSampleSize - drawW) / 2
-                    val lbOffY = (faceSampleSize - drawH) / 2
-                    // 黑边区域先擦除，否则复用位图会残留上一帧内容
-                    canvasBmp.eraseColor(android.graphics.Color.BLACK)
-                    android.graphics.Canvas(canvasBmp).drawBitmap(
+                // ===== v2.6.23 🔴 修复「美颜完全没效果」：送检前必须把图**上下翻正** =====
+                // `glReadPixels` 的行序是自下而上（GL 惯例），直接塞进 Bitmap 后整幅图是**倒立**的。
+                // 此前这条链路一直没翻 —— MediaPipe 的 BlazeFace 对 180° 倒置人脸检出率≈0，
+                // 于是每次采样都"未检出" → faceMissStreak 一路涨到 3 → uFaceCount/uFaceDetected=0
+                // → 瘦脸/大眼/妆容/口红恒为 0，只剩不依赖检测的磨皮与美白。
+                // 用户体感就是「没看出美颜效果」。实测（MuMu + 5 人同框测试视频）：送检图确认倒立。
+                //
+                // 翻转放在这唯一一次绘制里（canvas.scale(1, -1)），零额外内存、零额外拷贝。
+                // 代价：合并了原来的「方形直通」分支 —— 现在方形也要画一次，可忽略（512×512 一次 blit）。
+                if (faceScaledBmp == null) {
+                    faceScaledBmp = Bitmap.createBitmap(faceSampleSize, faceSampleSize, Bitmap.Config.ARGB_8888)
+                }
+                val canvasBmp = faceScaledBmp!!
+                val scaledSizeF = faceSampleSize.toFloat()
+                val fitScale = minOf(scaledSizeF / fw, scaledSizeF / fh)
+                val drawW = (fw * fitScale).toInt().coerceAtLeast(1)
+                val drawH = (fh * fitScale).toInt().coerceAtLeast(1)
+                val lbOffX = (faceSampleSize - drawW) / 2
+                val lbOffY = (faceSampleSize - drawH) / 2
+                // 黑边区域先擦除，否则复用位图会残留上一帧内容
+                canvasBmp.eraseColor(android.graphics.Color.BLACK)
+                run {
+                    val canvas = android.graphics.Canvas(canvasBmp)
+                    canvas.save()
+                    // 垂直翻转：把目标矩形的原点移到内容区**底边**，再按 y 轴 -1 缩放
+                    canvas.translate(0f, (lbOffY + drawH).toFloat())
+                    canvas.scale(1f, -1f)
+                    canvas.drawBitmap(
                         srcBmp,
                         android.graphics.Rect(0, 0, fw, fh),
-                        android.graphics.Rect(lbOffX, lbOffY, lbOffX + drawW, lbOffY + drawH),
+                        android.graphics.Rect(lbOffX, 0, lbOffX + drawW, drawH),
                         null
                     )
-                    scaledBmp = canvasBmp
-                    // MediaPipe 返回的是「含黑边的整张 256×256 画布」归一化坐标，须先换算回内容子矩形
-                    // 再套 mapCrop*ToViewport 得到视口 UV。lbW/lbH 为内容在画布中的归一化占比。
-                    lbX0 = lbOffX / scaledSizeF
-                    lbY0 = lbOffY / scaledSizeF
-                    lbW = drawW / scaledSizeF
-                    lbH = drawH / scaledSizeF
+                    canvas.restore()
                 }
+                val scaledBmp: Bitmap = canvasBmp
+                // MediaPipe 返回的是「整张 512×512 画布（含黑边）」的归一化坐标，
+                // 须先换算回内容子矩形再套 mapCrop*ToViewport 得到视口 UV。
+                val lbX0: Float = lbOffX / scaledSizeF
+                val lbY0: Float = lbOffY / scaledSizeF
+                val lbW: Float = drawW / scaledSizeF
+                val lbH: Float = drawH / scaledSizeF
                 val mpX: (Float) -> Float = { px -> mapCropXToViewport((px - lbX0) / lbW) }
-                val mpY: (Float) -> Float = { py -> mapCropYToViewport((py - lbY0) / lbH) }
+                // ⚠️ 图已翻正 → MediaPipe 给的 y 是「自上而下」；而 mapCropYToViewport 的公式
+                // 是按「倒立图（自下而上）」推导的（它内部自带一次 0.5-(cy-0.5)*scaleY 的翻转）。
+                // 这里先换回内容内、自下而上的等价坐标，公式本身不动 —— 改动面最小，也保证
+                // 与历史映射行为完全一致。
+                val mpY: (Float) -> Float = { py -> mapCropYToViewport(1f - (py - lbY0) / lbH) }
                 val mpLenX: (Float) -> Float = { len -> mapCropLenToViewport(len / lbW) }
 
                 // Track face landmarks using Google MediaPipe (with legacy fallback)
@@ -5887,43 +5781,87 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 val faceDetectStartNs = System.nanoTime()
                 faceProfPrepNanos += faceDetectStartNs - facePrepStartNs
                 if (manager != null) {
-                    val result = manager.detectFace(scaledBmp)
+                    // v2.6.22（多脸）：一次拿回最多 3 张脸（按两眼距离降序，第 0 张是主脸）
+                    val faces = manager.detectFaces(scaledBmp)
                     faceProfDetectNanos += System.nanoTime() - faceDetectStartNs
-                    if (result.detected) {
+                    if (faces.isNotEmpty()) {
                         // v2.0.156：MediaPipe 给的是「采样裁剪图」空间的坐标，必须换算成视口 UV
-                        // 再喂给 shader —— 否则人脸一偏离画面中心，妆容与变形就整体错位
-                        // （采样区只覆盖视口中央一小块，不换算相当于把局部坐标当成全屏坐标用）。
-                        val cxUv = mpX(result.centerX)
-                        val cyUv = mpY(result.centerY)
-                        val eyeDistUv = mpLenX(result.eyeDistance)
-                        // Smooth tracking updates using low-pass lerp filter to eliminate jitter
-                        // v2.0.173：检测成功 → 立即置 1 并清零失败计数（见下方失败分支的防抖说明）
+                        // 再喂给 shader —— 否则人脸一偏离画面中心，妆容与变形就整体错位。
                         faceMissStreak = 0
                         faceDetectedUniform = 1
-                        faceCenterXUniform = faceCenterXUniform * 0.75f + cxUv * 0.25f
-                        faceCenterYUniform = faceCenterYUniform * 0.75f + cyUv * 0.25f
-                        eyeDistanceUniform = eyeDistanceUniform * 0.75f + eyeDistUv * 0.25f
 
-                        // Sync the precise MediaPipe 468-point features when available
-                        if (result.hasDetailedLandmarks) {
+                        val n = minOf(faces.size, MediaPipeFaceManager.MAX_FACES)
+                        faceCountUniform = n
+                        // v2.6.23：按检出脸数动态降频 —— landmark 回归是逐脸做的，
+                        // 3 张脸的成本约是 1 张的 2 倍多（实测 100ms+ vs 40~60ms）。
+                        faceSampleInterval = when {
+                            n >= 3 -> 12
+                            n == 2 -> 10
+                            else -> 8
+                        }
+                        // v2.6.22（多脸）：低频诊断 —— 每 60 次成功检测打一行，
+                        // 用来确认「到底检出了几张脸」（多脸效果的唯一可观测指标）。
+                        faceDiagCount++
+                        if (faceDiagCount >= 60) {
+                            faceDiagCount = 0
+                            Log.i(
+                                TAG,
+                                "多脸检测：$n 张（主脸 eyeDist=${"%.4f".format(eyeDistancesArr[0])}，" +
+                                    "精细点位=${if (faces[0].hasDetailedLandmarks) "有" else "无"}）"
+                            )
+                        }
+                        for (i in 0 until n) {
+                            val f = faces[i]
+                            val o = i * 2
+                            // 每张脸各自做低通（0.75/0.25），抑制检测抖动。
+                            // ⚠️ 跨帧是按**索引**对应的 —— 返回顺序已按面积降序稳定化，
+                            //   但两人大小接近时仍可能交换，表现为两张脸的妆容短暂互换位置。
+                            //   这是「无 ID 跟踪」的固有局限（换检测器也一样），实测可接受。
+                            faceCentersXY[o] = faceCentersXY[o] * 0.75f + mpX(f.centerX) * 0.25f
+                            faceCentersXY[o + 1] = faceCentersXY[o + 1] * 0.75f + mpY(f.centerY) * 0.25f
+                            eyeDistancesArr[i] = eyeDistancesArr[i] * 0.75f + mpLenX(f.eyeDistance) * 0.25f
+
+                            if (f.hasDetailedLandmarks) {
+                                hasDetailedsArr[i] = 1
+                                eyeLeftsXY[o] = eyeLeftsXY[o] * 0.75f + mpX(f.eyeLeftX) * 0.25f
+                                eyeLeftsXY[o + 1] = eyeLeftsXY[o + 1] * 0.75f + mpY(f.eyeLeftY) * 0.25f
+                                eyeRightsXY[o] = eyeRightsXY[o] * 0.75f + mpX(f.eyeRightX) * 0.25f
+                                eyeRightsXY[o + 1] = eyeRightsXY[o + 1] * 0.75f + mpY(f.eyeRightY) * 0.25f
+                                mouthPossXY[o] = mouthPossXY[o] * 0.75f + mpX(f.mouthX) * 0.25f
+                                mouthPossXY[o + 1] = mouthPossXY[o + 1] * 0.75f + mpY(f.mouthY) * 0.25f
+                                chinsXY[o] = chinsXY[o] * 0.75f + mpX(f.chinX) * 0.25f
+                                chinsXY[o + 1] = chinsXY[o + 1] * 0.75f + mpY(f.chinY) * 0.25f
+                                mouthHalfWsArr[i] = mouthHalfWsArr[i] * 0.75f +
+                                    mpLenX(f.mouthHalfWidth) * 0.25f
+                                mouthHalfHsArr[i] = mouthHalfHsArr[i] * 0.75f +
+                                    ((f.mouthHalfHeight / lbH) * faceCropScaleY) * 0.25f
+                                // v2.6.23：图已翻正 → 嘴角连线的 y 方向与「倒立图」相反，
+                                // 角度取负还原（shader 里用的是 -uMouthAngles[fi]，符号错会让口红椭圆拧反）
+                                mouthAnglesArr[i] = -f.mouthAngle
+                            } else {
+                                hasDetailedsArr[i] = 0
+                            }
+                        }
+
+                        // ---- 主脸镜像：GPUPixel 的 ROI / 日志仍按「一张脸」工作 ----
+                        val main = faces[0]
+                        faceCenterXUniform = faceCentersXY[0]
+                        faceCenterYUniform = faceCentersXY[1]
+                        eyeDistanceUniform = eyeDistancesArr[0]
+                        if (main.hasDetailedLandmarks) {
                             hasDetailedLandmarks = 1
-                            eyeLeftXUniform = eyeLeftXUniform * 0.75f + mpX(result.eyeLeftX) * 0.25f
-                            eyeLeftYUniform = eyeLeftYUniform * 0.75f + mpY(result.eyeLeftY) * 0.25f
-                            eyeRightXUniform = eyeRightXUniform * 0.75f + mpX(result.eyeRightX) * 0.25f
-                            eyeRightYUniform = eyeRightYUniform * 0.75f + mpY(result.eyeRightY) * 0.25f
-                            mouthXUniform = mouthXUniform * 0.75f + mpX(result.mouthX) * 0.25f
-                            mouthYUniform = mouthYUniform * 0.75f + mpY(result.mouthY) * 0.25f
-                            chinXUniform = chinXUniform * 0.75f + mpX(result.chinX) * 0.25f
-                            chinYUniform = chinYUniform * 0.75f + mpY(result.chinY) * 0.25f
-                            // v2.0.159：嘴形（宽按水平比例、高按垂直比例缩放；角度不平滑，
-                            // 避免在 ±π 附近来回抖动）
-                            mouthHalfWidthUniform = mouthHalfWidthUniform * 0.75f +
-                                mpLenX(result.mouthHalfWidth) * 0.25f
-                            mouthHalfHeightUniform = mouthHalfHeightUniform * 0.75f +
-                                ((result.mouthHalfHeight / lbH) * faceCropScaleY) * 0.25f
-                            mouthAngleUniform = result.mouthAngle
+                            eyeLeftXUniform = eyeLeftsXY[0]
+                            eyeLeftYUniform = eyeLeftsXY[1]
+                            eyeRightXUniform = eyeRightsXY[0]
+                            eyeRightYUniform = eyeRightsXY[1]
+                            mouthXUniform = mouthPossXY[0]
+                            mouthYUniform = mouthPossXY[1]
+                            chinXUniform = chinsXY[0]
+                            chinYUniform = chinsXY[1]
+                            mouthHalfWidthUniform = mouthHalfWsArr[0]
+                            mouthHalfHeightUniform = mouthHalfHsArr[0]
+                            mouthAngleUniform = mouthAnglesArr[0]
                         } else {
-                            // Fallback tracker: derive rough feature positions from center/eye distance
                             hasDetailedLandmarks = 0
                         }
                     } else {
@@ -5932,8 +5870,23 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                         // 连续 3 次失败（≈半秒）才判定真正丢失；期间保持最后位置不漂移。
                         faceMissStreak++
                         if (faceMissStreak >= 3) {
+                            // v2.6.22（整帧采样改造的配套诊断）：只在"刚判定丢失"那一次打一行，
+                            // 便于真机上区分「画面里真的没有人脸」与「整帧缩放后脸太小、检出率不够」
+                            // —— 后者把 faceSampleSize 调大（512 → 640/768）即可，不必回退中央块裁剪。
+                            if (faceMissStreak == 3) {
+                                Log.w(
+                                    TAG,
+                                    "人脸检测连续 3 次未检出：输入 ${fw}x$fh（整帧等比缩放，长边上限 $faceSampleSize）；" +
+                                        "若画面确实有人脸，考虑调大 faceSampleSize"
+                                )
+                            }
                             faceDetectedUniform = 0
                             hasDetailedLandmarks = 0
+                            // v2.6.22（多脸）：张数归零 —— shader 的逐脸循环第一轮就 break，
+                            // 否则会拿「最后一张脸的残留坐标」继续画（表现为妆容停在原地）。
+                            faceCountUniform = 0
+                            // v2.6.23：丢失后回到 8 帧（尽快重新抓到脸），不要停在多脸时的长间隔
+                            faceSampleInterval = 8
                             // Decay smoothly back to default screen center coordinates
                             faceCenterXUniform = faceCenterXUniform * 0.92f + 0.50f * 0.08f
                             faceCenterYUniform = faceCenterYUniform * 0.92f + 0.45f * 0.08f
@@ -5964,6 +5917,43 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 synchronized(faceFrameLock) { faceFramePool = rgbaData }
                 isDetectingFace.set(false)
             }
+        }
+    }
+
+    /**
+     * v2.6.22（美颜审查 P0-1）：**带保护的线程池提交**。
+     *
+     * 之前所有提交点都是裸 `executor.execute {}`：
+     *  - [release] 里 `shutdownNow` 之后若还有提交 → `RejectedExecutionException`
+     *    冒到 GL 线程的 `onDrawFrame`；
+     *  - 更隐蔽的是**计数泄漏** —— 调用方在提交**前**已经把 `gpInFlight` 加了 1
+     *    （MediaPipe 路径是 `isDetectingFace.set(true)`），任务没提交成功就永远回不来，
+     *    于是「忙」判据恒真，**本渲染器生命周期内人脸检测彻底停摆**。
+     *
+     * @param rollback 提交失败时的回滚动作（把提交前预支的计数/标志还回去、归还帧缓冲）
+     * @return 是否真的提交成功
+     */
+    private fun submitSafely(
+        executor: java.util.concurrent.ExecutorService,
+        tag: String,
+        rollback: () -> Unit,
+        task: () -> Unit,
+    ): Boolean {
+        if (executorsClosed) {
+            runCatching { rollback() }
+            return false
+        }
+        return try {
+            executor.execute { task() }
+            true
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            Log.w(TAG, "$tag 提交被拒绝（线程池已关闭），回滚计数", e)
+            runCatching { rollback() }
+            false
+        } catch (e: Throwable) {
+            Log.e(TAG, "$tag 提交失败，回滚计数", e)
+            runCatching { rollback() }
+            false
         }
     }
 

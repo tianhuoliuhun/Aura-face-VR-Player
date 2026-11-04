@@ -191,7 +191,7 @@ object VrGamepadBus {
  *
  * ## 接入时要做什么（备忘）
  * 1. 把 SDK 的 `QiyuNativeSDK/`（头文件 + `.so`）放进 `app/src/main/cpp/` 与 `jniLibs/`；
- * 2. 参照现有华为那套（`com.example.vr.huawei.HuaweiVrActivity`）建一个**独立 Activity**，
+ * 2. 建一个**独立 Activity**（参考历史实现：曾有的 VR 眼镜专用 Activity），
  *    由它承载 SDK 的渲染循环（与当前 GLSurfaceView 方案并行存在，互不影响）；
  * 3. 设备识别已在 [VrGamepad.isQiyuDevice] 就绪，可据此在设置页/入口处提示；
  * 4. 手柄姿态若从 SDK 获取，转换后**投递到 [VrGamepadBus]** 即可复用现有全部上层逻辑。

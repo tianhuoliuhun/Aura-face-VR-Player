@@ -130,28 +130,6 @@
     <string name="audio_normal">Normal</string>
     <string name="audio_swapped">Swapped</string>
 
-    <!-- ===== Huawei VR Glass (VR Engine) ===== -->
-    <string name="huawei_vr_enable">Huawei VR Glass (VR Engine)</string>
-    <string name="huawei_vr_enable_desc">Output through the Huawei VR runtime; connect the glasses and enter from the VR entry</string>
-    <string name="huawei_vr_render_scale">Huawei VR render resolution</string>
-    <!-- formatted="false"：文案里的 `100%` 纯属展示 —— 代码侧是
-         `stringResource(R.string.huawei_vr_render_scale_desc)`（**不带参数**），
-         Android 不会对它做 String.format。但 lint 会把 "100% for" 里的 `% f`
-         当成格式符，报 StringFormatInvalid(error) + StringFormatCount warning
-         （英文 1 个格式符 vs 其他语言 0 个）。
-         显式声明"本串不参与格式化"：既消除误报，也让语义对自己的意图更明确。
-         ⚠️ 注意**不能**靠把 `%` 写成 `%%` 来绕过 —— 无参调用时 `%%` 会**原样显示**成两个百分号。 -->
-    <string name="huawei_vr_render_scale_desc" formatted="false">Ratio against the glasses\' recommended resolution (1552×1552 per eye). Pick 100% for best quality, lower it step by step if the device overheats or drops frames</string>
-    <string name="huawei_vr_enter">Enter Huawei VR</string>
-    <string name="huawei_vr_enter_desc">Tap after plugging in the VR Glass; with the glasses connected it skips the VR launcher and starts playback directly</string>
-    <string name="huawei_vr_runtime_missing">Huawei VR runtime not found, falling back to built-in split-screen VR</string>
-    <string name="huawei_vr_enter_failed">Could not start Huawei VR, fell back to built-in split-screen VR</string>
-    <string name="huawei_vr_ready">Huawei VR runtime detected</string>
-    <string name="huawei_vr_runtime_absent">No Huawei VR runtime on this device. The switch is only recorded; playback still uses built-in split-screen VR</string>
-    <string name="huawei_vr_handover">Huawei VR mode: field of view, IPD, head tracking and split-screen are handled by the runtime, so the settings below no longer apply</string>
-    <string name="huawei_vr_prefer_6dof">Prefer 6DoF controller mode</string>
-    <string name="huawei_vr_prefer_6dof_desc">Falls back to 3DoF automatically when no tracking kit is paired; no impact on normal use</string>
-    <string name="huawei_vr_note">In Huawei VR mode the image is presented by the glasses and no longer shown on the phone screen. Prepare the floating ball and playback controls before entering. Pressing Home exits and ends playback.</string>
 
     <!-- ===== batch ===== -->
     <string name="dome_half_crop">180° dome source crop</string>
@@ -323,7 +301,6 @@
     <string name="action_view">View</string>
     <string name="track_dialog_title">Audio &amp; subtitle tracks</string>
     <string name="track_none">This media has no switchable audio/subtitle tracks</string>
-    <string name="huawei_vr_initializing">Initializing Huawei VR…</string>
     <string name="toast_switched_codec">Switched to: %1$s</string>
     <string name="subtitle_loaded_toast">Subtitles generated and loaded: %1$s (%2$d lines)</string>
     <string name="track_subtitle_item">Subtitle track %1$d</string>
@@ -417,6 +394,7 @@
     <string name="beauty_compare_original">Beauty Switch</string>
     <string name="beauty_compare_desc">Beauty applies to the entire playback area · No processing when off · State is remembered</string>
     <string name="beauty_engine_title">Beauty Engine</string>
+    <string name="beauty_engine_gp_limited">The GPUPixel engine supports smoothing / whitening / face slimming / big eyes. Switch to the GLSL engine for makeup and other fine effects.</string>
     <string name="beauty_engine_glsl">GLSL (built-in)</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
     <string name="beauty_engine_unavailable">GPUPixel failed to initialize; staying on the GLSL engine</string>
@@ -584,6 +562,7 @@
     <string name="decoder_coming_soon">Coming soon</string>
     <string name="auto_opt">Auto</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
+    <string name="engine_index_translate">Index-Translate (keyless)</string>
     <string name="engine_bing">Bing Translate (unofficial)</string>
     <string name="engine_deepseek">DeepSeek API</string>
     <string name="engine_qwen">Qwen</string>
@@ -595,7 +574,7 @@
     <string name="engine_libretranslate">LibreTranslate</string>
     <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google Translate (unofficial)</string>
-    <string name="engine_local_llm">On-device AI (offline)</string>
+    <string name="engine_local_llm">On-device AI (offline · WIP, do not use)</string>
     <string name="engine_pollinations">Pollinations (keyless)</string>
     <string name="translate_mymemory_cooldown">MyMemory free quota reached; will retry in about %1$d min</string>
     <string name="translate_pollinations_cooldown">Pollinations free tier is rate-limited; retrying in %1$d s</string>
@@ -995,6 +974,8 @@
     <string name="danmu_test_hint_no_content">Server responded but returned no usable content; this model may not support image input</string>
     <string name="danmu_test_hint_generic">Connection failed</string>
     <string name="danmu_section_runtime">Runtime</string>
+    <string name="local_ai_wip_tag">WIP · Do not use</string>
+    <string name="local_ai_wip_warning">⚠️ Local AI is not finished — please do not use it: model download and inference may fail, or be too slow to be usable (CPU inference can take tens of seconds per item). Use cloud translation / cloud danmaku for now.</string>
     <string name="local_model_title">Local model</string>
     <string name="local_model_desc">Once downloaded, enables on-device AI translation and danmaku generation — fully offline</string>
     <string name="local_model_download">Download</string>

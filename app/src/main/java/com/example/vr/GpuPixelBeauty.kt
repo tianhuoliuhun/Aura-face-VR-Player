@@ -41,6 +41,73 @@ const val BEAUTY_ENGINE_GPUPIXEL = 1
 object GpuPixelBeauty {
     private const val TAG = "GpuPixelBeauty"
 
+    /**
+     * v2.6.22（多脸）：Mars-Face 返回数组的**每脸 float 数**。
+     *
+     * 来源：`FaceDetector::kKeyPointsPerFace`（111）× 2（x/y）= 222。
+     * ⚠️ 必须与 `third_party/gpupixel/include/gpupixel/face_detector/face_detector.h`
+     * 里的 `kFloatsPerFace` 保持一致 —— 改一处必须改两处，否则整段数组错位。
+     */
+    const val FLOATS_PER_FACE = 222
+
+    /** 同时美颜的最大人脸数（与 C++ 侧 kMaxFaces / shader 数组容量一致） */
+    const val MAX_FACES = 3
+
+    /** 一张脸的语义锚点 float 数（6 个点 × x/y），⚠️ 与 C++ `FaceReshapeFilter` 的 12 保持一致 */
+    const val FLOATS_PER_ANCHOR_FACE = 12
+
+    /**
+     * v2.6.23：把 Mars 111 点原始点列**翻译成语义锚点**，供 `FaceReshapeFilter` 形变使用。
+     *
+     * 为什么不直接传点列：GPUPixel 的 shader 原本按「106 点模型」的写死索引取点
+     * （thinFace 用 3/29/44/45/46/49…，bigEye 用 72/74/75/77），而 Mars 是 111 点、
+     * 点序语义完全不同（实测 0~32 轮廓、35~50 眉眼、80~95 鼻嘴）。硬套会把脸拽成外星人。
+     *
+     * 这里只从**轮廓 0..32** 取三个稳定锚点（不依赖单个编号，抗点序微调）：
+     *   - x 最小 / 最大 → 左右脸颊最外
+     *   - y 最小（注意坐标已 `1-y` 取反，y 小 = 画面下方）→ 下巴
+     * 眼睛位置按脸宽比例估算（0、30 号轮廓点大致就在眼线高度），对「轻微大眼」足够；
+     * 瘦脸只依赖轮廓，完全可靠。
+     *
+     * @param points 多脸扁平点列（每脸 222 float），坐标**已换算到 filter 纹理的 y 方向**
+     * @return 每脸 12 float 的锚点数组，长度 = 脸数 × 12；无脸返回空数组
+     */
+    fun anchorsFromLandmarks(points: FloatArray): FloatArray {
+        val faces = minOf(points.size / FLOATS_PER_FACE, MAX_FACES)
+        if (faces <= 0) return FloatArray(0)
+        val out = FloatArray(faces * FLOATS_PER_ANCHOR_FACE)
+        for (f in 0 until faces) {
+            val b = f * FLOATS_PER_FACE
+            var minX = Float.MAX_VALUE
+            var maxX = -Float.MAX_VALUE
+            var chinY = Float.MAX_VALUE
+            var leftX = 0f; var leftY = 0f
+            var rightX = 0f; var rightY = 0f
+            var chinX = 0f
+            for (i in 0..32) {
+                val x = points[b + i * 2]
+                val y = points[b + i * 2 + 1]
+                if (x < minX) { minX = x; leftX = x; leftY = y }
+                if (x > maxX) { maxX = x; rightX = x; rightY = y }
+                if (y < chinY) { chinY = y; chinX = x }
+            }
+            val eyeY = (leftY + rightY) * 0.5f
+            val faceW = (rightX - leftX).coerceAtLeast(0.001f)
+            val cx = (leftX + rightX) * 0.5f
+            val cy = (eyeY + chinY) * 0.5f
+            val eyeDist = faceW * 0.45f
+            val o = f * FLOATS_PER_ANCHOR_FACE
+            out[o] = leftX; out[o + 1] = leftY                       // 左脸颊
+            out[o + 2] = rightX; out[o + 3] = rightY                 // 右脸颊
+            out[o + 4] = chinX; out[o + 5] = chinY                   // 下巴
+            out[o + 6] = cx - eyeDist * 0.5f; out[o + 7] = eyeY      // 左眼
+            out[o + 8] = cx + eyeDist * 0.5f; out[o + 9] = eyeY      // 右眼
+            out[o + 10] = cx; out[o + 11] = cy                       // 脸中心
+        }
+        return out
+    }
+
+
     /** init 成功时为 true；失败由上层提示并保持 GLSL（v2.0.163 起不再做 ABI 门槛） */
     @Volatile
     var available: Boolean = false
@@ -356,7 +423,11 @@ object GpuPixelBeauty {
             if (hasFace) {
                 val lm = landmarks!!
                 if (lm !== lastLandmarks) {
-                    r?.SetProperty("face_landmark", lm)
+                    // v2.6.23：改发**语义锚点**（每脸 12 float = 6 个点）。
+                    // 旧 `face_landmark_multi` 传的是 Mars 111 点原始点列，而 shader 原本用的是
+                    // GPUPixel 106 点模型的写死索引表，点序不匹配会把脸拉成外星人。
+                    // 现在 shader 只认 6 个解剖锚点，点序翻译在 [anchorsFromLandmarks] 完成。
+                    r?.SetProperty("face_anchors_multi", lm)
                     lastLandmarks = lm
                 }
                 if (slim != lastSlim) {
@@ -469,19 +540,28 @@ object GpuPixelBeauty {
          * 返回值每次都是**新数组**（平滑结果被拷贝一份）—— 因为调用方（GL 处理线程）
          * 会在下一帧检测期间继续读它，必须与平滑内部缓冲解耦。
          *
-         * @return 平滑后的 landmarks（归一化，2 float/点）；未检出返回 null
+         * @return 平滑后的 landmarks —— **多脸扁平数组**：每张脸 [FLOATS_PER_FACE]=222 个 float
+         *         （111 点 × x/y，归一化到 0~1），最多 [MAX_FACES] 张，按人脸面积降序；
+         *         未检出返回 null。v2.6.22 前这里是单脸（222 个 float），调用方按「每脸 222」
+         *         分组即可同时兼容。
          */
         fun detect(rgba: ByteArray, w: Int, h: Int, stride: Int): FloatArray? {
             if (!GpuPixelBeauty.available) return null
             return try {
                 ensure()
+                // 🔴 v2.6.23：送 Mars 之前必须把图**上下翻正**。
+                //   传入的 rgba 来自 `glReadPixels`，行序自下而上（GL 惯例）→ Mars 按
+                //   「第一行 = 图顶」解释，看到的就是一张**倒立**的人脸。实测（MuMu，5 人同框片源）
+                //   倒置时**每次都返回 0 张脸** → 瘦脸/大眼恒为 0（磨皮/美白不依赖检测，照常生效），
+                //   用户体感就是「美颜没效果」。GLSL 引擎侧同样问题（那边翻转在 Bitmap 上做）。
+                val flipped = flipVertically(rgba, h, stride)
                 // 🔴 v2.4.33：**取 detector 与使用必须在同一把 [detectLock] 内**。
                 //   原先 `val det = detector ?: …` 在锁**外**：release() 可能恰好在取到
                 //   局部变量之后、进入锁之前把它 destroy() → native use-after-free → SIGSEGV。
                 val raw = synchronized(detectLock) {
                     val det = detector ?: FaceDetector.Create().also { detector = it }
                     det.detect(
-                        rgba, w, h, stride,
+                        flipped, w, h, stride,
                         FaceDetector.GPUPIXEL_MODE_FMT_VIDEO,
                         FaceDetector.GPUPIXEL_FRAME_TYPE_RGBA
                     )
@@ -491,12 +571,50 @@ object GpuPixelBeauty {
                     smInit = false
                     null
                 } else {
-                    smoothLandmarks(raw)
+                    val faces = normalizeFaces(raw)
+                    // 🔴 v2.6.23：**y 轴取反**。Mars 是在「已翻正」的图上给坐标（y=0 是图顶），
+                    //   而下游 `FaceReshapeFilter` 采样的是**未翻转**的原始纹理 —— 在它眼里
+                    //   纹理 v=0 对应画面**底**。两套 y 方向相反，不取反的话形变区域会上下镜像
+                    //   （脸在画面上半部、瘦脸却作用在下半部）。
+                    var i = 1
+                    while (i < faces.size) {
+                        faces[i] = 1f - faces[i]
+                        i += 2
+                    }
+                    smoothLandmarks(faces)
                 }
             } catch (e: Throwable) {
                 Log.e(TAG, "GPUPixel detect failed", e)
                 null
             }
+        }
+
+        /** 复用缓冲（单线程 gpDetectExecutor 上使用，无需加锁） */
+        private var flipBuf: ByteArray? = null
+
+        /** 按行倒序拷贝 —— 上下翻转一块 RGBA 帧（每行 [stride] 字节，共 [h] 行） */
+        private fun flipVertically(src: ByteArray, h: Int, stride: Int): ByteArray {
+            val need = h * stride
+            val buf = flipBuf?.takeIf { it.size >= need } ?: ByteArray(need).also { flipBuf = it }
+            for (y in 0 until h) {
+                System.arraycopy(src, y * stride, buf, (h - 1 - y) * stride, stride)
+            }
+            return buf
+        }
+
+        /**
+         * v2.6.22（多脸）：把 native 返回的扁平数组规整成「整张脸对齐 + 最多 [MAX_FACES] 张」。
+         *
+         * 为什么必须做：下游（C++ filter / shader）按 `FLOATS_PER_FACE` 定长分组。
+         * 若点数不足一张脸（历史版本 / 模型变更 / 尾部残包），多出来的零头会让
+         * **所有**后续脸整体错位 → 形变把画面扭成麻花。宁可丢掉零头，也不能错位。
+         */
+        private fun normalizeFaces(raw: FloatArray): FloatArray {
+            val whole = raw.size / FLOATS_PER_FACE
+            if (whole <= 0) return FloatArray(0)
+            val use = minOf(whole, MAX_FACES)
+            val keep = use * FLOATS_PER_FACE
+            return if (keep == raw.size) raw else raw.copyOf(keep)
         }
 
         /** alpha-beta 滤波：pred = pos + vel → 用测量值校正，同时更新速度估计 */
@@ -540,7 +658,7 @@ object GpuPixelBeauty {
          * | 美白 | `whiteness` | `BeautyFaceFilter::SetWhite` |
          * | 瘦脸 | `thin_face` | `FaceReshapeFilter::SetFaceSlimLevel` |
          * | 大眼 | `big_eye` | `FaceReshapeFilter::SetEyeZoomLevel` |
-         * | 关键点 | `face_landmark` | `FaceReshapeFilter::SetFaceLandmarks` |
+         * | 关键点锚点 | `face_anchors_multi` | `FaceReshapeFilter::SetFaceAnchorsMulti`（v2.6.23 语义锚点） |
          *
          * 取值范围（官方文档）：磨皮 / 美白 / 瘦脸 / 大眼 均 0~1（0 = 不生效）。
          * 注：`BeautyFaceFilter` 未注册 sharpen / radius，故不提供锐化。

@@ -21,6 +21,13 @@ class MediaPipeFaceManager(private val context: Context) {
     companion object {
         private const val TAG = "MediaPipeFaceManager"
         private const val MODEL_PATH = "face_landmarker.task"
+
+        /**
+         * v2.6.22（多脸）：同时美颜的最大人脸数。
+         * ⚠️ 必须与 shader 里 `uFaceCenters[3]` 等数组容量、以及 GPUPixel 侧
+         * （`FaceDetector::kMaxFaces` / `GpuPixelBeauty.MAX_FACES`）保持一致。
+         */
+        const val MAX_FACES = 3
     }
 
     private var faceLandmarker: FaceLandmarker? = null
@@ -80,10 +87,14 @@ class MediaPipeFaceManager(private val context: Context) {
      * Detects face landmarks using Google MediaPipe (streaming VIDEO mode).
      * Returns: FaceResult(detected, faceCenter, eyeDistance, eyeLeft, eyeRight, mouth, chin)
      * All coordinates are normalized to [0..1] relative to the input bitmap.
+     *
+     * v2.6.22：**多脸** —— 返回最多 [MAX_FACES] 张脸，按「两眼距离」从大到小（≈ 离镜头远近）排序。
+     * 第一张是主脸（[detectFace] 的兼容语义）。兜底 FaceDetector 路径同样返回多脸，
+     * 但只有中心/眼距两项（没有精细点位）。
      */
-    fun detectFace(bitmap: Bitmap): FaceResult {
+    fun detectFaces(bitmap: Bitmap): List<FaceResult> {
         if (!isInitialized || faceLandmarker == null) {
-            return fallbackDetect(bitmap)
+            return fallbackDetectFaces(bitmap)
         }
 
         try {
@@ -91,107 +102,114 @@ class MediaPipeFaceManager(private val context: Context) {
             // Timestamp must be monotonically increasing for VIDEO mode tracking.
             lastTimestampMs = System.currentTimeMillis().coerceAtLeast(lastTimestampMs + 1)
             val result: FaceLandmarkerResult =
-                faceLandmarker?.detectForVideo(mpImage, lastTimestampMs) ?: return fallbackDetect(bitmap)
+                faceLandmarker?.detectForVideo(mpImage, lastTimestampMs) ?: return fallbackDetectFaces(bitmap)
 
             val landmarksList = result.faceLandmarks()
             if (!landmarksList.isNullOrEmpty()) {
-                // v2.0.164：多人脸 —— 上面 setNumFaces(3)，这里从最多 3 张脸里选**尺度最大**的一张
-                // 作为「主脸」交给 GLSL 管线（两眼距离最长者 ≈ 最近/最大的脸）。
-                // ⚠️ GLSL 的面部效果只有一组锚点 uniform，真正的多脸渲染需把 uniform 改成
-                // 数组 + shader 内循环，属结构性改造，另行排期；GPUPixel 引擎的 landmarks 是
-                // **全量透传**，多脸由库内部处理，不受此限制。
-                val candidates = landmarksList.filter { it.size > 454 }
-                val landmarks = candidates.maxByOrNull { lmk ->
-                    val lx = (lmk[33].x() + lmk[133].x()) / 2f
-                    val ly = (lmk[33].y() + lmk[133].y()) / 2f
-                    val rx = (lmk[263].x() + lmk[362].x()) / 2f
-                    val ry = (lmk[263].y() + lmk[362].y()) / 2f
-                    Math.hypot((rx - lx).toDouble(), (ry - ly).toDouble())
-                } ?: return fallbackDetect(bitmap)
-
-                if (landmarks.size > 454) {
-                    // Eye corners
-                    val leftEyeOuter = landmarks[33]
-                    val leftEyeInner = landmarks[133]
-                    val rightEyeOuter = landmarks[263]
-                    val rightEyeInner = landmarks[362]
-                    // Nose / cheeks / chin
-                    val noseTip = landmarks[4]
-                    val leftCheek = landmarks[234]
-                    val rightCheek = landmarks[454]
-                    val chin = landmarks[152]
-                    // Mouth
-                    val mouthLeft = landmarks[61]
-                    val mouthRight = landmarks[291]
-                    val mouthTop = landmarks[13]
-                    val mouthBottom = landmarks[14]
-
-                    val leftEyeX = (leftEyeOuter.x() + leftEyeInner.x()) / 2f
-                    val leftEyeY = (leftEyeOuter.y() + leftEyeInner.y()) / 2f
-                    val rightEyeX = (rightEyeOuter.x() + rightEyeInner.x()) / 2f
-                    val rightEyeY = (rightEyeOuter.y() + rightEyeInner.y()) / 2f
-
-                    val eyeDistance = Math.hypot(
-                        (rightEyeX - leftEyeX).toDouble(),
-                        (rightEyeY - leftEyeY).toDouble()
-                    ).toFloat()
-
-                    // Mouth center (average of the 4 mouth corners/edges)
-                    val mouthX = (mouthLeft.x() + mouthRight.x() + mouthTop.x() + mouthBottom.x()) / 4f
-                    val mouthY = (mouthLeft.y() + mouthRight.y() + mouthTop.y() + mouthBottom.y()) / 4f
-
-                    // v2.0.159：嘴部形状 —— 半宽用嘴角左右缘（61 / 291），
-                    // 半高用**外**唇上下缘（0 = 上唇顶、17 = 下唇底；13/14 是内唇，偏小），
-                    // 倾角用嘴角连线。这些值让 shader 能画一个贴合唇形的椭圆而不是正圆。
-                    val mouthUpperLip = landmarks[0]
-                    val mouthLowerLip = landmarks[17]
-                    val mouthHalfWidth = Math.abs(mouthRight.x() - mouthLeft.x()) / 2f
-                    val mouthHalfHeight = Math.abs(mouthLowerLip.y() - mouthUpperLip.y()) / 2f
-                    val mouthAngle = Math.atan2(
-                        (mouthRight.y() - mouthLeft.y()).toDouble(),
-                        (mouthRight.x() - mouthLeft.x()).toDouble()
-                    ).toFloat()
-
-                    // Face center: horizontal center of the jaw/cheeks blended with the nose,
-                    // vertical center between the eye line and the chin.
-                    val centerX = ((leftCheek.x() + rightCheek.x()) / 2f + noseTip.x()) * 0.5f
-                    val centerY = (leftEyeY + rightEyeY) / 2f * 0.5f + (chin.y() + noseTip.y()) / 2f * 0.5f
-
-                    Log.v(TAG, "MediaPipe detected face! Center: ($centerX, $centerY), EyeDistance: $eyeDistance")
-                    return FaceResult(
-                        detected = true,
-                        centerX = centerX,
-                        centerY = centerY,
-                        eyeDistance = eyeDistance,
-                        eyeLeftX = leftEyeX,
-                        eyeLeftY = leftEyeY,
-                        eyeRightX = rightEyeX,
-                        eyeRightY = rightEyeY,
-                        mouthX = mouthX,
-                        mouthY = mouthY,
-                        chinX = chin.x(),
-                        chinY = chin.y(),
-                        mouthHalfWidth = mouthHalfWidth,
-                        mouthHalfHeight = mouthHalfHeight,
-                        mouthAngle = mouthAngle,
-                        faceCount = candidates.size,
-                        // v117 修复：此前漏传该字段（默认 false），于是 shader 里 uHasDetailed 恒为 0，
-                        // MediaPipe 算出的眼/嘴/下巴精细点位全部被丢弃，只能退回粗略中心锚点。
-                        hasDetailedLandmarks = true
-                    )
+                // v2.0.164 → v2.6.22：不再「只取最大脸」，而是把最多 3 张脸全部算出来，
+                // 按两眼距离降序（大脸在前 → 第 0 张即主脸）。
+                val faces = landmarksList
+                    .filter { it.size > 454 }
+                    .mapNotNull { extractFace(it) }
+                    .sortedByDescending { it.eyeDistance }
+                    .take(MAX_FACES)
+                if (faces.isNotEmpty()) {
+                    Log.v(TAG, "MediaPipe detected ${faces.size} face(s); main center=(${faces[0].centerX}, ${faces[0].centerY})")
+                    return faces
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "MediaPipe detection error, using fallback", e)
         }
 
-        return fallbackDetect(bitmap)
+        return fallbackDetectFaces(bitmap)
+    }
+
+    /** 单脸接口（v2.6.22 起内部转调 [detectFaces]）：返回主脸，未检出返回 [FaceResult.default] */
+    fun detectFace(bitmap: Bitmap): FaceResult =
+        detectFaces(bitmap).firstOrNull() ?: FaceResult.default()
+
+    /**
+     * 从一套 478 点 landmark 里算出一张脸的全部锚点（v2.6.22 从原 [detectFace] 抽出）。
+     * 坐标仍是「输入位图归一化空间」，换算成视口 UV 由调用方完成。
+     */
+    private fun extractFace(landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>): FaceResult? {
+        if (landmarks.size <= 454) return null
+
+        // Eye corners
+        val leftEyeOuter = landmarks[33]
+        val leftEyeInner = landmarks[133]
+        val rightEyeOuter = landmarks[263]
+        val rightEyeInner = landmarks[362]
+        // Nose / cheeks / chin
+        val noseTip = landmarks[4]
+        val leftCheek = landmarks[234]
+        val rightCheek = landmarks[454]
+        val chin = landmarks[152]
+        // Mouth
+        val mouthLeft = landmarks[61]
+        val mouthRight = landmarks[291]
+        val mouthTop = landmarks[13]
+        val mouthBottom = landmarks[14]
+
+        val leftEyeX = (leftEyeOuter.x() + leftEyeInner.x()) / 2f
+        val leftEyeY = (leftEyeOuter.y() + leftEyeInner.y()) / 2f
+        val rightEyeX = (rightEyeOuter.x() + rightEyeInner.x()) / 2f
+        val rightEyeY = (rightEyeOuter.y() + rightEyeInner.y()) / 2f
+
+        val eyeDistance = Math.hypot(
+            (rightEyeX - leftEyeX).toDouble(),
+            (rightEyeY - leftEyeY).toDouble()
+        ).toFloat()
+
+        // Mouth center (average of the 4 mouth corners/edges)
+        val mouthX = (mouthLeft.x() + mouthRight.x() + mouthTop.x() + mouthBottom.x()) / 4f
+        val mouthY = (mouthLeft.y() + mouthRight.y() + mouthTop.y() + mouthBottom.y()) / 4f
+
+        // v2.0.159：嘴部形状 —— 半宽用嘴角左右缘（61 / 291），
+        // 半高用**外**唇上下缘（0 = 上唇顶、17 = 下唇底；13/14 是内唇，偏小），
+        // 倾角用嘴角连线。这些值让 shader 能画一个贴合唇形的椭圆而不是正圆。
+        val mouthUpperLip = landmarks[0]
+        val mouthLowerLip = landmarks[17]
+        val mouthHalfWidth = Math.abs(mouthRight.x() - mouthLeft.x()) / 2f
+        val mouthHalfHeight = Math.abs(mouthLowerLip.y() - mouthUpperLip.y()) / 2f
+        val mouthAngle = Math.atan2(
+            (mouthRight.y() - mouthLeft.y()).toDouble(),
+            (mouthRight.x() - mouthLeft.x()).toDouble()
+        ).toFloat()
+
+        // Face center: horizontal center of the jaw/cheeks blended with the nose,
+        // vertical center between the eye line and the chin.
+        val centerX = ((leftCheek.x() + rightCheek.x()) / 2f + noseTip.x()) * 0.5f
+        val centerY = (leftEyeY + rightEyeY) / 2f * 0.5f + (chin.y() + noseTip.y()) / 2f * 0.5f
+
+        return FaceResult(
+            detected = true,
+            centerX = centerX,
+            centerY = centerY,
+            eyeDistance = eyeDistance,
+            eyeLeftX = leftEyeX,
+            eyeLeftY = leftEyeY,
+            eyeRightX = rightEyeX,
+            eyeRightY = rightEyeY,
+            mouthX = mouthX,
+            mouthY = mouthY,
+            chinX = chin.x(),
+            chinY = chin.y(),
+            mouthHalfWidth = mouthHalfWidth,
+            mouthHalfHeight = mouthHalfHeight,
+            mouthAngle = mouthAngle,
+            faceCount = 1,
+            // v117 修复：此前漏传该字段（默认 false），于是 shader 里 uHasDetailed 恒为 0，
+            // MediaPipe 算出的眼/嘴/下巴精细点位全部被丢弃，只能退回粗略中心锚点。
+            hasDetailedLandmarks = true
+        )
     }
 
     /**
      * Highly stable fallback face tracker utilizing Android's built-in FaceDetector
      */
-    private fun fallbackDetect(bitmap: Bitmap): FaceResult {
+    private fun fallbackDetectFaces(bitmap: Bitmap): List<FaceResult> {
         try {
             // FaceDetector requires RGB_565 config
             val rgb565Bmp = if (bitmap.config != Bitmap.Config.RGB_565) {
@@ -203,7 +221,7 @@ class MediaPipeFaceManager(private val context: Context) {
             val detector = if (fallbackDetector == null ||
                 fallbackDetectorW != bitmap.width || fallbackDetectorH != bitmap.height
             ) {
-                android.media.FaceDetector(bitmap.width, bitmap.height, 3).also {
+                android.media.FaceDetector(bitmap.width, bitmap.height, MAX_FACES).also {
                     fallbackDetector = it
                     fallbackDetectorW = bitmap.width
                     fallbackDetectorH = bitmap.height
@@ -212,8 +230,8 @@ class MediaPipeFaceManager(private val context: Context) {
                 fallbackDetector!!
             }
             val faces = fallbackFaces
-                ?: arrayOfNulls<android.media.FaceDetector.Face>(3).also { fallbackFaces = it }
-            faces[0] = null
+                ?: arrayOfNulls<android.media.FaceDetector.Face>(MAX_FACES).also { fallbackFaces = it }
+            for (i in faces.indices) faces[i] = null
             val count = detector.findFaces(rgb565Bmp, faces)
 
             if (rgb565Bmp != bitmap) {
@@ -221,33 +239,32 @@ class MediaPipeFaceManager(private val context: Context) {
             }
 
             if (count > 0) {
-                // v2.0.164：兜底检测同样支持多脸（最多 3 张），与 MediaPipe 路径一致，
-                // 取**眼睛距离最大**的一张作为主脸
-                var best: android.media.FaceDetector.Face? = null
-                var bestDist = 0f
+                // v2.6.22（多脸）：把所有检出的脸都返回（按眼距降序 ≈ 主脸在前）。
+                // 兜底路径**没有**精细点位，shader 里会退回「以中心 + 眼距估算五官」的粗略锚点。
+                val out = ArrayList<FaceResult>(count)
                 for (i in 0 until minOf(count, faces.size)) {
                     val f = faces[i] ?: continue
-                    val d = f.eyesDistance()
-                    if (d > bestDist) {
-                        bestDist = d
-                        best = f
-                    }
+                    val pt = android.graphics.PointF()
+                    f.getMidPoint(pt)
+                    out.add(
+                        FaceResult(
+                            detected = true,
+                            centerX = pt.x / bitmap.width.toFloat(),
+                            centerY = pt.y / bitmap.height.toFloat(),
+                            eyeDistance = f.eyesDistance() / bitmap.width.toFloat(),
+                            faceCount = count,
+                            hasDetailedLandmarks = false
+                        )
+                    )
                 }
-                val face = best ?: return FaceResult.default()
-                val pt = android.graphics.PointF()
-                face.getMidPoint(pt)
-                val dist = face.eyesDistance()
-
-                val centerX = pt.x / bitmap.width.toFloat()
-                val centerY = pt.y / bitmap.height.toFloat()
-                val eyeDistance = dist / bitmap.width.toFloat()
-
-                return FaceResult(true, centerX, centerY, eyeDistance, faceCount = count)
+                if (out.isNotEmpty()) {
+                    return out.sortedByDescending { it.eyeDistance }.take(MAX_FACES)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Fallback FaceDetector failed", e)
         }
-        return FaceResult.default()
+        return emptyList()
     }
 
     fun release() {

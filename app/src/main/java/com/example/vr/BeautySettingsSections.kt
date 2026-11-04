@@ -544,14 +544,6 @@ fun BeautyEngineSection(
     accentColor: Color,
     engineType: Int,
     onEngineChange: (Int) -> Unit,
-    gpSmooth: Float,
-    onGpSmoothChange: (Float) -> Unit,
-    gpWhite: Float,
-    onGpWhiteChange: (Float) -> Unit,
-    gpSlim: Float,
-    onGpSlimChange: (Float) -> Unit,
-    gpEyeZoom: Float,
-    onGpEyeZoomChange: (Float) -> Unit,
     vrFace: Boolean,
     onVrFaceChange: (Boolean) -> Unit,
     halfRes: Boolean,
@@ -585,12 +577,13 @@ fun BeautyEngineSection(
         }
 
         if (engineType == BEAUTY_ENGINE_GPUPIXEL) {
-            BeautySliderItem(stringResource(R.string.beauty_smooth), gpSmooth, onGpSmoothChange, accentColor = accentColor)
-            BeautySliderItem(stringResource(R.string.beauty_whitening), gpWhite, onGpWhiteChange, accentColor = accentColor)
-            // v2.0.164：BeautyFaceFilter 未注册 sharpen property（SetProperty 会被静默忽略），
-            // 故移除该滑块；需要「锐化」可用 GLSL 引擎的「皮肤质感」滑块（> 1 即 USM 锐化）。
-            BeautySliderItem(stringResource(R.string.beauty_face_slim), gpSlim, onGpSlimChange, accentColor = accentColor)
-            BeautySliderItem(stringResource(R.string.beauty_big_eyes), gpEyeZoom, onGpEyeZoomChange, accentColor = accentColor)
+            // v2.6.22（美颜审查 P1-4）：**四个参数滑块已移除**。
+            // 原先 GPUPixel 自带磨皮/美白/瘦脸/大眼四根滑条，值与 GLSL 那套完全独立
+            // （默认 0.7/0.4/0.4/0.3），切引擎时效果直接跳变。现在两个引擎共用
+            // 通用美颜区的同一套参数，这里只保留 GPUPixel 特有的两个开关。
+            //
+            // v2.0.164 备注（保留）：BeautyFaceFilter 未注册 sharpen property，
+            // 「皮肤质感」在 GPUPixel 下不生效 —— 已由面板上的限制提示覆盖。
 
             // v2.0.160（P3）：VR 视频人脸美颜 —— 屏幕空间后处理，默认关
             // v2.4.43：**文本列必须 `weight(1f)`**，否则窄列下文本吃满整行、开关被压成 0 宽（详见 SWITCH_ROW_GAP 注释）

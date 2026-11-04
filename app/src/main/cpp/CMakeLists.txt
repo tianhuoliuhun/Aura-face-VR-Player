@@ -101,29 +101,6 @@ if(HUAWEI_VR_INCLUDE_DIR STREQUAL "")
 endif()
 message(STATUS "OpenXR 头文件目录: ${HUAWEI_VR_INCLUDE_DIR}")
 
-# 定位 libxr_loader.so（华为 loader，各 ABI 预编译）
-set(_hw_lib_candidates
-    "${HUAWEI_VR_SDK_DIR}/sdkDemo/openXRsdk/jni/${ANDROID_ABI}"
-    "${HUAWEI_VR_SDK_DIR}/sdkDemo/HVRSDK_XrDemo/jni/${ANDROID_ABI}"
-    "${HUAWEI_VR_SDK_DIR}/openXRsdk/jni/${ANDROID_ABI}"
-    "${HUAWEI_VR_SDK_DIR}/jni/${ANDROID_ABI}"
-    "${HUAWEI_VR_SDK_DIR}/libs/${ANDROID_ABI}"
-)
-set(HUAWEI_VR_LIB_DIR "")
-foreach(_cand ${_hw_lib_candidates})
-    if(EXISTS "${_cand}/libxr_loader.so")
-        set(HUAWEI_VR_LIB_DIR "${_cand}")
-        break()
-    endif()
-endforeach()
-
-if(HUAWEI_VR_LIB_DIR STREQUAL "")
-    message(FATAL_ERROR
-        "未找到 libxr_loader.so（ABI=${ANDROID_ABI}）。已尝试路径:\n  ${_hw_lib_candidates}\n"
-        "请确认 SDK 的 jni 目录下是否有该 ABI 的 loader。")
-endif()
-message(STATUS "OpenXR Loader 目录: ${HUAWEI_VR_LIB_DIR}")
-
 endif()  # if(AURA_HAVE_OPENXR) —— 定位 VR 眼镜 SDK
 
 # ---------------------------------------------------------------------------
@@ -293,24 +270,6 @@ target_compile_options(auravr PRIVATE
     -Wno-missing-field-initializers
     -fno-omit-frame-pointer     # 便于真机抓 backtrace
 )
-
-# ---------------------------------------------------------------------------
-# 把华为 SDK 的 libxr_loader.so 一起打进 APK 的 libs/<abi>/
-# 说明：libxr_loader.so 是预编译二进制，必须随包分发，否则运行时找不到。
-#       ⚠️ 该目录已在 .gitignore 中忽略（华为许可禁止再分发 SDK 二进制）。
-# ---------------------------------------------------------------------------
-# ⚠️ v2.4.16：**仅接入 VR 眼镜时**才复制 loader ——
-#    主线包（standard）不该带任何 VR loader（省约 4.1MB，且不再需要 SDK）。
-if(AURA_HAVE_OPENXR)
-    add_custom_command(TARGET auravr POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${HUAWEI_VR_LIB_DIR}/libxr_loader.so"
-                "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/libxr_loader.so"
-        COMMENT "复制华为 libxr_loader.so 到 jniLibs (${ANDROID_ABI})"
-    )
-endif()
 
 # ===========================================================================
 # GPUPixel（本地 fork，git submodule: third_party/gpupixel）—— 源码级集成

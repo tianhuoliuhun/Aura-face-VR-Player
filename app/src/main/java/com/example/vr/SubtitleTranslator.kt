@@ -37,6 +37,25 @@ enum class TranslationEngine(
     val defaultModel: String,
     val requiresApiKey: Boolean
 ) {
+    /**
+     * v2.6.23：**Index-Translate**（B 站开源翻译模型家族的官方免费 API，OpenAI 兼容）。
+     *
+     * - 端点 `https://index-translate.bilibili.com/v1/chat/completions`，模型 `Index-Translate-35B-A3B`
+     *   （Qwen3.5 底座、150 语种、翻译专门训练）。**Key 随便填即可**（官方示例用 `index`），
+     *   所以 `requiresApiKey = false` —— 面板的 Key/BaseUrl 输入框会自动隐藏。
+     * - 2026-11-04 实测（10 条真实 ASR 字幕日→中）：0.4~0.8s/条，译文口语化、抗 ASR 噪声好；
+     *   **ASS 标签原生保持**（`{\pos}`/`{\r}` 一字不动）；同场景 Reverso 被 Cloudflare 403 全灭。
+     * - ⚠️ 免费服务**无 SLA**（35B-A3B 还是 preview）：定位是 Reverso 之后的免密兜底通道，不硬依赖。
+     * - 协议就是 OpenAI 兼容，但 `fetchTranslation` 的 when **必须显式列出**（接新引擎三动作之一，
+     *   防止将来改动时静默落进 else）；入口 [translateViaIndexTranslate] 会防御性剥离思考标签。
+     */
+    INDEX_TRANSLATE(
+        id = 15,
+        displayNameResId = R.string.engine_index_translate,
+        defaultBaseUrl = "https://index-translate.bilibili.com/v1",
+        defaultModel = "Index-Translate-35B-A3B",
+        requiresApiKey = false
+    ),
     BING(
         id = 0,
         displayNameResId = R.string.engine_bing,
@@ -275,7 +294,9 @@ enum class TranslationTargetLanguage(
 
 data class TranslationConfig(
     val isEnabled: Boolean = false,
-    val engine: TranslationEngine = TranslationEngine.BING,
+    // v2.6.23（用户要求「设在默认位置」）：默认引擎从必应改为 Index-Translate（免密翻译 API，
+    // 实测质量/延迟均优于其它免密通道；枚举声明位置也放在首位，面板 chip 排第一）。
+    val engine: TranslationEngine = TranslationEngine.INDEX_TRANSLATE,
     val displayMode: TranslationDisplayMode = TranslationDisplayMode.DUAL_LANGUAGE,
     val targetLanguage: TranslationTargetLanguage = TranslationTargetLanguage.ZH,
     val apiKey: String = "",
@@ -1579,6 +1600,10 @@ class SubtitleTranslator(private val context: Context) {
                     // else 只会用单一模型打一次，而它的核心价值是「:free 池轮换 + 单模型冷却」，
                     // 落进 else 等于丢掉整套兜底（模型当天被限流就整片翻不出来）。
                     TranslationEngine.OPENROUTER -> translateViaOpenRouter(text, targetLangCode)
+                    // v2.6.23：Index-Translate 虽是 OpenAI 兼容协议（落进 else 也能跑），
+                    // 但接新引擎三动作要求 **显式列出** —— 防止将来重构 when 时静默改变行为；
+                    // 且只有走独立入口才能做思考标签剥离（见 translateViaIndexTranslate）。
+                    TranslationEngine.INDEX_TRANSLATE -> translateViaIndexTranslate(text, targetLangCode)
                     else -> translateViaOpenAiApi(text, targetLangCode)
                 }
             } catch (e: Exception) {
@@ -1724,6 +1749,29 @@ class SubtitleTranslator(private val context: Context) {
             Log.e("SubtitleTranslator", "Bing response parse failed: $body", e)
             ""
         }
+    }
+
+    /**
+     * v2.6.23：**Index-Translate** 免费 API（B 站开源翻译模型，OpenAI 兼容协议）。
+     *
+     * 协议与 [translateViaOpenAiApi] 完全一致，这里只做一层薄封装：
+     * - `requiresApiKey = false` → Key 为空也放行（`translateViaOpenAiApi` 的 Key 检查按引擎开关）；
+     * - **纵深防御式的输出清理**：2026-11-04 实测该 API 把思考内容放在 `message.reasoning`
+     *   **独立字段**（本引擎只读 `content`，不会串），10/10 输出干净。这里仍剥两类痕迹：
+     *   ① 偶发的思考标签块（官方给浏览器扩展做过 "thinking tag suppression"，说明裸输出
+     *      有过混入案例）；② markdown 代码围栏兜底。纯防御，正常路径零影响。
+     */
+    private suspend fun translateViaIndexTranslate(text: String, targetLangCode: String): String {
+        val raw = translateViaOpenAiApi(text, targetLangCode)
+        if (raw.isEmpty()) return raw
+        var s = raw.trim()
+        // 思考标签块：任何含 "think" 的开/闭标签对（涵盖 …、<thinking>… 等写法）
+        s = s.replace(Regex("(?s)<[^>]*think[^>]*>.*?</[^>]*think[^>]*>"), " ").trim()
+        // markdown 代码围栏兜底（只处理「整段被围住」的情形，正文含 ``` 时不动）
+        if (s.startsWith("```")) {
+            s = s.substringAfter('\n').substringBeforeLast("```").trim()
+        }
+        return s.ifEmpty { raw }
     }
 
     /**

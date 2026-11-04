@@ -60,7 +60,6 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import com.example.R
-import com.example.vr.huawei.HuaweiVrActivity
 import com.example.vr.vrinput.VrGamepadAction
 import com.example.vr.vrinput.VrGamepadBus
 import androidx.compose.ui.unit.IntOffset
@@ -196,21 +195,14 @@ fun VRPlayerScreen(
     var beautyMasterEnabled by remember {
         mutableStateOf(prefs.getBoolean("beauty_master_enabled", false))
     }
-    // v2.0.160：美颜引擎（0 = GLSL 内置，1 = GPUPixel）。两套引擎的检测与参数完全独立
+    // v2.0.160：美颜引擎（0 = GLSL 内置，1 = GPUPixel）。
+    // v2.6.22（美颜审查 P1-4）：**参数已统一** —— 原先这里另有 beautyGpSmooth / beautyGpWhite /
+    // beautyGpSlim / beautyGpEyeZoom 四个独立 state（prefs 前缀 beauty_gp_*），
+    // 与下方的 beautyLevel / beautyWhitening / beautyFaceSlimming / beautyBigEyes 各调一套，
+    // 切引擎时四项效果直接跳变。现在两个引擎共用同一套参数（GPUPixel 只支持其中四项，
+    // 其余在面板上标注「该引擎不支持」）。
     var beautyEngineType by remember {
         mutableIntStateOf(prefs.getInt("beauty_engine_type", BEAUTY_ENGINE_GLSL))
-    }
-    var beautyGpSmooth by remember {
-        mutableFloatStateOf(prefs.getFloat("beauty_gp_smooth", 0.7f))
-    }
-    var beautyGpWhite by remember {
-        mutableFloatStateOf(prefs.getFloat("beauty_gp_white", 0.4f))
-    }
-    var beautyGpSlim by remember {
-        mutableFloatStateOf(prefs.getFloat("beauty_gp_slim", 0.4f))
-    }
-    var beautyGpEyeZoom by remember {
-        mutableFloatStateOf(prefs.getFloat("beauty_gp_eye_zoom", 0.3f))
     }
     // v2.0.160（P3）：GPUPixel 方案下把人脸美颜也应用到 VR/全景视频（屏幕空间后处理）。
     // v2.0.184：恢复为**真开关**（默认开）—— v2.0.182 曾把它从激活条件里拿掉（当时 VR 无条件生效），
@@ -333,43 +325,6 @@ fun VRPlayerScreen(
         )
     }
 
-    // v2.0.174：华为 VR Glass（VR Engine）接入开关。
-    // 默认关（华为设备占比低，避免误入）；受「记忆模式」门控，与其它设置一致。
-    // 该开关仅决定「默认后端与入口是否显示」，真正的 VR 会话由华为 Runtime 接管：
-    //   - 每眼 swapchain / FOV / IPD / 头姿 全部由 OpenXR Runtime 提供，
-    //     因此华为模式下 fovDeg、vrIpdOffsetRatio、isGyroEnabled、isSplitScreenVR 均不生效。
-    //   - ProjectionMode（平面/球面/穹顶几何）仍然生效，用于决定内容如何映射。
-    // 详见 HUAWEI_VR_ENGINE_PLAN_2026-09-26.md 第 6 节。
-    var huaweiVrEnabled by remember {
-        mutableStateOf(
-            if (isMemoryModeEnabled) prefs.getBoolean("huawei_vr_enabled", false) else false
-        )
-    }
-    // 每眼分辨率相对 Runtime 推荐值（1552×1552/眼）的比例，预留性能调档：1.0 / 0.75 / 0.5
-    var huaweiVrRenderScale by remember {
-        mutableFloatStateOf(
-            if (isMemoryModeEnabled) prefs.getFloat("huawei_vr_render_scale", 1.0f) else 1.0f
-        )
-    }
-    // 手柄 6DoF 模式（P5 才实际使用，先落状态与开关）
-    var huaweiVrPrefer6dof by remember {
-        mutableStateOf(
-            if (isMemoryModeEnabled) prefs.getBoolean("huawei_vr_prefer_6dof", false) else false
-        )
-    }
-    // 运行时可用性缓存在状态里：开关行与路由都要读，避免每帧查 PackageManager
-    val huaweiVrRuntimeAvailable = remember { isHuaweiVrRuntimeAvailable(context) }
-
-    // v2.0.205：机型是否为华为/荣耀 —— 用户要求「机型非华为、荣耀不显示 VR Glass 开关」。
-    // ⚠️ 用 manufacturer + brand 双字段（部分华为设备 brand 会是第三方渠道名），
-    //    忽略大小写；缓存进 remember，避免每次重组都读 Build。
-    val isHuaweiOrHonorDevice = remember {
-        val mfr = android.os.Build.MANUFACTURER ?: ""
-        val brand = android.os.Build.BRAND ?: ""
-        listOf("huawei", "honor").any {
-            mfr.contains(it, ignoreCase = true) || brand.contains(it, ignoreCase = true)
-        }
-    }
 
     // Playback state
     var isVideoPlaying by remember { mutableStateOf(false) }
@@ -1262,10 +1217,6 @@ fun VRPlayerScreen(
         beautyTextureDetail,
         beautyMasterEnabled,
         beautyEngineType,
-        beautyGpSmooth,
-        beautyGpWhite,
-        beautyGpSlim,
-        beautyGpEyeZoom,
         gpuPixelVrFaceBeauty,
         gpuPixelHalfResBeauty,
         // v2.0.188 审计修复：beautyPreset 此前不在 key 列表 → 切换美颜预设不会触发写回
@@ -1287,9 +1238,6 @@ fun VRPlayerScreen(
         beautySmallHead,
         isSplitScreenVR,
         isGyroEnabled,
-        huaweiVrEnabled,
-        huaweiVrRenderScale,
-        huaweiVrPrefer6dof,
         asrThreads,
         gyroInverted,
         fovDeg,
@@ -1376,10 +1324,6 @@ fun VRPlayerScreen(
             putBoolean("beauty_master_enabled", beautyMasterEnabled)
             putFloat("beauty_level", beautyLevel)
             putFloat("beauty_texture_detail", beautyTextureDetail)
-            putFloat("beauty_gp_smooth", beautyGpSmooth)
-            putFloat("beauty_gp_white", beautyGpWhite)
-            putFloat("beauty_gp_slim", beautyGpSlim)
-            putFloat("beauty_gp_eye_zoom", beautyGpEyeZoom)
             putBoolean("beauty_gp_vr_face", gpuPixelVrFaceBeauty)
             putBoolean("beauty_gp_half_res", gpuPixelHalfResBeauty)
             putFloat("beauty_whitening", beautyWhitening)
@@ -1410,9 +1354,6 @@ fun VRPlayerScreen(
                 putFloat("contrast_level", contrastLevel)
                 putBoolean("is_split_screen_vr", isSplitScreenVR)
                 putBoolean("is_gyro_enabled", isGyroEnabled)
-                putBoolean("huawei_vr_enabled", huaweiVrEnabled)
-                putFloat("huawei_vr_render_scale", huaweiVrRenderScale)
-                putBoolean("huawei_vr_prefer_6dof", huaweiVrPrefer6dof)
                 putInt("asr_threads", asrThreads)
                 putBoolean("gyro_inverted", gyroInverted)
                 putFloat("fov_deg", fovDeg)
@@ -1499,9 +1440,6 @@ fun VRPlayerScreen(
                 remove("contrast_level")
                 remove("is_split_screen_vr")
                 remove("is_gyro_enabled")
-                remove("huawei_vr_enabled")
-                remove("huawei_vr_render_scale")
-                remove("huawei_vr_prefer_6dof")
                 remove("fov_deg")
                 remove("is_video_mirrored")
                 remove("dome_half_select")
@@ -4787,10 +4725,6 @@ fun VRPlayerScreen(
                 view.renderer.beautyTextureDetail = beautyTextureDetail
                 view.renderer.beautyMasterEnabled = beautyMasterEnabled
                 view.renderer.beautyEngineType = beautyEngineType
-                view.renderer.beautyGpSmooth = beautyGpSmooth
-                view.renderer.beautyGpWhite = beautyGpWhite
-                view.renderer.beautyGpSlim = beautyGpSlim
-                view.renderer.beautyGpEyeZoom = beautyGpEyeZoom
                 view.renderer.gpuPixelVrFaceBeauty = gpuPixelVrFaceBeauty
                 view.renderer.gpuPixelHalfResBeauty = gpuPixelHalfResBeauty
                 // v2.0.182：GPUPixel 覆盖范围 —— 2D 全视频 / VR 全屏（用户要求）
@@ -5148,105 +5082,6 @@ fun VRPlayerScreen(
                                 contentDescription = stringResource(R.string.cd_vr_split_mode),
                                 modifier = Modifier.size(20.dp)
                             )
-                        }
-
-                        // v2.0.174：华为 VR Glass 显式入口。
-                        // 仅在「华为 VR 开关已开」或「本机检测到华为 VR 运行时」时出现，
-                        // 避免在普通机型上多出一个点不动的按钮。
-                        // v2.0.205：机型非华为/荣耀 → 整个 VR Glass 入口不显示（用户要求）
-                        if ((huaweiVrEnabled || huaweiVrRuntimeAvailable) && isHuaweiOrHonorDevice) {
-                            IconButton(
-                                onClick = {
-                                    keepUiAlight()
-                                    if (huaweiVrRuntimeAvailable) {
-                                        val ok = try {
-                                            context.startActivity(
-                                                buildHuaweiVrPromptIntent(
-                                                    context,
-                                                    huaweiVrRenderScale,
-                                                    // ⚠️ P2 退出落盘链路：
-                                                    // HuaweiVrActivity 退出会 killProcess，
-                                                    // 必须在此之前把设置写进 prefs，否则全丢。
-                                                    onBeforeKill = {
-                                                        runCatching {
-                                                            prefs.edit()
-                                                                .putBoolean("huawei_vr_enabled", huaweiVrEnabled)
-                                                                .putFloat("huawei_vr_render_scale", huaweiVrRenderScale)
-                                                                .putBoolean("huawei_vr_prefer_6dof", huaweiVrPrefer6dof)
-                                                                .putBoolean("is_split_screen_vr", isSplitScreenVR)
-                                                                .apply()
-                                                        }
-                                                    },
-                                                    // ⚠️ P1 视频源接线（关键）：
-                                                    // 华为侧 Activity 起来后会创建自己的 SurfaceTexture，
-                                                    // 这里把**当前正在播放的 ExoPlayer 输出切过去**，
-                                                    // 让它画的每一帧都来自真实视频流，而不是空画面。
-                                                    onVideoSurfaceNeeded = { st ->
-                                                        runCatching {
-                                                            val uriStr = selectedMediaItem.uri
-                                                            if (uriStr != null && selectedMediaItem.isVideo) {
-                                                                // 尺寸沿用当前渲染器已知的视频宽高（VRGLRenderer.videoWidth/Height，
-                                                                // 由 onVideoSizeChanged 持续更新），避免切换瞬间被当成 0。
-                                                                val r = currentGlSurfaceView?.renderer
-                                                                val w = r?.videoWidth?.takeIf { it > 0 } ?: 1920
-                                                                val h = r?.videoHeight?.takeIf { it > 0 } ?: 1080
-                                                                st.setDefaultBufferSize(w, h)
-                                                                val newSurface = Surface(st)
-                                                                // ⚠️ setVideoSurface 内部会做一次 flush + 重配解码器输出，
-                                                                //    不会丢播放位置，也不会重启解码器。
-                                                                playerInstance?.setSurface(newSurface)
-                                                                Log.i(
-                                                                    "HuaweiVR",
-                                                                    "视频源已切到华为 VR（${w}x$h, uri=$uriStr）"
-                                                                )
-                                                            } else {
-                                                                Log.i("HuaweiVR", "当前非视频媒体，华为侧保持空画面")
-                                                            }
-                                                        }.onFailure {
-                                                            Log.e("HuaweiVR", "视频源接线失败", it)
-                                                        }
-                                                    }
-                                                )
-                                            )
-                                            true
-                                        } catch (e: Exception) {
-                                            // 未集成 hvrprompt.aar 或 Activity 未注册时走到这里：
-                                            // 记录原因并降级到内置分屏 VR（用户要求：绝不黑屏）
-                                            Log.w("HuaweiVR", "启动华为 VR 失败，回退内置分屏 VR", e)
-                                            false
-                                        }
-                                        if (!ok) {
-                                            isSplitScreenVR = true
-                                            Toast.makeText(
-                                                context,
-                                                context.getString(R.string.huawei_vr_enter_failed),
-                                                Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    } else {
-                                        // 无运行时：直接提示并回退
-                                        isSplitScreenVR = true
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(R.string.huawei_vr_runtime_missing),
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                },
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = if (huaweiVrEnabled) Color(0x33D0BCFF) else TranslucentWhite10,
-                                    contentColor = if (huaweiVrEnabled) AccentColor else Color.White
-                                ),
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .testTag("huawei_vr_enter_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Vrpano,
-                                    contentDescription = stringResource(R.string.huawei_vr_enter),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
                         }
 
                         IconButton(
@@ -6707,99 +6542,6 @@ fun VRPlayerScreen(
                                     }
                                 }
 
-                                // v2.0.174：华为 VR Glass（VR Engine）接入开关。
-                                // 放在「立体格式」之后，与投影/分屏/FOV/IPD 同组，语义上属同一类「输出后端」配置。
-                                // 该开关默认关；非华为设备开启只作记录并提示，不会阻断使用。
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.huawei_vr_enable),
-                                    desc = stringResource(R.string.huawei_vr_enable_desc),
-                                    checked = huaweiVrEnabled,
-                                    onChanged = {
-                                        huaweiVrEnabled = it
-                                        keepUiAlight()
-                                        if (it && !huaweiVrRuntimeAvailable) {
-                                            // 不阻断用户：仅提示会回退到内置分屏 VR
-                                            Toast.makeText(
-                                                context,
-                                                context.getString(R.string.huawei_vr_runtime_missing),
-                                                Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                                if (huaweiVrEnabled) {
-                                    // 状态文字与颜色预先算好（Compose 里 @Composable 调用不嵌在实参三元/if 表达式中更稳）
-                                    val hwStatusText = if (huaweiVrRuntimeAvailable)
-                                        stringResource(R.string.huawei_vr_ready)
-                                    else
-                                        stringResource(R.string.huawei_vr_runtime_absent)
-                                    val hwStatusColor = if (huaweiVrRuntimeAvailable) AccentColor else Color(0xFFE0A030)
-                                    val hwNoteText = stringResource(R.string.huawei_vr_note)
-                                    val hwScaleLabel = "${(huaweiVrRenderScale * 100).toInt()}%"
-                                    val hwScaleTitle = stringResource(R.string.huawei_vr_render_scale)
-                                    val hwScaleDesc = stringResource(R.string.huawei_vr_render_scale_desc)
-                                    Text(
-                                        text = hwStatusText,
-                                        color = hwStatusColor,
-                                        fontSize = 9.sp
-                                    )
-                                    Text(
-                                        text = hwNoteText,
-                                        color = Color.White.copy(alpha = 0.45f),
-                                        fontSize = 8.sp,
-                                        lineHeight = 11.sp
-                                    )
-                                    ExperimentalSwitchRow(
-                                        title = stringResource(R.string.huawei_vr_prefer_6dof),
-                                        desc = stringResource(R.string.huawei_vr_prefer_6dof_desc),
-                                        checked = huaweiVrPrefer6dof,
-                                        onChanged = { huaweiVrPrefer6dof = it; keepUiAlight() },
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor
-                                    )
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                hwScaleTitle,
-                                                color = Color.White.copy(alpha = 0.5f),
-                                                fontSize = 10.sp
-                                            )
-                                            Text(
-                                                hwScaleLabel,
-                                                color = AccentColor,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                        Slider(
-                                            value = huaweiVrRenderScale,
-                                            onValueChange = {
-                                                huaweiVrRenderScale = it
-                                                keepUiAlight()
-                                            },
-                                            valueRange = 0.5f..1.0f,
-                                            steps = 1, // 0.5 / 0.75 / 1.0
-                                            colors = SliderDefaults.colors(
-                                                thumbColor = AccentColor,
-                                                activeTrackColor = AccentColor,
-                                                inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                                            ),
-                                            modifier = Modifier.height(26.dp)
-                                        )
-                                        Text(
-                                            text = hwScaleDesc,
-                                            color = Color.White.copy(alpha = 0.4f),
-                                            fontSize = 8.sp,
-                                            lineHeight = 11.sp
-                                        )
-                                    }
-                                }
-
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(stringResource(R.string.video_mirror), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                                     Row(
@@ -6952,26 +6694,6 @@ fun VRPlayerScreen(
                                                 }
                                             }
                                         }
-                                    }
-                                }
-
-                                // v2.0.174：华为 VR 模式下的「接管提示」。
-                                // 华为 Runtime 用自己的 FOV(95°×95°) / IPD(63mm) / OpenXR pose，
-                                // 因此下面这些手动设置不再生效——显式告知，避免用户反复调却看不到变化。
-                                if (huaweiVrEnabled) {
-                                    Surface(
-                                        color = Color(0x1AE0A030),
-                                        shape = RoundedCornerShape(8.dp),
-                                        border = BorderStroke(1.dp, Color(0x66E0A030)),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.huawei_vr_handover),
-                                            color = Color(0xFFE0A030),
-                                            fontSize = 9.sp,
-                                            lineHeight = 13.sp,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                                        )
                                     }
                                 }
 
@@ -8226,22 +7948,17 @@ fun VRPlayerScreen(
                                             keepUiAlight()
                                         }
                                     },
-                                    gpSmooth = beautyGpSmooth,
-                                    onGpSmoothChange = { beautyGpSmooth = it; keepUiAlight() },
-                                    gpWhite = beautyGpWhite,
-                                    onGpWhiteChange = { beautyGpWhite = it; keepUiAlight() },
-                                    gpSlim = beautyGpSlim,
-                                    onGpSlimChange = { beautyGpSlim = it; keepUiAlight() },
-                                    gpEyeZoom = beautyGpEyeZoom,
-                                    onGpEyeZoomChange = { beautyGpEyeZoom = it; keepUiAlight() },
+                                    // v2.6.22（P1-4）：GPUPixel 的四个参数滑块已删除 ——
+                                    // 参数并入通用美颜区（磨皮 / 美白 / 瘦脸 / 大眼），两个引擎共用同一套值。
                                     vrFace = gpuPixelVrFaceBeauty,
                                     onVrFaceChange = { gpuPixelVrFaceBeauty = it; keepUiAlight() },
                                     halfRes = gpuPixelHalfResBeauty,
                                     onHalfResChange = { gpuPixelHalfResBeauty = it; keepUiAlight() }
                                 )
 
-                                // v2.0.160：GLSL 专属参数区（GPUPixel 模式下显示其自带参数区，避免混淆）
-                                if (beautyEngineType == BEAUTY_ENGINE_GLSL) {
+                                // v2.6.22（P1-4）：预设 + 通用美颜参数（磨皮 / 质感 / 亮度 / 对比 / 美白），
+                                // **两个引擎共用**。原先这里被 `if (engineType == GLSL)` 包住，
+                                // GPUPixel 另有四个独立滑块（beauty_gp_*），切引擎时四项效果直接跳变。
 
                                 BeautyPresetRow(
                                     presetId = beautyPreset,
@@ -8263,7 +7980,7 @@ fun VRPlayerScreen(
                                     whiteningLevel = beautyWhitening,
                                     onWhiteningLevelChange = { beautyWhitening = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
                                 )
-                                } // v2.0.160：end if GLSL（通用美颜参数区，LUT 调色不受引擎影响）
+
 
                                 LutFilterSection(
                                     accentColor = AccentColor,
@@ -8278,7 +7995,17 @@ fun VRPlayerScreen(
                                     onUserInteraction = { keepUiAlight() }
                                 )
 
-                                if (beautyEngineType == BEAUTY_ENGINE_GLSL) {
+                                // v2.6.22（P1-4）：参数已统一，但 GPUPixel 引擎只支持
+                                // 「磨皮 / 美白 / 瘦脸 / 大眼」四项 —— 其余项在该引擎下不生效，
+                                // 这里显式标注，避免用户以为「调了没反应」是 bug。
+                                if (beautyEngineType == BEAUTY_ENGINE_GPUPIXEL) {
+                                    Text(
+                                        text = stringResource(R.string.beauty_engine_gp_limited),
+                                        color = Color(0xFFE0A030),
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp
+                                    )
+                                }
                                 PortraitRetouchSection(
                                     accentColor = AccentColor,
                                     enabled = is2DBeautyMode,
@@ -8296,7 +8023,7 @@ fun VRPlayerScreen(
                                         PortraitParam(stringResource(R.string.beauty_small_head), beautySmallHead) { beautySmallHead = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
                                     )
                                 )
-                                } // v2.0.160：end if GLSL（人像精修区，瘦脸/大眼等由 GPUPixel 滑块替代）
+
                                 }
 
                                 SettingsHeader()

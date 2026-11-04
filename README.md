@@ -13,14 +13,14 @@
 > ASR 扩展至 **87 项语言与方言** 并把 **Dolphin 内置进 APK**（开箱即用），新增时间标记悬浮球与语言选择多级收纳；
 > 后期（v2.1.24x）把播放内核扩到 **四个**（EXO / IJK / MPV / 系统解码），
 > **MPV 内置进 APK** 作为 WMV·ASF·RM·RMVB 的兜底内核，并用**容器白名单**做内核自动路由；
-> **v2.2–v2.4** 引入 **AI 弹幕**（画面 / 台词驱动、上屏渲染、颜色与行距、时间抖动、外部弹幕导入）与**端侧本地大模型**（MiniCPM-V 4.7 1B，一次性下载后**离线**翻译与弹幕生成 —— 🚧 尚未完成）；新增 **VR 眼镜支持**（华为 VR Glass / Pico / Quest，按 flavor 分包 —— 🚧 尚未完成），完成多轮代码审查修复（美颜双引擎 / 本地 AI / 设置面板），并在 **v2.4.58** 加入**投屏接收**（本机作为标准 DLNA 渲染器，接收手机视频 App 推送的 URL 并播放）；
-> **v2.6** 重构界面材质 —— 三档玻璃（纯色 / 液态 / 磨砂）：液态改为**真半透明**、直出全分辨率画面，磨砂恢复高斯模糊层，两档共用同一套 Canvas 体感层（顶部受光 / 内侧厚度 / 棱边高光）。
+> **v2.2–v2.4** 引入 **AI 弹幕**（画面 / 台词驱动、上屏渲染、颜色与行距、时间抖动、外部弹幕导入）与**端侧本地大模型**（MiniCPM-V 4.7 1B，一次性下载后**离线**翻译与弹幕生成 —— 🚧 尚未完成）；新增 **VR 眼镜支持**（Pico / Quest，按 flavor 分包 —— 🚧 尚未完成；v2.6.22 起移除华为 VR Glass 通路），完成多轮代码审查修复（美颜双引擎 / 本地 AI / 设置面板），并在 **v2.4.58** 加入**投屏接收**（本机作为标准 DLNA 渲染器，接收手机视频 App 推送的 URL 并播放）；
+> **v2.6** 重构界面材质 —— 三档玻璃（纯色 / 玻璃 / 磨砂；「液体玻璃」于 v2.6.22 更名「玻璃」）：**玻璃档**是一圈 **2dp 折射带**（含逐通道色散），内部透出 SurfaceView **真实视频**（全分辨率 / 全帧率 / 零延迟），磨砂档恢复高斯模糊层，共用同一套 Canvas 体感层（顶部受光 / 内侧厚度 / 棱边高光）；**v2.6.22** 完成美颜链路整改（**多脸美颜**、检测采样整帧化、回读 PBO 异步化）、播放打断闭环（音频焦点 / 拔耳机暂停 / 切后台暂停）与 **Index-Translate** 免密翻译引擎接入（并设为默认）。
 >
 > **v1.0** delivered the core VR playback (projection / stereo / gyro / LUT) ·
 > **v2.0** delivered AI speech recognition & translation (realtime subtitles, offline ASR, online translation, dual-engine beauty) ·
 > **v2.1** fixed the beauty-engine issues (GPUPixel crash, coverage, flicker & performance) and added video enhancement (MEMC / FSR) plus a major ASR language expansion;
 > later (v2.1.24x) expanded to **four playback kernels** (EXO / IJK / MPV / system) with **MPV bundled in-APK** as the fallback for WMV/ASF/RM/RMVB, plus container-based auto-routing;
-> **v2.2–v2.4** added **AI danmaku** (frame / subtitle-line driven, on-screen rendering, colors, adaptive spacing, timestamp jitter, external import) and an **on-device local LLM** (MiniCPM-V 4.7 1B; offline translation & danmaku generation after a one-time download — work in progress); introduced **VR glasses support** (Huawei VR Glass / Pico / Quest via per-flavor packaging — work in progress) plus several rounds of code-review fixes (beauty engines / local AI / settings panels); **v2.6** reworked the interface material into three glass styles — Liquid is now truly translucent (full-resolution passthrough) and Frosted regains its blur layer, both sharing one canvas-based body layer (top lighting / inner thickness / rim light).
+> **v2.2–v2.4** added **AI danmaku** (frame / subtitle-line driven, on-screen rendering, colors, adaptive spacing, timestamp jitter, external import) and an **on-device local LLM** (MiniCPM-V 4.7 1B; offline translation & danmaku generation after a one-time download — work in progress); introduced **VR glasses support** (Pico / Quest via per-flavor packaging — work in progress; Huawei VR Glass support was removed in v2.6.22) plus several rounds of code-review fixes (beauty engines / local AI / settings panels); **v2.6** reworked the interface material into three glass styles — Solid / Glass / Frosted ("Liquid glass" was renamed "Glass" in v2.6.22): the **Glass** style is a 2dp refraction rim (with per-channel chromatic aberration) around true full-resolution, full-frame-rate video passthrough, while Frosted regains its blur layer, both sharing one canvas-based body layer (top lighting / inner thickness / rim light). **v2.6.22** reworked the beauty pipeline (**multi-face beauty**, full-frame detection sampling, async PBO readback), added playback interruption handling (audio focus / headphone-unplug pause / background pause) and the **Index-Translate** keyless translation engine as the new default.
 
 ![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-green) ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-purple) ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material3-blue) ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
@@ -37,7 +37,7 @@
 | 功能 / Feature | 亮点 / Highlights |
 |---|---|
 | 🥽 **VR 播放**<br>VR Playback | 360°/180° 全景、鱼眼、标准平面四种投影，**普通 2D 视频开箱即播**；3D SBS/TAB 立体；陀螺仪跟随与手动偏移；圆柱曲面沉浸；8K 硬解实验（默认关）<br>Four projection modes — **plain 2D videos play out of the box**; SBS/TAB stereo, gyro tracking, cylinder curvature, experimental 8K decoding |
-| 🕶️ **VR 眼镜 / OpenXR**<br>VR Glasses & OpenXR | 🚧 **未完成（开发中）** —— 目标支持 **华为 VR Glass / Pico / Quest** 等 VR 眼镜（OpenXR 会话与立体渲染）；已按 **flavor 分包**（主线 `standard`（不编 OpenXR、体积最小）/ 全兼容 `all`（发版）/ 单眼镜 `huawei`·`pico`·`quest`），眼镜包在普通手机上同样可运行；**真机上的渲染与交互验收尚未完成，暂不作为正式功能**<br>🚧 **Work in progress** — intended OpenXR support for Huawei VR Glass / Pico / Quest, split into **per-flavor builds** (mainline `standard` / all-in-one `all` / single-glasses `huawei`·`pico`·`quest`); on-device rendering and interaction are not yet validated, so it is not a shipped feature |
+| 🕶️ **VR 眼镜 / OpenXR**<br>VR Glasses & OpenXR | 🚧 **未完成（开发中）** —— 目标支持 **Pico / Quest** 等 VR 眼镜（OpenXR 会话与立体渲染）；已按 **flavor 分包**（主线 `standard`（不编 OpenXR、体积最小）/ 全兼容 `all`（发版）/ 单眼镜 `pico`·`quest`），眼镜包在普通手机上同样可运行；**真机上的渲染与交互验收尚未完成，暂不作为正式功能**<br>🚧 **Work in progress** — intended OpenXR support for Pico / Quest, split into **per-flavor builds** (mainline `standard` / all-in-one `all` / single-glasses `pico`·`quest`); on-device rendering and interaction are not yet validated, so it is not a shipped feature |
 | ⚡ **画质增强**<br>Video Enhancement | **MEMC 运动补偿插帧**（48/60/72/90/120 fps）+ **FSR 超分**（EASU + RCAS，默认规则与自定义 6 档，自定义完全接管）<br>Motion-compensated interpolation plus FSR upscaling with default and fully-overriding custom rules |
 | ✨ **实时 AI 美颜**<br>Real-time AI Beauty | **GLSL / GPUPixel 双引擎**可切换；478 点人像精修（瘦脸/大眼/去黑眼圈/鼻梁/嘴型/牙齿/口红/腮红/眉毛）；磨皮为频域分离 + 可调皮肤质感<br>Dual switchable engines, 478-landmark portrait retouch, frequency-separation smoothing |
 | 🎨 **3D LUT 调色**<br>LUT Color Grading | 36 款内置 LUT（人像美颜 24 + 风格滤镜 12，全部自研/开源可商用）；可导入自定义 `.cube`<br>36 bundled LUTs plus custom `.cube` import |
@@ -47,7 +47,7 @@
 | 🧠 **端侧本地大模型**<br>On-device LLM | 🚧 **未完成（开发中）** —— 目标是下载一次后**全程离线**：本地 AI 翻译 + 本地弹幕生成（**MiniCPM-V 4.7 1B，Q4_K_M 量化，Apache 2.0** + 自建 llama.cpp / libmtmd JNI；主权重约 672MB，可选视觉编码器 mmproj 约 1.11GB）；**推理链路已跑通**（单 worker 调度 + 优先级队列：实时字幕 > 弹幕 > 远期预翻译；超时与失败原因如实回传；不联网、不上传内容），但**翻译与弹幕的实际输出质量尚未达到可用**，故按未完成论<br>🚧 **Work in progress** — goal is fully offline local AI translation and danmaku generation (**MiniCPM-V 4.7 1B, Q4_K_M, Apache 2.0** with a self-built llama.cpp / libmtmd JNI; ~672MB main weights, optional ~1.11GB mmproj). The inference path works (single-worker scheduler with a **priority queue**, timeouts and real failure reasons surfaced), but output quality is not yet usable, so it is not a shipped feature |
 | 📁 **局域网与远程播放**<br>LAN & Remote | SMB（jcifs-ng）浏览与直连；HTTP 缓存数据源让不支持 Range 的源也能拖动；远程源同样支持实时字幕<br>SMB browsing, a caching data source for seamless remote seek, subtitles for remote sources |
 | 📺 **投屏接收（DLNA）**<br>Cast Receiver | **v2.4.58**：设置里一个开关，本机即以标准 **DLNA 渲染器（`MediaRenderer:1`）** 出现在手机视频 App 的投屏列表中；手机把视频 **URL** 推过来后，**复用整条播放链路**（投影 / 字幕与 ASR / AI 弹幕 / 美颜 / 画质增强 / VR 渲染，四内核自动路由），并支持手机端遥控播放与进度回读。⚠️ 仅「URL 推送式」投屏，**不支持屏幕镜像**<br>**v2.4.58** DLNA renderer: flip one switch and phone video apps can cast to this device; the pushed URL **reuses the entire playback pipeline** with remote play/pause/seek. URL-push only — no screen mirroring |
-| 🧊 **界面材质 / Glass UI** | **三档可切换**（纯色 / 液态玻璃 / 磨砂玻璃，Android 12+）：**液态档真半透明** —— 不做位图采样，把 Compose 半透明层与视频图层直接合成，透出**全分辨率**画面，并保留轻薄的顶部受光与棱边高光；**磨砂档**采样 96px 降采样帧 + 高斯模糊（面板 32dp）+ 颗粒噪点，背后内容被真正漫射掉。两档共用同一套 Canvas 体感层（顶部受光 / 内侧厚度 / 棱边高光），零 RenderEffect，被 ROM 屏蔽实时模糊的设备同样可用；悬浮球与面板**同源**（`glassBall` = `glassPanel` + `CircleShape`）<br>**Three switchable styles** (Solid / Liquid / Frosted, Android 12+): Liquid is truly translucent — no bitmap sampling, the translucent Compose layer composites straight over the video layer to show the **full-resolution** frame while keeping a light top highlight and rim light; Frosted samples a 96px downscaled frame plus a 32dp blur and a grain overlay so the content behind is genuinely diffused. Both share one canvas-based body layer with zero RenderEffect, so they also work where the ROM blocks real-time blur; floating balls reuse the panel implementation |
+| 🧊 **界面材质 / Glass UI** | **三档可切换**（纯色 / 玻璃 / 磨砂，Android 12+）：**玻璃档**（原「液体玻璃」，v2.6.22 更名）是一圈 **2dp 折射带**（含逐通道色散），内部透出 SurfaceView **真实视频**（全分辨率 / 全帧率 / 零延迟）；回读位图只保留在边缘环带（320×144 降采样 + PBO 异步回读，≈4.6 MB/s）。**磨砂档**采样帧 + 高斯模糊（面板 32dp）+ 颗粒噪点。两档共用同一套 Canvas 体感层（顶部受光 / 内侧厚度 / 棱边高光），零 RenderEffect，被 ROM 屏蔽实时模糊的设备同样可用；悬浮球与面板**同源**（`glassBall` = `glassPanel` + `CircleShape`），支持按压鼓包（Liquid Press）与两球靠近融合（Liquid Merge）<br>**Three switchable styles** (Solid / Glass / Frosted, Android 12+): **Glass** (renamed from "Liquid glass" in v2.6.22) is a 2dp refraction rim (with per-channel chromatic aberration) around true full-resolution, full-frame-rate video passthrough, with the sampled backdrop bitmap kept only in the edge ring (320×144 downscale + async PBO readback, ~4.6 MB/s); **Frosted** samples the frame plus a 32dp blur and a grain overlay. Both share one canvas-based body layer with zero RenderEffect, so they also work where the ROM blocks real-time blur; floating balls reuse the panel implementation and support press-bulge (Liquid Press) and near-merge (Liquid Merge) |
 | ⏩ **进度条拖动**<br>Seeking | **松手才定位**（拖动中只更新预览，不堆积 seek）—— **AVI / AV1 也能顺畅拖动**；容器不支持定位时**不重新编码**地自动重封装修复；AVI 内嵌 AV1 明确提示改用 MPV 内核<br>Seek-on-release keeps AVI/AV1 dragging smooth; auto remux (no re-encode) when a file cannot seek |
 | 🎞️ **多内核与格式兼容**<br>Multi-kernel & Formats | **四个内核可选**（EXO / IJK / MPV / 系统解码）+ 自动路由：打开 **WMV / ASF / RM / RMVB / ISO / VOB** 等片源时**本次自动切换**到能吃它的内核（不改写你的设置）。**MPV 已内置进 APK**，无需下载即可播放上述格式<br>Four selectable kernels with container-based auto-routing; **MPV is bundled in-APK** so WMV/ASF/RM/RMVB/ISO/VOB play out of the box |
 | 📄 **字幕格式**<br>Subtitle Formats | 外挂 **SRT / VTT / ASS / SSA**（按内容自动识别）；**MKV 内挂 ASS/SRT 字幕轨**也可切换；字幕文件**编码自动探测**（BOM / UTF-8 / GBK / Big5），中文老字幕不再乱码<br>External **SRT / VTT / ASS / SSA** (auto-detected), **embedded ASS/SRT in MKV**, and charset auto-detection (BOM / UTF-8 / GBK / Big5) |
@@ -102,7 +102,7 @@
 |---|---|---|
 | `standard` | 主线包（日常自用，体积最小，不编 OpenXR）/ Mainline build (daily use, smallest, no OpenXR) | — |
 | `all` | **全兼容发版包** / All-in-one release build | ✓ |
-| `huawei` · `pico` · `quest` | 单眼镜优化包 / Single-glasses builds | ✓ |
+| `pico` · `quest` | 单眼镜优化包 / Single-glasses builds | ✓ |
 
 > 说明：早期版本曾按 ABI 拆分为 4 个包发布，v116 起改为**单包**发布；v2.4.10 起 ABI 进一步收敛为 **arm64-v8a**。
 > Note: early releases shipped 4 ABI-split APKs; since v116 it is a **single package**, and since v2.4.10 the ABI is narrowed to **arm64-v8a**.
@@ -278,6 +278,18 @@ model is cooled down individually while the app rotates to another model in the 
 affiliated with, licensed by or endorsed by OpenRouter; availability, rate limits and pricing of free models
 are set unilaterally by OpenRouter and its upstream providers and may change at any time. Subtitle text is
 sent to OpenRouter and its upstream providers — do not translate sensitive content.
+
+**Index-Translate 翻译（B 站免费 API）**：「字幕在线翻译」的 Index-Translate 引擎调用 **B 站官方免费 API**
+（`index-translate.bilibili.com/v1`，OpenAI 兼容协议，模型 `Index-Translate-35B-A3B`，Apache-2.0 开源），
+无需注册与 API Key。本项目与 **哔哩哔哩 / Index-Translate 团队无关联、未获授权与背书**；
+该免费 API 为**预览性质**、无服务等级承诺，可用性与限流由服务方单方决定、可能随时变化。
+启用该引擎时字幕文本会发送至该服务，请勿翻译敏感内容。
+<br>**Index-Translate translation (Bilibili free API)**: the Index-Translate engine calls **Bilibili's
+official free API** (`index-translate.bilibili.com/v1`, OpenAI-compatible, model
+`Index-Translate-35B-A3B`, open-sourced under Apache-2.0) with no sign-up or API key. This project is
+not affiliated with, licensed by or endorsed by Bilibili / the Index-Translate team; the free API is
+**preview** with no SLA and its availability and rate limits are set unilaterally by the operator and
+may change at any time. Subtitle text is sent to that service — do not translate sensitive content.
 
 完整版见 **[内容与第三方服务声明](docs/CONTENT_AND_SERVICE_DISCLAIMER.md)**，
 第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [NOTICE](NOTICE)。

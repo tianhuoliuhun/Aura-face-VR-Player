@@ -119,21 +119,6 @@
     <string name="audio_normal">通常</string>
     <string name="audio_swapped">左右入れ替え</string>
 
-    <!-- ===== Huawei VR Glass（VR Engine）===== -->
-    <string name="huawei_vr_enable">Huawei VR Glass（VR Engine）</string>
-    <string name="huawei_vr_enable_desc">Huawei VR ランタイム経由で出力。グラス接続後、VR 入口から起動してください</string>
-    <string name="huawei_vr_render_scale">Huawei VR レンダリング解像度</string>
-    <string name="huawei_vr_render_scale_desc">グラス推奨解像度（片眼 1552×1552）に対する比率。画質重視なら 100%、発熱やコマ落ち時は順に下げてください</string>
-    <string name="huawei_vr_enter">Huawei VR に入る</string>
-    <string name="huawei_vr_enter_desc">VR Glass を接続してからタップ。接続済みなら VR ランチャーを飛ばして直接再生します</string>
-    <string name="huawei_vr_runtime_missing">Huawei VR ランタイムが見つかりません。内蔵の分割画面 VR を使用します</string>
-    <string name="huawei_vr_enter_failed">Huawei VR を起動できませんでした。内蔵の分割画面 VR に戻ります</string>
-    <string name="huawei_vr_ready">Huawei VR ランタイムを検出しました</string>
-    <string name="huawei_vr_runtime_absent">この端末には Huawei VR ランタイムがありません。スイッチは記録のみで、実際は内蔵の分割画面 VR を使用します</string>
-    <string name="huawei_vr_handover">Huawei VR モード：視野角・IPD・頭部トラッキング・分割画面はランタイムが担当するため、以下の設定は反映されません</string>
-    <string name="huawei_vr_prefer_6dof">6DoF コントローラーモードを優先</string>
-    <string name="huawei_vr_prefer_6dof_desc">トラッキングキット未接続の場合は自動的に 3DoF に戻ります。通常利用に影響はありません</string>
-    <string name="huawei_vr_note">Huawei VR モードでは映像はグラス側に表示され、スマートフォンの画面には出ません。フローティングボールと再生コントロールは入る前に準備してください。Home で終了すると再生も終了します。</string>
     <string name="dome_half_crop">180° ドームのソースをクロップ</string>
     <string name="dome_half_left">左半分のみ</string>
     <string name="dome_half_right">右半分のみ</string>
@@ -299,7 +284,6 @@
     <string name="action_view">表示</string>
     <string name="track_dialog_title">音声トラックと字幕トラック</string>
     <string name="track_none">切り替え可能な音声/字幕トラックがありません</string>
-    <string name="huawei_vr_initializing">Huawei VR を初期化中…</string>
     <string name="toast_switched_codec">切り替えました：%1$s</string>
     <string name="subtitle_loaded_toast">字幕を生成して読み込みました：%1$s（%2$d 行）</string>
     <string name="track_subtitle_item">字幕トラック %1$d</string>
@@ -387,6 +371,7 @@
     <string name="beauty_compare_original">美顔スイッチ</string>
     <string name="beauty_compare_desc">美顔は再生画面全体に適用 · オフの間は美顔処理を行いません · スイッチは記憶されます</string>
     <string name="beauty_engine_title">美顔エンジン</string>
+    <string name="beauty_engine_gp_limited">GPUPixel エンジンは肌補正 / 美白 / 小顔 / 目ヂカラに対応。メイクやクマ消しなどの細かい効果は GLSL エンジンに切り替えてください。</string>
     <string name="beauty_engine_glsl">GLSL（内蔵）</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
     <string name="beauty_engine_unavailable">GPUPixel の初期化に失敗しました。GLSL エンジンを維持します</string>
@@ -544,6 +529,7 @@
     <string name="decoder_coming_soon">開発中</string>
     <string name="auto_opt">自動</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
+    <string name="engine_index_translate">Index-Translate（キー不要）</string>
     <string name="engine_bing">Bing 翻訳（非公式）</string>
     <string name="engine_deepseek">DeepSeek API</string>
     <string name="engine_qwen">Qwen</string>
@@ -555,7 +541,7 @@
     <string name="engine_libretranslate">LibreTranslate</string>
     <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google 翻訳（非公式）</string>
-    <string name="engine_local_llm">ローカル AI 翻訳（オフライン）</string>
+    <string name="engine_local_llm">ローカル AI 翻訳（オフライン・未完成、使用しないでください）</string>
     <string name="engine_pollinations">Pollinations（キー不要）</string>
     <string name="translate_mymemory_cooldown">MyMemory の無料枠を使い切りました。約 %1$d 分後に再開します</string>
     <string name="translate_pollinations_cooldown">Pollinations の無料枠がレート制限中です。%1$d 秒後に再開します</string>
@@ -955,6 +941,8 @@
     <string name="danmu_test_hint_no_content">サーバーは応答しましたが有効な内容がありません。このモデルは画像入力に未対応の可能性があります</string>
     <string name="danmu_test_hint_generic">接続に失敗しました</string>
     <string name="danmu_section_runtime">実行パラメータ</string>
+    <string name="local_ai_wip_tag">未完成・使用しないでください</string>
+    <string name="local_ai_wip_warning">⚠️ ローカル AI は未完成のため使用しないでください。モデルのダウンロードや推論が失敗する、あるいは非常に遅くなる可能性があります（CPU 推論は 1 件で数十秒かかることがあります）。当面はクラウド翻訳 / クラウド弾幕をご利用ください。</string>
     <string name="local_model_title">ローカルモデル</string>
     <string name="local_model_desc">ダウンロードすると、オフラインで AI 翻訳と弾幕生成に使えます</string>
     <string name="local_model_download">ダウンロード</string>

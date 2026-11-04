@@ -31,15 +31,12 @@ The app requests **only the permissions required to play local video**; it colle
 | `INTERNET` | 在线翻译、模型下载。仅此一项涉及网络。 / Online translation and model download only. |
 | `READ_MEDIA_VIDEO`（Android 13+）/ `READ_EXTERNAL_STORAGE`（≤Android 12） | 选择要播放的本地视频文件。 / Selecting local video files to play. |
 | `org.khronos.openxr.permission.OPENXR` | 在 VR 头显上运行。 / Running on VR headsets. |
-| `com.huawei.android.permission.VR`、`com.huawei.vrhandle.permission.DEVICE_MANAGER` | 华为 VR Glass 手柄发现与交互。 / Huawei VR Glass controller discovery. |
 
 ### 关于「获取应用列表」提示 / About the app-list permission prompt
 
 应用商店会把 Android 的 `<queries>` 包可见性声明显示为「获取应用列表」，
 但本应用**并未扫描用户装了什么应用** —— 它是**精确列举**了几个必需的系统服务：
 
-- `com.huawei.vrhandle` / `com.huawei.hvrsdkserverapp` —— 华为 VR Glass 手柄与运行时
-- `com.huawei.android.vr.PROMPT` —— 华为 VR 接入提示
 - `org.khronos.openxr.OpenXRRuntimeService` —— 标准 OpenXR 运行时发现
 
 Android 11+ 若删掉这些声明，VR 设备上将**搜不到手柄、找不到 OpenXR 运行时**，因此必须保留。

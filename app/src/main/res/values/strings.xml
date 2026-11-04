@@ -130,20 +130,6 @@
     <string name="audio_swapped">声道反转</string>
 
     <!-- ===== 华为 VR Glass（VR Engine）===== -->
-    <string name="huawei_vr_enable">华为 VR Glass（VR Engine）</string>
-    <string name="huawei_vr_enable_desc">通过华为 VR 运行时输出到 VR Glass；开启后需连接眼镜并从 VR 入口进入</string>
-    <string name="huawei_vr_render_scale">华为 VR 渲染分辨率</string>
-    <string name="huawei_vr_render_scale_desc">相对眼镜推荐分辨率（每眼 1552×1552）的比例。画质优先选 100%，发热掉帧时依次下调</string>
-    <string name="huawei_vr_enter">进入华为 VR</string>
-    <string name="huawei_vr_enter_desc">插入 VR Glass 后点击；已连接眼镜时会跳过 VR 桌面直接进入播放</string>
-    <string name="huawei_vr_runtime_missing">未检测到华为 VR 运行时，将使用内置分屏 VR</string>
-    <string name="huawei_vr_enter_failed">无法启动华为 VR，已回退到内置分屏 VR</string>
-    <string name="huawei_vr_ready">已检测到华为 VR 运行时</string>
-    <string name="huawei_vr_runtime_absent">当前设备无华为 VR 运行时，开关仅作记录，实际仍走内置分屏 VR</string>
-    <string name="huawei_vr_handover">华为 VR 模式：视场角、瞳距、陀螺仪、分屏由 Runtime 接管，下列设置不再生效</string>
-    <string name="huawei_vr_prefer_6dof">优先 6DoF 手柄模式</string>
-    <string name="huawei_vr_prefer_6dof_desc">眼镜未配对定位套件时会自动退回 3DoF，不影响使用</string>
-    <string name="huawei_vr_note">华为 VR 模式下画面由眼镜直接呈现，手机屏幕不再显示画面，悬浮球与播控条需在进入前准备好。按 Home 退出会结束播放。</string>
 
     <!-- ===== batch ===== -->
     <string name="dome_half_crop">180°穹幕源画面裁剪</string>
@@ -315,7 +301,6 @@
     <string name="action_view">查看</string>
     <string name="track_dialog_title">音轨与字幕轨</string>
     <string name="track_none">当前媒体没有可切换的音轨/字幕轨</string>
-    <string name="huawei_vr_initializing">华为 VR 初始化中…</string>
     <string name="toast_switched_codec">已切换为：%1$s</string>
     <string name="subtitle_loaded_toast">字幕已生成并加载：%1$s（%2$d 句）</string>
     <string name="track_subtitle_item">字幕 %1$d</string>
@@ -409,6 +394,7 @@
     <string name="beauty_compare_original">美颜开关</string>
     <string name="beauty_compare_desc">美颜对整个播放画面生效 · 关闭后不做任何美颜处理 · 状态自动记忆</string>
     <string name="beauty_engine_title">美颜方案</string>
+    <string name="beauty_engine_gp_limited">GPUPixel 引擎支持磨皮 / 美白 / 瘦脸 / 大眼；妆容、去黑眼圈、瘦鼻等精细项请切换到 GLSL 引擎。</string>
     <string name="beauty_engine_glsl">GLSL（内置）</string>
     <string name="beauty_engine_gpupixel">GPUPixel</string>
     <string name="beauty_engine_unavailable">GPUPixel 初始化失败，已保持 GLSL 引擎</string>
@@ -576,6 +562,7 @@
     <string name="decoder_coming_soon">开发中</string>
     <string name="auto_opt">自动</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
+    <string name="engine_index_translate">Index-Translate（免密）</string>
     <string name="engine_bing">必应翻译（非官方）</string>
     <string name="engine_deepseek">DeepSeek API</string>
     <string name="engine_qwen">通义千问</string>
@@ -587,7 +574,7 @@
     <string name="engine_libretranslate">LibreTranslate</string>
     <string name="engine_deepl">DeepL</string>
     <string name="engine_google_free">Google 翻译（非官方）</string>
-    <string name="engine_local_llm">本地 AI 翻译（离线）</string>
+    <string name="engine_local_llm">本地 AI 翻译（离线 · 未完成，请勿使用）</string>
     <string name="engine_pollinations">Pollinations（免密）</string>
     <string name="translate_mymemory_cooldown">MyMemory 已达免费额度，约 %1$d 分钟后自动恢复</string>
     <string name="translate_pollinations_cooldown">Pollinations 免费层限流，%1$d 秒后自动恢复</string>
@@ -988,6 +975,8 @@
     <string name="danmu_test_hint_no_content">服务端已响应但没有可用内容，该模型可能不支持图片输入</string>
     <string name="danmu_test_hint_generic">连接失败</string>
     <string name="danmu_section_runtime">运行参数</string>
+    <string name="local_ai_wip_tag">未完成 · 请勿使用</string>
+    <string name="local_ai_wip_warning">⚠️ 本地 AI 尚未完成，请勿使用：模型下载与推理可能失败，或慢到无法接受（CPU 推理单条可达数十秒）。请暂用云端翻译 / 云端弹幕。</string>
     <string name="local_model_title">本地模型</string>
     <string name="local_model_desc">下载后可用于本地 AI 翻译与本地弹幕生成，全程不联网</string>
     <string name="local_model_download">下载</string>

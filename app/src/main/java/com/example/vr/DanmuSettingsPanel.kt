@@ -532,12 +532,28 @@ fun DanmuSettingsPanel(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.danmu_use_local_llm),
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                // v2.6.22（用户要求）：本地 AI 标记「未完成，请勿使用」（橙色小标签）
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.danmu_use_local_llm),
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0x33E0A030), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.local_ai_wip_tag),
+                            color = Color(0xFFE0A030),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
                 Text(
                     text = stringResource(R.string.danmu_use_local_llm_desc),
                     color = Color.White.copy(alpha = 0.45f),
