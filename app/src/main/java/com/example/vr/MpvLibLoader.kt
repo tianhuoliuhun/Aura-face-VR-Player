@@ -60,13 +60,23 @@ object MpvLibLoader {
     private const val TAG = "MpvLibLoader"
 
     /**
-     * 下载源：**独立 tag 的 Release**（tag 固定为 `mpv-libs`，不随版本号变）。
+     * 下载源：**仓库内的 `mpv-libs/` 目录**（raw 直链，走 `main` 分支）。
      *
-     * ⚠️ 刻意不写成 `<最新版本 tag>`：否则每次发版都要改代码里的 URL，
-     *    一旦忘记改就会 404。放在一个固定 tag 下，资源地址永久有效。
+     * 🔴 v2.6.22（用户要求「依赖包挪到仓库里，不要挂在构建里」）：
+     *   此前这两个 zip 挂在 **tag 为 `mpv-libs` 的 Release** 上，占 30.9 MB 的 Release 附件；
+     *   现改为随源码进仓库（`<repo>/mpv-libs/mpv-libs-<abi>.zip`），Release 侧已删除。
+     *
+     * ⚠️ 为什么仍用 `main` 分支的 raw 直链、而不是把 so 打进 APK 就完事：
+     *   MPV 的 10 个 so **本来就已内置 APK**（`System.loadLibrary(短名)` 是首选路径，
+     *   见 [ensureLoaded]），这里的下载只是**极少数情况下的兜底**
+     *   （例如某个 ABI 包因 packaging 配置变动漏了 so）。兜底仍需要一个可下载的地址。
+     *
+     * ⚠️ raw 直链的两个约束（换地址时注意）：
+     *   ① 单文件 ≤ 100 MB（当前 15~17 MB，安全）；
+     *   ② 走 `main` 分支 → **改这两个 zip 必须推 main 才生效**，改完记得验一次下载。
      */
     private const val BASE_URL =
-        "https://github.com/tianhuoliuhun/Aura-face-VR-Player/releases/download/mpv-libs/"
+        "https://raw.githubusercontent.com/tianhuoliuhun/Aura-face-VR-Player/main/mpv-libs/"
 
     /** 下载文件名：mpv-libs-<abi>.zip */
     private fun zipNameFor(abi: String) = "mpv-libs-$abi.zip"

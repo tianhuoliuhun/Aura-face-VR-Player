@@ -103,9 +103,10 @@ android {
       //   1. 查实 WMV/RM 这类格式**只有 MPV 能解**（IJK 裁剪版无对应解码器、
       //      EXO 无 ASF/RealMedia 解析器）→ MPV 从"可选内核"变成"兜底必需"，
       //      再让用户先下载 36MB 才能播一个 WMV，体验上不可接受；
-      //   2. 后下载模式依赖固定 tag `mpv-libs` 的 Release 可达性与下载成功率，
-      //      多一条失败路径；内置后 `dlopen` 直接走 APK 的 nativeLibraryDir
-      //      （Android 白名单路径），最稳。
+      //   2. 后下载模式依赖远端下载源的可达性与成功率，多一条失败路径；
+      //      内置后 `dlopen` 直接走 APK 的 nativeLibraryDir（Android 白名单路径），最稳。
+      //      （v2.6.22 起该下载源从 tag `mpv-libs` 的 Release 迁到仓库 `mpv-libs/` 目录，
+      //        见 `MpvLibLoader.BASE_URL` 与 `mpv-libs/README.md`。）
       //
       // 代价：APK 体积增大（arm64 的 MPV so 展开约 36MB）。
       // 这是明确的取舍：**用体积换"任何格式开箱即播"**。
