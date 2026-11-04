@@ -19,13 +19,20 @@ package com.example.vr
 object DanmuSubtitleSnippet {
 
     /**
-     * 取出 `positionMs` 附近的台词，拼成一段纯文本。
+     * 取出 `positionMs` 附近的台词，拼成一段文本。
+     *
+     * v2.6.23（用户要求「AI 弹幕链路同时获得字幕的原稿和翻译」）：新增 [translationOf] ——
+     * 每条台词若能查到译文，就拼成「原文\n译文」两行（`SubtitleCue.text` 恒为原文，
+     * 译文在翻译缓存里，由调用方以 lambda 注入查询，本函数保持纯函数可单测）。
+     * 无译文或译文 == 原文时退回纯原文，行为与旧版完全一致。
      *
      * @param cues        全部已生成的台词（可为空）
      * @param positionMs  当前播放位置（ms）
      * @param windowBeforeMs 向前取多久（默认 [DanmuConfig.SUBTITLE_WINDOW_BEFORE_MS]）
      * @param windowAfterMs  向后取多久（默认 [DanmuConfig.SUBTITLE_WINDOW_AFTER_MS]）
-     * @param maxChars    结果字符上限（超出则保留**靠后**的部分 —— 越近的台词越相关）
+     * @param maxChars    结果字符上限（超出则保留**靠后**的部分 —— 越近的台词越相关；
+     *                    双语模式下调用方应适当调大，如 `SUBTITLE_TEXT_MAX_CHARS * 2`）
+     * @param translationOf 原文 → 译文 的只读查询（默认不查 = 纯原文模式）
      * @return 拼好的台词文本；无可用台词时返回**空串**（调用方据此判断"没素材"）
      */
     fun extract(
@@ -33,7 +40,8 @@ object DanmuSubtitleSnippet {
         positionMs: Long,
         windowBeforeMs: Long = DanmuConfig.SUBTITLE_WINDOW_BEFORE_MS,
         windowAfterMs: Long = DanmuConfig.SUBTITLE_WINDOW_AFTER_MS,
-        maxChars: Int = DanmuConfig.SUBTITLE_TEXT_MAX_CHARS
+        maxChars: Int = DanmuConfig.SUBTITLE_TEXT_MAX_CHARS,
+        translationOf: (String) -> String? = { null }
     ): String {
         if (cues.isEmpty()) return ""
         if (maxChars <= 0) return ""
@@ -64,11 +72,18 @@ object DanmuSubtitleSnippet {
         val parts = ArrayDeque<String>(picked.size)
         for (cue in picked) {
             val t = cue.text.trim().replace('\n', ' ')
-            if (t.isNotEmpty()) parts.addLast(t)
+            if (t.isEmpty()) continue
+            // 双语：译文独立成行（原文在前），便于 LLM 分辨两种语言；
+            // 查不到译文 / 译文与原文相同（未翻译的目标语言）时退回纯原文
+            val tr = runCatching { translationOf(t) }.getOrNull()?.trim()
+                ?.replace('\n', ' ')
+            val block = if (tr.isNullOrBlank() || tr == t) t else "$t\n$tr"
+            parts.addLast(block)
         }
         if (parts.isEmpty()) return ""
 
         // 从尾部往前累加，保证「越近的台词一定保留」
+        // （cost 按拼好后的实际长度算，双语块自然比单语贵，无需特判）
         val out = ArrayList<String>(parts.size)
         var total = 0
         var i = parts.size - 1

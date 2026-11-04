@@ -740,7 +740,8 @@ fun VRPlayerScreen(
                 targetLanguage = targetLang,
                 apiKey = prefs.getString("translate_api_key", "") ?: "",
                 baseUrl = prefs.getString("translate_base_url", "") ?: "",
-                modelName = prefs.getString("translate_model_name", "") ?: ""
+                modelName = prefs.getString("translate_model_name", "") ?: "",
+                glossary = prefs.getString("translate_glossary", "") ?: ""
             )
         }
         translatorSettingsRestored = true
@@ -754,7 +755,8 @@ fun VRPlayerScreen(
         subtitleTranslator.config.targetLanguage,
         subtitleTranslator.config.apiKey,
         subtitleTranslator.config.baseUrl,
-        subtitleTranslator.config.modelName
+        subtitleTranslator.config.modelName,
+        subtitleTranslator.config.glossary
     ) {
         if (!translatorSettingsRestored) return@LaunchedEffect
         prefs.edit().apply {
@@ -765,6 +767,7 @@ fun VRPlayerScreen(
                 putString("translate_api_key", subtitleTranslator.config.apiKey)
                 putString("translate_base_url", subtitleTranslator.config.baseUrl)
                 putString("translate_model_name", subtitleTranslator.config.modelName)
+                putString("translate_glossary", subtitleTranslator.config.glossary)
             } else {
                 remove("translate_engine_id")
                 remove("translate_display_mode_id")
@@ -772,6 +775,7 @@ fun VRPlayerScreen(
                 remove("translate_api_key")
                 remove("translate_base_url")
                 remove("translate_model_name")
+                remove("translate_glossary")
             }
             apply()
         }
@@ -2268,7 +2272,15 @@ fun VRPlayerScreen(
                 //       在「仅台词」模式下就变成"没有素材"，用专门的错误文案提示，便于用户理解。
                 val subtitleText = if (danmuConfig.needsSubtitle) {
                     val cues = if (isRealtimeSubtitleEnabled) realtimeCues else loadedSubtitleCues
-                    DanmuSubtitleSnippet.extract(cues, currentPositionMs)
+                    // v2.6.23（用户要求「AI 弹幕链路同时获得字幕的原稿和翻译」）：
+                    // 每条台词拼「原文\n译文」—— 译文从翻译缓存只读查询（peekTranslation，不触发网络），
+                    // 查不到就退回纯原文；双语后字数上限翻倍，保持可覆盖的台词时长不变。
+                    DanmuSubtitleSnippet.extract(
+                        cues = cues,
+                        positionMs = currentPositionMs,
+                        maxChars = DanmuConfig.SUBTITLE_TEXT_MAX_CHARS * 2,
+                        translationOf = { src -> subtitleTranslator.peekTranslation(src) }
+                    )
                 } else {
                     ""
                 }

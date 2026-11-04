@@ -176,6 +176,13 @@ fun SubtitleOverlay(
     val activeCueText =
         if (stripPunctuation) SubtitlePunctuation.strip(mergedCueText) else mergedCueText
 
+    // v2.6.23（simul-subtitle 可移植清单 #3）：文本切换时 160ms 淡入 ——
+    // 配合下方 AnchoredSubtitleBox 的 animateContentSize，cue 切换不再“吧”地跳变。
+    val appear = remember(activeCueText) { Animatable(0f) }
+    LaunchedEffect(activeCueText) {
+        appear.animateTo(1f, tween(160, easing = FastOutSlowInEasing))
+    }
+
     // In bilingual mode the output is "source block + translated block", so the
     // translated block keeps exactly as many lines as the source.
     val isBilingual = translator != null && translator.config.isEnabled &&
@@ -189,12 +196,12 @@ fun SubtitleOverlay(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = BiasAlignment(
-                    horizontalBias = ((offsetXRatio + vrIpdOffsetRatio) * 2.2f).coerceIn(-0.95f, 0.95f),
-                    verticalBias = verticalBias
-                )
+                    .fillMaxHeight()
             ) {
+                AnchoredSubtitleBox(
+                    hBias = ((offsetXRatio + vrIpdOffsetRatio) * 2.2f).coerceIn(-0.95f, 0.95f),
+                    verticalBias = verticalBias
+                ) {
                 SubtitledText(
                     text = activeCueText,
                     fontFamily = fontFamily,
@@ -202,7 +209,7 @@ fun SubtitleOverlay(
                     fontWeightVal = fontWeightVal,
                     isItalic = isItalic,
                     textColor = textColor,
-                    textAlpha = textAlpha,
+                    textAlpha = textAlpha * appear.value,
                     strokeColor = strokeOption.strokeColor,
                     strokeWidthDp = strokeOption.widthDp,
                     backgroundColor = bgOption.bgColor,
@@ -211,18 +218,19 @@ fun SubtitleOverlay(
                     maxLines = effectiveMaxLines,
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
+                }
             }
 
             // Right Eye Viewport
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = BiasAlignment(
-                    horizontalBias = ((offsetXRatio - vrIpdOffsetRatio) * 2.2f).coerceIn(-0.95f, 0.95f),
-                    verticalBias = verticalBias
-                )
+                    .fillMaxHeight()
             ) {
+                AnchoredSubtitleBox(
+                    hBias = ((offsetXRatio - vrIpdOffsetRatio) * 2.2f).coerceIn(-0.95f, 0.95f),
+                    verticalBias = verticalBias
+                ) {
                 SubtitledText(
                     text = activeCueText,
                     fontFamily = fontFamily,
@@ -230,7 +238,7 @@ fun SubtitleOverlay(
                     fontWeightVal = fontWeightVal,
                     isItalic = isItalic,
                     textColor = textColor,
-                    textAlpha = textAlpha,
+                    textAlpha = textAlpha * appear.value,
                     strokeColor = strokeOption.strokeColor,
                     strokeWidthDp = strokeOption.widthDp,
                     backgroundColor = bgOption.bgColor,
@@ -239,16 +247,15 @@ fun SubtitleOverlay(
                     maxLines = effectiveMaxLines,
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
+                }
             }
         }
     } else {
         // Flat Mode (Standard Single Screen)
-        Box(
-            modifier = modifier.fillMaxSize(),
-            contentAlignment = BiasAlignment(
-                horizontalBias = (offsetXRatio * 2.2f).coerceIn(-0.95f, 0.95f),
-                verticalBias = verticalBias
-            )
+        AnchoredSubtitleBox(
+            hBias = (offsetXRatio * 2.2f).coerceIn(-0.95f, 0.95f),
+            verticalBias = verticalBias,
+            modifier = modifier
         ) {
             SubtitledText(
                 text = activeCueText,
@@ -257,7 +264,7 @@ fun SubtitleOverlay(
                 fontWeightVal = fontWeightVal,
                 isItalic = isItalic,
                 textColor = textColor,
-                textAlpha = textAlpha,
+                textAlpha = textAlpha * appear.value,
                 strokeColor = strokeOption.strokeColor,
                 strokeWidthDp = strokeOption.widthDp,
                 backgroundColor = bgOption.bgColor,
@@ -266,6 +273,46 @@ fun SubtitleOverlay(
                 maxLines = effectiveMaxLines,
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
+        }
+    }
+}
+/**
+ * v2.6.23（simul-subtitle 可移植清单 #3）：**边缘锚定 + 平滑过渡**的字幕容器。
+ *
+ * 旧布局用 BiasAlignment 锚定块**中心** —— 行数一变（单行↔双语两行、cue 换行数不同）
+ * 整块上下跳。本容器改为锚定**边缘**：偏下（verticalBias ≥ 0）时底边固定、向上生长，
+ * 偏上时顶边固定、向下生长（simul-subtitle 的方案：正在读的行不被挤走）。
+ *
+ * 位置语义微调：锚边落在「旧中心位置」，字幕整体比旧版向屏幕边移约半块高（更像常规播放器）。
+ * 高度变化走 200ms animateContentSize，文本切换另有 160ms 淡入（见调用侧 appear）。
+ */
+@Composable
+private fun AnchoredSubtitleBox(
+    hBias: Float,
+    verticalBias: Float,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val containerH = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val vB = verticalBias.coerceIn(-0.95f, 0.95f)
+        // 旧版「中心」所在 y（BiasAlignment 语义）：y = H * (1 + bias) / 2
+        val yCenter = containerH * (1f + vB) / 2f
+        val anchorBottom = vB >= 0f
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    bottom = if (anchorBottom) with(density) { (containerH - yCenter).toDp() } else 0.dp,
+                    top = if (anchorBottom) 0.dp else with(density) { yCenter.toDp() }
+                ),
+            contentAlignment = BiasAlignment(
+                horizontalBias = hBias.coerceIn(-0.95f, 0.95f),
+                verticalBias = if (anchorBottom) 1f else -1f
+            )
+        ) {
+            content()
         }
     }
 }

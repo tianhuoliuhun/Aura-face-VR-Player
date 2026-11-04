@@ -572,6 +572,8 @@
     <string name="decoder_coming_soon">開發中</string>
     <string name="auto_opt">自動</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
+    <string name="translate_glossary_label">術語表（可選）</string>
+    <string name="translate_glossary_hint">每行一條：原文→譯文  例：碳纖維→carbon fiber</string>
     <string name="engine_index_translate">Index-Translate（免密）</string>
     <string name="engine_bing">必應翻譯（非官方）</string>
     <string name="engine_deepseek">DeepSeek API</string>

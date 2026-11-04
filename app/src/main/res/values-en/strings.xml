@@ -562,6 +562,8 @@
     <string name="decoder_coming_soon">Coming soon</string>
     <string name="auto_opt">Auto</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
+    <string name="translate_glossary_label">Glossary (optional)</string>
+    <string name="translate_glossary_hint">One per line: source→translation, e.g. carbon fiber→碳纤维</string>
     <string name="engine_index_translate">Index-Translate (keyless)</string>
     <string name="engine_bing">Bing Translate (unofficial)</string>
     <string name="engine_deepseek">DeepSeek API</string>

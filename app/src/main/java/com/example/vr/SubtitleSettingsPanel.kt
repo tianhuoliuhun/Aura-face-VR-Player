@@ -798,6 +798,40 @@ fun SubtitleSettingsPanel(
                         }
                     }
 
+                    // v2.6.23（simul-subtitle 可移植清单 #4）：术语表 —— 多行「原文→译文」，
+                    // 非空时拼进 LLM 引擎的 system prompt（Index-Translate / OpenAI 兼容引擎生效；
+                    // Reverso / Bing 等专用协议引擎没有提示词概念，填了也不起作用）。
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.translate_glossary_label),
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 10.sp
+                        )
+                        OutlinedTextField(
+                            value = translator.config.glossary,
+                            onValueChange = { v ->
+                                translator.config = translator.config.copy(glossary = v)
+                                onUserActivity()
+                            },
+                            placeholder = {
+                                Text(
+                                    stringResource(R.string.translate_glossary_hint),
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.35f)
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(72.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = accentColor,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+                    }
+
                     // v2.4.12：**选中本地 LLM 引擎时才显示模型下载区**。
                     // ⚠️ 刻意不做成常显：其它引擎用不到它，常显会让面板变长，
                     //    还会让人误以为"必须下载这个模型才能翻译"。

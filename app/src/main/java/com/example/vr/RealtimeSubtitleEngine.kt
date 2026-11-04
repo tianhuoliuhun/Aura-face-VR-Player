@@ -928,7 +928,15 @@ class SherpaSegmentRecognizer(
     override fun recognize(samples: FloatArray): String {
         val stream = recognizer.createStream()
         return try {
-            stream.acceptWaveform(samples, 16000)
+            // v2.6.23（simul-subtitle 可移植清单 #2）：**首尾各补 0.3s 静音**再送识别。
+            // ReazonSpeech 实测「有效语音从第 0 个采样点直接开始会吞掉句首第一个词」——
+            // sherpa-onnx 系离线模型的通病（Dolphin/SenseVoice 未专门验证，补静音零风险）。
+            val pad = FloatArray(4800) // 0.3s @ 16kHz
+            val padded = FloatArray(pad.size * 2 + samples.size)
+            System.arraycopy(pad, 0, padded, 0, pad.size)
+            System.arraycopy(samples, 0, padded, pad.size, samples.size)
+            System.arraycopy(pad, 0, padded, pad.size + samples.size, pad.size)
+            stream.acceptWaveform(padded, 16000)
             recognizer.decode(stream)
             sanitizeAsrText(recognizer.getResult(stream).text)
         } finally {

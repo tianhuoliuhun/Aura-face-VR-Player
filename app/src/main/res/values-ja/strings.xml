@@ -529,6 +529,8 @@
     <string name="decoder_coming_soon">開発中</string>
     <string name="auto_opt">自動</string>
     <!-- ===== i18n: 设置面板硬编码中文迁移 (v2.0.138) ===== -->
+    <string name="translate_glossary_label">用語集（任意）</string>
+    <string name="translate_glossary_hint">1 行 1 件：原文→訳語（例：店長→店长）</string>
     <string name="engine_index_translate">Index-Translate（キー不要）</string>
     <string name="engine_bing">Bing 翻訳（非公式）</string>
     <string name="engine_deepseek">DeepSeek API</string>

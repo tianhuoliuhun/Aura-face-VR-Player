@@ -301,7 +301,13 @@ data class TranslationConfig(
     val targetLanguage: TranslationTargetLanguage = TranslationTargetLanguage.ZH,
     val apiKey: String = "",
     val baseUrl: String = "",
-    val modelName: String = ""
+    val modelName: String = "",
+    /**
+     * v2.6.23（simul-subtitle 可移植清单 #4）：**术语表**，多行文本，每行「原文→译文」
+     * （也接受 `:`/`=` 分隔）。非空时拼进 LLM 引擎的 system prompt（前缀缓存友好：
+     * 固定内容全在 system，句间可复用）。对专用协议引擎（Reverso/Bing 等）无效。
+     */
+    val glossary: String = ""
 )
 
 class SubtitleTranslator(private val context: Context) {
@@ -519,6 +525,28 @@ class SubtitleTranslator(private val context: Context) {
                 best == cyrillic -> "rus"
                 else -> "chi"
             }
+        }
+
+        /**
+         * v2.6.23（simul-subtitle 可移植清单 #4）：把多行术语表文本整理成提示词块（纯函数）。
+         *
+         * 每行「原文→译文」（也接受 `:` / `=` / Tab 分隔）；空行与无分隔符的行忽略；
+         * 输出形如 `- 碳纤维 -> carbon fiber`。整体为空时返回空串（调用方不拼块）。
+         */
+        fun buildGlossaryPrompt(glossaryText: String): String {
+            if (glossaryText.isBlank()) return ""
+            val out = StringBuilder()
+            for (rawLine in glossaryText.lineSequence()) {
+                val line = rawLine.trim()
+                if (line.isEmpty()) continue
+                val sepIdx = line.indexOfFirst { it == '→' || it == ':' || it == '=' || it == '\t' }
+                if (sepIdx <= 0) continue
+                val src = line.substring(0, sepIdx).trim()
+                val dst = line.substring(sepIdx + 1).trim().removePrefix("→").trim()
+                if (src.isEmpty() || dst.isEmpty()) continue
+                out.append("- ").append(src).append(" -> ").append(dst).append('\n')
+            }
+            return out.toString().trimEnd()
         }
 
         // ===== v2.4.8：缓存 key 归一化（纯函数，放 companion 便于单测）=====
@@ -1095,6 +1123,18 @@ class SubtitleTranslator(private val context: Context) {
      */
     private fun makeCacheKey(targetLang: String, text: String): String =
         normalizeCacheKey(targetLang + ":" + text)
+
+    /**
+     * v2.6.23：**只读**查询译文缓存（不触发网络请求、不写缓存）。
+     *
+     * 用途：AI 弹幕链路（`DanmuSubtitleSnippet`）拿「原文 + 译文」双语素材 ——
+     * `SubtitleCue.text` 恒为原文，译文只存在于本缓存（字幕显示层也是这样取的）。
+     * 未命中返回 `null`，调用方退回只用原文。
+     */
+    fun peekTranslation(sourceText: String): String? {
+        val key = makeCacheKey(config.targetLanguage.code, sourceText)
+        return translationCache[key]?.takeIf { it.isNotBlank() }
+    }
 
     /**
      * 对**已拼好的 key** 归一化（形如 `zh:文本`）。
@@ -1751,6 +1791,134 @@ class SubtitleTranslator(private val context: Context) {
         }
     }
 
+    // ===== v2.6.23（simul-subtitle 可移植清单 #5）：关闭思考（Reasoning）参数自动探测 =====
+
+    /**
+     * 对某个 jsonBody 施加第 [idx] 档「关思考」参数。
+     * 档位顺序即 simul-subtitle 实测的探测顺序（各家服务商字段不统一）：
+     * 0 `thinking:{type:disabled}`（DeepSeek/GLM/豆包）、1 `chat_template_kwargs`（vLLM/SGLang Qwen3）、
+     * 2 `enable_thinking:false`（SiliconFlow/百炼）、3 `reasoning:{enabled:false}`（OpenRouter）、
+     * 4 `reasoning_effort:"none"`（OpenAI 推理模型/Gemini 兼容口）、5 `reasoning_effort:"minimal"`+提示词（Gemma）、
+     * 6 不加参数。
+     */
+    private fun applyThinkingVariant(body: JSONObject, idx: Int) {
+        when (idx) {
+            0 -> body.put("thinking", JSONObject().put("type", "disabled"))
+            1 -> body.put(
+                "chat_template_kwargs",
+                JSONObject().put("enable_thinking", false).put("thinking", false)
+            )
+            2 -> body.put("enable_thinking", false)
+            3 -> body.put("reasoning", JSONObject().put("enabled", false))
+            4 -> body.put("reasoning_effort", "none")
+            5 -> body.put("reasoning_effort", "minimal")
+            // 6：不加
+        }
+    }
+
+    /** 响应里是否仍带思考痕迹：`reasoning*` 字段 / think 标签 / usage.reasoning_tokens > 0。 */
+    private fun looksLikeThinking(root: JSONObject, content: String): Boolean {
+        val msg = root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+        if (msg != null) {
+            if (msg.optString("reasoning").isNotBlank()) return true
+            if (msg.optString("reasoning_content").isNotBlank()) return true
+        }
+        if (Regex("(?s)<[^>]*think[^>]*>").containsMatchIn(content)) return true
+        val rt = root.optJSONObject("usage")
+            ?.optJSONObject("completion_tokens_details")
+            ?.optInt("reasoning_tokens", 0) ?: 0
+        return rt > 0
+    }
+
+    /**
+     * 试单档关思考参数。
+     * @return true=正常返回且无思考痕迹；false=本档无效（400/5xx/空译文/仍有思考）；null=硬中止（Key/网络异常）
+     */
+    private fun tryThinkingVariant(
+        baseUrl: String,
+        model: String,
+        apiKey: String,
+        langName: String,
+        idx: Int
+    ): Boolean? {
+        val body = JSONObject().apply {
+            put("model", model)
+            put("temperature", 0.2)
+            put("messages", JSONArray().apply {
+                put(
+                    JSONObject().put("role", "system").put(
+                        "content",
+                        "You are a translator. Translate into $langName. Output ONLY the translation." +
+                            if (idx == 5) " Do not think. Output directly." else ""
+                    )
+                )
+                put(JSONObject().put("role", "user").put("content", "你好"))
+            })
+            if (idx in 0..5) applyThinkingVariant(this, idx)
+        }
+        val rb = Request.Builder().url(baseUrl).addHeader("Content-Type", "application/json")
+        if (apiKey.isNotBlank()) rb.addHeader("Authorization", "Bearer $apiKey")
+        if (config.engine == TranslationEngine.INDEX_TRANSLATE) {
+            rb.addHeader("User-Agent", "Index-Translate-Client/1.0")
+        }
+        return try {
+            httpClient.newCall(
+                rb.post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+            ).execute().use { resp ->
+                when (resp.code) {
+                    401, 403, 404, 429 -> null
+                    in 500..599 -> false
+                    else -> {
+                        if (!resp.isSuccessful) return@use false // 400：参数不被接受
+                        val str = resp.body?.string() ?: return@use false
+                        val root = JSONObject(str)
+                        val content = root.optJSONArray("choices")?.optJSONObject(0)
+                            ?.optJSONObject("message")?.optString("content")?.trim() ?: ""
+                        if (content.isEmpty() || looksLikeThinking(root, content)) false else true
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 依次试 7 档，返回命中的档位索引；全部有思考痕迹返回 6（不加参数，仍可用）；
+     * Key 错误/网络异常返回 null（不缓存，下次重试）。
+     */
+    private fun probeThinkingOff(baseUrl: String, model: String, apiKey: String, langName: String): Int? {
+        for (idx in 0..6) {
+            when (tryThinkingVariant(baseUrl, model, apiKey, langName, idx)) {
+                true -> return idx
+                null -> return null
+                false -> Unit
+            }
+        }
+        return 6
+    }
+
+    private fun thinkProbePrefs() =
+        context.getSharedPreferences("translate_think_probe", android.content.Context.MODE_PRIVATE)
+
+    private fun cachedThinkingIndex(baseUrl: String, model: String): Int? =
+        thinkProbePrefs().getInt("idx|$baseUrl|$model", -1).takeIf { it >= 0 }
+
+    private fun cacheThinkingIndex(baseUrl: String, model: String, idx: Int) {
+        thinkProbePrefs().edit().putInt("idx|$baseUrl|$model", idx).apply()
+    }
+
+    /** 剥离思考标签/围栏（纵深防御：正常响应 content 不含这些）。 */
+    private fun stripThinkingArtifacts(raw: String): String {
+        var t = raw.trim()
+        t = t.replace(Regex("(?s)<[^>]*think[^>]*>.*?</[^>]*think[^>]*>"), " ").trim()
+        if (t.startsWith("```")) {
+            t = t.substringAfter('\n').substringBeforeLast("```").trim()
+        }
+        return t.ifEmpty { raw }
+    }
+
     /**
      * v2.6.23：**Index-Translate** 免费 API（B 站开源翻译模型，OpenAI 兼容协议）。
      *
@@ -1795,7 +1963,23 @@ class SubtitleTranslator(private val context: Context) {
         val model = getActiveModel()
         val langName = config.targetLanguage.displayName
 
-        val systemPrompt = "You are an expert subtitle translator. Translate the given video subtitle text accurately into $langName. Output ONLY the translated text without explanations, quotes, or markdown formatting."
+        // v2.6.23（可移植清单 #5）：关思考参数探测（缓存「地址+模型」，只探一次）
+        val probeIdx = cachedThinkingIndex(baseUrl, model)
+            ?: probeThinkingOff(baseUrl, model, apiKey, langName)
+                ?.also { cacheThinkingIndex(baseUrl, model, it) }
+
+        val systemPrompt = buildString {
+            append("You are an expert subtitle translator. Translate the given video subtitle text accurately into $langName. Output ONLY the translated text without explanations, quotes, or markdown formatting.")
+            // v2.6.23（可移植清单 #4）：术语表注入 system（固定内容前置，服务端前缀缓存友好）
+            val gl = buildGlossaryPrompt(config.glossary)
+            if (gl.isNotEmpty()) {
+                append("\n\nStrictly follow this glossary for these terms (do not translate them any other way):\n")
+                append(gl)
+            }
+            if (probeIdx == 5) {
+                append("\n\nDo not think. Output the translation directly.")
+            }
+        }
 
         val jsonBody = JSONObject().apply {
             put("model", model)
@@ -1813,9 +1997,20 @@ class SubtitleTranslator(private val context: Context) {
             })
         }
 
-        val request = Request.Builder()
-            .url(baseUrl)
-            .addHeader("Authorization", "Bearer $apiKey")
+        if (probeIdx != null && probeIdx in 0..5) applyThinkingVariant(jsonBody, probeIdx)
+
+        val requestBuilder = Request.Builder().url(baseUrl)
+        // v2.6.23（simul-subtitle 可移植清单 #1）：**空 Key 不发 Authorization 头** ——
+        // 无鉴权服务（Index-Translate 免密 API 等）发空 Bearer 反而可能被个别网关 401。
+        if (apiKey.isNotBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+        }
+        // v2.6.23：Index-Translate 的公网防火墙**要求专用 UA**（`Index-Translate-Client/1.0`，
+        // 缺失时可能被 412 拦截 —— simul-subtitle 文档实测记录）。其余引擎走 OkHttp 默认。
+        if (config.engine == TranslationEngine.INDEX_TRANSLATE) {
+            requestBuilder.addHeader("User-Agent", "Index-Translate-Client/1.0")
+        }
+        val request = requestBuilder
             .addHeader("Content-Type", "application/json")
             .post(jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
@@ -1839,7 +2034,7 @@ class SubtitleTranslator(private val context: Context) {
                         val choice = choices.getJSONObject(0)
                         val message = choice.optJSONObject("message")
                         val content = message?.optString("content")?.trim() ?: ""
-                        content
+                        stripThinkingArtifacts(content)
                     } else {
                         ""
                     }

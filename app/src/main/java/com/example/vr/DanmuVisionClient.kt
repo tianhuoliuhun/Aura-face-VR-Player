@@ -587,7 +587,7 @@ class DanmuVisionClient {
         val sb = StringBuilder(head)
         sb.append("直接输出弹幕文本，每行一条。")
         if (hasSubtitle) {
-            sb.append("\n\n当前台词（仅供参考，不要复述台词，要像观众那样对台词做出反应）：\n")
+            sb.append("\n\n当前台词（可能含原文与译文对照，仅供参考，不要复述台词，要像观众那样对台词做出反应）：\n")
             sb.append(subtitleText)
         }
         return sb.toString()
