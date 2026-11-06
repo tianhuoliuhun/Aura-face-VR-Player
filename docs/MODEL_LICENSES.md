@@ -42,7 +42,7 @@
 | 额外条款 | 仓库与模型卡均**未提及**商用限制、登记流程或附加协议 |
 | 来源 | <https://github.com/bilibili/Index-Translate>（核实于 2026-10-10 更新）、<https://huggingface.co/IndexTeam/Index-Translate-omni-2B-GGUF>（核实于 2026-11-06，commit `41eb7bb`） |
 | 商用限制 | 无 |
-| 用途 | Omni = 文本翻译（150 语言，术语表 / 格式约束 / 内容保留类指令）+ 图像翻译（视觉 mmproj，无 OCR 依赖）。⚠️ **GGUF 版不含音频模块**（官方「Audio limitation」：只有 language model + 可选 mmproj vision），故本项目的语音识别仍用自带 Dolphin |
+| 用途 | Omni = 文本翻译（150 语言，术语表 / 格式约束 / 内容保留类指令）+ 图像翻译（视觉 mmproj，无 OCR 依赖）。⚠️ **GGUF 版不含音频模块**（官方「Audio limitation」：只有 language model + 可选 mmproj vision），故本项目的语音识别仍用自带 Dolphin。**为什么不能用原生包补上**：官方 `NATIVE_INFERENCE.md` 要求下载完整仓库（`language/` `modules/` `assets/` `index_omni/`）并安装 PyTorch 2.11.0+cu129 / Transformers 5.6.0、在**有 GPU 内存的环境**运行，语音调用走独立 audio frontend （`audio_generate(..., task="zh_asr")`）；而 llama.cpp 的 mtmd 至今只支持图像/视频输入，没有音频通路 —— **端侧 CPU + GGUF 路线拿不到该模型的语音能力**（自研 audio projector 转 GGUF 成本极高且上游不支持，不采纳） |
 
 **为什么换到它**（v2.8.0 起用文本版，v2.8.1 起用 Omni 版）：
 原先用的 MiniCPM-V 4.7 1B 是**通用多模态**模型，做字幕翻译属于"顺带能翻"；
