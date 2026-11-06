@@ -173,6 +173,16 @@ class SchemeRoutingDataSource(private val context: Context) : BaseDataSource(/* 
                 // 直连 http 源少一层，行为更接近普通播放器；且网页直链带一次性 token，缓存无复用价值。
                 if (HttpPlaybackHeaders.isActive) {
                     httpSource
+                } else if (MediaFormats.isStreamManifest(dataSpec.uri)) {
+                    // 🟥 v2.6.24（直播）：**流媒体清单绝不能进缓存**。
+                    // 清单（m3u8/mpd）是会持续变化的；CacheDataSource 一旦把它缓存住，
+                    // HLS 追踪器每次 reload 都读到同一份旧清单 → 30 秒后抛
+                    // `HlsPlaylistTracker$PlaylistStuckException` → **所有 HLS 直播都打不开**，
+                    // 然后走 Exo 失败回退（表现为"直播只能用 MPV"）。
+                    // 实测：本地自造流、Akamai 测试流、Unified Streaming 直播流全部命中，
+                    // 与片源无关 —— 是这一层缓存的锅。
+                    // ⚠️ 只放行清单，分片（.ts/.m4s）仍走缓存：分片内容不可变，缓存能省流量。
+                    httpSource
                 } else {
                     CacheDataSource(getHttpCache(context), httpSource)
                 }

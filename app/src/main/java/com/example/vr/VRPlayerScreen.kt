@@ -644,6 +644,27 @@ fun VRPlayerScreen(
     var isStripSubtitlePunctuation by remember {
         mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("subtitle_strip_punct", true) else true)
     }
+    // v2.6.24：字幕文本切换的 160ms 淡入（**默认关闭** —— 直播/密集换行场景不必拖影）
+    var subtitleFadeIn by remember {
+        mutableStateOf(if (isMemoryModeEnabled) prefs.getBoolean("subtitle_fade_in", false) else false)
+    }
+    // v2.6.24（直播 P0）：直播态（时长未知 / 不可任意 seek）。
+    // 判定需**连续 3 次采样**确认 —— 点播元数据解析期 duration 会短暂为 0，单次判定会误伤。
+    var isLiveStream by remember { mutableStateOf(false) }
+    val liveStreak = remember { intArrayOf(0) }
+    // v2.6.24（直播 P1）：**直播强制 EXO** 的运行时兜底 —— URL 启发式（
+    // MediaFormats.isLikelyLiveStream）漏判时（无扩展名且路径无特征词的流），
+    // 等播放器自己确认是直播后，把当前 URI 记在这里触发**一次**重建切到 EXO。
+    // ⚠️ 只记 URI 不记 boolean：重建后 isLiveStream 会因新播放器重新采样而短暂归 false，
+    //    用 boolean 做 key 会来回抖；URI 一旦相等就恒定命中，不会反复重建。
+    var liveForceExoUri by remember { mutableStateOf<String?>(null) }
+    // v2.6.24（直播 P1）：直播字幕需要实时识别 —— 每次进入直播只提示一次，不反复骚扰
+    var liveAsrHinted by remember { mutableStateOf(false) }
+    // v2.6.24（直播 P3）：断流/缓冲提示的采样计数（避免一次瞬时 buffering 就弹提示）
+    val liveBufferStreak = remember { intArrayOf(0) }
+    // v2.6.24（直播 P1）：流内嵌字幕轨（HLS 的 CC/TTML）自动选中 —— 只尝试一次，
+    // 避免每秒覆盖用户后来手动选的轨
+    var liveTextTrackPicked by remember { mutableStateOf(false) }
     var loadedSubtitleFileName by remember { mutableStateOf("") }
     var loadedSubtitleCues by remember { mutableStateOf<List<SubtitleCue>>(emptyList()) }
     var subtitleFont by remember {
@@ -699,6 +720,12 @@ fun VRPlayerScreen(
     var subtitleDelayMs by remember {
         mutableLongStateOf(if (isMemoryModeEnabled) prefs.getLong("subtitle_delay_ms", 0L) else 0L)
     }
+    // v2.6.24：**直播延迟**（秒，0 = 贴实时边缘）。
+    // 与 subtitleDelayMs 是两个概念：那个只挪字幕显示的参考时间点，这个真的让
+    // 播放器落后实时边缘 N 秒 —— 用实时性换"字幕来得及生成"。
+    var liveDelaySec by remember {
+        mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("live_delay_sec", 0) else 0)
+    }
     // 在线字幕搜索 API Key（8/2 功能）
     var subtitleSearchApiKey by remember {
         mutableStateOf(prefs.getString("subtitle_search_api_key", "") ?: "")
@@ -718,6 +745,13 @@ fun VRPlayerScreen(
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("subtitle_max_lines", 2) else 2)
     }
     val subtitleTranslator = remember { SubtitleTranslator(context) }
+    // v2.6.24（直播 P2）：直播态同步给翻译器 —— 一个开关切三处行为
+    // （不预读 / 不落盘 / 超时丢弃，见 SubtitleTranslator.liveMode 的表格）。
+    // ⚠️ 这是**唯一**的设置点：字幕叠加层只写"本条 cue 何时过期"，不碰模式位。
+    LaunchedEffect(isLiveStream) {
+        subtitleTranslator.liveMode = isLiveStream
+        if (!isLiveStream) subtitleTranslator.liveCueDeadlineMs = 0L
+    }
     // v2.0.127：恢复上次的「字幕翻译」开关。
     // v2.0.144：翻译相关设置**全部**固化——此前只有 translation_enabled 落盘，
     // 引擎（必应/MyMemory/…）与「双语/仅译文」显示模式每次重启都回到默认，
@@ -911,6 +945,28 @@ fun VRPlayerScreen(
             if (isMemoryModeEnabled) prefs.getBoolean("realtime_subtitle_enabled", false) else false
         )
     }
+    /**
+     * v2.6.24：**后台执行 AI 字幕**（不显示字幕，只给 AI 弹幕供数据）。
+     *
+     * 为什么需要它：AI 弹幕的素材就是"当前播放位置附近的台词"，而台词来自实时 ASR。
+     * 但很多用户并不想在这种场景下看字幕（VR 沉浸、字幕挡画面），于是出现
+     * 「想看 AI 弹幕就不得不开着字幕」的矛盾。这个开关把「跑识别」与「显示字幕」
+     * 拆开：识别照跑、`realtimeCues` 照常填充（弹幕链路直接消费），只是渲染层不取它。
+     */
+    var bgAsrEnabled by remember {
+        mutableStateOf(
+            if (isMemoryModeEnabled) prefs.getBoolean("bg_asr_enabled", false) else false
+        )
+    }
+    /**
+     * v2.6.24：**识别引擎的开关判据**（单一来源）。
+     *
+     * 凡是「要不要跑 ASR / 要不要推进游标 / 台词算不算可用」都读它；
+     * 只有**渲染**相关的地方才继续读 [isRealtimeSubtitleEnabled]。
+     * ⚠️ 不要再在各处写 `isRealtimeSubtitleEnabled || bgAsrEnabled` —— 那是同一判据两处登记，
+     *    以后再加第三种模式必然漏改。
+     */
+    val isRealtimeAsrActive = isRealtimeSubtitleEnabled || bgAsrEnabled
     var realtimeCues by remember { mutableStateOf<List<SubtitleCue>>(emptyList()) }
     var realtimeSubtitleStatus by remember { mutableStateOf("") }
     // v127b：实时字幕生成进度（供进度条与"完成"提示）
@@ -1005,7 +1061,7 @@ fun VRPlayerScreen(
         val label = SherpaAsrManager.sherpaLanguages.firstOrNull { it.code == code }?.let { context.getString(it.labelResId) } ?: code
         Toast.makeText(
             context,
-            if (isRealtimeSubtitleEnabled) context.getString(R.string.asr_lang_switch_hint, label) else context.getString(R.string.asr_lang_label, label),
+            if (isRealtimeAsrActive) context.getString(R.string.asr_lang_switch_hint, label) else context.getString(R.string.asr_lang_label, label),
             Toast.LENGTH_SHORT
         ).show()
     }
@@ -1018,7 +1074,8 @@ fun VRPlayerScreen(
      * 现在直接从内存字幕缓存导出：实时字幕与手动加载的字幕都能导出。
      */
     fun exportSubtitleSrt() {
-        val cues = if (isRealtimeSubtitleEnabled) realtimeCues else loadedSubtitleCues
+        // v2.6.24：后台模式下 realtimeCues 同样是有效数据（只是没显示），一并可导出
+        val cues = if (isRealtimeAsrActive) realtimeCues else loadedSubtitleCues
         if (cues.isEmpty()) {
             Toast.makeText(context, context.getString(R.string.toast_no_subtitle_export), Toast.LENGTH_SHORT).show()
             return
@@ -1055,7 +1112,8 @@ fun VRPlayerScreen(
 
     /** v127e：重新生成实时字幕（清空缓存后按当前播放点重新走优先级调度） */
     fun regenerateRealtimeSubtitle() {
-        if (!isRealtimeSubtitleEnabled) {
+        // v2.6.24：后台模式也算引擎在跑，允许重新生成（弹幕素材同样受益）
+        if (!isRealtimeAsrActive) {
             Toast.makeText(context, context.getString(R.string.toast_enable_realtime_first), Toast.LENGTH_SHORT).show()
             return
         }
@@ -1308,7 +1366,9 @@ fun VRPlayerScreen(
         lutName,
         lutMix,
         // v2.4.58：投屏接收开关（漏加进 key 列表 → 改了不落盘，重启即丢）
-        castReceiverEnabled
+        castReceiverEnabled,
+        // v2.6.24：直播延迟（秒）
+        liveDelaySec
     ) {
         // v2.0.144：美颜预设按稳定 id 落盘（本地化名只用于显示与匹配）。
         // 名称无法识别（如切语言后残留旧语言名）时返回 -1，此时**不改动已存值**，
@@ -1405,6 +1465,7 @@ fun VRPlayerScreen(
                 putInt("mpv_cache_mb", mpvOptions.cacheMb)
                 putBoolean("is_subtitle_enabled", isSubtitleEnabled)
                 putBoolean("subtitle_strip_punct", isStripSubtitlePunctuation)
+                putBoolean("subtitle_fade_in", subtitleFadeIn)
                 putInt("subtitle_font_id", subtitleFont.id)
                 putInt("subtitle_font_size", subtitleFontSizeSp)
                 putInt("subtitle_font_weight", subtitleFontWeightVal)
@@ -1416,6 +1477,7 @@ fun VRPlayerScreen(
                 putFloat("subtitle_offset_y", subtitleOffsetYRatio)
                 putFloat("subtitle_offset_x", subtitleOffsetXRatio)
                 putLong("subtitle_delay_ms", subtitleDelayMs)
+                putInt("live_delay_sec", liveDelaySec)
                 putInt("subtitle_align_id", subtitleTextAlignOpt.id)
                 putFloat("vr_ipd_offset", vrIpdOffsetRatio)
                 putInt("subtitle_max_lines", subtitleMaxLines)
@@ -1497,6 +1559,7 @@ fun VRPlayerScreen(
                 remove("subtitle_offset_y")
                 remove("subtitle_offset_x")
                 remove("subtitle_delay_ms")
+                remove("live_delay_sec")
                 remove("subtitle_align_id")
                 remove("vr_ipd_offset")
                 remove("subtitle_max_lines")
@@ -1923,6 +1986,22 @@ fun VRPlayerScreen(
     // duration/isPlaying/setPlaybackSpeed/release），因此下面 20 多处调用点无需改动。
     var playerInstance by remember { mutableStateOf<VrPlayerBackend?>(null) }
 
+    // v2.6.24：**直播延迟**下发 —— 让播放位置稳定落后实时边缘 N 秒。
+    // 直播的字幕要靠后台识别/翻译生成（比实时慢 1~3 秒），把播放压低就能让字幕追上画面。
+    // ⚠️ key 里带 playerInstance：内核重建（如强制 EXO、切换解码器）后新播放器
+    //    不知道这个偏移，必须重新下发一次，否则用户会看到"设置还在、位置又贴回实时了"。
+    // ⚠️ 只在直播下下发：点播没有"实时边缘"概念，EXO 对非直播源设 target offset 无效。
+    LaunchedEffect(isLiveStream, liveDelaySec, playerInstance) {
+        if (isLiveStream) {
+            val p = playerInstance
+            Log.i(
+                "VRPlayerScreen",
+                "直播延迟 ${liveDelaySec}s 已下发 → engine=${p?.engine} cls=${p?.javaClass?.simpleName}"
+            )
+            p?.setLiveDelayMs(liveDelaySec * 1000L)
+        }
+    }
+
     // ==================================================================================
     // v2.4.58：投屏接收 —— DMC 遥控与进度回写（**必须放在 playerInstance 声明之后**）
     //   1) DMC 下发的 Play/Pause/Stop/Seek → 作用于现有播放器门面
@@ -2271,7 +2350,10 @@ fun VRPlayerScreen(
                 //    ⚠️ 字幕可能尚未生成到当前位置（ASR 是 1x 速度），此时 substring 为空串 →
                 //       在「仅台词」模式下就变成"没有素材"，用专门的错误文案提示，便于用户理解。
                 val subtitleText = if (danmuConfig.needsSubtitle) {
-                    val cues = if (isRealtimeSubtitleEnabled) realtimeCues else loadedSubtitleCues
+                    // v2.6.24：后台执行 AI 字幕时**不显示字幕但台词照样可用** ——
+                    // 弹幕取词读的就是这里，所以判据用 isRealtimeAsrActive（跑没跑 ASR），
+                    // 而不是 isRealtimeSubtitleEnabled（显不显示字幕）。
+                    val cues = if (isRealtimeAsrActive) realtimeCues else loadedSubtitleCues
                     // v2.6.23（用户要求「AI 弹幕链路同时获得字幕的原稿和翻译」）：
                     // 每条台词拼「原文\n译文」—— 译文从翻译缓存只读查询（peekTranslation，不触发网络），
                     // 查不到就退回纯原文；双语后字数上限翻倍，保持可覆盖的台词时长不变。
@@ -3237,6 +3319,33 @@ fun VRPlayerScreen(
         } ?: Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
     }
 
+    /** v2.6.24（直播 P3）：实时字幕保留条数上限 / 时间窗口 */
+    val LIVE_CUE_MAX_ENTRIES = 500
+    val LIVE_CUE_KEEP_WINDOW_MS = 10 * 60 * 1000L
+
+    /**
+     * v2.6.24（直播 P3）：裁剪实时字幕快照 —— 只留「最近 10 分钟」且「不超过 500 条」。
+     *
+     * 引擎给的是**完整快照**（每次新增都推全量）。点播无所谓（一部片几千条封顶），
+     * 但直播是无限流：挂一下午能攒出几万条，而真正的消费者只有两个，窗口都很窄
+     * （字幕叠加层按当前播放位置取 1 条、AI 弹幕取词 ±15s）。
+     *
+     * ⚠️ 以最后一条 cue 的**结束时间**为基准往前算，而不是当前播放位置：
+     *    直播下识别前沿略超前于播放头，用播放位置算会把刚生成的前沿句裁掉。
+     * ⚠️ 点播**同样裁剪**：一部 3 小时的片也就 3000 条左右，裁到 10 分钟会让
+     *    「往回拖到 20 分钟前」没有字幕可显示。因此只对直播生效。
+     */
+    fun trimRealtimeCues(cues: List<SubtitleCue>): List<SubtitleCue> {
+        if (!isLiveStream || cues.size <= LIVE_CUE_MAX_ENTRIES) return cues
+        val lastEnd = cues.lastOrNull()?.endTimeMs ?: return cues
+        val keepFrom = lastEnd - LIVE_CUE_KEEP_WINDOW_MS
+        val trimmed = cues.asSequence()
+            .filter { it.endTimeMs >= keepFrom }
+            .toList()
+            .takeLast(LIVE_CUE_MAX_ENTRIES)
+        return trimmed
+    }
+
     // Helper inside Compose to rebuild/re-bind Android ExoPlayer to GLES
     fun setupVideoPlayer(surfaceTexture: SurfaceTexture, videoUriStr: String) {
         try {
@@ -3248,7 +3357,12 @@ fun VRPlayerScreen(
             currentVideoUri = decodedUri
 
             // v119 修复(#7)：按当前媒体 URI 读取上次播放位置（不再跨媒体共享同一个变量）
-            var resumeMs = PlaybackPositions.load(prefs, videoUriStr)
+            // v2.6.24（直播 P1）：**直播不恢复断点** —— 断点表里存的是上一场的播放位置，
+            // 对实时流是失效位置：轻则被 clamp 到窗口边缘（画面顿一下才追到实时），
+            // 重则触发一次重连。P0 只挡住了"写"，这里补上"读"。
+            var resumeMs =
+                if (MediaFormats.isLikelyLiveStream(decodedUri)) 0L
+                else PlaybackPositions.load(prefs, videoUriStr)
             var resumeApplied = resumeMs <= 0L
             
             // Default dimensions prior to ExoPlayer onVideoSizeChanged callback
@@ -3564,6 +3678,34 @@ fun VRPlayerScreen(
         // ①②③ 在这里静默回退（只 Log，不打扰用户）；
         // ④ 会 Toast 并把内核切回 EXO（用户知情，且下次不再踩同一个坑）。
         // ======================================================================
+        // ======================================================================
+        // v2.6.24（直播 P1）：**直播流强制 EXO**
+        // ----------------------------------------------------------------------
+        // 为什么直播必须走 EXO：
+        //   ① HLS/DASH 的多分片清单只有 EXO 的 HlsMediaSource/DashMediaSource 能正确
+        //      跟踪滑动窗口（IJK 的裁剪版 FFmpeg 根本没编 hls demuxer，MPV 虽有 FFmpeg
+        //      但 vo=mediacodec_embed 下切码率/重连会黑屏）；
+        //   ② 权重的直播判定（`VrPlayerBackend.isLive`）本身就依赖 EXO 的
+        //      `Timeline.Window.isLive` —— 换内核后 UI 的 LIVE 态也会失准。
+        // 判据有两条，命中任一即强制：
+        //   ① 打开前的 URL 启发式（MediaFormats.isLikelyLiveStream）；
+        //   ② 运行时兜底（liveForceExoUri）—— 播放器已自证是直播，但 URL 看不出来。
+        // ⚠️ 两个 retry 例外必须绕开：Exo 打不开该流时，`mpvRetryUri` / `softRetryUri`
+        //    已经把内核指到 MPV/IJK，这里再强制回 EXO 就成了"打开失败 → 切 MPV →
+        //    又切回 EXO"的死循环（每轮都要重建播放器）。
+        // ======================================================================
+        val liveUrlGuess = MediaFormats.isLikelyLiveStream(decodedUri)
+        val liveRuntimeForce = liveForceExoUri != null && liveForceExoUri == selectedMediaItem.uri
+        if ((liveUrlGuess || liveRuntimeForce) && effectiveEngine != DecoderEngine.EXO &&
+            mpvRetryUri != selectedMediaItem.uri && softRetryUri != selectedMediaItem.uri
+        ) {
+            Log.i(
+                "VRPlayerScreen",
+                "直播流（${if (liveUrlGuess) "URL 判据" else "运行时确认"}）→ 强制使用 EXO 内核（原 $effectiveEngine）"
+            )
+            effectiveEngine = DecoderEngine.EXO
+        }
+
         if (effectiveEngine == DecoderEngine.IJK) {
             val ijkUri = decodedUri
             val ijkUsable = IjkPlayerFactory.supports(ijkUri) && IjkPlayerFactory.ensureLibraries()
@@ -4139,12 +4281,24 @@ fun VRPlayerScreen(
                 // v126：实时字幕跟随播放头。
                 // 位置突跳（>2 秒）视为 seek —— 这样不必逐个改各 seek 调用点，
                 // 进度条拖动、章节跳转、双击重置等入口都能被统一捕获。
-                if (isRealtimeSubtitleEnabled) {
+                // v2.6.24：判据换成 isRealtimeAsrActive —— 后台执行模式下**不显示字幕，
+                // 但引擎仍要跟着播放头走**（否则 ASR 不知道播到哪儿，弹幕素材就断了）。
+                if (isRealtimeAsrActive) {
                     val pos = player.currentPosition
-                    if (kotlin.math.abs(pos - lastPosForRealtime) > 2_000L) {
+                    // v2.6.24（直播 P3）：直播的跳变阈值放大到 **30s**。
+                    // 直播正常播放也会有秒级位置抖动（重连、切码率、追赶实时边缘），
+                    // 沿用点播的 2s 阈值会被频繁误判成 seek；而 >30s 的跳变必然是重连。
+                    val jumpThreshold = if (isLiveStream) 30_000L else 2_000L
+                    if (kotlin.math.abs(pos - lastPosForRealtime) > jumpThreshold) {
                         realtimeSubtitleEngine.onSeek(pos)
-                        // v127：跳转后重新预读翻译新位置前方的字幕
-                        if (subtitleTranslator.config.isEnabled && realtimeCues.isNotEmpty()) {
+                        if (isLiveStream) {
+                            // v2.6.24（直播 P3）：直播跳变 = 换了内容段落 → 旧字幕/旧译文全部作废
+                            realtimeCues = emptyList()
+                            subtitleTranslator.clearLiveMemoryCache()
+                            realtimeSubtitleEngine.dropAllCues()
+                        } else if (subtitleTranslator.config.isEnabled && realtimeCues.isNotEmpty()) {
+                            // v127：跳转后重新预读翻译新位置前方的字幕
+                            // （直播下 pretranslateAhead 内部已直接 return，见其 liveMode 短路）
                             subtitleTranslator.pretranslateAhead(realtimeCues, pos)
                         }
                     } else {
@@ -4160,7 +4314,8 @@ fun VRPlayerScreen(
                     // 审查 #10：切片瞬间 selectedMediaItem.uri 已指向新片，但 playerInstance
                     // 仍是旧播放器 → 会把「旧片位置」误存到新片 URI 下。仅当播放器绑定的
                     // URI 与当前片一致时才保存。
-                    if (player.currentUri?.toString() == selectedMediaItem.uri) {
+                    // v2.6.24（直播 P0）：直播不写断点 —— 位置对下次播放无意义，还会污染断点表
+                    if (player.currentUri?.toString() == selectedMediaItem.uri && !isLiveStream) {
                         val now = System.currentTimeMillis()
                         if (now - lastSavedAt >= 2_000L) {
                             lastSavedAt = now
@@ -4232,6 +4387,15 @@ fun VRPlayerScreen(
     // Effect A：只在“换媒体”时触发 —— 应用一次打开视频的默认视角，再绑定新媒体。
     LaunchedEffect(selectedMediaItem) {
         keepUiAlight()
+        // v2.6.24（直播 P1/P3）：换媒体必须复位直播态。
+        // 否则上一场的 LIVE 判定、强制 EXO 标记、提示计数会被带到下一部片：
+        // 典型后果是「从直播切回点播」后进度条仍显示 LIVE（要等 3 次采样才恢复）。
+        isLiveStream = false
+        liveStreak[0] = 0
+        liveBufferStreak[0] = 0
+        liveAsrHinted = false
+        liveForceExoUri = null
+        liveTextTrackPicked = false
         if (currentGlSurfaceView == null) return@LaunchedEffect
 
         if (selectedMediaItem.isVideo) {
@@ -4254,13 +4418,16 @@ fun VRPlayerScreen(
     // ⚠️ v2.4.32：`mpvRetryUri` 也作为 key —— Exo 打开失败时置位它（见 onPlayerError），
     //    借此**触发一次重建**并用 MPV 重试；它只在失败时变一次，不会引起意外重建。
     // ⚠️ v2.6.13：`softRetryUri` 同理（尺寸超硬解上限 → 切软解内核），同样只会变一次。
+    // ⚠️ v2.6.24：`liveForceExoUri` 也作为 key —— 运行时确认是直播但内核不是 EXO 时置位它，
+    //    借此触发**一次**重建切到 EXO（见进度轮询里的直播判定）。同样只会变一次。
     LaunchedEffect(
         isSoftwareDecoding,
         decoderEngine,
         ijkOptions,
         photoReloadTrigger,
         mpvRetryUri,
-        softRetryUri
+        softRetryUri,
+        liveForceExoUri
     ) {
         if (!decoderRebindSeen) {
             // 首次组合时上面的 Effect A 已经完成绑定，这里跳过，避免重复创建播放器
@@ -4268,7 +4435,10 @@ fun VRPlayerScreen(
             return@LaunchedEffect
         }
         keepUiAlight()
-        val resumeAt = playerInstance?.currentPosition ?: 0L
+        // v2.6.24（直播 P3）：直播**不做位置续播** —— 旧播放器的位置属于"刚才那一段"，
+        // 重建后 seek 回去等于让用户退回十几秒，还要再等追直播边缘；
+        // 直播重建后应当直接从实时边缘开播（EXO 默认行为）。
+        val resumeAt = if (isLiveStream) 0L else (playerInstance?.currentPosition ?: 0L)
         rebindCurrentMediaToRenderer()
         if (resumeAt > 0L) {
             playerInstance?.seekTo(resumeAt)
@@ -4350,7 +4520,9 @@ fun VRPlayerScreen(
     // v126：实时 AI 字幕（方案文档「边播边生成」）
     // 开启后后台滚动预读：独立解码音频 → VAD 分段 → ASR → 内存缓存；
     // 播放头只需查缓存即可显示，不再等整片转写完成。
-    LaunchedEffect(isRealtimeSubtitleEnabled, selectedMediaItem.uri, asrEngineType, sherpaLangCode, SherpaAsrManager.modelChoiceVersion) {
+    // v2.6.24：**"要不要跑引擎"与"要不要显示字幕"是两件事** —— 后台执行模式下
+    // 只跑引擎不显示（台词给 AI 弹幕用），所以这里读 isRealtimeAsrActive。
+    LaunchedEffect(isRealtimeAsrActive, selectedMediaItem.uri, asrEngineType, sherpaLangCode, SherpaAsrManager.modelChoiceVersion) {
         // v127f：切语言/切媒体/开关都会重跑本 effect，必须把**全部**相关状态清干净，
         // 否则屏上会残留上一轮的字幕或进度（会让用户以为"改了语言没反应"）。
         realtimeCues = emptyList()
@@ -4358,7 +4530,7 @@ fun VRPlayerScreen(
         realtimeGeneratedMs = 0L
         realtimeTotalMs = 0L
         realtimeSubtitleStatus = ""
-        if (!isRealtimeSubtitleEnabled) {
+        if (!isRealtimeAsrActive) {
             realtimeSubtitleEngine.stop()
             realtimeSubtitleStatus = ""
             return@LaunchedEffect
@@ -4379,11 +4551,16 @@ fun VRPlayerScreen(
             },
             listener = object : RealtimeSubtitleEngine.Listener {
                 override fun onCuesUpdated(cues: List<SubtitleCue>) {
-                    scope.launch { realtimeCues = cues }
+                    // v2.6.24（直播 P3）：**只保留最近 10 分钟 / 500 条**。
+                    // 引擎回调的是「完整快照」，点播片长有限（一部电影几千条）无所谓；
+                    // 直播是无限流，挂一下午就是几万条，而字幕叠加层只需要当前 ±15s、
+                    // AI 弹幕取词也只看 ±15s —— 留全量纯粹是让内存线性增长。
+                    scope.launch { realtimeCues = trimRealtimeCues(cues) }
                     // v127：字幕一有新增就预读翻译游标前方的部分，
                     // 显示时直接命中缓存，译文与原文同时出现（而不是等显示才开始翻）
+                    // （直播下 pretranslateAhead 内部直接 return）
                     if (subtitleTranslator.config.isEnabled) {
-                        subtitleTranslator.pretranslateAhead(cues, currentPositionMs)
+                        subtitleTranslator.pretranslateAhead(realtimeCues, currentPositionMs)
                     }
                 }
                 override fun onStatus(message: String) {
@@ -4431,10 +4608,88 @@ fun VRPlayerScreen(
                 try {
                     val current = mp.currentPosition
                     val duration = mp.duration
+                    // v2.6.24（直播 P0）：直播判定（连续 3 次采样确认，见 state 注释）
+                    if (mp.isLive || duration <= 0) {
+                        liveStreak[0]++
+                        if (liveStreak[0] >= 3) {
+                            if (!isLiveStream) {
+                                isLiveStream = true
+                                // 直播没有总时长：进度条禁用，时间区显示 LIVE
+                                videoDurationText = "\u25CF LIVE"
+                                // v2.6.24（直播 P1）：**直播强制 EXO** 的运行时兜底。
+                                // URL 启发式（MediaFormats.isLikelyLiveStream）只能看扩展名/路径，
+                                // 像 `https://cdn.x.com/abc123?token=…` 这种纯随机路径判不出来；
+                                // 播放器自己采样确认是直播后才在这里补一次重建。
+                                // 只置 URI（幂等）：重建后新播放器要重新累计 3 次才会再次进入本分支，
+                                // 而 URI 相等时 setupVideoPlayer 里恒走 EXO，不会来回切。
+                                // ⚠️ 两个 retry 标记必须排除：若 EXO 已经打不开这条流、内核是被
+                                //    `mpvRetryUri`/`softRetryUri` 指过去的，这里再要求"切回 EXO"
+                                //    就会形成「EXO 失败 → MPV → 又要 EXO」的重建抖动
+                                //    （每次重建都要 release/destroy MPV 全局单例，代价极高）。
+                                //    实测：静态 HLS 清单会被 EXO 判 PlaylistStuck 并回退 MPV。
+                                if (mp.engine != DecoderEngine.EXO &&
+                                    mpvRetryUri != selectedMediaItem.uri &&
+                                    softRetryUri != selectedMediaItem.uri
+                                ) {
+                                    Log.i(
+                                        "VRPlayerScreen",
+                                        "运行时确认直播但内核是 ${mp.engine} → 重建切到 EXO"
+                                    )
+                                    liveForceExoUri = selectedMediaItem.uri
+                                }
+                                // v2.6.24（直播 P1）：直播字幕只能来自「实时识别」或「流内嵌 CC」。
+                                // 外挂 SRT 在直播下毫无意义，用户开了翻译却看不到字幕时会以为坏了 → 提示一次。
+                                if (!liveAsrHinted && isSubtitleEnabled && !isRealtimeSubtitleEnabled) {
+                                    liveAsrHinted = true
+                                    postToast(context.getString(R.string.toast_live_need_realtime_asr))
+                                }
+                            }
+                        }
+                    } else {
+                        liveStreak[0] = 0
+                        if (isLiveStream) {
+                            isLiveStream = false
+                            liveAsrHinted = false
+                            liveBufferStreak[0] = 0
+                        }
+                    }
+                    // v2.6.24（直播 P1）：流内嵌字幕轨（CC/TTML）**自动选中一次**。
+                    // 直播没有外挂字幕可加载，而「媒体轨道」面板要用户自己翻菜单才会发现
+                    // 有 CC 轨 —— 不自动选的话，用户开了字幕后画面依旧空白，会以为字幕坏了。
+                    // ⚠️ 只尝试一次（liveTextTrackPicked）：HLS 的 CC 轨常常要等第一个媒体段
+                    //    加载完才出现在 currentTracks 里，所以放在每秒轮询里等，而不是打开时判一次。
+                    if (isLiveStream && !liveTextTrackPicked) {
+                        if (!isSubtitleEnabled || selectedTextTrack >= 0) {
+                            liveTextTrackPicked = true      // 用户没开字幕 / 已手动选过轨 → 不插手
+                        } else {
+                            val textGroup = mp.exo?.currentTracks?.groups
+                                ?.firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_TEXT }
+                            if (textGroup != null && textGroup.mediaTrackGroup.length > 0) {
+                                liveTextTrackPicked = true
+                                selectMediaTrack(androidx.media3.common.C.TRACK_TYPE_TEXT, 0)
+                                Log.i("VRPlayerScreen", "直播内嵌字幕轨 ${textGroup.mediaTrackGroup.length} 条 → 自动选中第 1 条")
+                            }
+                        }
+                    }
+                    // v2.6.24（直播 P3）：断流/卡顿提示 —— 连续 5 次采样（≈5s）仍在缓冲才提示，
+                    // 瞬时缓冲（切码率、扔帧）不打扰。EXO 专有：另两个内核拿不到 playbackState。
+                    if (isLiveStream) {
+                        val buffering = mp.exo?.playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                        if (buffering) {
+                            liveBufferStreak[0]++
+                            if (liveBufferStreak[0] == 5) videoDurationText = "\u25CF LIVE \u00B7 缓冲中"
+                        } else {
+                            if (liveBufferStreak[0] >= 5) videoDurationText = "\u25CF LIVE"
+                            liveBufferStreak[0] = 0
+                        }
+                    }
                     // v2.6.20：**拖动中绝不覆盖**。轮询每秒把"真实位置"写进进度 state，
                     // 用户正在拖的 thumb 会被立即拉回去 —— 播完后位置恒等于 duration，
                     // 覆盖幅度最大（从拖到的位置直接弹回片尾），表象就是"进度条拖不动"。
-                    if (!isSeekingActive && duration > 0) {
+                    // v2.6.24（直播 P0）：直播**不写进度与时间文本** —— 直播的 duration 可能是
+                    // 「滑动窗口时长」（实测 12~15s）而非 0，若这里照写会把上面刚设置的
+                    // 「● LIVE」覆盖回 00:08 / 00:15（冒烟实测踩到）。
+                    if (!isSeekingActive && duration > 0 && !isLiveStream) {
                         videoPlaybackProgress = current.toFloat() / duration.toFloat()
                         val curSec = (current / 1000).toInt()
                         val durSec = (duration / 1000).toInt()
@@ -4499,15 +4754,26 @@ fun VRPlayerScreen(
                     if (isUiVisible) { isUiVisible = false; true } else false
                 }
                 VrGamepadAction.SEEK_FORWARD -> {
-                    p?.let {
-                        val dur = if (it.duration > 0) it.duration else Long.MAX_VALUE
-                        it.seekTo((it.currentPosition + seekForwardStep * 1000L).coerceIn(0L, dur))
+                    // v2.6.24（直播 P0 补齐）：直播不可任意 seek —— 快进等于追实时边缘、
+                    // 快退会被 EXO clamp 回窗口内（外加一次重缓冲），两个动作在直播下都不成立
+                    if (isLiveStream) {
+                        val label = context.getString(R.string.live_seek_disabled)
+                        seekHudText = label
+                    } else {
+                        p?.let {
+                            val dur = if (it.duration > 0) it.duration else Long.MAX_VALUE
+                            it.seekTo((it.currentPosition + seekForwardStep * 1000L).coerceIn(0L, dur))
+                        }
                     }
                     true
                 }
                 VrGamepadAction.SEEK_BACKWARD -> {
-                    p?.let {
-                        it.seekTo((it.currentPosition - seekBackwardStep * 1000L).coerceAtLeast(0L))
+                    if (isLiveStream) {
+                        seekHudText = context.getString(R.string.live_seek_disabled)
+                    } else {
+                        p?.let {
+                            it.seekTo((it.currentPosition - seekBackwardStep * 1000L).coerceAtLeast(0L))
+                        }
                     }
                     true
                 }
@@ -4835,6 +5101,8 @@ fun VRPlayerScreen(
                                     vrIpdOffsetRatio = vrIpdOffsetRatio,
                                     exoCueText = exoCueText,
                                     stripPunctuation = isStripSubtitlePunctuation,
+                                    enableFadeIn = subtitleFadeIn,
+                                    isLiveStream = isLiveStream,
                                     modifier = Modifier.fillMaxSize()
                                 )
         AnimatedVisibility(
@@ -5223,212 +5491,239 @@ fun VRPlayerScreen(
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Text(
-                                            text = if (videoDurationText.contains("/")) videoDurationText.split("/")[0].trim() else "00:00",
+                                            // v2.6.24（直播 P0）：直播直接显示 ● LIVE（不去解析 00:00 格式文本）
+                                            text = if (isLiveStream) "● LIVE"
+                                            else if (videoDurationText.contains("/")) videoDurationText.split("/")[0].trim()
+                                            else "00:00",
                                             color = Color.White.copy(alpha = 0.6f),
                                             fontSize = 11.sp,
                                             fontFamily = FontFamily.Monospace
                                         )
 
-                                        Slider(
-                                            value = videoPlaybackProgress,
-                                            onValueChange = { seeker ->
-                                                val adjustedProgress = if (isSliderDragged) {
-                                                    if (!isSeekingActive) {
-                                                        isSeekingActive = true
-                                                        seekStartProgress = videoPlaybackProgress
-                                                        seekStartValue = seeker
-                                                    }
-                                                    val delta = seeker - seekStartValue
-                                                    (seekStartProgress + delta * 0.25f).coerceIn(0f, 1f)
-                                                } else {
-                                                    isSeekingActive = false
-                                                    seeker
-                                                }
-                                                videoPlaybackProgress = adjustedProgress
-                                                isHoverActive = true
-                                                keepUiAlight()
-                                                // ⚠️⚠️ v2.1.247：**拖动过程中绝不逐帧 seek**。
-                                                //
-                                                // 旧实现在这里每帧调 `mp.seekTo(targetTime)`，对 mp4
-                                                // 尚可，但对 **AVI 是灾难**：EXO 的 `AviExtractor` 若没有
-                                                // `idx1` 索引，每次 seek 都要**从头线性扫描 chunk**；逐帧 seek
-                                                // 会在几十毫秒内堆几十个未完成的 seek 请求 → 解码器被反复
-                                                // flush → 画面冻结、进度条回弹、最终卡死（用户报的「AVI 拖不动」）。
-                                                //
-                                                // 正确做法（所有成熟播放器的标准姿势）：
-                                                //   · 拖动中：只更新 UI 进度 + `hoverTimeMs`（驱动缩略图），**不 seek**；
-                                                //   · 松手时（onValueChangeFinished）：**只 seek 一次**到最终位置。
-                                                // 这样对 AVI 只有一次线性扫描，拖动全程跟手。
-                                                playerInstance?.let { mp ->
-                                                    try {
-                                                        val duration = mp.duration
-                                                        // ⚠️ v2.1.247：duration 在 buffering 阶段可能是
-                                                        //    `C.TIME_UNSET`（负数）或 0（尤其 AVI 刚开始解析时）
-                                                        //    → 若直接相乘会得到**负数**的 hoverTimeMs，
-                                                        //    松手 seek 到负数 = 位置不动（用户看到的「拖了没反应」）。
-                                                        //    这里只在 duration 有效时才更新，否则保留上一次有效值。
-                                                        if (duration > 0) {
-                                                            hoverTimeMs = (adjustedProgress * duration).toLong()
+                                        // v2.6.24（直播 P0）：直播没有可拖的进度 —— 换成静止的 LIVE 指示条，
+                                        // 避免彩色进度条造成「可以拖」的视觉歧义，也不给误触留入口。
+                                        if (isLiveStream) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(16.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(3.dp)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(AccentColor.copy(alpha = 0.55f))
+                                                )
+                                            }
+                                        } else {
+                                            Slider(
+                                                value = videoPlaybackProgress,
+                                                // v2.6.24（直播 P0）：直播不可任意 seek → 进度条禁用
+                                                enabled = !isLiveStream,
+                                                onValueChange = { seeker ->
+                                                    val adjustedProgress = if (isSliderDragged) {
+                                                        if (!isSeekingActive) {
+                                                            isSeekingActive = true
+                                                            seekStartProgress = videoPlaybackProgress
+                                                            seekStartValue = seeker
                                                         }
-                                                    } catch (e: Exception) {}
-                                                }
-                                            },
-                                            onValueChangeFinished = {
-                                                isSeekingActive = false
-                                                // ⚠️ v2.1.247：拖动结束才真正 seek（只此一次）。
-                                                //
-                                                // 这里**重新用当下的 duration × 进度**算目标位置，
-                                                // 而不是复用 `hoverTimeMs` —— 后者可能是拖动早期
-                                                // 用陈旧 duration 算出的值（见上），直接用会 seek 到错位置。
-                                                val finalProgress = videoPlaybackProgress
-                                                var seekTarget = hoverTimeMs
-                                                var seekIssued = false
-                                                playerInstance?.let { mp ->
-                                                    try {
-                                                        val duration = mp.duration
-                                                        if (duration > 0) {
-                                                            seekTarget = (finalProgress * duration).toLong()
-                                                                .coerceIn(0L, duration)
-                                                            hoverTimeMs = seekTarget
-                                                            mp.seekTo(seekTarget)
-                                                            seekIssued = true
-                                                        } else {
-                                                            // duration 不可用 → 退而求其次，用 hoverTimeMs
-                                                            if (seekTarget > 0) {
+                                                        val delta = seeker - seekStartValue
+                                                        (seekStartProgress + delta * 0.25f).coerceIn(0f, 1f)
+                                                    } else {
+                                                        isSeekingActive = false
+                                                        seeker
+                                                    }
+                                                    videoPlaybackProgress = adjustedProgress
+                                                    isHoverActive = true
+                                                    keepUiAlight()
+                                                    // ⚠️⚠️ v2.1.247：**拖动过程中绝不逐帧 seek**。
+                                                    //
+                                                    // 旧实现在这里每帧调 `mp.seekTo(targetTime)`，对 mp4
+                                                    // 尚可，但对 **AVI 是灾难**：EXO 的 `AviExtractor` 若没有
+                                                    // `idx1` 索引，每次 seek 都要**从头线性扫描 chunk**；逐帧 seek
+                                                    // 会在几十毫秒内堆几十个未完成的 seek 请求 → 解码器被反复
+                                                    // flush → 画面冻结、进度条回弹、最终卡死（用户报的「AVI 拖不动」）。
+                                                    //
+                                                    // 正确做法（所有成熟播放器的标准姿势）：
+                                                    //   · 拖动中：只更新 UI 进度 + `hoverTimeMs`（驱动缩略图），**不 seek**；
+                                                    //   · 松手时（onValueChangeFinished）：**只 seek 一次**到最终位置。
+                                                    // 这样对 AVI 只有一次线性扫描，拖动全程跟手。
+                                                    playerInstance?.let { mp ->
+                                                        try {
+                                                            val duration = mp.duration
+                                                            // ⚠️ v2.1.247：duration 在 buffering 阶段可能是
+                                                            //    `C.TIME_UNSET`（负数）或 0（尤其 AVI 刚开始解析时）
+                                                            //    → 若直接相乘会得到**负数**的 hoverTimeMs，
+                                                            //    松手 seek 到负数 = 位置不动（用户看到的「拖了没反应」）。
+                                                            //    这里只在 duration 有效时才更新，否则保留上一次有效值。
+                                                            if (duration > 0) {
+                                                                hoverTimeMs = (adjustedProgress * duration).toLong()
+                                                            }
+                                                        } catch (e: Exception) {}
+                                                    }
+                                                },
+                                                onValueChangeFinished = {
+                                                    isSeekingActive = false
+                                                    // ⚠️ v2.1.247：拖动结束才真正 seek（只此一次）。
+                                                    //
+                                                    // 这里**重新用当下的 duration × 进度**算目标位置，
+                                                    // 而不是复用 `hoverTimeMs` —— 后者可能是拖动早期
+                                                    // 用陈旧 duration 算出的值（见上），直接用会 seek 到错位置。
+                                                    val finalProgress = videoPlaybackProgress
+                                                    var seekTarget = hoverTimeMs
+                                                    var seekIssued = false
+                                                    playerInstance?.let { mp ->
+                                                        try {
+                                                            val duration = mp.duration
+                                                            if (duration > 0) {
+                                                                seekTarget = (finalProgress * duration).toLong()
+                                                                    .coerceIn(0L, duration)
+                                                                hoverTimeMs = seekTarget
                                                                 mp.seekTo(seekTarget)
                                                                 seekIssued = true
-                                                            }
-                                                        }
-                                                    } catch (e: Exception) {}
-                                                }
-                                                // 拖动结束立即把 UI 进度对齐到目标（不等 1 秒轮询），
-                                                // 否则会出现「松手后进度条先弹回旧位置、1 秒后才跳过去」的错觉。
-                                                if (seekIssued) {
-                                                    videoPlaybackProgress = finalProgress
-                                                    // ==================================================
-                                                    // v2.6.20：**播完态的拖动必须补一次 play()**
-                                                    // --------------------------------------------------
-                                                    // 视频播完后（onCompletion / Exo ENDED），三种内核都不会
-                                                    // 因为 seekTo 自动开播：EXO 只在 playWhenReady=true 时续播，
-                                                    // IJK/MPV 完成态下要显式 start，系统 MediaPlayer 的
-                                                    // PlaybackCompleted 态 seekTo 本身无效。
-                                                    // 于是用户拖到中间后画面停在那一帧不动 —— 就是
-                                                    // 「播完一个视频后拖动进度条无法播放」。
-                                                    // 判据用 [playbackEnded] 而不是"当前没在播"：
-                                                    // 用户**手动暂停**后拖动应当保持暂停，不能替他开播。
-                                                    // ==================================================
-                                                    if (playbackEnded) {
-                                                        playbackEnded = false
-                                                        playerInstance?.play()
-                                                        isVideoPlaying = true
-                                                    }
-                                                }
-                                                // Verify the seek took effect: some containers
-                                                // (moov-at-end / fragmented / AVI without idx1) reset the
-                                                // position to 0, in which case we offer an auto container fix.
-                                                //
-                                                // ⚠️ v2.1.247 收紧判据（AVI 相关）：
-                                                //   ① 只有在**确实发出过 seek** 时才校验（否则误判）；
-                                                //   ② 判定用「位置几乎没动」而不是「< 2s」—— 后者在
-                                                //      短片（< 10s）上会把正常位置也判成失败；
-                                                //   ③ 加长等待到 1.5s：AVI 无索引时线性扫描 1s 内可能还没到位，
-                                                //      过早判定会触发不必要的重封装。
-                                                val seekIssuedFlag = seekIssued
-                                                // ==================================================
-                                                // v2.4.9：AVI「跳到那一帧就不动了」的修复
-                                                // --------------------------------------------------
-                                                // ① **已知该 AVI 没有 idx1 索引** → 这次 seek 必定不完整：
-                                                //    无索引时 AviExtractor 只能线性扫描，扫到的位置未必是
-                                                //    关键帧 → 解码器拿不到 I 帧参考 → 画面冻在目标帧。
-                                                //    这不是「seek 没生效」，所以**旧的判据恰好检测不到**
-                                                //    （位置其实已经跳到目标了）。→ 直接重建索引（治本）。
-                                                //
-                                                // ② 通用兜底：位置到了、但**播放完全停住**。
-                                                //    用「1 秒内位置一毫秒都没推进」而非「推进得慢」，
-                                                //    以免误伤 AVI 慢速软解；并排除 buffering
-                                                //    （缓冲期间不推进是正常的）。
-                                                // ==================================================
-                                                val aviNeedsRebuild = aviProbe?.needsIndexRebuild == true
-                                                // ⚠️ v2.4.28：**容器修复只对 EXO 生效**。
-                                                //    MPV / IJK 的 seek 由 libavformat 负责，本来正常；
-                                                //    对它们触发重封装只会白等（实测对一条 9113s 的
-                                                //    MPV 视频重封装了 2.5 分钟、还因丢包导致播不了）。
-                                                scope.launch {
-                                                    // 🔴 v2.6.1：**必须先在"什么都不假设"的前提下观察，再决定修不修**。
-                                                    //    旧实现有两处会"没问题也修"，用户反馈"有时候没问题也修复"：
-                                                    //      ① `aviNeedsRebuild` 是**文件属性**（该 AVI 无 idx1），
-                                                    //         它一旦为 true 就**不做任何验证**直接重建索引 →
-                                                    //         同一个文件每次拖动都重建一次；
-                                                    //      ② `stuckAtStart` 只等 1.5s，慢设备 / 网络源 / 大文件上
-                                                    //         seek 还没落地（位置仍停在片头）就被判成"容器吞了 seek"。
-                                                    //    现在统一为：等 2.5s → 收集证据 → 只有**证明 seek 真的坏了**才修。
-                                                    delay(2500L)
-                                                    if (!seekIssuedFlag || seekTarget <= 3000L) return@launch
-                                                    val inst = playerInstance ?: return@launch
-                                                    // v2.4.28：非 EXO（MPV/IJK/系统）不参与容器修复判定
-                                                    if (inst.engine != DecoderEngine.EXO) return@launch
-                                                    if (seekUnsupported || isRemuxing || !selectedMediaItem.isVideo) return@launch
-                                                    // 仍在缓冲：位置不推进是正常的，本次不判定（下次拖动再观察）
-                                                    if (inst.exo?.playbackState == Player.STATE_BUFFERING) return@launch
-
-                                                    val posA = inst.currentPosition
-                                                    // ① seek **没落地**：位置仍停在片头附近，而目标很远
-                                                    val stuckAtStart = posA < 2000L && seekTarget > 5000L
-
-                                                    // ② seek **落地但卡死**：位置已在目标附近，
-                                                    //    连续 3 次 × 500ms 采样都不再推进（且未缓冲、确实在播）。
-                                                    //    ⚠️ 用"多次采样"而不是单次 —— 单次 1s 采样遇到
-                                                    //    解码器 flush / 刚 seek 完的短暂停顿就会误判。
-                                                    //    ⚠️ 排除暂停：用户 seek 后立刻暂停时 isPlaying=false，
-                                                    //    此时不推进是正常的，不累计 stall。
-                                                    var frozen = false
-                                                    if (!stuckAtStart && kotlin.math.abs(posA - seekTarget) <= 5000L) {
-                                                        var prev = posA
-                                                        var stalls = 0
-                                                        repeat(3) {
-                                                            delay(500L)
-                                                            val cur = inst.currentPosition
-                                                            val buffering =
-                                                                inst.exo?.playbackState == Player.STATE_BUFFERING
-                                                            if (!buffering && inst.isPlaying) {
-                                                                if (cur - prev <= 0L) stalls++ else stalls = 0
                                                             } else {
-                                                                stalls = 0
+                                                                // duration 不可用 → 退而求其次，用 hoverTimeMs
+                                                                if (seekTarget > 0) {
+                                                                    mp.seekTo(seekTarget)
+                                                                    seekIssued = true
+                                                                }
                                                             }
-                                                            prev = cur
-                                                        }
-                                                        // 3 次里连续 2 次无推进才算卡死（留一次容错）
-                                                        frozen = stalls >= 2
+                                                        } catch (e: Exception) {}
                                                     }
+                                                    // 拖动结束立即把 UI 进度对齐到目标（不等 1 秒轮询），
+                                                    // 否则会出现「松手后进度条先弹回旧位置、1 秒后才跳过去」的错觉。
+                                                    if (seekIssued) {
+                                                        videoPlaybackProgress = finalProgress
+                                                        // ==================================================
+                                                        // v2.6.20：**播完态的拖动必须补一次 play()**
+                                                        // --------------------------------------------------
+                                                        // 视频播完后（onCompletion / Exo ENDED），三种内核都不会
+                                                        // 因为 seekTo 自动开播：EXO 只在 playWhenReady=true 时续播，
+                                                        // IJK/MPV 完成态下要显式 start，系统 MediaPlayer 的
+                                                        // PlaybackCompleted 态 seekTo 本身无效。
+                                                        // 于是用户拖到中间后画面停在那一帧不动 —— 就是
+                                                        // 「播完一个视频后拖动进度条无法播放」。
+                                                        // 判据用 [playbackEnded] 而不是"当前没在播"：
+                                                        // 用户**手动暂停**后拖动应当保持暂停，不能替他开播。
+                                                        // ==================================================
+                                                        if (playbackEnded) {
+                                                            playbackEnded = false
+                                                            playerInstance?.play()
+                                                            isVideoPlaying = true
+                                                        }
+                                                    }
+                                                    // Verify the seek took effect: some containers
+                                                    // (moov-at-end / fragmented / AVI without idx1) reset the
+                                                    // position to 0, in which case we offer an auto container fix.
+                                                    //
+                                                    // ⚠️ v2.1.247 收紧判据（AVI 相关）：
+                                                    //   ① 只有在**确实发出过 seek** 时才校验（否则误判）；
+                                                    //   ② 判定用「位置几乎没动」而不是「< 2s」—— 后者在
+                                                    //      短片（< 10s）上会把正常位置也判成失败；
+                                                    //   ③ 加长等待到 1.5s：AVI 无索引时线性扫描 1s 内可能还没到位，
+                                                    //      过早判定会触发不必要的重封装。
+                                                    val seekIssuedFlag = seekIssued
+                                                    // ==================================================
+                                                    // v2.4.9：AVI「跳到那一帧就不动了」的修复
+                                                    // --------------------------------------------------
+                                                    // ① **已知该 AVI 没有 idx1 索引** → 这次 seek 必定不完整：
+                                                    //    无索引时 AviExtractor 只能线性扫描，扫到的位置未必是
+                                                    //    关键帧 → 解码器拿不到 I 帧参考 → 画面冻在目标帧。
+                                                    //    这不是「seek 没生效」，所以**旧的判据恰好检测不到**
+                                                    //    （位置其实已经跳到目标了）。→ 直接重建索引（治本）。
+                                                    //
+                                                    // ② 通用兜底：位置到了、但**播放完全停住**。
+                                                    //    用「1 秒内位置一毫秒都没推进」而非「推进得慢」，
+                                                    //    以免误伤 AVI 慢速软解；并排除 buffering
+                                                    //    （缓冲期间不推进是正常的）。
+                                                    // ==================================================
+                                                    val aviNeedsRebuild = aviProbe?.needsIndexRebuild == true
+                                                    // ⚠️ v2.4.28：**容器修复只对 EXO 生效**。
+                                                    //    MPV / IJK 的 seek 由 libavformat 负责，本来正常；
+                                                    //    对它们触发重封装只会白等（实测对一条 9113s 的
+                                                    //    MPV 视频重封装了 2.5 分钟、还因丢包导致播不了）。
+                                                    scope.launch {
+                                                        // 🔴 v2.6.1：**必须先在"什么都不假设"的前提下观察，再决定修不修**。
+                                                        //    旧实现有两处会"没问题也修"，用户反馈"有时候没问题也修复"：
+                                                        //      ① `aviNeedsRebuild` 是**文件属性**（该 AVI 无 idx1），
+                                                        //         它一旦为 true 就**不做任何验证**直接重建索引 →
+                                                        //         同一个文件每次拖动都重建一次；
+                                                        //      ② `stuckAtStart` 只等 1.5s，慢设备 / 网络源 / 大文件上
+                                                        //         seek 还没落地（位置仍停在片头）就被判成"容器吞了 seek"。
+                                                        //    现在统一为：等 2.5s → 收集证据 → 只有**证明 seek 真的坏了**才修。
+                                                        delay(2500L)
+                                                        if (!seekIssuedFlag || seekTarget <= 3000L) return@launch
+                                                        val inst = playerInstance ?: return@launch
+                                                        // v2.4.28：非 EXO（MPV/IJK/系统）不参与容器修复判定
+                                                        if (inst.engine != DecoderEngine.EXO) return@launch
+                                                        if (seekUnsupported || isRemuxing || !selectedMediaItem.isVideo) return@launch
+                                                        // 仍在缓冲：位置不推进是正常的，本次不判定（下次拖动再观察）
+                                                        if (inst.exo?.playbackState == Player.STATE_BUFFERING) return@launch
 
-                                                    if (!stuckAtStart && !frozen) return@launch
+                                                        val posA = inst.currentPosition
+                                                        // ① seek **没落地**：位置仍停在片头附近，而目标很远
+                                                        val stuckAtStart = posA < 2000L && seekTarget > 5000L
 
-                                                    Log.i(
-                                                        "VRPlayerScreen",
-                                                        "seek 异常（stuckAtStart=$stuckAtStart frozen=$frozen " +
-                                                            "pos=${posA / 1000}s target=${seekTarget / 1000}s " +
-                                                            "aviNoIdx1=$aviNeedsRebuild）→ 重建索引"
-                                                    )
-                                                    startRemuxFix()
-                                                }
-                                                scope.launch {
-                                                    delay(2500L)
-                                                    isHoverActive = false
-                                                }
-                                            },
-                                            interactionSource = sliderInteractionSource,
-                                            colors = SliderDefaults.colors(
-                                                thumbColor = AccentColor,
-                                                activeTrackColor = AccentColor,
-                                                inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(16.dp)
-                                        )
+                                                        // ② seek **落地但卡死**：位置已在目标附近，
+                                                        //    连续 3 次 × 500ms 采样都不再推进（且未缓冲、确实在播）。
+                                                        //    ⚠️ 用"多次采样"而不是单次 —— 单次 1s 采样遇到
+                                                        //    解码器 flush / 刚 seek 完的短暂停顿就会误判。
+                                                        //    ⚠️ 排除暂停：用户 seek 后立刻暂停时 isPlaying=false，
+                                                        //    此时不推进是正常的，不累计 stall。
+                                                        var frozen = false
+                                                        if (!stuckAtStart && kotlin.math.abs(posA - seekTarget) <= 5000L) {
+                                                            var prev = posA
+                                                            var stalls = 0
+                                                            repeat(3) {
+                                                                delay(500L)
+                                                                val cur = inst.currentPosition
+                                                                val buffering =
+                                                                    inst.exo?.playbackState == Player.STATE_BUFFERING
+                                                                if (!buffering && inst.isPlaying) {
+                                                                    if (cur - prev <= 0L) stalls++ else stalls = 0
+                                                                } else {
+                                                                    stalls = 0
+                                                                }
+                                                                prev = cur
+                                                            }
+                                                            // 3 次里连续 2 次无推进才算卡死（留一次容错）
+                                                            frozen = stalls >= 2
+                                                        }
+
+                                                        if (!stuckAtStart && !frozen) return@launch
+
+                                                        Log.i(
+                                                            "VRPlayerScreen",
+                                                            "seek 异常（stuckAtStart=$stuckAtStart frozen=$frozen " +
+                                                                "pos=${posA / 1000}s target=${seekTarget / 1000}s " +
+                                                                "aviNoIdx1=$aviNeedsRebuild）→ 重建索引"
+                                                        )
+                                                        startRemuxFix()
+                                                    }
+                                                    scope.launch {
+                                                        delay(2500L)
+                                                        isHoverActive = false
+                                                    }
+                                                },
+                                                interactionSource = sliderInteractionSource,
+                                                colors = SliderDefaults.colors(
+                                                    thumbColor = AccentColor,
+                                                    activeTrackColor = AccentColor,
+                                                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
+                                                ),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(16.dp)
+                                            )
+                                        }
 
                                         Text(
-                                            text = if (videoDurationText.contains("/")) videoDurationText.split("/")[1].trim() else "00:00",
+                                            // v2.6.24（直播 P0）：直播没有总时长 → 右侧留空
+                                            text = if (isLiveStream) ""
+                                            else if (videoDurationText.contains("/")) videoDurationText.split("/")[1].trim()
+                                            else "00:00",
                                             color = Color.White.copy(alpha = 0.6f),
                                             fontSize = 11.sp,
                                             fontFamily = FontFamily.Monospace
@@ -5754,7 +6049,8 @@ fun VRPlayerScreen(
                                         prefs.edit().putInt("asr_threads", asrThreads).apply()
                                     }
                                     // 识别器已按旧线程数创建，改动需重建引擎才生效
-                                    if (isRealtimeSubtitleEnabled) realtimeSubtitleEngine.restart()
+                                    // v2.6.24：判据用 isRealtimeAsrActive —— 后台执行模式同样要重建
+                                    if (isRealtimeAsrActive) realtimeSubtitleEngine.restart()
                                     keepUiAlight()
                                 },
                                 valueRange = SherpaAsrManager.MIN_THREADS.toFloat()..SherpaAsrManager.MAX_THREADS.toFloat(),
@@ -5782,6 +6078,25 @@ fun VRPlayerScreen(
                                 isRealtimeSubtitleEnabled = it
                                 if (isMemoryModeEnabled) {
                                     prefs.edit().putBoolean("realtime_subtitle_enabled", it).apply()
+                                }
+                                keepUiAlight()
+                            },
+                            accentColor = AccentColor,
+                            accentOnColor = AccentOnColor
+                        )
+                        // v2.6.24：**后台执行 AI 字幕** —— 只跑识别、不显示字幕，
+                        // 台词留给 AI 弹幕。与上面的实时字幕开关是**并列**关系：
+                        //  - 只开上面 = 显示实时字幕（弹幕也能用）
+                        //  - 只开这里 = 不显示字幕，但 AI 弹幕有台词素材
+                        //  - 两个都开 = 效果同只开上面（引擎不会重复启动，见 isRealtimeAsrActive）
+                        ExperimentalSwitchRow(
+                            title = stringResource(R.string.bg_asr_title),
+                            desc = stringResource(R.string.bg_asr_desc),
+                            checked = bgAsrEnabled,
+                            onChanged = {
+                                bgAsrEnabled = it
+                                if (isMemoryModeEnabled) {
+                                    prefs.edit().putBoolean("bg_asr_enabled", it).apply()
                                 }
                                 keepUiAlight()
                             },
@@ -5965,6 +6280,9 @@ fun VRPlayerScreen(
                             onOffsetXRatioChange = { subtitleOffsetXRatio = it },
                             delayMs = subtitleDelayMs,
                             onDelayMsChange = { subtitleDelayMs = it },
+                            liveDelaySec = liveDelaySec,
+                            onLiveDelaySecChange = { liveDelaySec = it },
+                            isLiveStream = isLiveStream,
                             textAlign = subtitleTextAlignOpt,
                             onTextAlignChange = { subtitleTextAlignOpt = it },
                             maxLines = subtitleMaxLines,
@@ -7770,6 +8088,8 @@ fun VRPlayerScreen(
                                     },
                                     stripPunctuation = isStripSubtitlePunctuation,
                                     onStripPunctuationChange = { isStripSubtitlePunctuation = it },
+                                    fadeIn = subtitleFadeIn,
+                                    onFadeInChange = { subtitleFadeIn = it },
                                     loadedSubtitleFileName = loadedSubtitleFileName,
                                     loadedCueCount = loadedSubtitleCues.size,
                                     onPickSubtitleFile = {
@@ -9086,12 +9406,19 @@ fun VRPlayerScreen(
                     seekHudText = fwdStepSwitched
                 },
                 onTrigger = { step ->
-                    val p = playerInstance
-                    if (p != null) {
-                        val dur = if (p.duration > 0) p.duration else Long.MAX_VALUE
-                        p.seekTo((p.currentPosition + step * 1000L).coerceIn(0L, dur))
+                    // v2.6.24（直播 P0 补齐）：直播下这两个悬浮球保持可见但只给提示 ——
+                    // 隐藏按钮会让用户以为功能被砍，点了没反应又像坏了。
+                    if (isLiveStream) {
+                        val label = context.getString(R.string.live_seek_disabled)
+                        seekHudText = label
+                    } else {
+                        val p = playerInstance
+                        if (p != null) {
+                            val dur = if (p.duration > 0) p.duration else Long.MAX_VALUE
+                            p.seekTo((p.currentPosition + step * 1000L).coerceIn(0L, dur))
+                        }
+                        seekHudText = fwdHudLabel
                     }
-                    seekHudText = fwdHudLabel
                 },
                 onFeedback = { seekHudText = it },
                 isLiquidGlass = isLiquidGlass,
@@ -9117,11 +9444,15 @@ fun VRPlayerScreen(
                     seekHudText = bwdStepSwitched
                 },
                 onTrigger = { step ->
-                    val p = playerInstance
-                    if (p != null) {
-                        p.seekTo((p.currentPosition - step * 1000L).coerceAtLeast(0L))
+                    if (isLiveStream) {
+                        seekHudText = context.getString(R.string.live_seek_disabled)
+                    } else {
+                        val p = playerInstance
+                        if (p != null) {
+                            p.seekTo((p.currentPosition - step * 1000L).coerceAtLeast(0L))
+                        }
+                        seekHudText = bwdHudLabel
                     }
-                    seekHudText = bwdHudLabel
                 },
                 onFeedback = { seekHudText = it },
                 isLiquidGlass = isLiquidGlass,

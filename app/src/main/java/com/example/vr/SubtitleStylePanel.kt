@@ -120,6 +120,18 @@ fun SubtitleStyleSettings(
     onOffsetXRatioChange: (Float) -> Unit,
     delayMs: Long,
     onDelayMsChange: (Long) -> Unit,
+    /**
+     * v2.6.24：**直播延迟**（秒）—— 让直播播放位置主动落后实时边缘 N 秒。
+     *
+     * 与 [delayMs] 的区别（两个概念别混）：
+     *  - [delayMs] 只是**显示层**偏移，画面/声音一帧不动；
+     *  - 直播延迟是**播放层**：EXO 维持在「实时边缘 - N 秒」，用这 N 秒给字幕生成
+     *    （ASR/翻译）留出时间，属于"牺牲实时性换字幕可用"。
+     */
+    liveDelaySec: Int = 0,
+    onLiveDelaySecChange: (Int) -> Unit = {},
+    /** 当前是否直播：非直播时滑块置灰（延迟对点播无意义） */
+    isLiveStream: Boolean = false,
     textAlign: SubtitleAlignOption,
     onTextAlignChange: (SubtitleAlignOption) -> Unit,
     maxLines: Int,
@@ -686,6 +698,56 @@ fun SubtitleStyleSettings(
                     activeTrackColor = accentColor
                 ),
                 modifier = Modifier.height(20.dp)
+            )
+        }
+
+        // 7b. v2.6.24：**直播延迟** —— 让播放主动落后实时边缘 N 秒，给字幕生成留时间。
+        //     与上面的「字幕延迟」是两个概念：那个只挪显示、这个真的让画面晚 N 秒。
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.subtitle_live_delay),
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (liveDelaySec <= 0) {
+                        stringResource(R.string.subtitle_live_delay_off)
+                    } else {
+                        stringResource(R.string.subtitle_live_delay_value, liveDelaySec)
+                    },
+                    color = if (liveDelaySec > 0) accentColor else Color.White.copy(alpha = 0.5f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Slider(
+                value = liveDelaySec.toFloat(),
+                onValueChange = {
+                    onLiveDelaySecChange(it.roundToInt().coerceIn(0, 60))
+                    onUserActivity()
+                },
+                valueRange = 0f..60f,
+                steps = 59,          // 0~60，1 秒一档
+                enabled = isLiveStream,
+                colors = SliderDefaults.colors(
+                    thumbColor = accentColor,
+                    activeTrackColor = accentColor,
+                    disabledThumbColor = Color.White.copy(alpha = 0.3f),
+                    disabledActiveTrackColor = Color.White.copy(alpha = 0.2f),
+                    disabledInactiveTrackColor = Color.White.copy(alpha = 0.12f)
+                ),
+                modifier = Modifier.height(20.dp)
+            )
+            Text(
+                text = stringResource(R.string.subtitle_live_delay_hint),
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = 9.sp
             )
         }
 

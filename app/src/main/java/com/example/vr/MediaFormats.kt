@@ -312,6 +312,62 @@ object MediaFormats {
         }
     }
 
+    /**
+     * v2.6.24（直播 P1）：**疑似直播流**判定 —— 供「直播强制 EXO」的内核路由使用。
+     *
+     * ## 为什么放在这里、而不是靠播放器自己判
+     * 与 [shouldRouteToMpv] / [shouldAutoRouteToIjk] 同属「**建播放器之前**的路由判据」。
+     * 必须提前判：一旦已经建了 MPV，运行时再切内核要 release/destroy 重建，代价高且
+     * 有 native 崩溃史（见 MpvPlayerBackend.release 的注释）。播放器跑起来之后的
+     * 权威判定仍然是 `VrPlayerBackend.isLive`（EXO 读 Timeline.Window.isLive）。
+     *
+     * ## 判据（任一命中即认为"疑似直播"）
+     * 1. **流式清单/分片容器**：`m3u8` / `m3u` / `mpd` / `flv` / `ts`。
+     *    这些本来就只有 EXO 能稳定播（IJK 的裁剪版 FFmpeg 无 hls demuxer），
+     *    即便个别是点播切片，落到 EXO 也是更优路径 —— 误判的代价几乎为零。
+     * 2. **实时传输协议**：`rtmp` / `rtsp` / `rtp` / `udp` / `srt` —— 语义上就是直播。
+     * 3. **无扩展名 + 路径含直播特征词**（`/live`、`/hls`、`chunklist`…）。
+     *    直播 CDN 常见 `https://x.com/live/abc?token=…` 这种没有扩展名的地址。
+     *    ⚠️ 只在**扩展名为空**时才用特征词，否则 `/streaming/movie.mp4` 这类点播会被误伤。
+     *
+     * ⚠️ `smb` / `content` / `file` 一律返回 false：本地文件不可能是直播，且它们本就
+     *    要落到容器路由（AVI/WMV→MPV）上。
+     */
+    fun isLikelyLiveStream(uri: Uri?): Boolean {
+        val scheme = uri?.scheme?.lowercase() ?: return false
+        if (scheme !in STREAM_SCHEMES) return false
+        // 实时传输协议：不看路径，本身就是直播
+        if (scheme in REALTIME_SCHEMES) return true
+        val ext = extensionOf(uri)
+        if (ext in LIVE_EXTENSIONS) return true
+        // 有其它扩展名 → 认为是点播文件（避免 /streaming/x.mp4 误判）
+        if (ext.isNotEmpty()) return false
+        val path = (uri?.path ?: "").lowercase()
+        return LIVE_URL_MARKERS.any { path.contains(it) }
+    }
+
+    private val STREAM_SCHEMES = setOf("http", "https", "rtmp", "rtsp", "rtp", "udp", "srt")
+    private val REALTIME_SCHEMES = setOf("rtmp", "rtsp", "rtp", "udp", "srt")
+    private val LIVE_EXTENSIONS = setOf("m3u8", "m3u", "mpd", "flv", "ts")
+
+    /**
+     * v2.6.24：是否是**流媒体清单**（`m3u8` / `m3u` / `mpd`）。
+     *
+     * 用途：这类请求**必须绕过本地 http 缓存**（见 `SchemeRoutingDataSource` 的分支说明）——
+     * 清单是**会变的**，缓存住就会一直拿到旧清单，Media3 的 HLS 追踪器于是判定
+     * `PlaylistStuckException`（连续 30s 没看到清单变化）→ **任何 HLS 直播都打不开**。
+     * 实测该 bug 与源无关：本地自造流、Akamai、Unified Streaming 的公网直播流全部命中。
+     *
+     * ⚠️ 只排除清单，**不排除分片**：`.ts` 分片内容不可变，缓存能省流量。
+     */
+    fun isStreamManifest(uri: Uri?): Boolean = extensionOf(uri) in setOf("m3u8", "m3u", "mpd")
+
+    /** 无扩展名直播 URL 的特征词（全部小写，按 path 匹配） */
+    private val LIVE_URL_MARKERS = listOf(
+        "/live", "live/", "/hls", "hls/", "chunklist", "/stream", "stream/",
+        "/channel", "playlist", "/pull", "/pullstream"
+    )
+
     // ===================== 能力判定 =====================
 
     /**

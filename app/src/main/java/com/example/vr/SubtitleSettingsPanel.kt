@@ -118,6 +118,10 @@ fun SubtitleSettingsPanel(
     onOffsetXRatioChange: (Float) -> Unit,
     delayMs: Long,
     onDelayMsChange: (Long) -> Unit,
+    // v2.6.24：直播延迟（秒，0=贴实时边缘）与当前是否直播（决定滑块是否可用）
+    liveDelaySec: Int = 0,
+    onLiveDelaySecChange: (Int) -> Unit = {},
+    isLiveStream: Boolean = false,
     textAlign: SubtitleAlignOption,
     onTextAlignChange: (SubtitleAlignOption) -> Unit,
     vrIpdOffsetRatio: Float,
@@ -134,6 +138,9 @@ fun SubtitleSettingsPanel(
     // 内部原文保持带标点，断句与翻译质量不受影响
     stripPunctuation: Boolean = true,
     onStripPunctuationChange: (Boolean) -> Unit = {},
+    // v2.6.24：字幕淡入开关（默认关）
+    fadeIn: Boolean = false,
+    onFadeInChange: (Boolean) -> Unit = {},
     translator: SubtitleTranslator? = null,
     onTranslateFileRequested: () -> Unit = {},
     // v2.0.127：翻译开关的持久化回调。面板本身不持有 prefs，
@@ -267,6 +274,34 @@ fun SubtitleSettingsPanel(
                 checked = stripPunctuation,
                 onCheckedChange = {
                     onStripPunctuationChange(it)
+                    onUserActivity()
+                },
+                accentColor = accentColor,
+                accentOnColor = accentOnColor
+            )
+        }
+
+        // v2.6.24：字幕淡入开关（默认关闭）
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.subtitle_fade_in),
+                    color = Color.White,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = stringResource(R.string.subtitle_fade_in_hint),
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 11.sp
+                )
+            }
+            AuraSwitch(
+                checked = fadeIn,
+                onCheckedChange = {
+                    onFadeInChange(it)
                     onUserActivity()
                 },
                 accentColor = accentColor,
@@ -1093,6 +1128,9 @@ fun SubtitleSettingsPanel(
             onOffsetXRatioChange = onOffsetXRatioChange,
             delayMs = delayMs,
             onDelayMsChange = onDelayMsChange,
+            liveDelaySec = liveDelaySec,
+            onLiveDelaySecChange = onLiveDelaySecChange,
+            isLiveStream = isLiveStream,
             textAlign = textAlign,
             onTextAlignChange = onTextAlignChange,
             maxLines = maxLines,

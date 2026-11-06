@@ -270,6 +270,10 @@ class IjkBackend(
         get() = safe { mp.currentPosition } ?: 0L
     override val duration: Long
         get() = safe { mp.duration } ?: 0L
+
+    /** v2.6.24（直播 P0）：本内核无直播判定 API，按「时长未知」兜底。 */
+    override val isLive: Boolean
+        get() = duration <= 0
     override val isPlaying: Boolean
         get() = safe { mp.isPlaying } ?: false
 

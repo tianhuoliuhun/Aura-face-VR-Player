@@ -21,6 +21,8 @@
     <string name="subtitle_enabled">字幕はオンです</string>
     <string name="subtitle_disabled">字幕はオフです</string>
     <string name="subtitle_off_hint">字幕はオフです。オンにすると外部 SRT/VTT を読み込み、VR/平面レンダリングのスタイルをカスタマイズできます</string>
+    <string name="subtitle_fade_in">字幕フェードイン</string>
+    <string name="subtitle_fade_in_hint">字幕テキスト切替時に 160ms フェード。ライブ配信や頻繁な改行ではオフ推奨</string>
     <string name="subtitle_strip_punct">句読点を除去</string>
     <string name="subtitle_strip_punct_hint">画面表示と書き出しの字幕から句読点を除きます（原文は変更しません）</string>
     <string name="subtitle_expand_all">すべて展開</string>
@@ -62,6 +64,14 @@
     <string name="toast_subtitle_exported">%1$d 件を書き出し：\n%2$s</string>
     <string name="toast_subtitle_export_failed">字幕の書き出しに失敗しました</string>
     <string name="toast_enable_realtime_first">先に「リアルタイム AI 字幕」をオンにしてください</string>
+    <string name="toast_live_need_realtime_asr">ライブ配信には外部字幕がありません。「リアルタイム AI 字幕」をオンにするか、埋め込み字幕のある配信を選んでください</string>
+    <string name="live_seek_disabled">ライブ配信ではシークできません</string>
+    <string name="subtitle_live_delay">ライブ遅延</string>
+    <string name="bg_asr_title">AI 字幕をバックグラウンド実行</string>
+    <string name="bg_asr_desc">字幕は表示せず、音声認識だけを続けてセリフを AI コメントに渡します。字幕を出さずにコメントだけ見たい場合に。</string>
+    <string name="subtitle_live_delay_off">オフ（ライブエッジ）</string>
+    <string name="subtitle_live_delay_value">%1$d 秒</string>
+    <string name="subtitle_live_delay_hint">ライブ時のみ有効：再生をライブエッジより N 秒遅らせ、字幕生成の時間を確保します。変更すると新しい位置に移動します。</string>
     <string name="toast_image_no_audio">画像のため認識できる音声トラックがありません</string>
     <string name="toast_subtitle_restarted">字幕生成をやり直しました</string>
     <string name="toast_image_no_audio_gen">画像のため音声トラックがありません（動画を開いてから生成してください）</string>
@@ -264,7 +274,7 @@
     <string name="danmu_source_image">映像のみ</string>
     <string name="danmu_source_subtitle">セリフのみ</string>
     <string name="danmu_source_hint">「セリフ」は現在位置付近の AI 字幕（前 15 秒 / 後 5 秒）を使います。セリフのみはスクリーンショットを送らないため高速・省通信ですが、映像は見えません。</string>
-    <string name="danmu_err_no_subtitle">現在位置のセリフがまだありません。AI 字幕を有効にして生成をお待ちください</string>
+    <string name="danmu_err_no_subtitle">現在位置のセリフがまだありません。「リアルタイム AI 字幕」または「AI 字幕をバックグラウンド実行」を有効にして生成をお待ちください</string>
     <string name="danmu_err_url_empty">エンドポイントが空です。http:// または https:// で始まるアドレスを入力してください</string>
     <string name="danmu_err_url_no_scheme">エンドポイントに接頭辞がありません。http:// または https:// で始める必要があります（例: https://api.xiaomimimo.com/v1）</string>
     <string name="danmu_err_url_bad_scheme">エンドポイントのプロトコルが誤っています。http または https のみ対応（よくある誤記: hhttps:// や htps://）</string>

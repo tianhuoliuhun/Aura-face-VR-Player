@@ -100,6 +100,15 @@ fun SubtitleOverlay(
     exoCueText: String? = null, // Fallback for ExoPlayer embedded cues
     /** v2.0.154：显示时去除标点（原文与译文都去；内部原始文本不受影响） */
     stripPunctuation: Boolean = true,
+    /**
+     * v2.6.24：字幕文本切换的 160ms 淡入。**默认关闭** —— 直播/密集换行场景下淡入会拖影。
+     */
+    enableFadeIn: Boolean = false,
+    /**
+     * v2.6.24（直播 P2）：直播态。开启后翻译走"尾随模式"（不预读、不落盘、超时丢弃），
+     * 由本组件把当前 cue 的过期时刻写进 [SubtitleTranslator.liveCueDeadlineMs]。
+     */
+    isLiveStream: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     if (!isSubtitleEnabled) return
@@ -156,12 +165,25 @@ fun SubtitleOverlay(
     // 把当前这条字幕重新翻一遍（哪怕改的只是与翻译无关的项）。
     LaunchedEffect(
         rawCueText,
+        isLiveStream,
         translator?.config?.isEnabled,
         translator?.config?.engine,
         translator?.config?.targetLanguage,
         translator?.config?.displayMode
     ) {
         if (translator != null) {
+            // v2.6.24（直播 P2）：直播下给本条 cue 一个"过期时刻"（现在 + 剩余显示时长 + 2s 宽限）。
+            // 翻译器拿到结果时若已过期就直接丢弃：直播里"这句说完了译文才到"只会和下一句抢屏。
+            // ⚠️ 模式位 [SubtitleTranslator.liveMode] 由 VRPlayerScreen 统一设置（权威），
+            //    这里只写"本条 cue 何时过期" —— 同一状态两处登记必然失步。
+            translator.liveCueDeadlineMs = if (isLiveStream) {
+                val now = currentPositionMs + subtitleDelayMs
+                val activeCue = subtitleCues.firstOrNull { now in it.startTimeMs..it.endTimeMs }
+                val remainMs = activeCue?.let { (it.endTimeMs - now).coerceAtLeast(0L) } ?: 0L
+                System.currentTimeMillis() + remainMs + 2_000L
+            } else {
+                0L
+            }
             translatedText = translator.translateOrOriginal(
                 rawCueText,
                 onTranslated = { result -> translatedText = result }
@@ -178,9 +200,12 @@ fun SubtitleOverlay(
 
     // v2.6.23（simul-subtitle 可移植清单 #3）：文本切换时 160ms 淡入 ——
     // 配合下方 AnchoredSubtitleBox 的 animateContentSize，cue 切换不再“吧”地跳变。
-    val appear = remember(activeCueText) { Animatable(0f) }
-    LaunchedEffect(activeCueText) {
-        appear.animateTo(1f, tween(160, easing = FastOutSlowInEasing))
+    // v2.6.24：淡入改为**可关的开关**（默认关）。关闭时恒为 1，等于旧行为直出。
+    val appear = remember(activeCueText, enableFadeIn) {
+        Animatable(if (enableFadeIn) 0f else 1f)
+    }
+    LaunchedEffect(activeCueText, enableFadeIn) {
+        if (enableFadeIn) appear.animateTo(1f, tween(160, easing = FastOutSlowInEasing))
     }
 
     // In bilingual mode the output is "source block + translated block", so the

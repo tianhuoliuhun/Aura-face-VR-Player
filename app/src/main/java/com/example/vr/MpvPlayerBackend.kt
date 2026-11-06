@@ -422,6 +422,22 @@ class MpvBackend(
     override val duration: Long
         get() = safe { (MPVLib.getPropertyDouble("duration") ?: 0.0) * 1000.0 }?.toLong() ?: 0L
 
+    /**
+     * v2.6.24（直播 P0）：直播判定。
+     *
+     * 🔴 冒烟实测：MPV 播放 **HLS 直播**时 `duration` 返回的是**滑动窗口时长**（12~15s）而不是 0/负，
+     * 只判 `duration <= 0` 会漏判（画面在播但 UI 不显示 LIVE）。
+     * 因此在「时长未知」之外补一条启发式：**流协议 URL + 窗口时长远小于常规点播** → 直播。
+     */
+    override val isLive: Boolean
+        get() {
+            val d = duration
+            if (d <= 0) return true
+            val u = currentUri.toString().lowercase()
+            val streaming = u.contains(".m3u8") || u.contains(".mpd") || u.contains("mpegurl")
+            return streaming && d < 60_000L
+        }
+
     override val isPlaying: Boolean
         get() = safe { MPVLib.getPropertyBoolean("pause")?.not() } ?: false
 

@@ -37,6 +37,8 @@
     <string name="subtitle_enabled">字幕已開啟</string>
     <string name="subtitle_disabled">字幕已關閉</string>
     <string name="subtitle_off_hint">字幕功能處於關閉狀態，開啟後可加載外部 SRT/VTT 文件並自定義 VR/平面渲染樣式</string>
+    <string name="subtitle_fade_in">字幕淡入</string>
+    <string name="subtitle_fade_in_hint">文字切換時 160ms 淡入。直播或密集換行時建議關閉，避免拖影</string>
     <string name="subtitle_strip_punct">去除標點</string>
     <string name="subtitle_strip_punct_hint">顯示與匯出的字幕都不帶標點（不改動原始文字）</string>
     <string name="subtitle_expand_all">全部展開</string>
@@ -80,6 +82,14 @@
     <string name="toast_subtitle_exported">已導出 %1$d 條字幕：\n%2$s</string>
     <string name="toast_subtitle_export_failed">字幕導出失敗</string>
     <string name="toast_enable_realtime_first">請先開啓「實時 AI 字幕」</string>
+    <string name="toast_live_need_realtime_asr">直播沒有外掛字幕：請開啓「實時 AI 字幕」，或選擇帶內嵌字幕的直播源</string>
+    <string name="live_seek_disabled">直播中不可快進/快退</string>
+    <string name="subtitle_live_delay">直播延遲</string>
+    <string name="bg_asr_title">後台執行 AI 字幕</string>
+    <string name="bg_asr_desc">不顯示字幕，但仍執行語音辨識並把台詞提供給 AI 彈幕。適合「只想看彈幕、不想被字幕擋畫面」的情境。</string>
+    <string name="subtitle_live_delay_off">關閉（貼實時邊緣）</string>
+    <string name="subtitle_live_delay_value">%1$d 秒</string>
+    <string name="subtitle_live_delay_hint">僅直播生效：讓播放落後實時邊緣 N 秒，為字幕生成留出時間；關閉則緊跟實時。修改後會重新貼近新位置。</string>
     <string name="toast_image_no_audio">當前是圖片，沒有音軌可識別</string>
     <string name="toast_subtitle_restarted">已重新開始生成字幕</string>
     <string name="toast_image_no_audio_gen">當前是圖片，沒有音軌可識別（請打開視頻後再生成字幕）</string>
@@ -291,7 +301,7 @@
     <string name="danmu_source_image">僅畫面</string>
     <string name="danmu_source_subtitle">僅台詞</string>
     <string name="danmu_source_hint">「台詞」取自目前位置附近的 AI 字幕（前 15 秒 / 後 5 秒）。僅台詞模式不傳截圖，更快更省流量，但看不到畫面。</string>
-    <string name="danmu_err_no_subtitle">目前位置還沒有台詞：請先開啟 AI 字幕並稍等生成</string>
+    <string name="danmu_err_no_subtitle">目前位置還沒有台詞：請開啓「實時 AI 字幕」或「後台執行 AI 字幕」，並稍等生成</string>
     <string name="danmu_err_url_empty">介面位址不能為空：請在設定中填寫以 http:// 或 https:// 開頭的位址</string>
     <string name="danmu_err_url_no_scheme">介面位址缺少前綴：需要以 http:// 或 https:// 開頭（例如 https://api.xiaomimimo.com/v1）</string>
     <string name="danmu_err_url_bad_scheme">介面位址的通訊協定寫錯了：只支援 http 或 https（常見誤寫 hhttps:// 或 htps://）</string>

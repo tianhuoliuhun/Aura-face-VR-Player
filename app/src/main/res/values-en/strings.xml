@@ -27,6 +27,8 @@
     <string name="subtitle_enabled">Subtitles on</string>
     <string name="subtitle_disabled">Subtitles off</string>
     <string name="subtitle_off_hint">Subtitles are off. Turn them on to load external SRT/VTT files and customize VR/flat rendering styles</string>
+    <string name="subtitle_fade_in">Subtitle fade-in</string>
+    <string name="subtitle_fade_in_hint">160ms fade when the caption changes. Turn off for live streams or rapid line changes</string>
     <string name="subtitle_strip_punct">Remove punctuation</string>
     <string name="subtitle_strip_punct_hint">Subtitles on screen and in exports omit punctuation (source text unchanged)</string>
     <string name="subtitle_expand_all">Expand all</string>
@@ -71,6 +73,14 @@
 %2$s</string>
     <string name="toast_subtitle_export_failed">Failed to export subtitles</string>
     <string name="toast_enable_realtime_first">Please enable Realtime AI subtitles first</string>
+    <string name="toast_live_need_realtime_asr">Live streams have no sidecar subtitles: enable Realtime AI subtitles, or pick a stream with embedded captions</string>
+    <string name="live_seek_disabled">Seeking is disabled for live streams</string>
+    <string name="subtitle_live_delay">Live delay</string>
+    <string name="bg_asr_title">Run AI subtitles in background</string>
+    <string name="bg_asr_desc">Keep speech recognition running without showing subtitles, so AI danmaku still gets the lines. Useful when you want danmaku but no subtitle overlay.</string>
+    <string name="subtitle_live_delay_off">Off (at live edge)</string>
+    <string name="subtitle_live_delay_value">%1$d s</string>
+    <string name="subtitle_live_delay_hint">Live only: keep playback N seconds behind the live edge so subtitles have time to be generated. Changing it jumps to the new position.</string>
     <string name="toast_image_no_audio">This is an image - no audio track to recognize</string>
     <string name="toast_subtitle_restarted">Subtitle generation restarted</string>
     <string name="toast_image_no_audio_gen">This is an image - no audio track (open a video to generate subtitles)</string>
@@ -281,7 +291,7 @@
     <string name="danmu_source_image">Frame only</string>
     <string name="danmu_source_subtitle">Lines only</string>
     <string name="danmu_source_hint">“Lines” uses AI subtitles near the current position (15s before / 5s after). Lines-only mode sends no screenshot — faster and lighter, but blind to the picture.</string>
-    <string name="danmu_err_no_subtitle">No lines at this position yet — enable AI subtitles and wait for them to generate</string>
+    <string name="danmu_err_no_subtitle">No lines at this position yet — enable Realtime AI subtitles or “Run AI subtitles in background”, then wait for them to generate</string>
     <string name="danmu_err_url_empty">Endpoint address is empty — enter an address starting with http:// or https://</string>
     <string name="danmu_err_url_no_scheme">Endpoint address is missing a prefix — it must start with http:// or https:// (e.g. https://api.xiaomimimo.com/v1)</string>
     <string name="danmu_err_url_bad_scheme">Wrong protocol in endpoint address — only http or https is supported (common typos: hhttps:// or htps://)</string>

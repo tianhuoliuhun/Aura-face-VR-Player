@@ -670,6 +670,93 @@ class SubtitleTranslator(private val context: Context) {
     var statusMessage by mutableStateOf(context.getString(R.string.subtitle_translate_ready))
     var isTranslating by mutableStateOf(false)
 
+    /**
+     * v2.6.24（直播 P2）：**直播模式**。
+     *
+     * 直播与点播的翻译诉求完全不同，这里用**一个开关**切三处行为
+     * （而不是散在三个地方各写一次判断 —— 本项目「同一份数据两处登记」的老坑）：
+     *
+     * | 点播 | 直播 | 为什么 |
+     * |---|---|---|
+     * | 预读游标前方的字幕 | **不预读** | 直播没有"未来内容"，预读纯空转 |
+     * | 结果落盘 TSV | **只留内存** | 直播内容不复现，落盘只会让缓存无限长 |
+     * | 迟到结果照常上屏 | **超时丢弃** | 一分钟后才翻出来的句子没有意义 |
+     *
+     * 由 UI 在 `isLiveStream` 变化时设置（见 VRPlayerScreen 的 LaunchedEffect），
+     * 切回点播必须复位成 false，否则点播也不会落盘。
+     */
+    @Volatile
+    var liveMode: Boolean = false
+
+    /**
+     * v2.6.24（直播 P2）：**当前 cue 的过期时刻**（epoch ms），0 表示不限。
+     *
+     * UI 在每条 cue 开始显示时写入「现在 + 该 cue 剩余时长 + 宽限」，翻译器在请求
+     * 返回时比对它：已过期就不写缓存、不回调 —— 直播里迟到的译文上屏反而是干扰。
+     *
+     * 只用一个共享时间戳（而不是按 cue 建表）：同一时刻屏幕上只有一条 cue 在翻，
+     * 而且这本来就是"尽力而为"的丢弃策略，不需要精确归属。
+     */
+    @Volatile
+    var liveCueDeadlineMs: Long = 0L
+
+    /** 直播模式内存缓存上限（条）。超出按「最久未命中」淘汰一半，避免长时直播内存无限增长 */
+    private val LIVE_CACHE_MAX_ENTRIES = 600
+
+    /** 直播模式内存缓存的 TTL：超过 30 分钟未命中的译文直接清（直播台词不会重播） */
+    private val LIVE_CACHE_TTL_MS = 30 * 60 * 1000L
+
+    /** 直播下"迟到译文"的判定：已过 [liveCueDeadlineMs] 就算过期 */
+    private fun isLiveResultStale(): Boolean =
+        liveMode && liveCueDeadlineMs > 0L && System.currentTimeMillis() > liveCueDeadlineMs
+
+    /**
+     * v2.6.24（直播 P2）：内存缓存的**上限与 TTL**（只在 [liveMode] 生效）。
+     *
+     * 点播的缓存是**资产**（下次看同一片直接命中），直播的缓存是**一次性**的，
+     * 所以这里做两道约束：
+     *  1. 超过 30 分钟没被命中的条目直接清（直播的台词不会重播）；
+     *  2. 仍超 [LIVE_CACHE_MAX_ENTRIES] 时按「最久未命中」淘汰一半。
+     */
+    private fun trimLiveCacheIfNeeded() {
+        if (!liveMode) return
+        val now = System.currentTimeMillis()
+        val expired = translationCache.keys.filter { k ->
+            val meta = cacheMeta[k] ?: return@filter false
+            now - meta[0] > LIVE_CACHE_TTL_MS
+        }
+        for (k in expired) {
+            translationCache.remove(k)
+            cacheMeta.remove(k)
+        }
+        if (translationCache.size <= LIVE_CACHE_MAX_ENTRIES) return
+        val victims = translationCache.keys
+            .sortedBy { cacheMeta[it]?.get(0) ?: 0L }        // 最久未命中优先
+            .take(translationCache.size - LIVE_CACHE_MAX_ENTRIES / 2)
+        for (k in victims) {
+            translationCache.remove(k)
+            cacheMeta.remove(k)
+        }
+        Log.i(
+            "SubtitleTranslator",
+            "直播模式缓存收敛：TTL 清 $expired 条 / LRU 淘汰 ${victims.size} 条，剩 ${translationCache.size}"
+        )
+    }
+
+    /**
+     * v2.6.24（直播 P3）：位置剧烈跳变（重连 / 切码率 / 追到实时边缘）时清空**内存**译文。
+     *
+     * 只清内存不清盘：① 直播本来就不落盘（见 [appendDiskCache]）；② 点播侧的磁盘缓存
+     * 是用户资产，任何"直播动作"都不该动它。
+     */
+    fun clearLiveMemoryCache() {
+        val n = translationCache.size
+        translationCache.clear()
+        cacheMeta.clear()
+        metaDirty.set(0)
+        Log.i("SubtitleTranslator", "直播跳变 → 清空内存译文 $n 条")
+    }
+
     // Translation cache: key = "$targetLangCode:$sourceText" -> translated text
     private val translationCache = ConcurrentHashMap<String, String>()
 
@@ -875,6 +962,9 @@ class SubtitleTranslator(private val context: Context) {
      * 也不会把译文写进错误的文件。
      */
     private fun appendDiskCache(key: String, value: String) {
+        // v2.6.24（直播 P2）：**直播不落盘**。直播内容不会重播，写进 TSV 只会让
+        // 缓存文件随时间无限增长（长时挂直播一下午就是几万条），且会稀释点播的命中率。
+        if (liveMode) return
         try {
             val langTag = key.substringBefore(':')
             val file = cacheFileFor(langTag)
@@ -984,7 +1074,11 @@ class SubtitleTranslator(private val context: Context) {
         meta[0] = now
         meta[1] = meta[1] + 1
         cacheHits.incrementAndGet()
-        if (metaDirty.incrementAndGet() >= META_FLUSH_DIRTY_THRESHOLD) {
+        // v2.6.24（直播 P2）：直播下跳过「攒够条数就重写语言文件」的自动落盘。
+        // ⚠️ 只挡这里不够：rewriteDiskCache 内部是"把内存全量写回文件"，直播的
+        //   一次性译文照样会被写进去 —— 所以真正的防线是 appendDiskCache 的短路，
+        //   这里只负责不让它被「命中计数」意外触发（省掉一次全量 IO）。
+        if (metaDirty.incrementAndGet() >= META_FLUSH_DIRTY_THRESHOLD && !liveMode) {
             metaDirty.set(0)
             loadedLangTag?.let { lang -> scope.launch { rewriteDiskCache(lang) } }
         }
@@ -1343,8 +1437,16 @@ class SubtitleTranslator(private val context: Context) {
                 }
             }
             val listeners = synchronized(pendingTranslations) { pendingTranslations.remove(cacheKey) }
+            // v2.6.24（直播 P2）：**迟到的译文丢弃** —— 不写缓存也不上屏。
+            // 直播里"这句已经说完了译文才到"等于噪声：上屏会与下一句抢位置，
+            // 写缓存则会让淘汰压力全压在这类一次性条目上。
+            if (isLiveResultStale()) {
+                Log.i("SubtitleTranslator", "直播译文超时 ${System.currentTimeMillis() - liveCueDeadlineMs}ms → 丢弃")
+                return@launch
+            }
             if (translatedText.isNotBlank()) {
                 translationCache[cacheKey] = translatedText
+                trimLiveCacheIfNeeded()
             }
             val output = if (translatedText.isNotBlank()) formatOutput(text, translatedText) else text
             withContext(Dispatchers.Main) {
@@ -1434,8 +1536,11 @@ class SubtitleTranslator(private val context: Context) {
                 }
             }
             val listeners = synchronized(pendingTranslations) { pendingTranslations.remove(cacheKey) }
+            // v2.6.24（直播 P2）：与单行路径同口径 —— 超时结果不写缓存、不上屏
+            if (isLiveResultStale()) return@launch
             if (translated.isNotBlank()) {
                 translationCache[cacheKey] = translated
+                trimLiveCacheIfNeeded()
             }
             withContext(Dispatchers.Main) {
                 listeners?.forEach { it(translated.ifBlank { line }) }
@@ -1471,6 +1576,10 @@ class SubtitleTranslator(private val context: Context) {
     ) {
         if (!config.isEnabled || cues.isEmpty()) return
         if (isSessionLimitReached) return   // 用量已达上限：只显示已有译文
+        // v2.6.24（直播 P2）：**直播不预读**。预读的前提是"未来内容已知且一定会播到"，
+        // 直播的字幕是边播边产出的，预读窗口里根本没有未来的 cue；更糟的是它会
+        // 白白占掉并发额度，把当前这句的翻译挤到后面去。
+        if (liveMode) return
         val targetLang = config.targetLanguage.code
 
         // 只取游标前方窗口内、且尚未翻译的文本（去重后保持时间顺序）
@@ -1658,8 +1767,13 @@ class SubtitleTranslator(private val context: Context) {
             // 而读取端一律经 makeCacheKey() 折叠空白 —— 只要原文含连续空格/全角空格差异，
             // 写入的 key 与读取的 key 就永远对不上，该条缓存形同虚设（每次都重翻）。
             val key = makeCacheKey(targetLangCode, text)
-            translationCache[key] = result
-            appendDiskCache(key, result)
+            // v2.6.24（直播 P2）：超时的结果连缓存都不留 —— 这里是**所有翻译路径的
+            // 统一出口**，上层再判一次只能拦住"上屏"，拦不住这一笔内存/磁盘写入。
+            if (!isLiveResultStale()) {
+                translationCache[key] = result
+                appendDiskCache(key, result)   // 直播下已由 appendDiskCache 自己短路
+                trimLiveCacheIfNeeded()
+            }
             sessionTranslated.incrementAndGet()
         }
         return result

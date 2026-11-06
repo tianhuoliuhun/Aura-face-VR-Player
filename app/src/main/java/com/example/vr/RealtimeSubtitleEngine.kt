@@ -327,6 +327,23 @@ class RealtimeSubtitleEngine(private val context: Context) {
         Log.i(TAG, "seek → ${targetMs}ms, 缓存保留 ${cache.size()} 条，已覆盖 ${scannedMs()}ms")
     }
 
+    /**
+     * v2.6.24（直播 P3）：**丢弃已生成的全部字幕**，从当前位置重新产出。
+     *
+     * 只用于直播的位置剧烈跳变（重连 / 切码率 / 追回实时边缘）：
+     * 与点播的 [onSeek] 刻意相反 —— 点播的音频没变，旧字幕照样正确、清掉是纯浪费；
+     * 直播跳变意味着**内容换了一段**，旧 cue 留着只会跟新段落的识别结果混在一起。
+     *
+     * ⚠️ 只清缓存与扫描记录，不动解码协程：直播下这条链路本就常常打不开
+     *    （AudioTee 基于 MediaExtractor，见类注释），重启反而更容易踩 native 竞态。
+     */
+    fun dropAllCues() {
+        cache.clear()
+        clearScanned()
+        generatedUpToMs = 0L
+        Log.i(TAG, "直播跳变 → 清空已生成字幕，从 ${cursorMs}ms 重新开始")
+    }
+
     fun stop() {
         isRunning = false
         generation++   // v2.0.136：旧代协程在当前窗口处理完后立即自灭，不再写共享状态
