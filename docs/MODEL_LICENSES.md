@@ -8,7 +8,7 @@
 | 模型 | 许可 | 可否商用 | 需要做什么 |
 |---|---|---|---|
 | **Dolphin ASR**（DataoceanAI） | **Apache-2.0** | ✅ 可以 | 保留版权与许可声明（本项目已在 `NOTICE`、`THIRD_PARTY_NOTICES.md`、应用内许可页登记） |
-| **Index-Translate 2B**（bilibili / IndexTeam） | **Apache-2.0** | ✅ 可以 | 同上；**无额外登记/申请要求** |
+| **Index-Translate Omni 2B**（bilibili / IndexTeam） | **Apache-2.0** | ✅ 可以 | 同上；**无额外登记/申请要求** |
 
 > 之前担心的"唯一可能真侵权的两个点"，经核实**都不成立**——两者均为 Apache-2.0，
 > 与本次核实前标注的"待核实"相比，结论是放宽而不是收紧。
@@ -33,21 +33,23 @@
 
 ---
 
-## 二、Index-Translate 2B（bilibili / IndexTeam）
+## 二、Index-Translate Omni 2B（bilibili / IndexTeam）
 
 | 项 | 内容 |
 |---|---|
-| 使用方式 | **不随包分发**：用户首次使用时从 HuggingFace `IndexTeam/Index-Translate-2B-GGUF` 下载（见 `LocalLlm.kt` 的 `MODELS`） |
+| 使用方式 | **不随包分发**：用户首次使用时从 HuggingFace `IndexTeam/Index-Translate-omni-2B-GGUF` 下载（见 `LocalLlm.kt` 的 `MODELS`） |
 | 许可 | **Apache License 2.0**（仓库根 `LICENSE` 为 Apache-2.0；HF 模型卡 `license:apache-2.0` 标签） |
 | 额外条款 | 仓库与模型卡均**未提及**商用限制、登记流程或附加协议 |
-| 来源 | <https://github.com/bilibili/Index-Translate>（核实于 2026-10-10 更新）、<https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF>（核实于 2026-11-06，commit `3a0eca6`） |
+| 来源 | <https://github.com/bilibili/Index-Translate>（核实于 2026-10-10 更新）、<https://huggingface.co/IndexTeam/Index-Translate-omni-2B-GGUF>（核实于 2026-11-06，commit `41eb7bb`） |
 | 商用限制 | 无 |
-| 用途 | 翻译专用：150 语言，支持术语表 / 格式约束 / 内容保留类指令；同仓库还带视觉 mmproj（图像翻译，无 OCR 依赖） |
+| 用途 | Omni = 文本翻译（150 语言，术语表 / 格式约束 / 内容保留类指令）+ 图像翻译（视觉 mmproj，无 OCR 依赖）。⚠️ **GGUF 版不含音频模块**（官方「Audio limitation」：只有 language model + 可选 mmproj vision），故本项目的语音识别仍用自带 Dolphin |
 
-**为什么换到它**（v2.8.0）：
+**为什么换到它**（v2.8.0 起用文本版，v2.8.1 起用 Omni 版）：
 原先用的 MiniCPM-V 4.7 1B 是**通用多模态**模型，做字幕翻译属于"顺带能翻"；
 Index-Translate 是**翻译专用**模型（bilibili 开源，2B 档），指令跟随与术语表约束更对口，
 且同样提供 GGUF + mmproj，架构为 `qwen35`，与项目内置的 llama.cpp 构建一致（无需重编 native）。
+Omni 版在**文本翻译基准上与文本版完全相同**（FLORES COMET22 0.8655 / WMT24++ 0.8489），多出来的是图像翻译与语音模态 ——
+其中语音在 GGUF 里被裁掉，因此实际额外可用的只有图像翻译。
 
 **⚠️ 版本/规模提醒**：
 同系列还有 9B、35B-A3B（preview）、以及 Omni / Echo（语音）/ Homura / NativeLong 等衍生模型，
@@ -59,8 +61,8 @@ Index-Translate 是**翻译专用**模型（bilibili 开源，2B 档），指令
 - 本项目只提供**下载地址**，权重由用户设备直接从 HuggingFace 获取，不构成再分发；
 - 因此即使许可将来变化，主要义务落在"告知用户其许可"这一层，而非"本项目再分发权重"。
 
-**历史备注**：v2.4.59 ~ v2.7.1 使用的是 openbmb 的 MiniCPM-V 4.7 1B（同样 Apache-2.0）。
-换模型后旧权重文件会被 `LocalLlmManager.deleteLegacyModelFiles()` 清理（约 1.8GB）。
+**历史备注**：v2.4.59 ~ v2.7.1 用 openbmb 的 MiniCPM-V 4.7 1B；v2.8.0 用 Index-Translate 2B（纯文本版）；
+v2.8.1 起用 Omni 2B。旧权重文件会被 `LocalLlmManager.deleteLegacyModelFiles()` 清理（MiniCPM 约 1.8GB、文本版约 1.7GB）。
 
 ---
 
@@ -87,6 +89,6 @@ Index-Translate 是**翻译专用**模型（bilibili 开源，2B 档），指令
 ## 五、核实方法说明
 
 - Dolphin：读取 HuggingFace 模型卡的 License 段（官方原文）、GitHub 仓库 LICENSE 声明、PyPI 元数据。
-- Index-Translate 2B：读取 HF API 的 `tags`（`license:apache-2.0`）、仓库根 `LICENSE`，
+- Index-Translate Omni 2B：读取 HF API 的 `tags`（`license:apache-2.0`）、仓库根 `LICENSE`，
   并检查 README 是否含 commercial/registration 等附加条款（结论：无）。
 - 二手来源（技术媒体、聚合站）仅作交叉印证，**结论以官方页面为准**。

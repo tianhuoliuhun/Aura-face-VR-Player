@@ -130,36 +130,36 @@ object LocalLlmManager {
     // 上游 main 一旦更新同名文件（或主模型与 mmproj 不配套），`resolve/main` 会静默换成新内容；
     // 锁到 commit 可保证「下载即确定」，与已落盘的模型完全可复现。
     //
-    // v2.8.0：主模型换为 **bilibili Index-Translate 2B**（`IndexTeam/Index-Translate-2B-GGUF`，Apache 2.0）。
-    // 选它的三条理由：
-    //  ① **翻译专用**（150 语言，原生支持术语表 / 格式约束 / 内容保留类指令）——
-    //     比原先的通用多模态 1B 更对口「字幕翻译」这条主用途，且参数量 2B 更可能到可用质量；
-    //  ② GGUF 仓库**自带视觉 mmproj**（Q8_0 361MB），弹幕的"看画面"路径不用换方案；
-    //  ③ 架构 `qwen35`，与项目内置的 llama.cpp 构建（已支持 qwen35）一致 → **无需重编 native**。
-    // ⚠️ 体积代价（净增约 0.47GB）：主权重 1312MB（原 672MB）+ mmproj 361MB（原 1110MB）。
-    // ⚠️ 文件名与 commit 均由 HF API 核实（2026-11-06），体积为精确字节数。
-    const val MODEL_ID_INDEX_TRANSLATE_2B = "index-translate-2b-q4km"
-    private const val MODEL_REPO_INDEX = "IndexTeam/Index-Translate-2B-GGUF"
-    private const val MODEL_REPO_INDEX_COMMIT = "3a0eca6ce931d88d00614d427ab3ed8ff0743902"
+    // v2.8.1：换成 **Index-Translate-omni-2B**（`IndexTeam/Index-Translate-omni-2B-GGUF`，Apache 2.0）。
+    // 与 v2.8.0 的纯文本版是**同一族**：文本翻译基准完全相同（FLORES COMET22 0.8655 / WMT24++ 0.8489 /
+    // WMT26 Judge 60.26 / MEME 0.6443，均取自上游模型卡），差别在 Omni 多了图像翻译与语音模态。
+    // ⚠️ **GGUF 里没有音频模块**（官方 README「Audio limitation」：GGUF 只含 language model + 可选 mmproj
+    //    vision，不含 audio encoder / connector / runtime，不是端到端音频模型）→ 本项目的语音识别仍用
+    //    自带的 Dolphin，不依赖它；换成 Omni **不增加**任何语音相关能力。
+    // ⚠️ 架构同为 `qwen35`，与内置 llama.cpp 构建一致 → **无需重编 native**。
+    // ⚠️ 体积：主权重 1560MB（纯文本版 1312MB，+248MB）；mmproj Q8_0 仍是 361MB（与视觉版同尺寸）。
+    const val MODEL_ID_INDEX_TRANSLATE_OMNI_2B = "index-translate-omni-2b-q4km"
+    private const val MODEL_REPO_INDEX = "IndexTeam/Index-Translate-omni-2B-GGUF"
+    private const val MODEL_REPO_INDEX_COMMIT = "41eb7bb3ad13308d2c2c07be76775d2fa31c43a5"
 
     /** 主权重文件名（HF 仓库内原名；也是落盘名） */
-    private const val MODEL_FILE_INDEX_MAIN = "Index-Translate-2B.Q4_K_M.gguf"
+    private const val MODEL_FILE_INDEX_MAIN = "Index-Translate-omni-2B.Q4_K_M.gguf"
 
     /** 视觉编码器文件名（Q8_0 档 —— f16 档 668MB，q8_0 在同样的视觉任务上够用且省一半） */
-    private const val MODEL_FILE_INDEX_MMPROJ = "Index-Translate-2B.mmproj-Q8_0.gguf"
+    private const val MODEL_FILE_INDEX_MMPROJ = "Index-Translate-omni-2B.mmproj-Q8_0.gguf"
 
     /**
      * 已登记的本地模型。
      *
      * ⚠️ 只登记**一个**（与 [LocalModelSection] 的单模型界面一致；`MODELS.firstOrNull()` 是它的前提）。
-     *    v2.8.0 由 MiniCPM-V 4.7 1B 换成 Index-Translate 2B。若将来要支持多个，需先把 UI 改成模型选择器。
+     *    v2.8.1 由 Index-Translate 2B（纯文本）换成 Index-Translate-**omni** 2B。若将来要支持多个，需先把 UI 改成模型选择器。
      */
     val MODELS: List<LocalLlmModel> = listOf(
         LocalLlmModel(
-            id = MODEL_ID_INDEX_TRANSLATE_2B,
-            displayName = "Index-Translate 2B（Q4_K_M）",
+            id = MODEL_ID_INDEX_TRANSLATE_OMNI_2B,
+            displayName = "Index-Translate Omni 2B（Q4_K_M）",
             fileName = MODEL_FILE_INDEX_MAIN,
-            sizeBytes = 1_312_164_352L,
+            sizeBytes = 1_560_461_056L,
             urls = listOf(
                 // 主源：Hugging Face 官方 IndexTeam 仓库（锁定 commit）
                 "https://huggingface.co/$MODEL_REPO_INDEX/resolve/$MODEL_REPO_INDEX_COMMIT/$MODEL_FILE_INDEX_MAIN",
@@ -169,10 +169,12 @@ object LocalLlmManager {
             // 上下文 2048：模型原生支持 262144，但真机上 KV cache 才是内存大头，
             // 字幕/弹幕都是短输入（一条台词几十字），2048 足够且能把内存压住。
             contextSize = 2048,
-            description = "bilibili 开源的 Index-Translate 2B（Apache 2.0，150 语言翻译专用，支持术语表与格式约束）。" +
-                "Q4_K_M 量化约 1.31GB，纯 CPU 推理。" +
+            description = "bilibili 开源的 Index-Translate Omni 2B（Apache 2.0，文本翻译 150 语言 + 图像翻译，" +
+                "支持术语表与格式约束）。Q4_K_M 量化约 1.56GB，纯 CPU 推理。" +
                 "\n⚠️ 这是**翻译专用**模型：本地翻译按官方推荐的指令模板与贪心解码调用；" +
-                "本地**弹幕生成**（自由创作类）不在该模型的训练目标内，输出质量有限，弹幕建议改用云端视觉模型。",
+                "本地**弹幕生成**（自由创作类）不在该模型的训练目标内，输出质量有限，弹幕建议改用云端视觉模型。" +
+                "\n⚠️ GGUF 版**不含音频模块**（官方说明：GGUF 只有语言模型 + 可选视觉 mmproj），" +
+                "语音识别仍由应用自带的 Dolphin 模型完成，与本模型无关。",
             // 视觉编码器：官方 Q8_0 档（361MB）。弹幕的「看画面」路径需要它；不下载则纯文本可用。
             mmprojFileName = MODEL_FILE_INDEX_MMPROJ,
             mmprojSizeBytes = 361_518_144L,
@@ -436,7 +438,12 @@ object LocalLlmManager {
         "MiniCPM-V-4_7-1B-Q4_K_M.gguf",
         "MiniCPM-V-4_7-1B-Q4_K_M.gguf.part",
         "mmproj-model-f16.gguf",
-        "mmproj-model-f16.gguf.part"
+        "mmproj-model-f16.gguf.part",
+        // v2.8.1 替换掉的 Index-Translate 2B（纯文本版；主权重 1312MB + 视觉编码器 361MB）
+        "Index-Translate-2B.Q4_K_M.gguf",
+        "Index-Translate-2B.Q4_K_M.gguf.part",
+        "Index-Translate-2B.mmproj-Q8_0.gguf",
+        "Index-Translate-2B.mmproj-Q8_0.gguf.part"
     )
 
     /** 已下载体积（MB），供 UI 显示。 */

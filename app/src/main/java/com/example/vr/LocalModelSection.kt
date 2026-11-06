@@ -68,7 +68,7 @@ fun LocalModelSection(
 
     Column(modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         // 🔴 v2.6.22（用户要求）：**本地 AI 标注为「未完成，请勿使用」**。
-        //    该功能（Index-Translate 2B 端侧推理）目前下载链路与 CPU 推理都还不稳定/极慢，
+        //    该功能（Index-Translate Omni 2B 端侧推理）目前下载链路与 CPU 推理都还不稳定/极慢，
         //    放出去只会让用户以为"功能坏了"。故在设置页两处入口（字幕面板 + 弹幕面板，
         //    都调本组件）统一挂一个橙色「未完成」标签 + 一段警告条。
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -125,7 +125,7 @@ fun LocalModelSection(
         )
 
         // ===== v2.4.16：**推理状态反馈** =====
-        // ⚠️ 本地推理跑在 CPU 上（Index-Translate 2B），单条实测要**几十秒**（模拟器转译下更慢）。
+        // ⚠️ 本地推理跑在 CPU 上（Index-Translate Omni 2B），单条实测要**几十秒**（模拟器转译下更慢）。
         //    此前 UI 在这里**毫无反馈** —— 用户只看到「译文一直不出现」，
         //    很自然会判定成「本地 AI 无法执行 / 功能坏了」。
         //    所以这里显式给出「进行中」与「上次耗时」，让"慢"变得可预期。

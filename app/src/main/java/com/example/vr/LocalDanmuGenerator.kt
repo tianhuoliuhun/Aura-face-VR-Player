@@ -6,7 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * **本地 LLM 弹幕生成**（v2.4.12；v2.8.0 起模型为 Index-Translate 2B）—— 端侧 llama.cpp。
+ * **本地 LLM 弹幕生成**（v2.4.12；v2.8.1 起模型为 Index-Translate Omni 2B）—— 端侧 llama.cpp。
  *
  * ## ⚠️ 与云端视觉模型（[DanmuVisionClient]）的本质差别
  * | | 云端视觉模型 | 本地 LLM |
