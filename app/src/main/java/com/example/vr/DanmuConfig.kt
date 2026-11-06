@@ -197,10 +197,10 @@ data class DanmuConfig(
     val sourceTypeId: Int = DanmuSourceType.AI.id,
 
     /**
-     * v2.4.12：**用本地 LLM 生成弹幕**（端侧 llama.cpp + MiniCPM-V 4.7 1B）。
+     * v2.4.12：**用本地 LLM 生成弹幕**（端侧 llama.cpp；v2.8.0 起模型为 Index-Translate 2B）。
      *
      * ## ⚠️ 与云端视觉模型的本质差别：**本地模型看不到画面**
-     * 我们下载的是 GGUF **主权重**（纯文本）。视觉编码器（`mmproj`，另有 116~207MB）
+     * 我们下载的是 GGUF **主权重**（纯文本）。视觉编码器（`mmproj`，另有 361MB）
      * 是**独立文件**、当前未下载 → 本地生成**只能用台词**。
      *
      * 因此开启后：

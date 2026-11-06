@@ -6,7 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * **本地 LLM 弹幕生成**（v2.4.12，v2.4.59 起模型为 MiniCPM-V 4.7 1B）—— 端侧 llama.cpp。
+ * **本地 LLM 弹幕生成**（v2.4.12；v2.8.0 起模型为 Index-Translate 2B）—— 端侧 llama.cpp。
  *
  * ## ⚠️ 与云端视觉模型（[DanmuVisionClient]）的本质差别
  * | | 云端视觉模型 | 本地 LLM |
@@ -92,7 +92,7 @@ object LocalDanmuGenerator {
             ?.let { "\n另外，整体风格要求：$it" }
             .orEmpty()
         // v2.4.13：有画面时改写提示词 —— 让模型知道它可以看图，
-        // 否则它会忽略图片只按台词发挥（白白浪费视觉编码器的算力与那 116MB 存储）。
+        // 否则它会忽略图片只按台词发挥（白白浪费视觉编码器的算力与那 361MB 存储）。
         val prompt = if (useVision) {
             val linesPart = if (subtitleText.isNotBlank()) "\n台词：\n$subtitleText" else ""
             "根据这张画面${if (subtitleText.isNotBlank()) "和以下台词" else ""}生成 $n 条弹幕。$linesPart$persona"
@@ -127,7 +127,7 @@ object LocalDanmuGenerator {
             rgb = rgbBytes,
             imgW = rgbW,
             imgH = rgbH,
-            // 弹幕要多样 → 温度比翻译高（翻译用 0.2，追求稳定）
+            // 弹幕要多样 → 温度比翻译高（翻译用 0，官方推荐贪心解码，追求稳定）
             maxTokens = 512,
             temperature = 0.9f
         ) ?: return emptyList()

@@ -86,13 +86,13 @@
 | 模型 | 随包分发 | 许可 | 商用条款 |
 |---|---|---|---|
 | Dolphin ASR（`assets/dolphin/model.int8.onnx`，约 103 MB） | 是 | **Apache-2.0** | ✅ 允许商用；需保留版权与许可声明（核实于 2026-10-18） |
-| MiniCPM-V 4.7 1B（GGUF） | 否，用户端下载 | **Apache-2.0** | ✅ 允许商用；无额外登记要求（核实于 2026-10-18） |
+| Index-Translate 2B（GGUF，bilibili / IndexTeam） | 否，用户端下载 | **Apache-2.0** | ✅ 允许商用；无额外登记要求（核实于 2026-11-06） |
 | MediaPipe Face Landmarker（`face_landmarker.task`） | 是 | Apache-2.0 | 允许商用 |
 | Silero VAD（`silero_vad.onnx`） | 是 | MIT | 允许商用 |
 
 > 核实过程与来源见 `docs/MODEL_LICENSES.md`。
-> ⚠️ MiniCPM **4.7 之前的版本**使用自定义 "MiniCPM Model License"（商用需登记），
-> 若替换为旧版模型必须重新核实。
+> ⚠️ v2.8.0 起端侧模型由 MiniCPM-V 4.7 1B 换成 Index-Translate 2B（同为 Apache-2.0）。
+> 若将来切换到该系列其它规模（9B / 35B-A3B）或语音类模型，需重新核实仓库内容（见 `docs/MODEL_LICENSES.md`）。
 
 ### 2.5 字体
 

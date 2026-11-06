@@ -132,7 +132,7 @@ enum class TranslationEngine(
         requiresApiKey = false
     ),
     /**
-     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + MiniCPM-V 4.7 1B）。
+     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp；v2.8.0 起模型为 Index-Translate 2B）。
      *
      * ## 为什么不复用 [QWEN]
      * [QWEN] 是**阿里云 DashScope 的在线接口**（要 API Key、按量计费）；
@@ -2388,7 +2388,7 @@ class SubtitleTranslator(private val context: Context) {
      * （另一常见端点 `translate.googleapis.com/translate_a/single?client=gtx` 在同环境返回 429，故不采用。）
      */
     /**
-     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp + MiniCPM-V 4.7 1B）。
+     * v2.4.12：**本地 LLM 翻译**（端侧 llama.cpp；v2.8.0 起模型为 Index-Translate 2B）。
      *
      * ## 与其它引擎的差别
      * 不走 HTTP、不需要 Key，但**需要模型已下载**。
@@ -2427,12 +2427,16 @@ class SubtitleTranslator(private val context: Context) {
             .firstOrNull { it.code.equals(targetLangCode, ignoreCase = true) }
             ?.displayName ?: targetLangCode
         val system = "你是专业的字幕翻译。只输出译文本身，不要解释、不要引号、不要任何多余文字。"
-        val prompt = "把下面这句字幕翻译成$langName：\n$text"
+        // v2.8.0：换成 Index-Translate 2B 后，**按官方推荐格式**改写指令
+        // （官方模板："请将以下文本翻译为{target-language}，直接输出翻译结果，不要进行任何解释。"），
+        // 并改贪心解码（temperature = 0）。这两条都写在模型卡里，不照做会明显掉质量：
+        // 翻译专用模型对"把下面这句翻译成X"这种口语化指令的遵循度不如其训练模板。
+        val prompt = "请将以下文本翻译为$langName，直接输出翻译结果，不要进行任何解释。\n\n$text"
         val out = LocalLlmManager.complete(
             prompt = prompt,
             systemPrompt = system,
             maxTokens = 256,
-            temperature = 0.2f,
+            temperature = 0f,
             priority = priority
         ) ?: return ""
         // v2.4.23 审查 #5：本地模型可能先输出 <think>...</think> 推理段，
