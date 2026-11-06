@@ -12,7 +12,7 @@
 > | **直播强制 EXO** | `MediaFormats.isLikelyLiveStream`（打开前判据）＋ `liveForceExoUri`（运行时兜底，触发一次重建） |
 > | LIVE 态 UI | 进度条禁用、时间区 `● LIVE`、断点读写跳过、快进/快退（手柄 + 悬浮球）只提示不执行 |
 > | P1 字幕源 | 直播提示开「实时 AI 字幕」；流内嵌 CC 走既有 `exoCueText` |
-> | P2 翻译 | `SubtitleTranslator.liveMode`（不预读 / 不落盘 / 超时丢弃）＋ `liveCueDeadlineMs` |
+> | P2 翻译 | `SubtitleTranslator.liveMode`（不预读 / 不落盘）；**v2.7.1 起迟到译文不再丢弃** |
 > | P3 稳定性 | `trimRealtimeCues`（10 分钟 / 500 条）、30s 跳变清 cue、`STATE_BUFFERING` 5s 提示 |
 > | P4 直播延迟 | 字幕样式面板的「直播延迟」滑块（0~60s）→ `VrPlayerBackend.setLiveDelayMs` → EXO `MediaItem.LiveConfiguration.targetOffsetMs` |
 >
@@ -88,7 +88,7 @@
 |---|---|---|
 | `pretranslateAhead` 预读（提前翻整段未来字幕） | **关闭预读**，改「尾随翻译」：只翻最近 N 秒（当前 cue + 前 1~2 句） | 直播没有未来内容，预读等于空转 |
 | 全量缓存 + 写磁盘 TSV | **只写内存**（容量上限 + TTL），不落盘 | 直播内容不复现，落盘只会让 tsv 无限增长 |
-| 翻译可等 | **超时丢弃**：cue 已结束超过 `2s` 仍没翻完 → 直接放弃，不补翻 | 直播场景迟到的字幕没意义，还会占并发额度 |
+| 翻译可等 | ~~超时丢弃~~ → **v2.7.1 起改为照常上屏**（用户明确要求不丢弃） | 直播回看不了：宁可晚一点看到译文，也不要这一句永远空缺 |
 | 逐句串行 | 短句优先 + 并发 2~4（现有 semaphore 已支持） | 控制端到端延迟 ≤ 1~2s |
 
 1. **新增 `isLive` 到翻译上下文**：`SubtitleTranslator` 增加 `@Volatile var liveMode: Boolean`，
@@ -121,7 +121,7 @@
 
 | 风险 | 说明 | 缓解 |
 |---|---|---|
-| ASR + 翻译双重延迟 | 直播总延迟 = 编码延迟 + ASR(0.5~2s) + 翻译(0.5~2s) | 短句优先、超时丢弃、术语表减少回改 |
+| ASR + 翻译双重延迟 | 直播总延迟 = 编码延迟 + ASR(0.5~2s) + 翻译(0.5~2s) | 短句优先、术语表减少回改 |
 | 不可回看 | 翻错无法重放 | 宁短勿长；不追求长句连贯 |
 | 缓存膨胀 | cue / 翻译缓存随时长线性增长 | P3 的窗口裁剪 + 不落盘 |
 | 内核差异 | IJK/MPV 的 live 判定靠 duration≤0，可能误判（点播元数据解析中也会短时为 0） | 加二次确认：连续 3 次采样 duration≤0 才认定直播 |

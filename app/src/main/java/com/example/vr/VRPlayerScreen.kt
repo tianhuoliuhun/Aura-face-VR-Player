@@ -745,12 +745,11 @@ fun VRPlayerScreen(
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("subtitle_max_lines", 2) else 2)
     }
     val subtitleTranslator = remember { SubtitleTranslator(context) }
-    // v2.6.24（直播 P2）：直播态同步给翻译器 —— 一个开关切三处行为
-    // （不预读 / 不落盘 / 超时丢弃，见 SubtitleTranslator.liveMode 的表格）。
-    // ⚠️ 这是**唯一**的设置点：字幕叠加层只写"本条 cue 何时过期"，不碰模式位。
+    // v2.6.24（直播 P2）：直播态同步给翻译器 —— 一个开关切两处行为
+    // （不预读 / 不落盘，见 SubtitleTranslator.liveMode 的表格）。
+    // ⚠️ v2.7.1：**不再有"迟到译文丢弃"**（用户明确要求），所以这里也不写任何过期时刻。
     LaunchedEffect(isLiveStream) {
         subtitleTranslator.liveMode = isLiveStream
-        if (!isLiveStream) subtitleTranslator.liveCueDeadlineMs = 0L
     }
     // v2.0.127：恢复上次的「字幕翻译」开关。
     // v2.0.144：翻译相关设置**全部**固化——此前只有 translation_enabled 落盘，
@@ -5102,7 +5101,6 @@ fun VRPlayerScreen(
                                     exoCueText = exoCueText,
                                     stripPunctuation = isStripSubtitlePunctuation,
                                     enableFadeIn = subtitleFadeIn,
-                                    isLiveStream = isLiveStream,
                                     modifier = Modifier.fillMaxSize()
                                 )
         AnimatedVisibility(
