@@ -103,6 +103,19 @@
     <string name="theme_name_rose">ローズ</string>
     <string name="theme_name_amber">アンバー</string>
     <string name="theme_name_mint">ミント</string>
+    <!-- v2.9.2：Material Design の基本色 + Monet 動的カラー -->
+    <string name="theme_name_blue">ブルー</string>
+    <string name="theme_name_light_blue">ライトブルー</string>
+    <string name="theme_name_teal">ティール</string>
+    <string name="theme_name_lime">ライム</string>
+    <string name="theme_name_yellow">イエロー</string>
+    <string name="theme_name_orange">オレンジ</string>
+    <string name="theme_name_deep_orange">ディープオレンジ</string>
+    <string name="theme_name_red">レッド</string>
+    <string name="theme_name_blue_grey">ブルーグレー</string>
+    <string name="theme_name_brown">ブラウン</string>
+    <string name="theme_name_monet">壁紙に連動</string>
+    <string name="theme_monet_unsupported">壁紙に連動（Android 12+ が必要）</string>
     <string name="theme_liquid_glass">ガラス</string>
     <string name="settings_group_projection">レンズ投影と視野モード</string>
     <string name="projection_auto_detect">投影の自動検出</string>
@@ -805,6 +818,8 @@
     <string name="url_play_entry_desc">動画の直リンク（m3u8 / mp4 / flv）を貼り付けて直接再生</string>
     <string name="url_play_hint">https://…</string>
     <string name="url_play_note">http / https のみ。URL はタイトルや再生履歴に表示されません。</string>
+    <string name="url_play_referer_label">参照元ページ（任意）</string>
+    <string name="url_play_referer_hint">動画があるページのURL。空欄なら Referer を送信しません</string>
     <string name="url_play_action">再生</string>
     <string name="url_play_invalid">アドレスは http:// または https:// で始まる必要があります</string>
     <string name="url_play_playing_title">URL 動画</string>

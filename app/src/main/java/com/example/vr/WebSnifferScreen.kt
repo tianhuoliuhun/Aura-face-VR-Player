@@ -1,9 +1,14 @@
 /**
- * ⚠️ v2.6.5：**本文件当前没有 UI 入口**（用户要求移除「网页直链播放」入口）。
+ * v2.9.0：**网页直链播放 UI 层**，入口在「选择文件来源」对话框的入口 4
+ * （`VRPlayerScreen` 的 `showWebSniffer` → 本全屏覆盖层）。
  *
- * 保留代码的原因：嗅探链路本身可用（实测能抓到直链并成功播放），
- * 只是"播放时会回退 MPV 内核"的观感问题尚未解决。若将来重新启用，
- * 需要把入口加回「选择文件来源」并处理内核选择，别直接删这个文件。
+ * 历史：v2.6.5 曾按用户要求移除入口（当时只保留实现），原因是 Exo 首帧报错后
+ * 自动回退 MPV 内核的观感不可接受。v2.9.0 已把入口加回，并给 URL 播放加了
+ * 可选「来源页面」输入框 + 修正 Referer 推断（见 [HttpPlaybackHeaders]）。
+ *
+ * ⚠️ **仍未处理**：v2.6.5 记录的内核选择问题（Exo → MPV 自动换核）没有改动。
+ * 重新启用入口后若再次出现换核，需要在 `VRPlayerScreen` 的内核路由里
+ * 对网页/URL 来源做特判 —— 这是重启该功能的验收条件，别误以为已经解决。
  */
 package com.example.vr
 
@@ -153,7 +158,11 @@ fun WebSnifferScreen(
                     )
                 },
                 singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                // 🔴 v2.9.1：**必须显式给文字颜色**。原来只设了 fontSize，颜色走默认值
+                //   （深色背景下是接近黑），于是"粘完地址看不见自己输入了什么"——
+                //   实测 dump 里 value 是 `http://127.0.0.1:8099/`，但截图上输入框一片空白。
+                //   placeholder 因为单独指定了白色所以一直可见，更容易让人误判成"没粘上"。
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White),
             )
             Spacer8()
             TextButton(
@@ -171,6 +180,21 @@ fun WebSnifferScreen(
                 factory = { ctx ->
                     @SuppressLint("SetJavaScriptEnabled")
                     WebView(ctx).apply {
+                        // 🔴🔴 v2.9.1：**必须禁用 WebView 的硬件层**，否则它画在窗口原点。
+                        //
+                        // 实测（MuMu / 1600x900，`dumpsys activity top` + 截图取证）：
+                        //   布局完全正确 —— `ViewFactoryHolder{0,186-1600,786}`，
+                        //   `WebView{0,0-1600,600}`（相对 holder）；
+                        //   但截图上 WebView 的底色实际覆盖 `y=0~786`（宽度铺满）。
+                        // 即 WebView 的绘制位置停在窗口原点、高度取了 holder 的 bottom。
+                        // 后果：它盖住顶栏与地址栏 → 用户打开「网页直链播放」只看到
+                        // 一片黑 + 底部结果条，地址栏根本点不到（虽然命中测试是好的）。
+                        //
+                        // 根因是 WebView 内部合成层走 `LAYER_TYPE_HARDWARE` 的 RenderNode，
+                        // 其位置更新没有被应用到 Compose 的 `AndroidViewsHandler` 变换上。
+                        // 强制软件层后，WebView 直接用父容器的 canvas 绘制，位置就归位了。
+                        // 代价：网页渲染不走 GPU 合成（本页只用于嗅探抓流，可接受）。
+                        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         // 桌面 UA：部分站点对移动 UA 不返回视频流（只给 App 跳转）

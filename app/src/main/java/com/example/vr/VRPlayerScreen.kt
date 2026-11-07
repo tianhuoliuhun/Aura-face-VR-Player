@@ -463,6 +463,9 @@ fun VRPlayerScreen(
     }
     // v2.6.4：URL 直接播放对话框
     var showUrlPlayDialog by remember { mutableStateOf(false) }
+    // v2.9.0：网页直链播放（v2.6.5 曾按用户要求移除入口，仅保留 WebSnifferScreen 实现）。
+    // 现在重新接回「选择文件来源」—— 页面地址 → WebView 旁听 → 抓出真实视频流。
+    var showWebSniffer by remember { mutableStateOf(false) }
     // 步长（秒），双击循环 5 → 10 → 15 → 30
     var seekForwardStep by remember {
         mutableIntStateOf(if (isMemoryModeEnabled) prefs.getInt("seek_forward_step", 5) else 5)
@@ -1595,10 +1598,13 @@ fun VRPlayerScreen(
     var seekStartProgress by remember { mutableFloatStateOf(0f) }
     var seekStartValue by remember { mutableFloatStateOf(0f) }
 
-    // 主题系统（8/2 功能：6 套主题色 + 玻璃模式）
+    // 主题系统（8/2 功能；v2.9.2：16 套静态 MD 配色 + 1 套 Monet 动态取色 + 玻璃模式）
     var uiThemeId by remember { mutableStateOf(UiThemes.loadThemeId(prefs)) }
     var glassMode by remember { mutableStateOf(UiThemes.loadGlassMode(prefs)) }
-    val uiTheme = UiThemes.byId(uiThemeId)
+    // v2.9.2：统一走 resolve —— Monet 模式从系统壁纸动态取色，其余走静态预设。
+    // 刻意不用 remember 缓存：每次重组重算，壁纸变化才能自动跟随；monetPalette 内部有
+    // 值缓存，值不变时复用同一对象引用，不会因「每帧 new 一个对象」误触发下游重组。
+    val uiTheme = UiThemes.resolve(context, uiThemeId)
     val ThemeBgColor = uiTheme.bg
     val ThemePanelBgColor = when (glassMode) {
         1 -> uiTheme.panelBg.copy(alpha = 0.70f)
@@ -3832,7 +3838,14 @@ fun VRPlayerScreen(
                     uri = decodedUri,
                     surface = nativeSurface,
                     // v2.1.244：把兜底选定的 voMode 合并进 options（EMBED / GPU）
-                    options = mpvOptions.copy(voMode = mpvVoMode),
+                    options = mpvOptions.copy(
+                        voMode = mpvVoMode,
+                        // 🔴 v2.9.1：网页/URL 播放时，把 Exo 用的**同一份** UA/Referer 也交给 mpv。
+                        //   不给的话，Exo 失败回退到 MPV 就是裸请求（mpv 默认 UA = libmpv）→ CDN 403
+                        //   → 用户看到"换内核还是打不开"。本地文件播放时这里是空列表，行为不变。
+                        //   ⚠️ 只给 UA/Referer，**不给 Range**（会破坏 mpv 的 seek），见方法注释。
+                        httpHeaders = HttpPlaybackHeaders.asMpvHeaderFields()
+                    ),
                     callbacks = object : MpvPlayerFactory.Callbacks {
                         override fun onVideoSizeChanged(width: Int, height: Int) {
                             // 与 Exo / IJK 共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
@@ -6506,37 +6519,78 @@ fun VRPlayerScreen(
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
-                                // v2.4.45（主题选择界面布局优化）：
-                                // ① `spacedBy(10.dp)` → `SpaceBetween`：6 个色点均匀铺满整行，
-                                //    窄列下不再全部挤在左侧、右侧留一大片空；
-                                // ② **选中不再改变尺寸**（原先选中 30dp / 未选 24dp）—— 那会让整行其余
-                                //    色点跟着位移，每次换主题都「抖」一下。改为固定 26dp + 选中加粗白环。
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    UiThemes.list.forEach { t ->
-                                        val selected = uiThemeId == t.id
-                                        Box(
-                                            modifier = Modifier
-                                                .size(26.dp)
-                                                .clip(CircleShape)
-                                                .background(t.accent)
-                                                .border(
-                                                    width = if (selected) 2.dp else 1.dp,
-                                                    color = if (selected) Color.White
-                                                    else Color.White.copy(alpha = 0.3f),
-                                                    shape = CircleShape
+                                // v2.9.2：静态预设 6 → 16 套，单行 SpaceBetween 会把色点挤到
+                                //   互相贴住 → 改为每行 8 个、共 2 行的网格；不足一行的尾部补
+                                //   等宽占位，保证与上一行逐列对齐（同下方玻璃档 chip 的做法）。
+                                // v2.4.45 两条约束继续保留：SpaceBetween 铺满行、选中不改尺寸
+                                //   （选中只加粗白环，避免换主题时整行色点跟着抖）。
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    UiThemes.list.chunked(8).forEach { rowThemes ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            rowThemes.forEach { t ->
+                                                val selected = uiThemeId == t.id
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(26.dp)
+                                                        .clip(CircleShape)
+                                                        .background(t.accent)
+                                                        .border(
+                                                            width = if (selected) 2.dp else 1.dp,
+                                                            color = if (selected) Color.White
+                                                            else Color.White.copy(alpha = 0.3f),
+                                                            shape = CircleShape
+                                                        )
+                                                        .clickable {
+                                                            uiThemeId = t.id
+                                                            prefs.edit().putInt("ui_theme_id", t.id).apply()
+                                                            keepUiAlight()
+                                                        }
+                                                        .testTag("theme_dot_${t.id}")
                                                 )
-                                                .clickable {
-                                                    uiThemeId = t.id
-                                                    prefs.edit().putInt("ui_theme_id", t.id).apply()
-                                                    keepUiAlight()
-                                                }
-                                                .testTag("theme_dot_${t.id}")
-                                        )
+                                            }
+                                            repeat(8 - rowThemes.size) {
+                                                Spacer(modifier = Modifier.size(26.dp))
+                                            }
+                                        }
                                     }
+                                }
+                                // v2.9.2：MD 莫奈取色（Android 12+ Material You 动态配色）。
+                                // 做成独立 chip 而非第 17 个色点：它没有固定颜色可展示，且低版本
+                                // 需要明确禁用并说明原因。点任意静态色点即自动退出 Monet；
+                                // 再点本 chip 关闭时回落到默认紫罗兰（DEFAULT_THEME_ID）。
+                                val monetOn = uiThemeId == UiThemes.MONET_THEME_ID
+                                val monetAvailable = UiThemes.isMonetAvailable()
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (monetOn) AccentColor else TranslucentWhite10)
+                                        .clickable(enabled = monetAvailable) {
+                                            val next = if (monetOn) UiThemes.DEFAULT_THEME_ID
+                                            else UiThemes.MONET_THEME_ID
+                                            uiThemeId = next
+                                            prefs.edit().putInt("ui_theme_id", next).apply()
+                                            keepUiAlight()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                        .testTag("theme_monet_chip"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = stringResource(
+                                            if (monetAvailable) R.string.theme_name_monet
+                                            else R.string.theme_monet_unsupported
+                                        ),
+                                        color = if (monetOn) AccentOnColor
+                                        else Color.White.copy(alpha = if (monetAvailable) 1f else 0.45f),
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                                 // v2.4.45（主题选择界面布局优化）：
                                 // 原先「主题名 + 4 个玻璃档 chip」硬塞在**同一行**（SpaceBetween，
@@ -6545,8 +6599,9 @@ fun VRPlayerScreen(
                                 // → chip 被压扁、文字截断，甚至与左侧主题名互相叠压。
                                 // 现改为**独立成块 + 两列两行**（与下方「界面语言」块同款：`chunked` +
                                 // `weight(1f)` 等宽）—— 任何列宽下都不溢出，点击区也更大。
+                                // v2.9.2：Monet 模式也要显示「跟随系统壁纸」，故直接取已解析的 uiTheme
                                 Text(
-                                    text = stringResource(UiThemes.byId(uiThemeId).nameRes),
+                                    text = stringResource(uiTheme.nameRes),
                                     color = AccentColor,
                                     fontSize = 12.sp
                                 )
@@ -8452,8 +8507,36 @@ fun VRPlayerScreen(
 
         // v2.6.4：**URL 直接播放**（粘贴直链即可播放，无需先嗅探）
         // 标题同样写中性的「URL 视频」，完整链接不进入标题与最近播放。
+        // v2.9.0：网页直链播放（全屏覆盖层）。
+        // 位置有讲究：必须在 BoxWithConstraints 内、且写在播放 UI 之后 —— 它是 fillMaxSize
+        // 的普通 Compose 图层，靠后写才能盖住下面的播放界面；AlertDialog 走独立 Window，
+        // 不受这里的层级影响，所以放在对话框之前不会挡住对话框。
+        if (showWebSniffer) {
+            WebSnifferScreen(
+                onPlay = { url, pageUrl ->
+                    showWebSniffer = false
+                    // 🔴 Referer 必须是**页面**地址，不能是直链自己的 origin：
+                    // 视频流在 CDN 域名、页面在站点域名，CDN 校验的是后者（退化成
+                    // 直链 origin 会直接 403，见 HttpPlaybackHeaders 的注释）。
+                    HttpPlaybackHeaders.forWebPlayback(pageUrl, url)
+                    selectedMediaItem = MediaItem(
+                        id = "web_${System.currentTimeMillis()}",
+                        title = context.getString(R.string.web_sniffer_playing_title),
+                        uri = url,
+                        isVideo = true
+                    )
+                },
+                onClose = { showWebSniffer = false },
+                accentColor = AccentColor,
+                accentOnColor = Color.Black
+            )
+        }
+
         if (showUrlPlayDialog) {
             var urlText by remember { mutableStateOf("") }
+            // v2.9.0：直链防盗链 —— CDN 校验的 Referer 是**站点页面地址**，不是直链
+            // 所在的 CDN 域名。留空则不发送 Referer（只带桌面 UA + Range）。
+            var refererText by remember { mutableStateOf("") }
             AlertDialog(
                 onDismissRequest = { showUrlPlayDialog = false },
                 containerColor = Color(0xFC18171C),
@@ -8485,6 +8568,30 @@ fun VRPlayerScreen(
                                 color = Color.White
                             )
                         )
+                        // v2.9.0：可选的来源页（Referer）。只在直链被 CDN 拦截时才需要填。
+                        OutlinedTextField(
+                            value = refererText,
+                            onValueChange = { refererText = it },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            label = {
+                                Text(
+                                    stringResource(R.string.url_play_referer_label),
+                                    fontSize = 10.sp
+                                )
+                            },
+                            placeholder = {
+                                Text(
+                                    stringResource(R.string.url_play_referer_hint),
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.35f)
+                                )
+                            },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 12.sp,
+                                color = Color.White
+                            )
+                        )
                         Text(
                             text = stringResource(R.string.url_play_note),
                             color = Color.White.copy(alpha = 0.45f),
@@ -8499,7 +8606,12 @@ fun VRPlayerScreen(
                             val u = urlText.trim()
                             if (u.startsWith("http://", true) || u.startsWith("https://", true)) {
                                 showUrlPlayDialog = false
-                                HttpPlaybackHeaders.forWebPlayback(null, u)
+                                // v2.9.0：填了来源页就作为 Referer；留空传 null，
+                                // forWebPlayback 不再退化成直链 origin（旧行为会 403），改为不发 Referer。
+                                HttpPlaybackHeaders.forWebPlayback(
+                                    refererText.trim().takeIf { it.isNotBlank() },
+                                    u
+                                )
                                 selectedMediaItem = MediaItem(
                                     id = "url_${System.currentTimeMillis()}",
                                     title = context.getString(R.string.url_play_playing_title),
@@ -8845,6 +8957,52 @@ fun VRPlayerScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     stringResource(R.string.url_play_entry_desc),
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.45f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // ── 入口 4：网页直链播放（v2.9.0，粘页面地址自动抓流）──
+                        // 与入口 3 的区别：入口 3 只认直链（m3u8/mp4），粘网页地址会失败；
+                        // 这里打开 WebView 旁听页面请求，抓出真实流地址，并把**页面地址**
+                        // 作为 Referer 带下去（CDN 校验的就是它）。
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    pickerSourceDialogOpen = false
+                                    showWebSniffer = true
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.web_sniffer_title),
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    stringResource(R.string.web_sniffer_entry_desc),
                                     color = Color.White.copy(alpha = 0.55f),
                                     fontSize = 10.sp
                                 )
@@ -9272,6 +9430,14 @@ fun VRPlayerScreen(
         val ballPx = with(LocalDensity.current) { 54.dp.toPx() }
         val seekMaxX = constraints.maxWidth.toFloat() - ballPx
         val seekMaxY = constraints.maxHeight.toFloat() - ballPx
+        // 🔴 v2.9.1：**网页直链播放（全屏覆盖层）打开时，所有悬浮球一律让位。**
+        //   实测（MuMu 1600x900，dump 取证）：右上角电量球占 `[1519,82]-[1600,163]`，
+        //   而嗅探界面「打开」按钮的可点区域是 `[1501,102]-[1588,174]` —— **两者重叠**，
+        //   点击全被浮球吃掉 → 粘完地址点「打开」毫无反应（连 `open()` 都不会进）。
+        //   同一行的地址栏因为左边有大片空白、顶栏关闭按钮因为 y 不重叠，反而都能点，
+        //   所以这个坑很容易被误判成"按钮坏了"。
+        //   浮球是播放器的浮层，全屏模态界面下不该盖在它上面。
+        val ballsAllowed = !showWebSniffer
         // 提示文案在语句位置取好（@Composable 调用不能塞进普通 lambda）
         val fwdHudLabel = stringResource(R.string.seek_forward_hud, seekForwardStep)
         val bwdHudLabel = stringResource(R.string.seek_backward_hud, seekBackwardStep)
@@ -9284,7 +9450,7 @@ fun VRPlayerScreen(
         // 横向取 initialXRatio = 0 → 贴左边缘，与右侧两个球天然错开，不抢位置也不误触。
         // 差值实时性：currentPositionMs 是上游播放器循环写入的 state，写一次就重组一次
         //（见 MarkerFloatingBall 的注释），无需额外定时器。
-        if (isMarkerBallEnabled) {
+        if (isMarkerBallEnabled && ballsAllowed) {
             MarkerFloatingBall(
                 currentPositionMs = currentPositionMs,
                 maxX = seekMaxX,
@@ -9308,7 +9474,7 @@ fun VRPlayerScreen(
         // 底层与标记球/快进球完全一致（floatingBallGesture + FloatingBallPositions + 玻璃材质），
         // 只有显示内容不同。默认贴**两侧上方**：时钟左上、电量右上，
         // 与「标记球（左中）/ 快进球（右 28%）/ 后退球（右 72%）」初始位置都不重叠。
-        if (isClockBallEnabled) {
+        if (isClockBallEnabled && ballsAllowed) {
             InfoFloatingBall(
                 kind = InfoBallKind.CLOCK,
                 maxX = seekMaxX,
@@ -9326,7 +9492,7 @@ fun VRPlayerScreen(
             )
         }
 
-        if (isBatteryBallEnabled) {
+        if (isBatteryBallEnabled && ballsAllowed) {
             InfoFloatingBall(
                 kind = InfoBallKind.BATTERY,
                 maxX = seekMaxX,
@@ -9347,7 +9513,7 @@ fun VRPlayerScreen(
         // 13d. v2.6.4：**播放控制球**（右侧中部）
         // 单击 = 播放/暂停，双击 = 播报状态。球面图标由 `playerInstance.isPlaying` 驱动
         // （不由球自己持有状态）→ 自动暂停、播完、外部控制暂停都能反映到图标上。
-        if (isPlayBallEnabled) {
+        if (isPlayBallEnabled && ballsAllowed) {
             ControlFloatingBall(
                 isPlaying = playerInstance?.isPlaying == true,
                 maxX = seekMaxX,
@@ -9373,7 +9539,7 @@ fun VRPlayerScreen(
         }
 
         // 13e. v2.6.4：**性能球**（左上；时钟球占 y=0.10，这里 0.26 不重叠）
-        if (isPerfBallEnabled) {
+        if (isPerfBallEnabled && ballsAllowed) {
             PerfFloatingBall(
                 maxX = seekMaxX,
                 maxY = seekMaxY,
@@ -9390,7 +9556,7 @@ fun VRPlayerScreen(
             )
         }
 
-        if (isSeekForwardBallEnabled) {
+        if (isSeekForwardBallEnabled && ballsAllowed) {
             SeekFloatingBall(
                 forward = true,
                 stepSeconds = seekForwardStep,
@@ -9428,7 +9594,7 @@ fun VRPlayerScreen(
             )
         }
 
-        if (isSeekBackwardBallEnabled) {
+        if (isSeekBackwardBallEnabled && ballsAllowed) {
             SeekFloatingBall(
                 forward = false,
                 stepSeconds = seekBackwardStep,

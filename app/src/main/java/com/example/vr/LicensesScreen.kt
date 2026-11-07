@@ -195,7 +195,8 @@ fun OpenSourceLicensesDialog(onDismiss: () -> Unit) {
     val prefs = remember {
         context.getSharedPreferences("vr_player_prefs", Context.MODE_PRIVATE)
     }
-    val accent = remember { UiThemes.byId(UiThemes.loadThemeId(prefs)).accent }
+    // v2.9.2：与主界面走同一个解析入口，Monet 模式下许可页高亮色也跟随壁纸
+    val accent = remember { UiThemes.resolve(context, UiThemes.loadThemeId(prefs)).accent }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFC18171C),

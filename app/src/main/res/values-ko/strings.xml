@@ -103,6 +103,19 @@
     <string name="theme_name_rose">로즈</string>
     <string name="theme_name_amber">앰버</string>
     <string name="theme_name_mint">민트</string>
+    <!-- v2.9.2: Material Design 기본 색상 + Monet 동적 색상 -->
+    <string name="theme_name_blue">블루</string>
+    <string name="theme_name_light_blue">라이트 블루</string>
+    <string name="theme_name_teal">틸</string>
+    <string name="theme_name_lime">라임</string>
+    <string name="theme_name_yellow">옐로</string>
+    <string name="theme_name_orange">오렌지</string>
+    <string name="theme_name_deep_orange">딥 오렌지</string>
+    <string name="theme_name_red">레드</string>
+    <string name="theme_name_blue_grey">블루 그레이</string>
+    <string name="theme_name_brown">브라운</string>
+    <string name="theme_name_monet">시스템 배경화면</string>
+    <string name="theme_monet_unsupported">시스템 배경화면 (Android 12+ 필요)</string>
     <string name="theme_liquid_glass">유리</string>
     <string name="settings_group_projection">렌즈 투영과 시야 모드</string>
     <string name="projection_auto_detect">투영 자동 감지</string>
@@ -805,6 +818,8 @@
     <string name="url_play_entry_desc">영상 직링크(m3u8 / mp4 / flv)를 붙여넣어 바로 재생</string>
     <string name="url_play_hint">https://…</string>
     <string name="url_play_note">http / https 만 지원. URL은 제목과 최근 목록에 표시되지 않습니다.</string>
+    <string name="url_play_referer_label">원본 페이지 (선택)</string>
+    <string name="url_play_referer_hint">동영상이 있는 페이지 URL. 비우면 Referer 를 보내지 않습니다</string>
     <string name="url_play_action">재생</string>
     <string name="url_play_invalid">주소는 http:// 또는 https:// 로 시작해야 합니다</string>
     <string name="url_play_playing_title">URL 영상</string>

@@ -113,6 +113,19 @@
     <string name="theme_name_rose">玫瑰</string>
     <string name="theme_name_amber">琥珀</string>
     <string name="theme_name_mint">薄荷</string>
+    <!-- v2.9.2：补齐 Material Design 主色 + Monet 动态取色 -->
+    <string name="theme_name_blue">蔚蓝</string>
+    <string name="theme_name_light_blue">浅蓝</string>
+    <string name="theme_name_teal">青绿</string>
+    <string name="theme_name_lime">黄绿</string>
+    <string name="theme_name_yellow">柠檬黄</string>
+    <string name="theme_name_orange">橙</string>
+    <string name="theme_name_deep_orange">深橙</string>
+    <string name="theme_name_red">珊瑚红</string>
+    <string name="theme_name_blue_grey">蓝灰</string>
+    <string name="theme_name_brown">棕</string>
+    <string name="theme_name_monet">跟随系统壁纸</string>
+    <string name="theme_monet_unsupported">跟随系统壁纸（需 Android 12+）</string>
     <string name="theme_liquid_glass">玻璃</string>
     <string name="settings_group_projection">镜头投影与视角模式</string>
     <string name="projection_auto_detect">投影智能检测</string>
@@ -838,6 +851,8 @@
     <string name="url_play_entry_desc">粘贴视频直链（m3u8 / mp4 / flv）直接播放</string>
     <string name="url_play_hint">https://…</string>
     <string name="url_play_note">支持 http / https 地址；链接不会显示在播放标题与最近播放里</string>
+    <string name="url_play_referer_label">来源页面（可选）</string>
+    <string name="url_play_referer_hint">视频所在网页地址，留空则不发送 Referer</string>
     <string name="url_play_action">播放</string>
     <string name="url_play_invalid">地址需以 http:// 或 https:// 开头</string>
     <string name="url_play_playing_title">URL 视频</string>

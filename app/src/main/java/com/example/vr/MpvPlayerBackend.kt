@@ -156,6 +156,55 @@ object MpvPlayerFactory {
             //     界面据此置"播完态"，用户拖动时由 UI 层补一次 play() 即可续播。
             MPVLib.setOptionString("keep-open", "yes")
 
+            // ==================================================================
+            // 🔴 v2.9.1：网页/URL 播放的请求头 —— MPV 默认是**裸请求**
+            // ------------------------------------------------------------------
+            // 故障链（2026-10-19 日志已实证）：
+            //   网页直链被 Exo 判为 source 失败 → `mpvRetryUri` 自动回退 MPV
+            //   → 但 MPV 这边一个头都不带（默认 UA 是 `libmpv`）→ CDN 403
+            //   → `loading failed`。用户观感是"换了个内核还是打不开"。
+            // 现在把 Exo 用的同一份 UA/Referer 也交给 mpv。
+            //
+            // ⚠️ 两条硬约束：
+            //   ① **必须在这里（init 之前）设置** —— mpv 在 init 时读配置并建管线，
+            //      事后 setOptionString 无效（见类注释第 1 条）。
+            //   ② **绝不能带 `Range`** —— mpv 自己的 Range 由 lavf 按 seek 位置生成，
+            //      固定成 `bytes=0-` 会让拖动后仍只拿文件头。所以只从
+            //      [HttpPlaybackHeaders.asMpvHeaderFields] 取值（那里就不给 Range）。
+            //   ③ mpv 的 `http-header-fields` 是**逗号分隔的 string list**，而桌面 UA 里
+            //      天然带逗号（`(KHTML, like Gecko)`）→ 拼成一个字符串会被拆成畸形头。
+            //      所以改用 **`http-header-fields-append` 逐条追加**：mpv 文档明确
+            //      「`-append` 不解释转义，逗号作为值的一部分原样保留」。
+            //      万一该变体在当前 mpv 上不可用，再退回「`\,` 转义 + 单次 set」。
+            // ==================================================================
+            if (options.httpHeaders.isNotEmpty()) {
+                var appended = 0
+                runCatching {
+                    options.httpHeaders.forEach { field ->
+                        MPVLib.setOptionString("http-header-fields-append", field)
+                        appended++
+                    }
+                }
+                if (appended < options.httpHeaders.size) {
+                    // fallback：单次 set + 反斜杠转义逗号（`-set` 语义会解释转义）
+                    val escaped = options.httpHeaders.joinToString(",") { it.replace(",", "\\,") }
+                    runCatching {
+                        MPVLib.setOptionString("http-header-fields", escaped)
+                    }.onFailure {
+                        // 注入失败不该影响播放：MPV 仍能裸请求（只是回到 403 老样子）
+                        Log.w(TAG, "注入 http-header-fields 失败（不影响继续播放）：${it.message}")
+                    }
+                }
+                if (appended > 0) {
+                    val hasReferer = options.httpHeaders.any { it.startsWith("Referer:") }
+                    Log.i(
+                        TAG,
+                        "已注入 $appended 条 HTTP 头给 mpv（Referer=$hasReferer，" +
+                            "方式=${if (appended == options.httpHeaders.size) "append" else "set+转义"}）"
+                    )
+                }
+            }
+
             // ===== 2. 初始化 =====
             MPVLib.init()
             backend.created = true   // native 上下文已就绪，release 时方可 destroy
@@ -287,7 +336,16 @@ data class MpvOptions(
     /**
      * 视频输出模式。**不持久化**，由二段兜底在内存里切换（见 [MpvVoMode]）。
      */
-    val voMode: MpvVoMode = MpvVoMode.EMBED
+    val voMode: MpvVoMode = MpvVoMode.EMBED,
+    /**
+     * HTTP 请求头（形如 `"User-Agent: ..."`），原样交给 mpv 的 `--http-header-fields`。
+     *
+     * 来源是 [HttpPlaybackHeaders.asMpvHeaderFields]（网页嗅探 / 手动 URL 播放时才有值）。
+     * **不持久化**：只在本次 [MpvPlayerFactory.create] 时读一次。
+     *
+     * ⚠️ 里面**不该有 `Range`** —— 见 [HttpPlaybackHeaders.asMpvHeaderFields] 的说明。
+     */
+    val httpHeaders: List<String> = emptyList()
 ) {
     companion object {
         /** 缓冲档位（MB）。0 表示交回 mpv 默认。 */
