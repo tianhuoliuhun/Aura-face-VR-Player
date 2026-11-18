@@ -34,6 +34,25 @@ object HttpPlaybackHeaders {
     var userAgent: String? = null
         private set
 
+    /**
+     * 🔴 v2.8.3：**会话 Cookie**（`name=value; name2=value2`）。
+     *
+     * ## 为什么必须透传
+     * 需要登录态 / 防盗链签发的站点，直链本身是 200 但**没有 Cookie 就 403**：
+     * 服务器把「这次请求属于哪个会话」全部压在 Cookie 里（`sessionid` / `cf_clearance` /
+     * 自家签发的短时票据）。此前整条链路（Exo 数据源、MPV、FFmpeg 重封装）都只带
+     * UA + Referer，于是这些站点的流**永远打不开**，且报错与「CDN 拒绝」完全一样
+     * （`InvalidResponseCodeException: 403`），无法从日志区分。
+     *
+     * ## 来源与边界
+     * 只从 **WebView 的 `CookieManager`** 取（即用户在那个 WebView 里真实登录/通过
+     * 挑战后浏览器持有的 Cookie），由 [WebSnifferScreen] 在点击播放的那一刻取值。
+     * 不做任何持久化、不写日志、不进「最近播放」—— 与直链 URL 同级敏感。
+     */
+    @Volatile
+    var cookie: String? = null
+        private set
+
     /** 嗅探播放时的桌面 UA（与 WebSnifferScreen 的 WebSettings 保持一致） */
     const val DESKTOP_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -52,11 +71,15 @@ object HttpPlaybackHeaders {
      *
      * @param pageUrl 嗅探来源页（可为 null —— 手动粘贴 URL 时没有页面）
      * @param streamUrl 直链；保留以兼容两个调用点，**不再参与 Referer 推断**
+     * @param cookie v2.8.3：WebView `CookieManager` 里该直链（或来源页）的 Cookie；
+     *   为 null 表示无会话态。**只在本进程内存里存活到 [clear]**
      */
-    @Suppress("UNUSED_PARAMETER")
-    fun forWebPlayback(pageUrl: String?, streamUrl: String) {
+    fun forWebPlayback(pageUrl: String?, streamUrl: String, cookie: String? = null) {
         userAgent = DESKTOP_UA
         referer = pageUrl?.trim()?.takeIf { it.isNotBlank() }
+        // 🔴 过滤 CR/LF：Cookie 来自页面（可被站点任意设置），拼进请求头前必须剔除换行，
+        //    否则是一个现成的 header 注入点（`a=1\r\nX-Evil: 1`）。
+        this.cookie = cookie?.let(::sanitizeHeaderValue)
     }
 
     /**
@@ -76,6 +99,8 @@ object HttpPlaybackHeaders {
         val m = LinkedHashMap<String, String>()
         referer?.takeIf { it.isNotBlank() }?.let { m["Referer"] = it }
         userAgent?.takeIf { it.isNotBlank() }?.let { m["User-Agent"] = it }
+        // v2.8.3：会话 Cookie —— 有它才能打开「直链 200、无 Cookie 403」的站点
+        cookie?.takeIf { it.isNotBlank() }?.let { m["Cookie"] = it }
         if (m.isEmpty()) return null
         m["Range"] = "bytes=0-"
         return m
@@ -104,19 +129,35 @@ object HttpPlaybackHeaders {
      * @return 形如 `["User-Agent: ...", "Referer: ..."]`；无网页上下文时为空列表
      */
     fun asMpvHeaderFields(): List<String> {
-        val out = ArrayList<String>(2)
+        val out = ArrayList<String>(3)
         userAgent?.takeIf { it.isNotBlank() }?.let { out += "User-Agent: $it" }
         referer?.takeIf { it.isNotBlank() }?.let { out += "Referer: $it" }
+        // v2.8.3：Cookie 同样只在这一层给。注入侧是 `http-header-fields-append`（逐条追加，
+        // 不解释转义、逗号原样保留），所以 Cookie 里出现逗号也不会被拆坏。
+        cookie?.takeIf { it.isNotBlank() }?.let { out += "Cookie: $it" }
         return out
+    }
+
+    /**
+     * v2.8.3：去掉 header 值里的 CR/LF（防 header 注入）。
+     *
+     * Cookie 与 Referer 都可能来自**页面可控**的内容（`document.cookie` 由站点设置），
+     * 直接把带 `\r\n` 的值拼进请求头等于把请求头注入能力交给站点。
+     * 这里统一在入口清洗，两个出口（Exo / mpv）都不会再出现裸换行。
+     */
+    private fun sanitizeHeaderValue(raw: String): String? {
+        val cleaned = raw.replace("\r", "").replace("\n", "").trim()
+        return cleaned.takeIf { it.isNotBlank() }
     }
 
     /** 是否处于「网页/URL 播放」上下文（决定数据源要不要走缓存层） */
     val isActive: Boolean
-        get() = !referer.isNullOrBlank() || !userAgent.isNullOrBlank()
+        get() = !referer.isNullOrBlank() || !userAgent.isNullOrBlank() || !cookie.isNullOrBlank()
 
     /** 播放结束/切换到本地文件时必须调用，避免把网页头带到下一次播放 */
     fun clear() {
         referer = null
         userAgent = null
+        cookie = null
     }
 }

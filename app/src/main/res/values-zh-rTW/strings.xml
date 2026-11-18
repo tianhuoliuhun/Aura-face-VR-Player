@@ -725,6 +725,7 @@
     <string name="rt_no_audio">該影片沒有可用的音軌，無法生成即時字幕</string>
     <string name="rt_audio_unsupported_codec">音訊編碼不支援：%s</string>
     <string name="rt_audio_io_failed">音訊讀取失敗（IO）</string>
+    <string name="rt_audio_live_unsupported">直播串流不支援即時字幕</string>
     <string name="rt_audio_remux_failed">音訊轉封裝失敗（code=%d）</string>
     <string name="rt_started">即時字幕已開啟，正在生成…</string>
     <string name="rt_all_done">即時字幕已全部生成完成（共 %1$d 條）</string>
@@ -873,6 +874,13 @@
     <string name="web_sniffer_open">開啟</string>
     <string name="web_sniffer_found">發現 %1$d 條影片直連（點按播放）</string>
     <string name="web_sniffer_empty">尚未抓到直連 —— 在網頁裡播放一下影片再回來看</string>
+    <!-- v2.8.3：HLS 多碼率選擇 + 網頁外掛字幕 -->
+    <string name="web_sniffer_quality_title">選擇清晰度</string>
+    <string name="web_sniffer_subtitle_title">字幕 %1$d 條（選中後隨片掛載，可匯出）</string>
+    <string name="web_sniffer_subtitle_progress">合併字幕 %1$d/%2$d</string>
+    <string name="web_sniffer_subtitle_partial">僅前 %1$s</string>
+    <string name="web_sniffer_subtitle_gaps">缺 %1$d 片</string>
+    <string name="action_cancel">取消</string>
     <string name="web_sniffer_playing_title">網頁影片</string>
     <string name="control_ball_enable">播放控制球</string>
     <string name="control_ball_desc">點按播放 / 暫停，雙擊播報目前狀態</string>

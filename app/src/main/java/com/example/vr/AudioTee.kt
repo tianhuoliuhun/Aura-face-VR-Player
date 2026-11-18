@@ -94,6 +94,8 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
         data class UnsupportedCodec(val mime: String) : AudioTeeOpenResult()
         object IoFailed : AudioTeeOpenResult()
         data class RemuxFailed(val code: Int) : AudioTeeOpenResult()
+        /** v2.8.3：直播（无固定时长）—— m3u8 直播清单没有终点，无法重封装成整段音频 */
+        object LiveUnsupported : AudioTeeOpenResult()
     }
 
     fun open(): AudioTeeOpenResult {
@@ -123,6 +125,18 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
             }
         }
         if (scheme == "http" || scheme == "https") {
+            // ==================================================================
+            // v2.8.3：**HLS（m3u8）直接走 FFmpeg 直读 URL**
+            // ------------------------------------------------------------------
+            // 框架 `MediaExtractor` **不认 m3u8** —— 那只是文本播放列表、不是媒体容器。
+            // 于是下面三步对 HLS 必然全部失败（各自还要等一次网络超时），
+            // UI 上只会看到「音频读取失败（IO）」。这里提前分流，
+            // 由 libavformat 直接打开 URL 并把音轨重封装成本地 MKV。
+            // ==================================================================
+            if (uri.toString().contains(".m3u8", ignoreCase = true)) {
+                Log.i(TAG, "AudioTee 检测到 HLS 清单 → 直接走 FFmpeg 直读 URL 重封装")
+                return openViaFfmpegRemux()
+            }
             // v2.6.7：**优先用带请求头的 HttpMediaDataSource**。
             // 框架自带 HTTP 栈（setDataSource(context, uri, null)）不带 UA / Range，
             // 对校验这两个头的 CDN 一律 403 —— 这正是「音频读取失败（IO）」的成因。
@@ -148,14 +162,16 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
             }
         
             // 最后兜底：分块下载到临时文件（下载内部已带 UA/Referer 并循环补齐）
-            val tmp = downloadToTemp(uri) ?: return AudioTeeOpenResult.IoFailed
+            // v2.8.3：下载也失败时不再直接判 IO 失败 —— 网络源的**容器**问题
+            // （HLS / 异常封装）可以靠 libavformat 直读 URL 救回来。
+            val tmp = downloadToTemp(uri) ?: return openViaFfmpegRemux()
             val ex3 = MediaExtractor()
             try {
                 ex3.setDataSource(tmp.absolutePath)
             } catch (e2: Exception) {
-                Log.w(TAG, "AudioTee 临时文件打开失败：${e2.message}")
+                Log.w(TAG, "AudioTee 临时文件打开失败：${e2.message} → 走 FFmpeg 直读 URL 兜底")
                 try { ex3.release() } catch (_: Exception) {}
-                return AudioTeeOpenResult.IoFailed
+                return openViaFfmpegRemux()
             }
             extractor = ex3
             return openCodec(ex3)
@@ -254,13 +270,32 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
      * ⚠️ 同步、耗时 —— 调用方（open 的协程）本就在后台线程，可接受。
      */
     private fun openViaFfmpegRemux(): AudioTeeOpenResult {
-        val outFile = java.io.File(context.cacheDir, "asr_remuxed_${uri.hashCode()}.mkv")
+        val scheme = uri.scheme?.lowercase()
+        val isNetwork = scheme == "http" || scheme == "https"
+        // 产物按 URI hash 缓存（同一片 seek 时复用）；但网络源的 CDN token 每次不同 →
+        // hash 每次都变，若不清旧文件会无限堆积，所以网络源走**单槽**策略。
+        val prefix = if (isNetwork) "rt_net_remux_" else "asr_remuxed_"
+        val outFile = java.io.File(context.cacheDir, "$prefix${uri.hashCode()}.mkv")
+        if (isNetwork) {
+            runCatching {
+                context.cacheDir.listFiles { f ->
+                    f.name.startsWith(prefix) && f.name != outFile.name
+                }?.forEach { it.delete() }
+            }
+        }
         if (!outFile.exists() || outFile.length() < 1024L) {
-            Log.i(TAG, "AudioTee 走 FFmpeg 转封装兜底（框架解不开该容器）→ ${outFile.name}")
+            Log.i(
+                TAG,
+                "AudioTee 走 FFmpeg 转封装兜底（" +
+                    (if (isNetwork) "网络流：直读 URL" else "框架解不开该容器") +
+                    "）→ ${outFile.name}"
+            )
             val r = FfmpegRemuxer.remuxToMkv(context, uri, outFile)
             if (!r.success) {
                 Log.w(TAG, "FFmpeg 转封装失败 code=${r.code}: ${r.message}")
                 outFile.delete()
+                // -8 = 直播（无固定时长）：给专门的提示，而不是笼统的「转封装失败」
+                if (r.code == -8) return AudioTeeOpenResult.LiveUnsupported
                 return AudioTeeOpenResult.RemuxFailed(r.code)
             }
         } else {

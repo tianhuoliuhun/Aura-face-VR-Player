@@ -58,6 +58,27 @@ object FfmpegRemuxer {
     private external fun nativeRemuxToMp4(inputPath: String, outputPath: String): Int
 
     /**
+     * v2.8.3：**网络源（http/https/HLS）→ MKV**，只搬音轨。
+     * 对应 `ffremux_jni.cpp` 的 `nativeRemuxUrlToMkv`。
+     *
+     * v2.8.3（第二轮）：多一个 `cookie` —— 需要登录态的站点（sessionid / cf_clearance）
+     * 光有 UA + Referer 仍会 403，重封装会在 `avformat_open_input` 就失败，
+     * 表现为「实时字幕永远准备中」。
+     */
+    private external fun nativeRemuxUrlToMkv(
+        inputUrl: String,
+        outputPath: String,
+        userAgent: String?,
+        referer: String?,
+        cookie: String?,
+        caFile: String?,
+        maxSeconds: Int
+    ): Int
+
+    /** 网络源重封装总预算（秒）：到点截断，已写出的音频仍可用来生成前段字幕。 */
+    private const val NETWORK_REMUX_BUDGET_SECONDS = 600
+
+    /**
      * 把 [inputUri] 转封装成 Matroska（MKV）写入 [outFile] —— 字幕链路兜底用。
      *
      * ⚠️ **同步、耗时**（1.19GB 实测 30~60s）——调用方必须在后台线程。
@@ -87,8 +108,34 @@ object FfmpegRemuxer {
                     ?: return Result(false, null, -100, "openFileDescriptor 返回 null")
                 "/proc/self/fd/${pfd.fd}"
             }
-            "smb", "http", "https" ->
-                return Result(false, null, -100, "网络 URI 不支持（先经 AudioTee 的临时下载兜底落地为本地文件）")
+            "http", "https" -> {
+                // v2.8.3：网络源改走独立 JNI 入口 —— libavformat 直接打开 URL（含 m3u8），
+                // 只搬音轨、带 UA/Referer、带总预算，见 ffremux_jni.cpp 的说明。
+                // 适用于「实时字幕在网页流上必然报『音频读取失败（IO）』」那个缺口。
+                if (mp4) {
+                    return Result(false, null, -100, "网络 URI 只支持转 MKV（MP4 用于本地容器修复）")
+                }
+                val h = HttpPlaybackHeaders.asRequestProperties() ?: emptyMap()
+                return try {
+                    val code = nativeRemuxUrlToMkv(
+                        inputUri.toString(),
+                        outFile.absolutePath,
+                        h["User-Agent"],
+                        h["Referer"],
+                        // v2.8.3：会话 Cookie（无会话态时为 null，native 侧跳过该头）
+                        h["Cookie"],
+                        ensureCaBundle(context),
+                        NETWORK_REMUX_BUDGET_SECONDS
+                    )
+                    if (code == 0) Result(true, outFile.absolutePath, 0, null)
+                    else Result(false, null, code, codeMessage(code))
+                } catch (t: Throwable) {
+                    Log.e(TAG, "网络 remux 异常", t)
+                    Result(false, null, -200, t.message ?: t.javaClass.simpleName)
+                }
+            }
+            "smb" ->
+                return Result(false, null, -100, "SMB 不支持转封装（先经 AudioTee 的临时下载兜底落地为本地文件）")
             else -> inputUri.toString()
         }
         return try {
@@ -104,6 +151,52 @@ object FfmpegRemuxer {
         }
     }
 
+    /**
+     * v2.8.3：把 Android 系统 CA 拼成 **单个 PEM bundle**。
+     *
+     * 为什么必须：FFmpeg 的 mbedtls 只认 `ca_file` 指向的**单个**文件，而 Android 的系统
+     * 证书是 `/system/etc/security/cacerts/` 下 140+ 个独立 PEM。不给 bundle 时所有 https 流都会：
+     * ```
+     * mbedtls_ssl_get_verify_result ... flags: 8
+     * The certificate is not correctly signed by the trusted CA
+     * → avformat_open_input 返回 AVERROR(EIO)（日志里只显示一句 I/O error）
+     * ```
+     * 表现为「网页流音频旁路全部失败」，极容易误判成网络问题。
+     *
+     * 产物缓存到 `cacheDir/ff_ca_bundle.pem`（只生成一次）；读不到系统目录时返回 null，
+     * native 侧会退化为关闭校验（本链路只用于取音频，不承载凭据）。
+     */
+    private fun ensureCaBundle(context: Context): String? {
+        val out = File(context.cacheDir, "ff_ca_bundle.pem")
+        if (out.exists() && out.length() > 1024L) return out.absolutePath
+        return try {
+            val files = File("/system/etc/security/cacerts").listFiles()
+                ?.filter { it.isFile } ?: return null
+            if (files.isEmpty()) return null
+            out.outputStream().bufferedWriter().use { w ->
+                files.forEach { f ->
+                    runCatching {
+                        val text = f.readText()
+                        if (text.contains("BEGIN CERTIFICATE")) {
+                            w.write(text)
+                            if (!text.endsWith("\n")) w.write("\n")
+                        }
+                    }
+                }
+            }
+            if (out.length() > 1024L) {
+                Log.i(TAG, "已生成 CA bundle：${files.size} 张证书 → ${out.length()} B")
+                out.absolutePath
+            } else {
+                out.delete()
+                null
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "生成 CA bundle 失败：${t.message}")
+            null
+        }
+    }
+
     private fun codeMessage(code: Int): String = when (code) {
         -1 -> "打不开输入文件"
         -2 -> "读取流信息失败"
@@ -112,6 +205,8 @@ object FfmpegRemuxer {
         -5 -> "打不开输出文件"
         -6 -> "建流失败"
         -7 -> "写帧失败"
+        -8 -> "直播/无固定时长的流，无法提取音频"
+        -9 -> "网络读取超时"
         -100 -> "输入路径解析失败"
         else -> "未知错误 $code"
     }

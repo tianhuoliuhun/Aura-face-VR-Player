@@ -682,6 +682,7 @@
     <string name="rt_no_audio">이 영상에는 사용 가능한 오디오 트랙이 없어 실시간 자막을 생성할 수 없습니다</string>
     <string name="rt_audio_unsupported_codec">오디오 코덱 미지원：%s</string>
     <string name="rt_audio_io_failed">오디오 읽기 실패（IO）</string>
+    <string name="rt_audio_live_unsupported">라이브 스트림에서는 실시간 자막을 사용할 수 없습니다</string>
     <string name="rt_audio_remux_failed">오디오 리먹싱 실패（code=%d）</string>
     <string name="rt_started">실시간 자막 켜짐, 생성 중…</string>
     <string name="rt_all_done">실시간 자막 생성 완료（총 %1$d 개）</string>
@@ -830,6 +831,13 @@
     <string name="web_sniffer_open">열기</string>
     <string name="web_sniffer_found">영상 직링크 %1$d개 발견(탭하여 재생)</string>
     <string name="web_sniffer_empty">아직 링크가 없습니다. 페이지에서 영상을 재생한 뒤 확인하세요</string>
+    <!-- v2.8.3：HLS 화질 선택 + 페이지 자막 -->
+    <string name="web_sniffer_quality_title">화질 선택</string>
+    <string name="web_sniffer_subtitle_title">자막 %1$d개 (재생 시 적용, 내보내기 가능)</string>
+    <string name="web_sniffer_subtitle_progress">자막 병합 중 %1$d/%2$d</string>
+    <string name="web_sniffer_subtitle_partial">앞 %1$s만</string>
+    <string name="web_sniffer_subtitle_gaps">%1$d개 누락</string>
+    <string name="action_cancel">취소</string>
     <string name="web_sniffer_playing_title">웹 영상</string>
     <string name="control_ball_enable">재생 제어 볼</string>
     <string name="control_ball_desc">탭으로 재생 / 일시정지, 더블 탭으로 상태 알림</string>

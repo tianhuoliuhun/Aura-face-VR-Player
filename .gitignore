@@ -56,3 +56,7 @@ app/src/main/cpp/libs/
 app/libs/hvrbridge.jar
 
 
+
+# v2.8.3：本地临时工作目录（108MB，含独立 gradle 工程）与散落截图，不入库
+/winplayer
+/m0_desktop.png

@@ -618,6 +618,27 @@ fun VRPlayerScreen(
      */
     var softRetryUri by remember { mutableStateOf<String?>(null) }
 
+    /**
+     * v2.8.3：**该文件在 MPV / IJK / 系统解码上播失败过 → 本次改用 EXO**。
+     *
+     * 语义与 [mpvRetryUri] / [softRetryUri] 完全对齐：只对「这一个文件」生效、
+     * **绝不写回 prefs** —— 用户设置的内核保持不变。
+     *
+     * 🔴 为什么必须这么做（原来直接 `decoderEngine = DecoderEngine.EXO`）：
+     *   `decoderEngine` 是**持久化状态** —— `LaunchedEffect(decoderEngine, …)` 会
+     *   `putInt("decoder_engine_id", decoderEngine.id)`。于是**一次播放失败就把用户的
+     *   内核设置永久改掉**：用户下次打开完全不同的片子也变成 EXO，表现为「设置自己变了」。
+     *   这类「为了救一个坏文件而改全局设置」的做法，与容器路由「刻意不写回 prefs」的原则冲突。
+     *
+     * 置位点：MPV `onError` / IJK `onError`（非容器路由场景）/ 系统解码 `onError`。
+     * 消费点：`setupVideoPlayer` 的 `effectiveEngine` —— **必须放在所有自动路由之后**，
+     *   否则会被后面的容器路由（AVI→MPV 等）再改回去。
+     *
+     * 不会死循环：EXO 失败置 [mpvRetryUri] → 转 MPV；MPV 失败置本标记 → 转回 EXO；
+     * EXO 再失败时 `uriNow != mpvRetryUri` 已不成立，不再置位 → 停在 EXO 的报错上。
+     */
+    var exoRetryUri by remember { mutableStateOf<String?>(null) }
+
     // v2.1.233：IJK 内核的可调参数（对应设置面板「解码器参数 · IJK」那几项）。
     // 只有选中 IJK 时才会被读取；切回 EXO 时这些值不参与播放，但仍保留在 prefs 里，
     // 用户下次切回 IJK 时不用重设。
@@ -670,6 +691,14 @@ fun VRPlayerScreen(
     var liveTextTrackPicked by remember { mutableStateOf(false) }
     var loadedSubtitleFileName by remember { mutableStateOf("") }
     var loadedSubtitleCues by remember { mutableStateOf<List<SubtitleCue>>(emptyList()) }
+    /**
+     * v2.8.3：网页嗅探面板选中的外挂字幕（**待挂载**）。
+     *
+     * 不能直接写 [loadedSubtitleCues]：切换媒体会触发
+     * `LaunchedEffect(selectedMediaItem.uri)`，那里开头就清空字幕（防上一个视频残留），
+     * 于是面板刚设好的字幕会被立刻清掉。改为先暂存，由那个 Effect 消费并 return。
+     */
+    var pendingWebSubtitle by remember { mutableStateOf<WebSubtitle?>(null) }
     var subtitleFont by remember {
         mutableStateOf(
             if (isMemoryModeEnabled) {
@@ -3711,6 +3740,24 @@ fun VRPlayerScreen(
             effectiveEngine = DecoderEngine.EXO
         }
 
+        // ======================================================================
+        // v2.8.3：**该文件在当前内核上播失败过 → 本次强制 EXO**
+        // ----------------------------------------------------------------------
+        // 放在**全部自动路由之后**：容器路由（AVI/WMV→MPV、超硬件上限→IJK 等）在上面已经
+        // 执行完毕，这里最后覆盖才真的回退成功；否则会「设成 EXO 又被路由回 MPV」。
+        // 只认「本次这一个文件」，且**不改 `decoderEngine`、不写 prefs**（见 state 注释）。
+        // 与直播强制 EXO 不冲突：两者目标都是 EXO，先到先得。
+        // ======================================================================
+        if (exoRetryUri != null && exoRetryUri == selectedMediaItem.uri &&
+            effectiveEngine != DecoderEngine.EXO
+        ) {
+            Log.i(
+                "VRPlayerScreen",
+                "该文件在 $effectiveEngine 上播放失败过 → 本次回退 EXO（用户设置不变）"
+            )
+            effectiveEngine = DecoderEngine.EXO
+        }
+
         if (effectiveEngine == DecoderEngine.IJK) {
             val ijkUri = decodedUri
             val ijkUsable = IjkPlayerFactory.supports(ijkUri) && IjkPlayerFactory.ensureLibraries()
@@ -3789,8 +3836,11 @@ fun VRPlayerScreen(
                                     Toast.LENGTH_LONG
                                 ).show()
                             } else {
-                                Log.e("VRPlayerScreen", "IJK 播放错误 what=$what extra=$extra -> 回退 EXO")
-                                decoderEngine = DecoderEngine.EXO
+                                Log.e("VRPlayerScreen", "IJK 播放错误 what=$what extra=$extra -> 本次回退 EXO")
+                                // v2.8.3：只标「本次这一个文件」，**不再写回 prefs**。
+                                // 原来改 decoderEngine 会经持久化把用户的内核永久改成 EXO ——
+                                // 播一个 IJK 解不了的片子，就让之后所有片子都变 EXO。
+                                exoRetryUri = selectedMediaItem.uri
                                 Toast.makeText(
                                     context,
                                     context.getString(R.string.toast_ijk_fallback),
@@ -3887,11 +3937,12 @@ fun VRPlayerScreen(
                             //   context 尚未销毁 → mpv 断言 `!mpctx->initialized` 失败 →
                             //   SIGABRT 崩在 libmpv.so。vo 模式改为**创建前预判**
                             //   （见 setupVideoPlayer 里的「预判式选 vo」），失败即回退。
-                            Log.e("VRPlayerScreen", "MPV 播放错误: $reason -> 回退 EXO")
+                            Log.e("VRPlayerScreen", "MPV 播放错误: $reason -> 本次回退 EXO")
                             // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
-                            //    改 decoderEngine 会触发重建 effect；同时写回 prefs，
-                            //    下次打开不再踩同一个坑（与 IJK 的回退一致）。
-                            decoderEngine = DecoderEngine.EXO
+                            //    v2.8.3：只置「本次这一个文件」的标记 → 同样触发重建，
+                            //    但**不再写回 prefs**：原来改 decoderEngine 会把用户的内核
+                            //    永久改成 EXO（一次失败污染之后所有播放）。
+                            exoRetryUri = selectedMediaItem.uri
                             Toast.makeText(
                                 context,
                                 context.getString(R.string.toast_mpv_fallback),
@@ -3979,10 +4030,10 @@ fun VRPlayerScreen(
                         }
 
                         override fun onError(what: Int, extra: Int) {
-                            Log.e("VRPlayerScreen", "系统解码播放错误 what=" + what + " extra=" + extra + " -> 回退 EXO")
+                            Log.e("VRPlayerScreen", "系统解码播放错误 what=" + what + " extra=" + extra + " -> 本次回退 EXO")
                             // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
-                            //    改 decoderEngine 触发重建；同时写回 prefs，下次不再踩同一个坑。
-                            decoderEngine = DecoderEngine.EXO
+                            //    v2.8.3：同样只标本次，**不写回 prefs**（理由见 exoRetryUri 注释）。
+                            exoRetryUri = selectedMediaItem.uri
                             Toast.makeText(
                                 context,
                                 context.getString(R.string.toast_system_fallback),
@@ -4432,6 +4483,8 @@ fun VRPlayerScreen(
     // ⚠️ v2.6.13：`softRetryUri` 同理（尺寸超硬解上限 → 切软解内核），同样只会变一次。
     // ⚠️ v2.6.24：`liveForceExoUri` 也作为 key —— 运行时确认是直播但内核不是 EXO 时置位它，
     //    借此触发**一次**重建切到 EXO（见进度轮询里的直播判定）。同样只会变一次。
+    // ⚠️ v2.8.3：`exoRetryUri` 同理 —— MPV/IJK/系统解码失败时置位它，触发一次重建回退 EXO
+    //    （只本次生效，不写回 prefs；见 state 注释）。
     LaunchedEffect(
         isSoftwareDecoding,
         decoderEngine,
@@ -4439,6 +4492,7 @@ fun VRPlayerScreen(
         photoReloadTrigger,
         mpvRetryUri,
         softRetryUri,
+        exoRetryUri,
         liveForceExoUri
     ) {
         if (!decoderRebindSeen) {
@@ -4464,6 +4518,24 @@ fun VRPlayerScreen(
         // 先清空旧字幕，避免上一个视频的字幕残留
         loadedSubtitleCues = emptyList()
         loadedSubtitleFileName = ""
+
+        // v2.8.3：**网页嗅探面板带来的字幕优先**。
+        // 位置有讲究：必须在清空之后、下面 `candidateNames` 的早退之前 ——
+        // 网页直链的 title 是「网页视频」、URI 是一串 URL，本地存档匹配必然为空，
+        // 放在早退之后这条字幕就永远挂不上（静默失效）。
+        // 用户是主动选的字幕，所以直接开字幕、并关掉实时生成（内容相同，省电省 CPU）。
+        pendingWebSubtitle?.let { ws ->
+            pendingWebSubtitle = null
+            loadedSubtitleCues = ws.cues
+            loadedSubtitleFileName = ws.name
+            isSubtitleEnabled = true
+            isRealtimeSubtitleEnabled = false
+            if (isMemoryModeEnabled) {
+                prefs.edit().putBoolean("realtime_subtitle_enabled", false).apply()
+            }
+            exoCueText = null
+            return@LaunchedEffect
+        }
 
         // v119 修复(#8)：内嵌字幕（ExoPlayer Cue）同样要清。
         // exoCueText 只在 onCues 回调里赋值/清空，切到图片时播放器被 release()
@@ -8513,16 +8585,23 @@ fun VRPlayerScreen(
         // 不受这里的层级影响，所以放在对话框之前不会挡住对话框。
         if (showWebSniffer) {
             WebSnifferScreen(
-                onPlay = { url, pageUrl ->
+                onPlay = { choice ->
                     showWebSniffer = false
                     // 🔴 Referer 必须是**页面**地址，不能是直链自己的 origin：
                     // 视频流在 CDN 域名、页面在站点域名，CDN 校验的是后者（退化成
                     // 直链 origin 会直接 403，见 HttpPlaybackHeaders 的注释）。
-                    HttpPlaybackHeaders.forWebPlayback(pageUrl, url)
+                    // v2.8.3：第三个参数是 WebView 的会话 Cookie —— 需要登录态的站点
+                    // 光有 UA + Referer 仍是 403，这条链路以前完全没带 Cookie。
+                    HttpPlaybackHeaders.forWebPlayback(choice.pageUrl, choice.url, choice.cookie)
+                    // v2.8.3：网页上抓到的外挂字幕。必须**先暂存**再切媒体 ——
+                    // 直接写 loadedSubtitleCues 会被切换媒体的 Effect 当场清空（见其注释）。
+                    pendingWebSubtitle = choice.subtitleCues.takeIf { it.isNotEmpty() }?.let {
+                        WebSubtitle(name = choice.subtitleName ?: "web", cues = it)
+                    }
                     selectedMediaItem = MediaItem(
                         id = "web_${System.currentTimeMillis()}",
                         title = context.getString(R.string.web_sniffer_playing_title),
-                        uri = url,
+                        uri = choice.url,
                         isVideo = true
                     )
                 },

@@ -3,6 +3,7 @@ package com.example.vr
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -147,5 +148,75 @@ class HttpPlaybackHeadersTest {
         val uaField = HttpPlaybackHeaders.asMpvHeaderFields().single()
         assertTrue("桌面 UA 本就含逗号，注入侧必须逐条 append 而不是拼串", uaField.contains(','))
         assertTrue(uaField.startsWith("User-Agent: "))
+    }
+
+    // =============== v2.8.3：会话 Cookie 透传 ===============
+
+    @Test
+    fun cookie_reachesBothExoAndMpv() {
+        // 需要登录态的站点：直链本身 200，但**没有 Cookie 就 403**。
+        // Exo 走 request properties，mpv 走 header fields，两条都必须带上。
+        HttpPlaybackHeaders.forWebPlayback(
+            "https://site.example.com/watch/1",
+            "https://cdn.example.com/v.m3u8",
+            "sessionid=abc123; cf_clearance=xyz"
+        )
+
+        assertEquals(
+            "sessionid=abc123; cf_clearance=xyz",
+            HttpPlaybackHeaders.asRequestProperties()!!["Cookie"]
+        )
+        assertTrue(
+            HttpPlaybackHeaders.asMpvHeaderFields()
+                .any { it == "Cookie: sessionid=abc123; cf_clearance=xyz" }
+        )
+        // mpv 那份仍然不能有 Range（有 Range 拖动就会失效）
+        assertTrue(HttpPlaybackHeaders.asMpvHeaderFields().none { it.startsWith("Range:") })
+    }
+
+    @Test
+    fun cookie_stripsCrLfToBlockHeaderInjection() {
+        // Cookie 由站点通过 document.cookie 设置 → 内容不可信。
+        // 带 \r\n 的值如果原样拼进请求头，等于把 header 注入能力交给站点。
+        HttpPlaybackHeaders.forWebPlayback(
+            null,
+            "https://cdn.example.com/v.mp4",
+            "a=1\r\nX-Evil: 1\nb=2"
+        )
+
+        val c = HttpPlaybackHeaders.asRequestProperties()!!["Cookie"]!!
+        assertFalse("换行必须被剔除", c.contains('\r') || c.contains('\n'))
+        assertEquals("a=1X-Evil: 1b=2", c)
+    }
+
+    @Test
+    fun blankCookie_isTreatedAsAbsent() {
+        HttpPlaybackHeaders.forWebPlayback("https://site.example.com/p", "https://cdn.example.com/v.mp4", "   ")
+        assertNull(HttpPlaybackHeaders.cookie)
+        assertFalse(HttpPlaybackHeaders.asRequestProperties()!!.containsKey("Cookie"))
+        assertTrue(HttpPlaybackHeaders.asMpvHeaderFields().none { it.startsWith("Cookie:") })
+    }
+
+    @Test
+    fun clear_alsoDropsCookie() {
+        HttpPlaybackHeaders.forWebPlayback(
+            "https://site.example.com/p",
+            "https://cdn.example.com/v.mp4",
+            "sessionid=abc"
+        )
+        assertNotNull(HttpPlaybackHeaders.cookie)
+
+        HttpPlaybackHeaders.clear()
+        assertNull(HttpPlaybackHeaders.cookie)
+        assertNull(HttpPlaybackHeaders.asRequestProperties())
+    }
+
+    @Test
+    fun cookiePlusUa_contextIsActive() {
+        // isActive 决定数据源要不要走缓存层 —— 网页流必须为 true，
+        // 否则会被当成本地播放、缓存层直接失败。Cookie 是其中一项判据。
+        HttpPlaybackHeaders.forWebPlayback(null, "https://cdn.example.com/v.mp4", "a=1")
+        assertTrue(HttpPlaybackHeaders.isActive)
+        assertNotNull(HttpPlaybackHeaders.cookie)
     }
 }

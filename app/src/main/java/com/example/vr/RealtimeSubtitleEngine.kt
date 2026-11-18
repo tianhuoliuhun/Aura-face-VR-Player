@@ -265,6 +265,13 @@ class RealtimeSubtitleEngine(private val context: Context) {
                         isRunning = false
                         return@launch
                     }
+                    // v2.8.3：直播清单没有终点，无法重封装成整段音频 → 单独提示，
+                    // 不再让用户看到笼统的「音频读取失败（IO）」去怀疑是网络问题。
+                    is AudioTee.AudioTeeOpenResult.LiveUnsupported -> {
+                        listener.onStatus(context.getString(R.string.rt_audio_live_unsupported))
+                        isRunning = false
+                        return@launch
+                    }
                 }
 
                 // 4) 预读主循环

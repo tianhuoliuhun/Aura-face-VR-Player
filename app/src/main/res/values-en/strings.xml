@@ -715,6 +715,7 @@
     <string name="rt_no_audio">This video has no usable audio track; real-time subtitles cannot be generated</string>
     <string name="rt_audio_unsupported_codec">Audio codec not supported: %s</string>
     <string name="rt_audio_io_failed">Audio read failed (IO)</string>
+    <string name="rt_audio_live_unsupported">Live streams do not support real-time subtitles</string>
     <string name="rt_audio_remux_failed">Audio remux failed (code=%d)</string>
     <string name="rt_started">Real-time subtitles enabled, generating…</string>
     <string name="rt_all_done">Real-time subtitle generation complete (%1$d cues)</string>
@@ -863,6 +864,13 @@
     <string name="web_sniffer_open">Open</string>
     <string name="web_sniffer_found">Found %1$d video stream(s) — tap to play</string>
     <string name="web_sniffer_empty">No stream yet — play the video on the page, then check back</string>
+    <!-- v2.8.3：HLS variant picker + page subtitles -->
+    <string name="web_sniffer_quality_title">Choose quality</string>
+    <string name="web_sniffer_subtitle_title">%1$d subtitle track(s) — attach on play, exportable</string>
+    <string name="web_sniffer_subtitle_progress">Merging subtitles %1$d/%2$d</string>
+    <string name="web_sniffer_subtitle_partial">first %1$s only</string>
+    <string name="web_sniffer_subtitle_gaps">%1$d missing</string>
+    <string name="action_cancel">Cancel</string>
     <string name="web_sniffer_playing_title">Web video</string>
     <string name="control_ball_enable">Playback control ball</string>
     <string name="control_ball_desc">Tap to play/pause, double-tap to report state</string>

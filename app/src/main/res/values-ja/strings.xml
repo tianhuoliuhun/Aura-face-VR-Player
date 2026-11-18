@@ -682,6 +682,7 @@
     <string name="rt_no_audio">この動画に利用可能な音声トラックがなく、リアルタイム字幕を生成できません</string>
     <string name="rt_audio_unsupported_codec">音声コーデック非対応：%s</string>
     <string name="rt_audio_io_failed">音声読み込み失敗（IO）</string>
+    <string name="rt_audio_live_unsupported">ライブ配信ではリアルタイム字幕を使えません</string>
     <string name="rt_audio_remux_failed">音声リミキシング失敗（code=%d）</string>
     <string name="rt_started">リアルタイム字幕オン、生成中…</string>
     <string name="rt_all_done">リアルタイム字幕生成完了（計 %1$d 件）</string>
@@ -830,6 +831,13 @@
     <string name="web_sniffer_open">開く</string>
     <string name="web_sniffer_found">動画の直リンクを %1$d 件検出（タップで再生）</string>
     <string name="web_sniffer_empty">まだ直リンクがありません。ページ内で動画を再生してから確認してください</string>
+    <!-- v2.8.3：HLS 画質選択 + ページ内字幕 -->
+    <string name="web_sniffer_quality_title">画質を選択</string>
+    <string name="web_sniffer_subtitle_title">字幕 %1$d 件（再生時に適用、書き出し可）</string>
+    <string name="web_sniffer_subtitle_progress">字幕を結合中 %1$d/%2$d</string>
+    <string name="web_sniffer_subtitle_partial">先頭 %1$s のみ</string>
+    <string name="web_sniffer_subtitle_gaps">%1$d 件欠落</string>
+    <string name="action_cancel">キャンセル</string>
     <string name="web_sniffer_playing_title">Web 動画</string>
     <string name="control_ball_enable">再生コントロール球</string>
     <string name="control_ball_desc">タップで再生 / 一時停止、ダブルタップで状態を読み上げ</string>

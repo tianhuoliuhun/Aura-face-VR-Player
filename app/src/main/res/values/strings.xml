@@ -715,6 +715,7 @@
     <string name="rt_no_audio">该视频没有可用的音轨，无法生成实时字幕</string>
     <string name="rt_audio_unsupported_codec">音频编码不支持：%s</string>
     <string name="rt_audio_io_failed">音频读取失败（IO）</string>
+    <string name="rt_audio_live_unsupported">直播流不支持实时字幕</string>
     <string name="rt_audio_remux_failed">音频转封装失败（code=%d）</string>
     <string name="rt_started">实时字幕已开启，正在生成…</string>
     <string name="rt_all_done">实时字幕已全部生成完成（共 %1$d 条）</string>
@@ -863,6 +864,13 @@
     <string name="web_sniffer_open">打开</string>
     <string name="web_sniffer_found">发现 %1$d 条视频直链（点击播放）</string>
     <string name="web_sniffer_empty">还没有抓到直链 —— 在网页里播放一下视频再回来看</string>
+    <!-- v2.8.3：HLS 多码率选择 + 网页外挂字幕 -->
+    <string name="web_sniffer_quality_title">选择清晰度</string>
+    <string name="web_sniffer_subtitle_title">字幕 %1$d 条（选中后随片挂载，可导出）</string>
+    <string name="web_sniffer_subtitle_progress">合并字幕 %1$d/%2$d</string>
+    <string name="web_sniffer_subtitle_partial">仅前 %1$s</string>
+    <string name="web_sniffer_subtitle_gaps">缺 %1$d 片</string>
+    <string name="action_cancel">取消</string>
     <string name="web_sniffer_playing_title">网页视频</string>
     <string name="control_ball_enable">播放控制球</string>
     <string name="control_ball_desc">单击播放 / 暂停，双击播报当前状态</string>
