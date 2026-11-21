@@ -49,6 +49,10 @@ internal object ProjectionAutoDetector {
     const val TAB_PANO_ASPECT_MIN = 0.95f
     const val TAB_PANO_ASPECT_MAX = 1.05f
 
+    /** 平面 Full-SBS（32:9，如 3840×1080）的宽高比窗口（约为 3.555） */
+    const val SBS_PLANAR_ASPECT_MIN = 3.20f
+    const val SBS_PLANAR_ASPECT_MAX = 3.70f
+
     /**
      * 认定为「上下拼接全景」所需的最小边。
      *
@@ -68,6 +72,12 @@ internal object ProjectionAutoDetector {
 
         /** 1:1 上下立体全景 */
         EQUIRECT_360_TAB,
+
+        /** 平面 3D 左右分屏（Full-SBS 比例或文件名含 SBS） */
+        PLANAR_3D_SBS,
+
+        /** 平面 3D 上下分屏（文件名含 TAB/OU） */
+        PLANAR_3D_TAB,
 
         /** 普通平面视频（含宽银幕、竖屏、方形） */
         FLAT
@@ -92,6 +102,36 @@ internal object ProjectionAutoDetector {
     fun isSbsPano(aspect: Float): Boolean =
         aspect >= SBS_360_ASPECT_MIN && aspect <= SBS_360_ASPECT_MAX
 
+    /** 宽高比是否落在平面 Full-SBS 窗口内（32:9 左右） */
+    fun isSbsPlanar(aspect: Float): Boolean =
+        aspect >= SBS_PLANAR_ASPECT_MIN && aspect <= SBS_PLANAR_ASPECT_MAX
+
+    /** 文件名是否包含左右 3D 关键词（如 sbs, hsbs, fsbs, side-by-side 等） */
+    fun isSbsName(name: String?): Boolean {
+        if (name.isNullOrBlank()) return false
+        val lower = name.lowercase()
+        val sbsPatterns = listOf(
+            "sbs", "hsbs", "fsbs", "half-sbs", "half.sbs", "full-sbs", "full.sbs",
+            "side-by-side", "side.by.side", "3d-sbs", "3d.sbs", "3d_sbs"
+        )
+        return sbsPatterns.any { pattern ->
+            Regex("""(^|[^a-z0-9])${Regex.escape(pattern)}([^a-z0-9]|$)""").containsMatchIn(lower)
+        }
+    }
+
+    /** 文件名是否包含上下 3D 关键词（如 tab, htab, over-under, ou 等） */
+    fun isTabName(name: String?): Boolean {
+        if (name.isNullOrBlank()) return false
+        val lower = name.lowercase()
+        val tabPatterns = listOf(
+            "tab", "htab", "ftab", "half-tab", "full-tab", "over-under", "over.under",
+            "top-and-bottom", "top.and.bottom", "3d-tab", "3d.tab", "3d_tab", "ou"
+        )
+        return tabPatterns.any { pattern ->
+            Regex("""(^|[^a-z0-9])${Regex.escape(pattern)}([^a-z0-9]|$)""").containsMatchIn(lower)
+        }
+    }
+
     /**
      * 是否为「上下拼接的全景」（方形且足够大）。
      *
@@ -109,12 +149,12 @@ internal object ProjectionAutoDetector {
     }
 
     /**
-     * 根据视频尺寸给出投影建议。
+     * 根据视频尺寸及文件名给出投影建议。
      *
      * @return 尺寸无效（任一边 ≤ 0，常见于解码器初始回调）时返回 null ——
      *         此时**不要**套用任何结论，否则刚进页面那一下会把用户已有模式重置成平面。
      */
-    fun detect(width: Int, height: Int): Suggestion? {
+    fun detect(width: Int, height: Int, mediaName: String? = null): Suggestion? {
         if (width <= 0 || height <= 0) return null
         val aspect = width.toFloat() / height.toFloat()
         return when {
@@ -142,6 +182,22 @@ internal object ProjectionAutoDetector {
                 reason = Reason.EQUIRECT_360
             )
 
+            // 平面 SBS（Full-SBS 宽高比，或文件名带 SBS 标识）
+            isSbsPlanar(aspect) || isSbsName(mediaName) -> Suggestion(
+                mode = ProjectionMode.STANDARD,
+                stereo = StereoMode.SBS,
+                warpDualCenter = false,
+                reason = Reason.PLANAR_3D_SBS
+            )
+
+            // 平面 TAB（文件名带 TAB/OU 标识）
+            isTabName(mediaName) -> Suggestion(
+                mode = ProjectionMode.STANDARD,
+                stereo = StereoMode.TAB,
+                warpDualCenter = false,
+                reason = Reason.PLANAR_3D_TAB
+            )
+
             else -> Suggestion(
                 mode = ProjectionMode.STANDARD,
                 stereo = StereoMode.MONO,
@@ -150,4 +206,6 @@ internal object ProjectionAutoDetector {
             )
         }
     }
+
+    fun detect(width: Int, height: Int): Suggestion? = detect(width, height, null)
 }

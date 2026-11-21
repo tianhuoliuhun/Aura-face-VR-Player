@@ -79,6 +79,22 @@ class VRSensorManager(private val context: Context, private val renderer: VRGLRe
     private val baselineMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
     private var hasBaseline = false
 
+    /** 欧拉角复用缓冲：避免在 50Hz 回调中产生堆分配 [0=yaw, 1=pitch, 2=roll] */
+    private val orientationAngles = FloatArray(3)
+
+    /** 当前相对于基准视角的平滑偏航角（度） */
+    @Volatile
+    var currentYawDeg: Float = 0f
+        private set
+
+    /** 当前相对于基准视角的平滑俯仰角（度） */
+    @Volatile
+    var currentPitchDeg: Float = 0f
+        private set
+
+    /** v2.6.9 P0：Gaze 视线姿态回调 (yawDeg, pitchDeg) */
+    var onGazePoseChanged: ((yawDeg: Float, pitchDeg: Float) -> Unit)? = null
+
     /** 请求在下一个采样点重新捕获基准。跨线程访问，用 [baselineLock] 保护。 */
     private var recenterRequested = true
     private val baselineLock = Any()
@@ -220,11 +236,18 @@ class VRSensorManager(private val context: Context, private val renderer: VRGLRe
             // ---- 姿态基准对齐（recenter）----
             synchronized(baselineLock) {
                 if (recenterRequested || !hasBaseline) {
-                    System.arraycopy(remappedMatrix, 0, baselineMatrix, 0, 16)
+                    // 参考 vrplayer-gemini 算法优化：仅重置水平偏航角(Yaw)，
+                    // 使当前朝向对齐 0° 正前方视线，同时严格保留物理重力地平线基准(Pitch/Roll)，
+                    // 彻底消除头显归中时的地平线倾斜与轴向扭曲。
+                    val tempAngles = FloatArray(3)
+                    SensorManager.getOrientation(remappedMatrix, tempAngles)
+                    val yawRad = tempAngles[0]
+                    val yawDeg = Math.toDegrees(yawRad.toDouble()).toFloat()
+
+                    Matrix.setRotateM(baselineMatrix, 0, yawDeg, 0f, 1f, 0f)
+                    Matrix.transposeM(baselineTransposed, 0, baselineMatrix, 0)
                     hasBaseline = true
                     recenterRequested = false
-                    // 基准自身的转置：输出 = R_当前 × R_基准ᵀ
-                    Matrix.transposeM(baselineTransposed, 0, baselineMatrix, 0)
                 }
             }
 
@@ -233,6 +256,14 @@ class VRSensorManager(private val context: Context, private val renderer: VRGLRe
             Matrix.multiplyMM(outputMatrix, 0, remappedMatrix, 0, baselineTransposed, 0)
 
             renderer.updateGyroRotationMatrix(outputMatrix)
+
+            // v2.6.9 P0：提取相对姿态欧拉角供免触屏 Gaze 视线准星使用
+            SensorManager.getOrientation(outputMatrix, orientationAngles)
+            val yawDeg = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
+            val pitchDeg = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
+            currentYawDeg = yawDeg
+            currentPitchDeg = pitchDeg
+            onGazePoseChanged?.invoke(yawDeg, pitchDeg)
         } catch (e: Exception) {
             Log.e("VRSensorManager", "Error updating rotation from vector", e)
         }

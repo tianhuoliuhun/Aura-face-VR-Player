@@ -29,6 +29,16 @@ object HttpPlaybackHeaders {
     var referer: String? = null
         private set
 
+    /** 嗅探来源页面地址原始串 */
+    @Volatile
+    var pageUrl: String? = null
+        private set
+
+    /** 当前播放的直链地址 */
+    @Volatile
+    var streamUrl: String? = null
+        private set
+
     /** 与嗅探层一致的桌面 UA。很多 CDN 会拒绝空/异常 UA */
     @Volatile
     var userAgent: String? = null
@@ -76,10 +86,42 @@ object HttpPlaybackHeaders {
      */
     fun forWebPlayback(pageUrl: String?, streamUrl: String, cookie: String? = null) {
         userAgent = DESKTOP_UA
-        referer = pageUrl?.trim()?.takeIf { it.isNotBlank() }
+        this.pageUrl = pageUrl?.trim()?.takeIf { it.isNotBlank() }
+        this.streamUrl = streamUrl.trim().takeIf { it.isNotBlank() }
+        referer = this.pageUrl
         // 🔴 过滤 CR/LF：Cookie 来自页面（可被站点任意设置），拼进请求头前必须剔除换行，
         //    否则是一个现成的 header 注入点（`a=1\r\nX-Evil: 1`）。
         this.cookie = cookie?.let(::sanitizeHeaderValue)
+    }
+
+    /**
+     * v2.8.4（P1）：从 WebView `CookieManager` 重新获取最新 Cookie。
+     *
+     * ## 为什么需要
+     * 需要登录态或短时防盗链 token 的网页直链（特别是长 HLS/点播），
+     * Cookie 会在中途过期（如 cf_clearance、sessionid 轮换）。
+     * 原实现仅在「点击播放」的那一刻获取一次，过期后 CDN 直接返回 403/410，
+     * 播放器只表现为「卡死/加载失败」。
+     *
+     * 在捕获到 HTTP 403/410 错误时，调用此方法重新从 WebView CookieManager
+     * 按直链与来源页拉取最新 Cookie。
+     *
+     * @return 若获取到了新的非空 Cookie，更新内部属性并返回 true；否则返回 false。
+     */
+    fun refreshCookie(fallbackStreamUrl: String? = null): Boolean {
+        val sUrl = fallbackStreamUrl ?: streamUrl
+        val pUrl = pageUrl ?: referer
+        val fresh = runCatching {
+            val cm = android.webkit.CookieManager.getInstance()
+            val cFromStream = sUrl?.takeIf { it.isNotBlank() }?.let { cm.getCookie(it) }?.takeIf { it.isNotBlank() }
+            cFromStream ?: pUrl?.takeIf { it.isNotBlank() }?.let { cm.getCookie(it) }?.takeIf { it.isNotBlank() }
+        }.getOrNull()?.let(::sanitizeHeaderValue)
+
+        if (!fresh.isNullOrBlank()) {
+            cookie = fresh
+            return true
+        }
+        return false
     }
 
     /**
@@ -157,6 +199,8 @@ object HttpPlaybackHeaders {
     /** 播放结束/切换到本地文件时必须调用，避免把网页头带到下一次播放 */
     fun clear() {
         referer = null
+        pageUrl = null
+        streamUrl = null
         userAgent = null
         cookie = null
     }

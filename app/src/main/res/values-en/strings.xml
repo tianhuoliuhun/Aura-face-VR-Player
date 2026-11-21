@@ -1111,4 +1111,21 @@
     <string name="audio_gender_mdx_failed">Separation failed (see MdxSeparator log)</string>
     <string name="audio_gender_apply">Apply (remove checked speakers)</string>
     <string name="audio_gender_credit_uvr">Separation model from UVR (Ultimate Vocal Remover) - thanks to its authors</string>
+    <string name="toast_cookie_refreshed_retry">Session expired (403/410). Refreshing Cookie and retrying...</string>
+    <string name="toast_detected_planar_sbs">3D Side-by-Side video detected, split-screen enabled</string>
+    <string name="toast_detected_planar_tab">3D Top-and-Bottom video detected</string>
+    <!-- v2.6.9: Google Cardboard VR Optimizations -->
+    <string name="cardboard_anti_distortion">Cardboard Lens Anti-Distortion</string>
+    <string name="cardboard_anti_distortion_desc">Auto-enable barrel distortion to counter VR box lens pincushion stretch</string>
+    <string name="cardboard_cinema_scale">Comfortable Viewing Scale</string>
+    <string name="cardboard_cinema_scale_desc">Shrink single-eye edges for comfortable margins; prevents subtitle edge crop and blur</string>
+    <string name="gaze_pointer_enabled">Gaze Dwell Interaction (Hands-free)</string>
+    <string name="gaze_pointer_enabled_desc">Wear VR box, look at buttons for 1.2s to trigger dwell click</string>
+    <string name="gaze_recenter">Recenter</string>
+    <string name="vr_ipd_title">Physical IPD Adjustment</string>
+    <string name="vr_swap_eyes">Swap Left/Right Eyes</string>
+    <string name="vr_swap_eyes_desc">For cross-eye or inverted 3D media, fix depth inversion</string>
+    <string name="vr_ipd_preset_narrow">58mm Narrow</string>
+    <string name="vr_ipd_preset_standard">64mm Standard</string>
+    <string name="vr_ipd_preset_wide">70mm Wide</string>
 </resources>

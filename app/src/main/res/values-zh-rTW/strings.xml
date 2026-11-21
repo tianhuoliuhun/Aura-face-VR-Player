@@ -1121,4 +1121,21 @@
     <string name="audio_gender_mdx_failed">人聲分離失敗（詳見日誌 MdxSeparator）</string>
     <string name="audio_gender_apply">套用（移除勾選的說話者）</string>
     <string name="audio_gender_credit_uvr">人聲分離模型來自 UVR（Ultimate Vocal Remover），感謝其作者</string>
+    <string name="toast_cookie_refreshed_retry">工作階段過期（403/410），正在更新 Cookie 並重試...</string>
+    <string name="toast_detected_planar_sbs">已識別為 3D 左右分屏影片，已開啟對應分屏</string>
+    <string name="toast_detected_planar_tab">已識別為 3D 上下分屏影片</string>
+    <!-- v2.6.9：Google Cardboard VR 最佳化 -->
+    <string name="cardboard_anti_distortion">Cardboard 透鏡反畸變</string>
+    <string name="cardboard_anti_distortion_desc">自動開啟桶形反畸變，抵消 VR 盒子凸透鏡邊緣拉伸</string>
+    <string name="cardboard_cinema_scale">適眼視距（巨幕畫幅）</string>
+    <string name="cardboard_cinema_scale_desc">收縮單眼邊緣留出適眼暗場，防止字幕被透鏡邊緣裁切與色散模糊</string>
+    <string name="gaze_pointer_enabled">視線凝視互動（免觸控）</string>
+    <string name="gaze_pointer_enabled_desc">戴上 VR 盒子後，轉動頭部對準控制按鈕凝視 1.2 秒自動觸發</string>
+    <string name="gaze_recenter">視角歸中</string>
+    <string name="vr_ipd_title">物理瞳距微調（IPD）</string>
+    <string name="vr_swap_eyes">左右眼序對調</string>
+    <string name="vr_swap_eyes_desc">適配交叉眼（Cross-Eye）或反序 3D 片源，消除深度反轉內凹</string>
+    <string name="vr_ipd_preset_narrow">58mm 窄瞳距</string>
+    <string name="vr_ipd_preset_standard">64mm 標準</string>
+    <string name="vr_ipd_preset_wide">70mm 寬瞳距</string>
 </resources>

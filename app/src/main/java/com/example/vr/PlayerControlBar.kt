@@ -172,7 +172,39 @@ fun PlayerControlButtons(
             }
         }
 
-        if ((3 * 40 + 2 * 8 + 40 + 54 + 40 + 2 * 12 + 6 * 40 + 5 * 8 + 32).dp > maxWidth) {
+        if (isSplitScreenVR) {
+            // VR 分屏模式：左右眼双视口各居中一份核心控制栏，避免按键横跨中间挡板被裁切，双眼完美融像
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    VrEyeControlBar(
+                        accentColor = accentColor,
+                        accentOnColor = accentOnColor,
+                        isVideo = isVideo,
+                        isVideoPlaying = isVideoPlaying,
+                        onPrev = onPrev,
+                        onNext = onNext,
+                        onTogglePlayPause = onTogglePlayPause,
+                        onToggleSplitScreen = onToggleSplitScreen,
+                        onResetViewCenter = onResetViewCenter,
+                        onUserInteraction = onUserInteraction
+                    )
+                }
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    VrEyeControlBar(
+                        accentColor = accentColor,
+                        accentOnColor = accentOnColor,
+                        isVideo = isVideo,
+                        isVideoPlaying = isVideoPlaying,
+                        onPrev = onPrev,
+                        onNext = onNext,
+                        onTogglePlayPause = onTogglePlayPause,
+                        onToggleSplitScreen = onToggleSplitScreen,
+                        onResetViewCenter = onResetViewCenter,
+                        onUserInteraction = onUserInteraction
+                    )
+                }
+            }
+        } else if ((3 * 40 + 2 * 8 + 40 + 54 + 40 + 2 * 12 + 6 * 40 + 5 * 8 + 32).dp > maxWidth) {
             // 窄屏：控制组上下排列
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -196,6 +228,62 @@ fun PlayerControlButtons(
                 Box(modifier = Modifier.align(Alignment.CenterEnd)) { RightControls() }
             }
         }
+    }
+}
+
+@Composable
+private fun VrEyeControlBar(
+    accentColor: Color,
+    accentOnColor: Color,
+    isVideo: Boolean,
+    isVideoPlaying: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onToggleSplitScreen: () -> Unit,
+    onResetViewCenter: () -> Unit,
+    onUserInteraction: () -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TooltipIconButton(
+            tooltip = stringResource(R.string.cd_reset_view),
+            onClick = { onResetViewCenter(); onUserInteraction() },
+            icon = Icons.Default.MyLocation,
+            iconSize = 18.dp
+        )
+        IconButton(onClick = { onPrev(); onUserInteraction() }, modifier = Modifier.size(36.dp)) {
+            Icon(
+                imageVector = Icons.Default.SkipPrevious,
+                contentDescription = stringResource(R.string.cd_prev),
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        PlayPauseButton(
+            accentColor = accentColor,
+            accentOnColor = accentOnColor,
+            isVideo = isVideo,
+            isPlaying = isVideoPlaying,
+            onToggle = { onTogglePlayPause(); onUserInteraction() },
+            modifier = Modifier.size(46.dp)
+        )
+        IconButton(onClick = { onNext(); onUserInteraction() }, modifier = Modifier.size(36.dp)) {
+            Icon(
+                imageVector = Icons.Default.SkipNext,
+                contentDescription = stringResource(R.string.cd_next),
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        TooltipIconButton(
+            tooltip = stringResource(R.string.cd_exit_vr_split),
+            onClick = { onToggleSplitScreen(); onUserInteraction() },
+            icon = Icons.Default.ViewInAr,
+            isActive = true
+        )
     }
 }
 

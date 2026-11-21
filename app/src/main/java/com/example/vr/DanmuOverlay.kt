@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,6 +73,7 @@ fun DanmuOverlay(
     engine: DanmuEngine,
     config: DanmuConfig,
     isSplitScreenVR: Boolean = false,
+    vrIpdOffsetRatio: Float = 0.0f,
     /**
      * v2.4.40/2.4.41（弹幕审查 #1）：播放是否**暂停**。
      * 暂停时渲染层冻结弹幕（不推进时钟、不 prune）；恢复那一帧把暂停时长补给 `bornMs`。
@@ -153,7 +157,8 @@ fun DanmuOverlay(
     }
 
     if (isSplitScreenVR) {
-        // 分屏：左右眼各一份，各自宽度 = 整屏 / 2
+        // 分屏：左右眼各一份，各自宽度 = 整屏 / 2，并按 vrIpdOffsetRatio 施加瞳距视差微调
+        val ipdShiftPx = (vrIpdOffsetRatio * 150f).roundToInt()
         Row(modifier = modifier.fillMaxSize()) {
             DanmuEye(
                 engine = engine,
@@ -169,6 +174,7 @@ fun DanmuOverlay(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    .offset { IntOffset(ipdShiftPx, 0) }
             )
             DanmuEye(
                 engine = engine,
@@ -184,6 +190,7 @@ fun DanmuOverlay(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    .offset { IntOffset(-ipdShiftPx, 0) }
             )
         }
     } else {

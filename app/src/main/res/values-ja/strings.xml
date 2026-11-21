@@ -1078,4 +1078,21 @@
     <string name="audio_gender_mdx_failed">音声分離に失敗（MdxSeparator ログ参照）</string>
     <string name="audio_gender_apply">適用（チェックした話者を除去）</string>
     <string name="audio_gender_credit_uvr">音声分離モデルは UVR（Ultimate Vocal Remover）提供。作者に感謝します</string>
+    <string name="toast_cookie_refreshed_retry">セッションが期限切れです（403/410）。Cookieを更新して再試行しています...</string>
+    <string name="toast_detected_planar_sbs">3D 左右分割動画を検出、対応する分割表示を開始しました</string>
+    <string name="toast_detected_planar_tab">3D 上下分割動画を検出しました</string>
+    <!-- v2.6.9：Google Cardboard VR 最適化 -->
+    <string name="cardboard_anti_distortion">Cardboard レンズ歪み補正</string>
+    <string name="cardboard_anti_distortion_desc">バレル歪み補正を自動有効化し、凸レンズによる引き伸ばしを相殺します</string>
+    <string name="cardboard_cinema_scale">快適視距離（巨大スクリーン）</string>
+    <string name="cardboard_cinema_scale_desc">単眼の端をわずかに縮小し、字幕の端切れやレンズ周辺のぼやけを防ぎます</string>
+    <string name="gaze_pointer_enabled">視線注視インタラクション（ハンズフリー）</string>
+    <string name="gaze_pointer_enabled_desc">VRゴーグル装着時、頭を向けてボタンを1.2秒注視すると自動実行されます</string>
+    <string name="gaze_recenter">正面リセット</string>
+    <string name="vr_ipd_title">瞳孔間距離微調整（IPD）</string>
+    <string name="vr_swap_eyes">左右の視眼を入れ替え</string>
+    <string name="vr_swap_eyes_desc">クロスアイや逆順3D動画向け、奥行きの反転凹みを修正します</string>
+    <string name="vr_ipd_preset_narrow">58mm 狭い</string>
+    <string name="vr_ipd_preset_standard">64mm 標準</string>
+    <string name="vr_ipd_preset_wide">70mm 広い</string>
 </resources>

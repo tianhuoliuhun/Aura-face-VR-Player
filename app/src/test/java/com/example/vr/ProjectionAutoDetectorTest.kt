@@ -186,4 +186,42 @@ class ProjectionAutoDetectorTest {
         assertFalse(ProjectionAutoDetector.isEquirect(4.0f))
         assertFalse(ProjectionAutoDetector.isEquirect(0.95f))
     }
+
+    @Test
+    fun `平面Full-SBS视频按比例识别为平面SBS`() {
+        // 3840x1080 (32:9 ≈ 3.555)
+        val s = ProjectionAutoDetector.detect(3840, 1080)!!
+        assertEquals(ProjectionMode.STANDARD, s.mode)
+        assertEquals(StereoMode.SBS, s.stereo)
+        assertEquals(ProjectionAutoDetector.Reason.PLANAR_3D_SBS, s.reason)
+    }
+
+    @Test
+    fun `带SBS文件名的普通1080p视频嗅探为平面SBS`() {
+        listOf(
+            "Avatar.2009.1080p.3D.HSBS.mp4",
+            "Avatar_SBS.mkv",
+            "Demo-Side-By-Side.mp4",
+            "test_half-sbs_movie.mkv"
+        ).forEach { name ->
+            val s = ProjectionAutoDetector.detect(1920, 1080, name)!!
+            assertEquals("$name 应为平面", ProjectionMode.STANDARD, s.mode)
+            assertEquals("$name 应为 SBS", StereoMode.SBS, s.stereo)
+            assertEquals(ProjectionAutoDetector.Reason.PLANAR_3D_SBS, s.reason)
+        }
+    }
+
+    @Test
+    fun `带TAB或OU文件名的普通1080p视频嗅探为平面TAB`() {
+        listOf(
+            "Avatar.2009.1080p.3D.HTAB.mp4",
+            "Movie.Over-Under.mp4",
+            "Demo_OU_3D.mkv"
+        ).forEach { name ->
+            val s = ProjectionAutoDetector.detect(1920, 1080, name)!!
+            assertEquals("$name 应为平面", ProjectionMode.STANDARD, s.mode)
+            assertEquals("$name 应为 TAB", StereoMode.TAB, s.stereo)
+            assertEquals(ProjectionAutoDetector.Reason.PLANAR_3D_TAB, s.reason)
+        }
+    }
 }

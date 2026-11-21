@@ -1078,4 +1078,21 @@
     <string name="audio_gender_mdx_failed">음성 분리 실패(MdxSeparator 로그 참조)</string>
     <string name="audio_gender_apply">적용(체크한 화자 제거)</string>
     <string name="audio_gender_credit_uvr">음성 분리 모델은 UVR(Ultimate Vocal Remover) 제공. 제작자에게 감사드립니다</string>
+    <string name="toast_cookie_refreshed_retry">세션이 만료되었습니다(403/410). 쿠키를 새로고침하고 다시 시도하는 중...</string>
+    <string name="toast_detected_planar_sbs">3D 좌우 분할 영상을 감지하여 해당 분할 화면을 시작했습니다</string>
+    <string name="toast_detected_planar_tab">3D 상하 분할 영상을 감지했습니다</string>
+    <!-- v2.6.9: Google Cardboard VR 최적화 -->
+    <string name="cardboard_anti_distortion">Cardboard 렌즈 왜곡 보정</string>
+    <string name="cardboard_anti_distortion_desc">볼록 렌즈의 외곽 늘림을 상쇄하기 위해 배럴 왜곡 보정을 자동 활성화합니다</string>
+    <string name="cardboard_cinema_scale">적정 시야 거리 (거대 스크린)</string>
+    <string name="cardboard_cinema_scale_desc">단안 가장자리를 살짝 축소하여 자막 잘림과 렌즈 주변부 번짐을 방지합니다</string>
+    <string name="gaze_pointer_enabled">시선 응시 상호작용 (핸즈프리)</string>
+    <string name="gaze_pointer_enabled_desc">VR 박스 착용 후, 머리를 움직여 버튼을 1.2초간 응시하면 자동 실행됩니다</string>
+    <string name="gaze_recenter">시야 재설정</string>
+    <string name="vr_ipd_title">물리적 동공 거리 미세조정 (IPD)</string>
+    <string name="vr_swap_eyes">좌우 시야 반전 (눈 순서 교체)</string>
+    <string name="vr_swap_eyes_desc">크로스아이 또는 역순 3D 영상용, 깊이 반전 및 함몰 현상 교정</string>
+    <string name="vr_ipd_preset_narrow">58mm 좁음</string>
+    <string name="vr_ipd_preset_standard">64mm 표준</string>
+    <string name="vr_ipd_preset_wide">70mm 넓음</string>
 </resources>

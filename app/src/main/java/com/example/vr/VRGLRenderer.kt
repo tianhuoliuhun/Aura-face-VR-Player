@@ -65,6 +65,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      */
     @Volatile var beautyTextureDetail = 0.88f
     @Volatile var isSplitScreenVR = false // Cardboard mode
+    @Volatile var vrIpdOffsetRatio = 0.0f // VR 瞳距偏移调节（-0.1f ~ 0.1f）
+    @Volatile var vrCinemaScale = 0.82f // v2.6.9 P2：Cardboard 分屏适眼巨幕缩放（0.6f ~ 1.0f）
+    @Volatile var isEyesSwapped = false // 3D 眼序对调（左右眼/上下眼对调，适配交叉眼 3D）
 
     @Volatile var gyroEnabled = true
     @Volatile var isVideoActive = false
@@ -2117,18 +2120,27 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // Check if Dual Viewport/VR Box split mode is requested
         if (isSplitScreenVR) {
             val halfWidth = displayWidth / 2
+            val leftEyeParam = if (isEyesSwapped) 0 else 1
+            val rightEyeParam = if (isEyesSwapped) 1 else 0
+
+            // 开启硬件视口裁剪，杜绝左右眼画面边缘渗漏
+            GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
 
             // Left Eye Viewport
+            GLES20.glScissor(0, 0, halfWidth, displayHeight)
             GLES20.glViewport(0, 0, halfWidth, displayHeight)
             calculateAndApplyMatrices(isLeft = true, aspect = halfWidth.toFloat() / displayHeight.toFloat(), mvpLoc = prog.hMVPMatrix)
-            uniform1i(prog.hLeftEye, 1)
+            uniform1i(prog.hLeftEye, leftEyeParam)
             drawActiveGeometry(prog)
 
             // Right Eye Viewport
+            GLES20.glScissor(halfWidth, 0, halfWidth, displayHeight)
             GLES20.glViewport(halfWidth, 0, halfWidth, displayHeight)
             calculateAndApplyMatrices(isLeft = false, aspect = halfWidth.toFloat() / displayHeight.toFloat(), mvpLoc = prog.hMVPMatrix)
-            uniform1i(prog.hLeftEye, 0)
+            uniform1i(prog.hLeftEye, rightEyeParam)
             drawActiveGeometry(prog)
+
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         } else {
             // Standard full width screen mode
             GLES20.glViewport(0, 0, displayWidth, displayHeight)
@@ -2293,7 +2305,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         // Apply physical eye pupillary deviation offset for immersive VR stereoscopic spacing
         if (isSplitScreenVR) {
-            val offset = if (isLeft) -0.04f else 0.04f
+            val baseIpd = 0.04f
+            // vrIpdOffsetRatio 范围 -0.1f ~ 0.1f，动态换算到基准瞳距偏移
+            val ipd = (baseIpd * (1.0f + vrIpdOffsetRatio * 2.0f)).coerceIn(0.01f, 0.10f)
+            val offset = if (isLeft) -ipd else ipd
             Matrix.translateM(viewMatrix, 0, offset, 0.0f, 0.0f)
         }
 
@@ -2307,7 +2322,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             val srcH = if (isVideoActive) videoHeight else imageHeight
             if (srcW > 0 && srcH > 0) {
                 val aScreen = aspect
-                val aSrc = srcW.toFloat() / srcH.toFloat()
+                val rawAspect = srcW.toFloat() / srcH.toFloat()
+                // v2.6.9：3D 平面片源单眼画幅比例修正
+                // 当处于左右立体 (SBS) 模式时：
+                //   - Full-SBS (32:9，rawAspect > 2.8)：单眼实际长宽比是 (srcW / 2) / srcH (约为 16:9)
+                //   - Half-SBS (16:9，单眼已被压扁)：shader 里横向采样 0..0.5 展在 Quad 上，
+                //     拉伸后单眼应当恢复为原本标准的长宽比 (即 rawAspect，16:9)
+                // 同理 TAB (上下立体)：
+                //   - Full-TAB (8:9，rawAspect < 1.0)：单眼实际长宽比是 srcW / (srcH / 2) (约为 16:9)
+                //   - Half-TAB (16:9，上下被压扁)：拉伸后单眼恢复为 rawAspect (16:9)
+                val aSrc = when (stereoMode) {
+                    StereoMode.SBS -> if (rawAspect > 2.8f) (srcW.toFloat() / 2f) / srcH.toFloat() else rawAspect
+                    StereoMode.TAB -> if (rawAspect < 1.0f) srcW.toFloat() / (srcH.toFloat() / 2f) else rawAspect
+                    else -> rawAspect
+                }
                 var scaleX = 1.0f
                 var scaleY = 1.0f
                 if (aSrc > aScreen) {
@@ -2316,6 +2344,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 } else {
                     // Source is taller: match height, pillarbox left/right
                     scaleX = aSrc / aScreen
+                }
+                // v2.6.9 P2：Cardboard 分屏 VR 适眼视距缩放（Cinema Scale）
+                // 默认 0.82f，留出舒适暗场边缘，防止画面边缘被凸透镜色散模糊或字幕裁切
+                if (isSplitScreenVR) {
+                    val factor = vrCinemaScale.coerceIn(0.5f, 1.0f)
+                    scaleX *= factor
+                    scaleY *= factor
                 }
                 Matrix.scaleM(modelMatrix, 0, scaleX, scaleY, 1.0f)
 

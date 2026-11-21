@@ -45,15 +45,14 @@ extern "C" {
  * 没有这层日志就只能瞎猜。
  *
  * 诊断期用 AV_LOG_DEBUG（能看到 http 请求/响应行与 mbedtls 握手细节）；
- * 定位完可降到 AV_LOG_WARNING 减少刷屏。
+ * 正式包/稳定期保持 AV_LOG_WARNING，避免泄露直链 URL token 与 Cookie 头，并减少刷屏。
  */
 static void ffLogToLogcat(void *, int level, const char *fmt, va_list vl) {
-    if (level > AV_LOG_DEBUG) return;
+    if (level > AV_LOG_WARNING) return;
     char line[1024];
     vsnprintf(line, sizeof(line), fmt, vl);
     int prio = (level <= AV_LOG_ERROR) ? ANDROID_LOG_ERROR
-             : (level <= AV_LOG_WARNING) ? ANDROID_LOG_WARN
-             : ANDROID_LOG_INFO;
+             : ANDROID_LOG_WARN;
     __android_log_print(prio, "FfmpegLog", "%s", line);
 }
 
@@ -61,7 +60,7 @@ static void ffLogToLogcat(void *, int level, const char *fmt, va_list vl) {
 static void ensureFfLog() {
     static bool inited = false;
     if (inited) return;
-    av_log_set_level(AV_LOG_DEBUG);
+    av_log_set_level(AV_LOG_WARNING);
     av_log_set_callback(ffLogToLogcat);
     inited = true;
 }
