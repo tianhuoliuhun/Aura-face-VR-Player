@@ -716,6 +716,7 @@
     <string name="rt_audio_unsupported_codec">Audio codec not supported: %s</string>
     <string name="rt_audio_io_failed">Audio read failed (IO)</string>
     <string name="rt_audio_live_unsupported">Live streams do not support real-time subtitles</string>
+    <string name="rt_live_stream_active">Live stream real-time subtitles active (PCM bypass capture)</string>
     <string name="rt_audio_remux_failed">Audio remux failed (code=%d)</string>
     <string name="rt_started">Real-time subtitles enabled, generating…</string>
     <string name="rt_all_done">Real-time subtitle generation complete (%1$d cues)</string>
@@ -1128,4 +1129,9 @@
     <string name="vr_ipd_preset_narrow">58mm Narrow</string>
     <string name="vr_ipd_preset_standard">64mm Standard</string>
     <string name="vr_ipd_preset_wide">70mm Wide</string>
+    <!-- 8K H.265 soft decode optimization -->
+    <string name="decoder_threads_title">Decoder Threads</string>
+    <string name="decoder_threads_auto">Auto</string>
+    <string name="fast_decode_8k_title">8K Fast Decode &amp; Loop Filter</string>
+    <string name="fast_decode_8k_desc">Skip non-key loop filter and enforce frame-level multithreading to boost 8K soft-decode throughput</string>
 </resources>

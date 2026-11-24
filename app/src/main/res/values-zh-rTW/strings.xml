@@ -726,6 +726,7 @@
     <string name="rt_audio_unsupported_codec">音訊編碼不支援：%s</string>
     <string name="rt_audio_io_failed">音訊讀取失敗（IO）</string>
     <string name="rt_audio_live_unsupported">直播串流不支援即時字幕</string>
+    <string name="rt_live_stream_active">直播串流即時字幕已啟動 (PCM旁路抓取)</string>
     <string name="rt_audio_remux_failed">音訊轉封裝失敗（code=%d）</string>
     <string name="rt_started">即時字幕已開啟，正在生成…</string>
     <string name="rt_all_done">即時字幕已全部生成完成（共 %1$d 條）</string>
@@ -1138,4 +1139,9 @@
     <string name="vr_ipd_preset_narrow">58mm 窄瞳距</string>
     <string name="vr_ipd_preset_standard">64mm 標準</string>
     <string name="vr_ipd_preset_wide">70mm 寬瞳距</string>
+    <!-- 8K H.265 軟解調優 -->
+    <string name="decoder_threads_title">解碼並發線程</string>
+    <string name="decoder_threads_auto">自動</string>
+    <string name="fast_decode_8k_title">8K快速解碼與濾波優化</string>
+    <string name="fast_decode_8k_desc">跳過非關鍵幀環路濾波並啟用幀級流水線重疊，大幅提升8K軟解吞吐</string>
 </resources>

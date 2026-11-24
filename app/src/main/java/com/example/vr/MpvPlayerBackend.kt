@@ -130,11 +130,35 @@ object MpvPlayerFactory {
             // ⚠️ 不把字幕烧进视频帧：本项目有自己的字幕层（样式可调、可翻译），
             //    烧进去会出现"双重字幕"
             MPVLib.setOptionString("sub-visibility", "no")
+
+            // ===== 软解性能关键调优（参考知乎专栏《8K H.265解码，从41 FPS到149 FPS》）=====
+            // 1. 设置 libavcodec 多线程并发数（上限 16 线程），彻底杜绝默认单线程或低线程导致的算力瓶颈
+            val effectiveThreads = if (options.threads > 0) {
+                options.threads
+            } else {
+                minOf(16, maxOf(2, Runtime.getRuntime().availableProcessors()))
+            }
+            MPVLib.setOptionString("vd-lavc-threads", effectiveThreads.toString())
+            // 2. 快速解码模式：开启 fast 标志，在不损失主观画质前提下大幅减少 8K 宏块密集计算
+            if (options.fastDecode) {
+                MPVLib.setOptionString("vd-lavc-fast", "yes")
+            }
+            // 3. 软解时跳过非关键帧环路滤波，消除多 Tile 扫描机制下 Deblock/SAO 导致的整行流水线饥饿
+            if (!options.hwdec || hwdecValue == "no") {
+                MPVLib.setOptionString("vd-lavc-skiploopfilter", "nonkey")
+                // 8K 软解内存直接映射与 A/V 同步强化：
+                // vd-lavc-dr: Direct Rendering，消除解码器内部到 VO 的中间拷贝
+                MPVLib.setOptionString("vd-lavc-dr", "yes")
+                // 音频主时钟同步：丢视频帧追赶音频，杜绝音视频脱节
+                MPVLib.setOptionString("video-sync", "audio")
+                // 纹理异步上传
+                MPVLib.setOptionString("opengl-pbo", "yes")
+            }
             if (options.cacheMb > 0) {
                 MPVLib.setOptionString("cache", "yes")
                 MPVLib.setOptionString("demuxer-max-bytes", (options.cacheMb * 1024L * 1024L).toString())
             }
-            // 丢帧保流畅（默认关：VR 里丢帧有空间跳动感）
+            // 丢帧保流畅：解码器级强丢帧（跳过 B 帧解码）
             MPVLib.setOptionString("framedrop", if (options.frameDrop) "decoder" else "no")
             // 只收 error 级日志，避免 logcat 被 mpv 刷屏
             MPVLib.setOptionString("msg-level", "all=error")
@@ -331,6 +355,10 @@ data class MpvOptions(
     val hwdec: Boolean = true,
     /** 解码跟不上时丢帧保流畅。默认关（VR 里丢帧有空间跳动感）。 */
     val frameDrop: Boolean = false,
+    /** 解码线程数。0 = 自动根据 CPU 核心数自适应 (min(16, max(2, cores)))。 */
+    val threads: Int = 0,
+    /** 8K / 高码率快速解码优化（开启 vd-lavc-fast 与软解跳过非关键帧滤波）。默认开。 */
+    val fastDecode: Boolean = true,
     /** 网络流缓冲上限（MB）。0 = 用 mpv 默认。 */
     val cacheMb: Int = 0,
     /**
@@ -356,6 +384,8 @@ data class MpvOptions(
             return MpvOptions(
                 hwdec = prefs.getBoolean("mpv_hwdec", true),
                 frameDrop = prefs.getBoolean("mpv_framedrop", false),
+                threads = prefs.getInt("mpv_threads", 0),
+                fastDecode = prefs.getBoolean("mpv_fast_decode", true),
                 cacheMb = prefs.getInt("mpv_cache_mb", 0)
                 // voMode 故意不从 prefs 读：它只用于「本片二段兜底」，不该跨片记住
             )

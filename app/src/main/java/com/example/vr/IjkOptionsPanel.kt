@@ -75,5 +75,21 @@ internal fun IjkOptionsPanel(
             labelOf = { bytes -> if (bytes <= 0L) defaultBufferLabel else "${bytes / 1024 / 1024}MB" },
             onSelect = { bytes -> onOptionsChange(options.copy(maxBufferBytes = bytes)) }
         )
+        // ===== 8K H.265 软解调优（参考知乎《8K H.265解码，从41 FPS到149 FPS》）=====
+        DecoderToggle(
+            label = stringResource(R.string.fast_decode_8k_title),
+            checked = options.fastDecode,
+            accentColor = accentColor,
+            onCheckedChange = { onOptionsChange(options.copy(fastDecode = it)) }
+        )
+        ParamChoiceRow(
+            label = stringResource(R.string.decoder_threads_title),
+            choices = listOf(0L, 4L, 8L, 16L),
+            selected = options.threads,
+            accentColor = accentColor,
+            accentOnColor = accentOnColor,
+            labelOf = { th -> if (th <= 0L) defaultBufferLabel else "${th}T" },
+            onSelect = { th -> onOptionsChange(options.copy(threads = th)) }
+        )
     }
 }

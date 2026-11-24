@@ -395,13 +395,13 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
         try { c.flush() } catch (_: Exception) {}
 
         val info = MediaCodec.BufferInfo()
-        val acc = ArrayList<Float>(ASR_SAMPLE_RATE * 32)
+        val acc = FloatArrayList(ASR_SAMPLE_RATE * 60)
         var ptsBaseUs = -1L
         var inputDone = false
         var outputDone = false
         val toUs = toMs * 1000L
         var pcmEncoding = android.media.AudioFormat.ENCODING_PCM_16BIT
-        var mono = FloatArray(0)
+        val monoAcc = FloatArrayList(outRate * 2)
 
         while (!outputDone) {
             if (!inputDone) {
@@ -465,7 +465,7 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
                     }
                     part[f] = sum / ch
                 }
-                mono = appendFloat(mono, part)
+                monoAcc.addAll(part)
             }
             val ptsUs = info.presentationTimeUs
             c.releaseOutputBuffer(outIdx, false)
@@ -473,22 +473,21 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
             if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
             if (ptsUs >= toUs) outputDone = true
 
-            // 边解边降采样重采样，避免长窗口累积过多内存
-            if (mono.size >= outRate) {
+            // 边解边降采样重采样，避免长窗口累积过多内存；复用 monoAcc 消除数组分配
+            if (monoAcc.size >= outRate) {
+                val mono = monoAcc.toArray()
                 val resampled = resampleLinear(mono, outRate, ASR_SAMPLE_RATE)
-                for (v in resampled) acc.add(v)
-                mono = FloatArray(0)
+                acc.addAll(resampled)
+                monoAcc.reset()
             }
         }
-        if (mono.isNotEmpty()) {
-            for (v in resampleLinear(mono, outRate, ASR_SAMPLE_RATE)) acc.add(v)
+        if (!monoAcc.isEmpty()) {
+            acc.addAll(resampleLinear(monoAcc.toArray(), outRate, ASR_SAMPLE_RATE))
         }
         if (acc.isEmpty()) return null
 
         val baseMs = if (ptsBaseUs >= 0) ptsBaseUs / 1000L else fromMs
-        val samples = FloatArray(acc.size)
-        for (i in acc.indices) samples[i] = acc[i]
-        return DecodedAudio(samples, baseMs)
+        return DecodedAudio(acc.toArray(), baseMs)
     }
 
     fun close() {
@@ -549,6 +548,36 @@ internal class AudioTee(private val context: Context, private val uri: Uri) {
             out[i] = input[i0] + (input[(i0 + 1).coerceAtMost(input.size - 1)] - input[i0]) * frac
         }
         return out
+    }
+
+    /** 无装箱原始 float 动态数组，替代 ArrayList<Float>，彻底杜绝百万级对象装箱造成的频繁 GC */
+    private class FloatArrayList(initialCapacity: Int = 16000 * 30) {
+        var data = FloatArray(initialCapacity)
+        var size = 0
+
+        fun addAll(elements: FloatArray) {
+            val needed = size + elements.size
+            if (needed > data.size) {
+                val newCap = maxOf(data.size * 2, needed)
+                val newData = FloatArray(newCap)
+                System.arraycopy(data, 0, newData, 0, size)
+                data = newData
+            }
+            System.arraycopy(elements, 0, data, size, elements.size)
+            size += elements.size
+        }
+
+        fun reset() {
+            size = 0
+        }
+
+        fun isEmpty(): Boolean = size == 0
+
+        fun toArray(): FloatArray {
+            val result = FloatArray(size)
+            System.arraycopy(data, 0, result, 0, size)
+            return result
+        }
     }
 }
 

@@ -125,6 +125,9 @@ class RealtimeSubtitleEngine(private val context: Context) {
 
     val cache = SubtitleCache()
 
+    /** v2.9.2：直播流与网络流旁路音频接收器（供 Media3 TeeAudioProcessor 注入） */
+    val liveAudioFeed = LiveAudioFeed()
+
     @Volatile var isRunning = false
         private set
 
@@ -187,14 +190,20 @@ class RealtimeSubtitleEngine(private val context: Context) {
      * finally 中执行（取消是协作式的，会等当前 native 调用返回后才进入 finally）。
      */
 
-    /** 启动实时字幕。[mediaUri] 支持 content://（相册）与 file:// */
-    fun start(mediaUri: Uri, factory: RecognizerFactory, listener: Listener) {
+    /** 启动实时字幕。[mediaUri] 支持 content://（相册）与 file://，同时支持直播流/网络流 */
+    fun start(
+        mediaUri: Uri,
+        factory: RecognizerFactory,
+        listener: Listener,
+        isLiveStream: Boolean = false
+    ) {
         if (isRunning) stop()
         generation++                      // v2.0.136：让尚未退出的旧代协程尽快自灭
         val myGen = generation
         this.listener = listener
         currentUri = mediaUri
         currentFactory = factory
+        isCurrentLiveStream = isLiveStream
         cache.clear()
         clearScanned()
         producedAnyCue = false
@@ -235,7 +244,14 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 // 2) 准备 VAD（失败只降级，不阻断）
                 vad = tryCreateSileroVad()
 
-                // 3) 打开独立音频解码器（AudioTee）
+                // 3) 直播流或显式要求旁路取音：直接启动 LiveAudioFeed 旁路音频抓取循环
+                if (isLiveStream) {
+                    Log.i(TAG, "检测到直播流模式，启动 LiveAudioFeed 旁路音频抓取循环")
+                    liveAudioLoop(liveAudioFeed, rec, vad, myGen)
+                    return@launch
+                }
+
+                // 4) 打开独立音频解码器（AudioTee）
                 val t = AudioTee(context, mediaUri)
                 when (val r = t.open()) {
                     is AudioTee.AudioTeeOpenResult.Success -> {
@@ -256,6 +272,12 @@ class RealtimeSubtitleEngine(private val context: Context) {
                         return@launch
                     }
                     is AudioTee.AudioTeeOpenResult.IoFailed -> {
+                        val scheme = mediaUri.scheme?.lowercase()
+                        if (scheme == "http" || scheme == "https" || scheme == "rtsp" || scheme == "rtmp") {
+                            Log.i(TAG, "网络流 AudioTee IO 失败，降级切换为 LiveAudioFeed 旁路音频抓取")
+                            liveAudioLoop(liveAudioFeed, rec, vad, myGen)
+                            return@launch
+                        }
                         listener.onStatus(context.getString(R.string.rt_audio_io_failed))
                         isRunning = false
                         return@launch
@@ -265,16 +287,15 @@ class RealtimeSubtitleEngine(private val context: Context) {
                         isRunning = false
                         return@launch
                     }
-                    // v2.8.3：直播清单没有终点，无法重封装成整段音频 → 单独提示，
-                    // 不再让用户看到笼统的「音频读取失败（IO）」去怀疑是网络问题。
+                    // 直播清单没有终点，无法重封装成整段音频 → 自动无缝降级切换为 LiveAudioFeed 旁路抓取
                     is AudioTee.AudioTeeOpenResult.LiveUnsupported -> {
-                        listener.onStatus(context.getString(R.string.rt_audio_live_unsupported))
-                        isRunning = false
+                        Log.i(TAG, "AudioTee 检测到直播流清单（LiveUnsupported），自动切换为 LiveAudioFeed 旁路抓取")
+                        liveAudioLoop(liveAudioFeed, rec, vad, myGen)
                         return@launch
                     }
                 }
 
-                // 4) 预读主循环
+                // 5) 预读主循环
                 prefetchLoop(t, rec, vad, myGen)
             } catch (e: CancellationException) {
                 throw e
@@ -284,6 +305,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
                 // 取消后仍要释放 native 资源，因此用 NonCancellable 包裹；
                 // 此时预读已停止（取消是协作式的，会等当前 native 调用返回），不会并发。
                 withContext(NonCancellable) {
+                    try { liveAudioFeed.stop() } catch (_: Exception) {}
                     try { teeLocal?.close() } catch (_: Exception) {}
                     try { vad?.release() } catch (_: Exception) {}
                     try { rec?.release() } catch (_: Exception) {}
@@ -304,8 +326,8 @@ class RealtimeSubtitleEngine(private val context: Context) {
         val uri = currentUri ?: return
         val factory = currentFactory ?: return
         val l = listener ?: return
-        Log.i(TAG, "重新生成字幕：从 ${cursorMs}ms 开始")
-        start(uri, factory, l)
+        Log.i(TAG, "重新生成字幕：从 ${cursorMs}ms 开始, live=$isCurrentLiveStream")
+        start(uri, factory, l, isCurrentLiveStream)
     }
 
     /** 播放位置推进（UI 每 200ms 左右调用一次即可） */
@@ -354,6 +376,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
     fun stop() {
         isRunning = false
         generation++   // v2.0.136：旧代协程在当前窗口处理完后立即自灭，不再写共享状态
+        liveAudioFeed.stop()
         // 只取消，不在这里释放 native 资源：释放由持有它们的协程在 finally 中完成，
         // 否则会与正在执行的识别并发，触发 native abort（见字段处说明）。
         job?.cancel()
@@ -479,6 +502,91 @@ class RealtimeSubtitleEngine(private val context: Context) {
             } else {
                 listener?.onStatus(context.getString(R.string.rt_generating_to, fmt(generatedMs)))
             }
+        }
+    }
+
+    /**
+     * 直播流/网络流实时音频抓取循环（基于 [LiveAudioFeed] + [TeeAudioProcessor]）。
+     *
+     * 特点：
+     * 1. 旁路消费 ExoPlayer 解码后的 16kHz PCM，无需依赖 MediaExtractor（解决 LiveUnsupported 卡点）；
+     * 2. Silero VAD 固定 512 样本步进，一旦检测到语音断句立即调用 ASR 识别；
+     * 3. 产生的新字幕平滑排布在当前播放进度附近（展示至少 3.5 秒），供 SubtitleOverlay 与 AI 弹幕实时消费；
+     * 4. 严格内存与协程代际控制。
+     */
+    private suspend fun liveAudioLoop(
+        feed: LiveAudioFeed,
+        r: SegmentRecognizer,
+        vad: com.k2fsa.sherpa.onnx.Vad?,
+        myGen: Long
+    ) {
+        feed.start()
+        listener?.onStatus(context.getString(R.string.rt_live_stream_active))
+        var lastEmittedEndMs = 0L
+        val clockStart = System.currentTimeMillis()
+        val energyBuffer = ArrayList<Float>()
+
+        try {
+            while (currentCoroutineContext().isActive) {
+                if (myGen != generation) return
+                val chunk = feed.receiveChunk() ?: break
+
+                if (vad != null) {
+                    vad.acceptWaveform(chunk)
+                    while (!vad.empty()) {
+                        val seg = vad.front()
+                        val text = try {
+                            r.recognize(seg.samples)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "live segment recognize failed: ${e.message}")
+                            ""
+                        }
+                        vad.pop()
+
+                        if (myGen != generation) return
+
+                        if (text.isNotBlank()) {
+                            val segDurationMs = (seg.samples.size * 1000L / SAMPLE_RATE).coerceAtLeast(1000L)
+                            val cur = if (cursorMs > 0L) cursorMs else (System.currentTimeMillis() - clockStart)
+                            // 预留展示时长：至少 3.5 秒或根据语音长度，确保用户能看清且不与下一句重叠
+                            val displayDuration = maxOf(3500L, segDurationMs)
+                            val startMs = maxOf(cur - 500L, lastEmittedEndMs)
+                            val endMs = startMs + displayDuration
+                            lastEmittedEndMs = endMs
+
+                            val cues = mutableListOf<SubtitleCue>()
+                            for (p in splitLongSentence(text, startMs.coerceAtLeast(0L), endMs)) {
+                                cues.add(SubtitleCue(cache.size() + cues.size + 1, p.startMs, p.endMs, p.text))
+                            }
+                            if (cues.isNotEmpty()) {
+                                producedAnyCue = true
+                                cache.putAll(cues)
+                                listener?.onCuesUpdated(cache.snapshot())
+                            }
+                        }
+                    }
+                } else {
+                    for (v in chunk) energyBuffer.add(v)
+                    if (energyBuffer.size >= SAMPLE_RATE * 2) {
+                        val samples = energyBuffer.toFloatArray()
+                        energyBuffer.clear()
+                        val text = try { r.recognize(samples) } catch (_: Exception) { "" }
+                        if (myGen != generation) return
+                        if (text.isNotBlank()) {
+                            val cur = if (cursorMs > 0L) cursorMs else (System.currentTimeMillis() - clockStart)
+                            val startMs = maxOf(cur - 500L, lastEmittedEndMs)
+                            val endMs = startMs + 3500L
+                            lastEmittedEndMs = endMs
+                            val cue = SubtitleCue(cache.size() + 1, startMs, endMs, text.trim())
+                            producedAnyCue = true
+                            cache.put(cue)
+                            listener?.onCuesUpdated(cache.snapshot())
+                        }
+                    }
+                }
+            }
+        } finally {
+            feed.stop()
         }
     }
 
@@ -611,6 +719,7 @@ class RealtimeSubtitleEngine(private val context: Context) {
     /** 启动参数留存，供 [restart] 重新生成时复用 */
     private var currentUri: Uri? = null
     private var currentFactory: RecognizerFactory? = null
+    @Volatile private var isCurrentLiveStream = false
 
     private fun fmt(ms: Long): String {
         val s = (ms / 1000L).coerceAtLeast(0L)

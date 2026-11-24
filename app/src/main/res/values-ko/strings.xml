@@ -683,6 +683,7 @@
     <string name="rt_audio_unsupported_codec">오디오 코덱 미지원：%s</string>
     <string name="rt_audio_io_failed">오디오 읽기 실패（IO）</string>
     <string name="rt_audio_live_unsupported">라이브 스트림에서는 실시간 자막을 사용할 수 없습니다</string>
+    <string name="rt_live_stream_active">라이브 스트림 실시간 자막 활성화됨 (PCM 바이패스 캡처)</string>
     <string name="rt_audio_remux_failed">오디오 리먹싱 실패（code=%d）</string>
     <string name="rt_started">실시간 자막 켜짐, 생성 중…</string>
     <string name="rt_all_done">실시간 자막 생성 완료（총 %1$d 개）</string>
@@ -1095,4 +1096,9 @@
     <string name="vr_ipd_preset_narrow">58mm 좁음</string>
     <string name="vr_ipd_preset_standard">64mm 표준</string>
     <string name="vr_ipd_preset_wide">70mm 넓음</string>
+    <!-- 8K H.265 소프트웨어 디코딩 최적화 -->
+    <string name="decoder_threads_title">디코딩 스레드 수</string>
+    <string name="decoder_threads_auto">자동</string>
+    <string name="fast_decode_8k_title">8K 고속 디코딩 및 필터 최적화</string>
+    <string name="fast_decode_8k_desc">비키 프레임 루프 필터를 건너뛰고 프레임 레벨 파이프라인을 활성화하여 8K 소프트 디코딩 처리량 향상</string>
 </resources>

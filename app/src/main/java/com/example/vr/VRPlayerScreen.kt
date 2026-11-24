@@ -1006,6 +1006,9 @@ fun VRPlayerScreen(
 
     // v126：实时 AI 字幕引擎（方案文档「边播边生成」，不写 SRT 文件）
     val realtimeSubtitleEngine = remember { RealtimeSubtitleEngine(context) }
+    val teeAudioProcessor = remember(realtimeSubtitleEngine) {
+        androidx.media3.exoplayer.audio.TeeAudioProcessor(realtimeSubtitleEngine.liveAudioFeed)
+    }
     var isRealtimeSubtitleEnabled by remember {
         mutableStateOf(
             if (isMemoryModeEnabled) prefs.getBoolean("realtime_subtitle_enabled", false) else false
@@ -1527,10 +1530,14 @@ fun VRPlayerScreen(
                 putLong("ijk_max_buffer", ijkOptions.maxBufferBytes)
                 putLong("ijk_probe_size", ijkOptions.probeSizeBytes)
                 putLong("ijk_skip_loop_filter", ijkOptions.skipLoopFilter)
+                putLong("ijk_threads", ijkOptions.threads)
+                putBoolean("ijk_fast_decode", ijkOptions.fastDecode)
                 // v2.1.234：MPV 内核参数
                 putBoolean("mpv_hwdec", mpvOptions.hwdec)
                 putBoolean("mpv_framedrop", mpvOptions.frameDrop)
                 putInt("mpv_cache_mb", mpvOptions.cacheMb)
+                putInt("mpv_threads", mpvOptions.threads)
+                putBoolean("mpv_fast_decode", mpvOptions.fastDecode)
                 putBoolean("is_subtitle_enabled", isSubtitleEnabled)
                 putBoolean("subtitle_strip_punct", isStripSubtitlePunctuation)
                 putBoolean("subtitle_fade_in", subtitleFadeIn)
@@ -1614,10 +1621,14 @@ fun VRPlayerScreen(
                 remove("ijk_max_buffer")
                 remove("ijk_probe_size")
                 remove("ijk_skip_loop_filter")
+                remove("ijk_threads")
+                remove("ijk_fast_decode")
                 // v2.1.234：MPV 参数 key（同上，必须与 put 成对）
                 remove("mpv_hwdec")
                 remove("mpv_framedrop")
                 remove("mpv_cache_mb")
+                remove("mpv_threads")
+                remove("mpv_fast_decode")
                 remove("is_subtitle_enabled")
                 remove("subtitle_strip_punct")
                 remove("subtitle_font_id")
@@ -3820,11 +3831,18 @@ fun VRPlayerScreen(
             val ijkUri = decodedUri
             val ijkUsable = IjkPlayerFactory.supports(ijkUri) && IjkPlayerFactory.ensureLibraries()
             if (ijkUsable) {
+                // v2.8.4：若因超出硬件硬解上限（如 8K 全景）走软解回退，强制关闭 MediaCodec 硬解，开启快速解码与主动丢帧
+                val isOversizeSoft = softRetryUri != null && softRetryUri == selectedMediaItem.uri
+                val effectiveIjkOptions = if (isOversizeSoft) {
+                    ijkOptions.copy(mediaCodec = false, frameDrop = true, fastDecode = true)
+                } else {
+                    ijkOptions
+                }
                 val backend = IjkPlayerFactory.create(
                     context = context,
                     uri = ijkUri,
                     surface = nativeSurface,
-                    options = ijkOptions,
+                    options = effectiveIjkOptions,
                     callbacks = object : IjkPlayerFactory.Callbacks {
                         override fun onVideoSizeChanged(width: Int, height: Int) {
                             // 与 Exo 侧共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
@@ -3941,13 +3959,19 @@ fun VRPlayerScreen(
         //    WMV/ISO 派给 MPV 而不是被 decoderEngine 挡住。
         if (effectiveEngine == DecoderEngine.MPV) {
             if (MpvPlayerFactory.isAvailable(context)) {
+                // v2.8.4：若因超出硬件硬解上限走软解回退，强制关硬解、切 GPU vo 渲染、开启快速解码
+                val isOversizeSoft = softRetryUri != null && softRetryUri == selectedMediaItem.uri
+                val effectiveVoMode = if (isOversizeSoft) MpvVoMode.GPU else mpvVoMode
                 val backend = MpvPlayerFactory.create(
                     context = context,
                     uri = decodedUri,
                     surface = nativeSurface,
                     // v2.1.244：把兜底选定的 voMode 合并进 options（EMBED / GPU）
                     options = mpvOptions.copy(
-                        voMode = mpvVoMode,
+                        hwdec = if (isOversizeSoft) false else mpvOptions.hwdec,
+                        voMode = effectiveVoMode,
+                        frameDrop = if (isOversizeSoft) true else mpvOptions.frameDrop,
+                        fastDecode = if (isOversizeSoft) true else mpvOptions.fastDecode,
                         // 🔴 v2.9.1：网页/URL 播放时，把 Exo 用的**同一份** UA/Referer 也交给 mpv。
                         //   不给的话，Exo 失败回退到 MPV 就是裸请求（mpv 默认 UA = libmpv）→ CDN 403
                         //   → 用户看到"换内核还是打不开"。本地文件播放时这里是空列表，行为不变。
@@ -4146,7 +4170,7 @@ fun VRPlayerScreen(
                     enableAudioTrackPlaybackParams: Boolean
                 ): androidx.media3.exoplayer.audio.AudioSink? {
                     return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
-                        .setAudioProcessors(arrayOf(audioProcessor))
+                        .setAudioProcessors(arrayOf(audioProcessor, teeAudioProcessor))
                         .build()
                 }
 
@@ -4590,6 +4614,7 @@ fun VRPlayerScreen(
         isSoftwareDecoding,
         decoderEngine,
         ijkOptions,
+        mpvOptions,
         photoReloadTrigger,
         mpvRetryUri,
         softRetryUri,
@@ -4711,7 +4736,7 @@ fun VRPlayerScreen(
     // 播放头只需查缓存即可显示，不再等整片转写完成。
     // v2.6.24：**"要不要跑引擎"与"要不要显示字幕"是两件事** —— 后台执行模式下
     // 只跑引擎不显示（台词给 AI 弹幕用），所以这里读 isRealtimeAsrActive。
-    LaunchedEffect(isRealtimeAsrActive, selectedMediaItem.uri, asrEngineType, sherpaLangCode, SherpaAsrManager.modelChoiceVersion) {
+    LaunchedEffect(isRealtimeAsrActive, selectedMediaItem.uri, asrEngineType, sherpaLangCode, SherpaAsrManager.modelChoiceVersion, isLiveStream) {
         // v127f：切语言/切媒体/开关都会重跑本 effect，必须把**全部**相关状态清干净，
         // 否则屏上会残留上一轮的字幕或进度（会让用户以为"改了语言没反应"）。
         realtimeCues = emptyList()
@@ -4755,7 +4780,8 @@ fun VRPlayerScreen(
                 override fun onStatus(message: String) {
                     scope.launch { realtimeSubtitleStatus = message }
                 }
-            }
+            },
+            isLiveStream = isLiveStream
         )
     }
 
@@ -4963,6 +4989,11 @@ fun VRPlayerScreen(
                         if (p.isPlaying) {
                             p.pause(); isVideoPlaying = false
                         } else {
+                            val dur = p.duration
+                            val cur = p.currentPosition
+                            if (playbackEnded || (dur > 0L && cur >= dur - 500L)) {
+                                p.seekTo(0L)
+                            }
                             p.play(); isVideoPlaying = true; playbackEnded = false
                         }
                     }
@@ -4996,6 +5027,11 @@ fun VRPlayerScreen(
                     } else {
                         p?.let {
                             it.seekTo((it.currentPosition - seekBackwardStep * 1000L).coerceAtLeast(0L))
+                            if (playbackEnded) {
+                                playbackEnded = false
+                                it.play()
+                                isVideoPlaying = true
+                            }
                         }
                     }
                     true
@@ -6164,6 +6200,12 @@ fun VRPlayerScreen(
                         mp.pause()
                         isVideoPlaying = false
                     } else {
+                        val dur = mp.duration
+                        val cur = mp.currentPosition
+                        // v2.8.4：若视频已播放到片尾（playbackEnded 或已接近末帧），点击播放自动重头开始播（seekTo 0）
+                        if (playbackEnded || (dur > 0L && cur >= dur - 500L)) {
+                            mp.seekTo(0L)
+                        }
                         mp.play()
                         isVideoPlaying = true
                         playbackEnded = false
@@ -6176,6 +6218,12 @@ fun VRPlayerScreen(
                     val dur = mp.duration
                     val target = (cur + deltaSec * 1000L).coerceIn(0L, dur.coerceAtLeast(0L))
                     mp.seekTo(target)
+                    // v2.8.4：片尾快退时，自动解除播完锁定并继续起播
+                    if (playbackEnded) {
+                        playbackEnded = false
+                        mp.play()
+                        isVideoPlaying = true
+                    }
                 }
             },
             onExitVR = {

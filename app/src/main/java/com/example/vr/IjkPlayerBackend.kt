@@ -128,12 +128,25 @@ object IjkPlayerFactory {
             mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 1L)
             // 不用 OpenSL ES 输出，统一走 AudioTrack（与 Exo 的 AudioSink 行为一致）
             mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0L)
-            // 覆盖层像素格式：RV32 = 0x32335652（'2','3','V','R'）。
-            // ⚠️ 这里写字面量而不用 IjkMediaPlayer.SDL_FCC_RV32 —— 0.8.8 的 Java 层
-            //    未必暴露该常量，写常量名一旦不存在就是编译失败。
-            mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "overlay-format", 0x32335652L)
-            // 丢帧：解码跟不上时主动丢帧保流畅（画质换流畅，慢机可开）
-            mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", if (options.frameDrop) 1L else 0L)
+            // 覆盖层像素格式：
+            // - 软解极致性能/8K（!mediaCodec && fastDecode）：启用 SDL_FCC_YV12（0x32315659L，'Y','V','1','2'）
+            //   直接纹理映射原生直通，避免 CPU libswscale 8K YUV 强转 32-bit RGBA（每帧 132.7MB 内存带宽雪崩），
+            //   降至 49.7MB/帧并省去色彩空间转换算力开销；
+            // - 其余模式：保持 RV32（0x32335652L）。
+            val overlayFormat = if (!options.mediaCodec && options.fastDecode) 0x32315659L else 0x32335652L
+            mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "overlay-format", overlayFormat)
+
+            // 丢帧：解码跟不上时主动丢帧保流畅。软解 8K 下使用 5L（解码器内强跳 B 帧保音频同步），普通使用 1L 或 0L
+            val frameDropVal = if (options.frameDrop) {
+                if (!options.mediaCodec && options.fastDecode) 5L else 1L
+            } else 0L
+            mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", frameDropVal)
+
+            // 8K 软解队列深度控制：防止 8K 解码帧缓存占用过大内存（每帧数十兆）导致 OOM
+            if (!options.mediaCodec) {
+                mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "video-pictq-size", 3L)
+                mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "min-frames", 2L)
+            }
             // 不要"prepare 完就自动播" —— 我们要先恢复上次播放位置，再手动 start
             mp.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 0L)
             // 变速：soundtouch = 变速不变调（1）；为 0 则是简单重采样（会变调）
@@ -149,8 +162,21 @@ object IjkPlayerFactory {
             if (options.probeSizeBytes > 0) {
                 mp.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", options.probeSizeBytes)
             }
-            // 环路滤波跳过阈值：48 = 跳过部分 deblock，明显省 CPU、画质损失很小。
-            // 8K/高码率片源在手机上很吃这一项。
+            // ===== 软解性能关键调优（参考知乎专栏《8K H.265解码，从41 FPS到149 FPS》）=====
+            // 1. 多线程解码：未显式指定时根据 CPU 物理核心数自适应（上限 16 线程），彻底消除默认单线程卡顿
+            val effectiveThreads = if (options.threads > 0) {
+                options.threads
+            } else {
+                minOf(16L, maxOf(2L, Runtime.getRuntime().availableProcessors().toLong()))
+            }
+            mp.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "threads", effectiveThreads)
+            // 2. 线程类型：强制启用帧级多线程（FF_THREAD_FRAME = 1），使帧与帧之间通过逐行滤波发布重叠流水线解码
+            mp.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "thread_type", 1L)
+            // 3. 快速解码模式：开启 fast 标志，在不损失主观画质前提下大幅减少 8K 宏块密集计算
+            if (options.fastDecode) {
+                mp.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "fast", 1L)
+            }
+            // 4. 环路滤波跳过阈值：48 = 跳过非关键帧 deblock，显著节省 CPU 并避免多 Tile 列扫描下的行等待饥饿
             mp.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", options.skipLoopFilter)
 
             // ===== 数据源 =====
@@ -223,7 +249,11 @@ data class IjkOptions(
     /** 探测字节数。0 = ijk 默认（不限）。 */
     val probeSizeBytes: Long = 0L,
     /** 环路滤波跳过阈值。48 = 官方 demo 值（省 CPU）；0 = 不跳过（画质最好）。 */
-    val skipLoopFilter: Long = 48L
+    val skipLoopFilter: Long = 48L,
+    /** 解码线程数。0 = 自动根据 CPU 核心数自适应 (min(16, max(2, cores)))。 */
+    val threads: Long = 0L,
+    /** 8K / 高码率快速解码优化（开启 fast decode 并强制帧级流水线）。默认开。 */
+    val fastDecode: Boolean = true
 ) {
     companion object {
         /** 缓冲档位：字节数。0 表示交回 ijk 默认。 */
@@ -238,7 +268,9 @@ data class IjkOptions(
                 soundTouch = prefs.getBoolean("ijk_soundtouch", true),
                 maxBufferBytes = prefs.getLong("ijk_max_buffer", 0L),
                 probeSizeBytes = prefs.getLong("ijk_probe_size", 0L),
-                skipLoopFilter = prefs.getLong("ijk_skip_loop_filter", 48L)
+                skipLoopFilter = prefs.getLong("ijk_skip_loop_filter", 48L),
+                threads = prefs.getLong("ijk_threads", 0L),
+                fastDecode = prefs.getBoolean("ijk_fast_decode", true)
             )
         }
     }

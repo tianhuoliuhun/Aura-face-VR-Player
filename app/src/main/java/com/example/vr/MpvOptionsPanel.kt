@@ -69,5 +69,21 @@ internal fun MpvOptionsPanel(
             labelOf = { mb -> if (mb <= 0) defaultLabel else "${mb}MB" },
             onSelect = { mb -> onOptionsChange(options.copy(cacheMb = mb)) }
         )
+        // ===== 8K H.265 软解调优（参考知乎《8K H.265解码，从41 FPS到149 FPS》）=====
+        DecoderToggle(
+            label = stringResource(R.string.fast_decode_8k_title),
+            checked = options.fastDecode,
+            accentColor = accentColor,
+            onCheckedChange = { onOptionsChange(options.copy(fastDecode = it)) }
+        )
+        ParamChoiceRow(
+            label = stringResource(R.string.decoder_threads_title),
+            choices = listOf(0, 4, 8, 16),
+            selected = options.threads,
+            accentColor = accentColor,
+            accentOnColor = accentOnColor,
+            labelOf = { th -> if (th <= 0) defaultLabel else "${th}T" },
+            onSelect = { th -> onOptionsChange(options.copy(threads = th)) }
+        )
     }
 }
