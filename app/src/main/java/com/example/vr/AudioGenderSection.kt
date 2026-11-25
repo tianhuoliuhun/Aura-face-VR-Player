@@ -63,6 +63,9 @@ fun AudioGenderSection(
     accentColor: Color,
     /** 要分析的媒体 URI（通常是当前打开的片子）；null = 还没打开任何媒体 */
     mediaUri: String?,
+    isFilterEnabled: Boolean = false,
+    onFilterEnabledChange: (Boolean) -> Unit = {},
+    onFilterWavReady: (File?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -86,11 +89,13 @@ fun AudioGenderSection(
     var processing by remember { mutableStateOf(false) }
     var processStage by remember { mutableStateOf("") }
     var processPct by remember { mutableIntStateOf(0) }
+    var processJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val ready = remember(refreshKey) { AudioGenderAnalyzer.modelsReady(context) }
     val downloadedMb = remember(refreshKey) { AudioGenderModels.downloadedMb(context) }
     val missingMb = remember(refreshKey) { AudioGenderModels.missing(context).sumOf { it.approxMb } }
     val mdxReady = remember(refreshKey) { MdxSeparator.isModelReady(context) }
+    val cachedWav = remember(mediaUri, refreshKey) { MdxStreamingPipeline.cachedFileIfReady(context, mediaUri) }
 
     // ⚠️ Compose 规则：stringResource(...) 是 @Composable，**不能在 scope.launch { } 里调用**
     //    → 在 Composable 作用域先取出来，协程里只用这些局部变量。
@@ -119,6 +124,42 @@ fun AudioGenderSection(
             color = Color.White.copy(alpha = 0.55f),
             fontSize = 10.sp,
         )
+
+        // ---------------- 实时过滤开关（当本片已有流式处理缓存时随时开关） ----------------
+        if (cachedWav != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(accentColor.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                    .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.audio_gender_realtime_toggle),
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.audio_gender_cache_info,
+                            (cachedWav.length() / (1024 * 1024)).toInt().coerceAtLeast(1)
+                        ),
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 9.sp,
+                    )
+                }
+                AuraSwitch(
+                    checked = isFilterEnabled,
+                    onCheckedChange = { onFilterEnabledChange(it) },
+                    accentColor = accentColor,
+                    enabled = !processing,
+                )
+            }
+        }
 
         // ---------------- 分析模型状态 / 下载 ----------------
         Text(
@@ -272,81 +313,50 @@ fun AudioGenderSection(
                     }
                 }
             } else {
-                // ---------------- 应用：按勾选去人声 ----------------
+                // ---------------- 应用：长片流式分离与按勾选过滤 ----------------
+                val btnLabel = if (processing) {
+                    stringResource(R.string.audio_gender_cancel_streaming, processPct)
+                } else {
+                    stringResource(R.string.audio_gender_apply)
+                }
                 ChipButton(
-                    label = if (processing) {
-                        "$processStage $processPct%"
-                    } else {
-                        stringResource(R.string.audio_gender_apply)
-                    },
-                    enabled = !processing && !analyzing && selected.isNotEmpty(),
+                    label = btnLabel,
+                    enabled = (!processing && !analyzing && selected.isNotEmpty()) || processing,
                     accentColor = accentColor,
                 ) {
-                    scope.launch {
+                    if (processing) {
+                        processJob?.cancel()
+                        return@ChipButton
+                    }
+                    processJob = scope.launch {
                         processing = true
                         processPct = 0
+                        processStage = textGProcessing
                         resultText = ""
                         try {
-                          // 必须切到 IO：MDX 推理对 90s 音频在模拟器上要 3 分钟量级，
-                          // 留在 Main 上会把主线程完全堵死 -> 系统判 ANR 杀界面（现象上等同闪退）。
-                          // 自检能过、UI 会崩，差别就在这里：自检本来就在 IO 线程。
-                          withContext(Dispatchers.IO) {
-                            // ① 44.1k 立体声流式解码 → 只取前 MAX_INLINE_SECONDS 秒（分离的内存上限）
-                            processStage = textGProcessing
-                            // 按**堆预算**决定这次最多处理多少秒：实测某些设备 maxMemory 只有 192MB，
-                            // 固定 90s 的峰值约 150MB 会 OOM → 宁可少处理一段，也不要崩。
-                            val inlineSec = MdxSeparator.safeInlineSeconds()
-                            val maxSamples = inlineSec * MdxDsp.SAMPLE_RATE
-                            android.util.Log.i(
-                                "AudioGenderSection",
-                                "应用: 本次内联时长上限 ${inlineSec}s（maxHeap=${
-                                    Runtime.getRuntime().maxMemory() / 1048576}MB）",
-                            )
-                            val mixL = FloatArray(maxSamples)
-                            val mixR = FloatArray(maxSamples)
-                            var filled = 0
-                            AudioPcmExtractor44k.stream(context, Uri.parse(mediaUri)) { l, r, n ->
-                                val take = min(n, maxSamples - filled)
-                                System.arraycopy(l, 0, mixL, filled, take)
-                                System.arraycopy(r, 0, mixR, filled, take)
-                                filled += take
-                                processPct = (filled * 15 / maxSamples)
-                                filled < maxSamples      // 够了就中止
-                            }
-                            if (filled <= 0) {
-                                resultText = textGMdxFail
-                                return@withContext
-                            }
-                            // 不做 copyOf：按 filled 作为有效长度直接传下去（省两份整段缓冲 = 32MB）
-                            // ② 分离人声
-                            val vocals = MdxSeparator.separate(context, mixL, mixR, filled) {
-                                processPct = 15 + it * 70 / 100
-                            }
-                            if (vocals == null) {
-                                resultText = textGMdxFail
-                                return@withContext
-                            }
-
-                            // ③ 按勾选的说话人重组（区间换伴奏 + 边界淡化）
-                            processStage = textGProcessing
-                            val out = MdxReprocessor.apply(
-                                mixL, mixR, vocals.first, vocals.second,
+                            val res = MdxStreamingPipeline.processToCache(
+                                context = context,
+                                uri = Uri.parse(mediaUri!!),
                                 segments = segments,
-                                selected = selected,
-                            )
-
-                            // ④ 写出 WAV
-                            val file = File(context.cacheDir, "audio_gender_processed.wav")
-                            val okW = WavIo.writeStereo16(file, out.first, out.second, MdxDsp.SAMPLE_RATE, filled)
-                            processPct = 100
-                            resultText = if (okW) {
-                                textGDone.format(file.absolutePath, filled / MdxDsp.SAMPLE_RATE)
-                            } else {
-                                textGMdxFail
+                                selectedSpeakers = selected,
+                            ) { pct, sec ->
+                                processPct = pct
+                                processStage = "$textGProcessing (${sec}s)"
                             }
-                          }  // withContext(Dispatchers.IO)
+                            if (res.cancelled) {
+                                resultText = ""
+                            } else if (res.success && res.outputFile != null) {
+                                processPct = 100
+                                refreshKey++
+                                onFilterWavReady(res.outputFile)
+                                onFilterEnabledChange(true)
+                                resultText = textGDone.format(res.outputFile.absolutePath, res.processedSeconds)
+                            } else {
+                                resultText = textGMdxFail
+                            }
                         } finally {
                             processing = false
+                            processJob = null
                         }
                     }
                 }

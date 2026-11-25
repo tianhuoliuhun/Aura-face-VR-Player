@@ -57,22 +57,15 @@ object MdxReprocessor {
 
         // 权重图：0 = 保留原音，1 = 完全换成伴奏
         val w = FloatArray(n)
-        val fade = (crossfadeMs.coerceAtLeast(0) * MdxDsp.SAMPLE_RATE / 1000).coerceAtLeast(1)
-        var touched = false
-        for (seg in segments) {
-            if (seg.speakerId !in selected) continue
-            val a = (seg.startMs * MdxDsp.SAMPLE_RATE / 1000).toInt().coerceIn(0, n)
-            val b = (seg.endMs * MdxDsp.SAMPLE_RATE / 1000).toInt().coerceIn(a, n)
-            if (b <= a) continue
-            touched = true
-            for (i in a until b) {
-                // 到两端距离的最小值 → 线性淡入/淡出；段中部为 1
-                val d0 = i - a
-                val d1 = b - 1 - i
-                val f = min(min(d0, d1), fade).toFloat() / fade
-                if (f > w[i]) w[i] = f
-            }
-        }
+        val touched = fillWeights(
+            weights = w,
+            offset = 0,
+            length = n,
+            globalStartSample = 0L,
+            segments = segments,
+            selected = selected,
+            crossfadeMs = crossfadeMs,
+        )
         if (!touched) return outL to outR
 
         // 注意 outL === mixL，但此处先读后写同一位置，读到的仍是原值 -> 安全。
@@ -84,6 +77,85 @@ object MdxReprocessor {
             }
         }
         return outL to outR
+    }
+
+    /**
+     * 流式分窗版本：仅对局部窗口 `[validFrom, validTo)` 原地把目标说话人的语音替换为伴奏，
+     * 通过 [windowGlobalStartSample] 与整片时间轴对齐，跨窗口边界的淡入淡出完全连续。
+     */
+    fun applyWindow(
+        mixL: FloatArray,
+        mixR: FloatArray,
+        vocalL: FloatArray,
+        vocalR: FloatArray,
+        validFrom: Int,
+        validTo: Int,
+        windowGlobalStartSample: Long,
+        segments: List<AudioGenderAnalyzer.SpeakerSegment>,
+        selected: Set<Int>,
+        crossfadeMs: Int = DEFAULT_CROSSFADE_MS,
+        weightsScratch: FloatArray? = null,
+    ) {
+        val len = validTo - validFrom
+        if (len <= 0 || selected.isEmpty() || segments.isEmpty()) return
+        val w = if (weightsScratch != null && weightsScratch.size >= len) {
+            weightsScratch.fill(0f, 0, len)
+            weightsScratch
+        } else {
+            FloatArray(len)
+        }
+        val touched = fillWeights(
+            weights = w,
+            offset = 0,
+            length = len,
+            globalStartSample = windowGlobalStartSample + validFrom,
+            segments = segments,
+            selected = selected,
+            crossfadeMs = crossfadeMs,
+        )
+        if (!touched) return
+        for (j in 0 until len) {
+            val k = w[j]
+            if (k > 0f) {
+                val idx = validFrom + j
+                mixL[idx] -= vocalL[idx] * k
+                mixR[idx] -= vocalR[idx] * k
+            }
+        }
+    }
+
+    private fun fillWeights(
+        weights: FloatArray,
+        offset: Int,
+        length: Int,
+        globalStartSample: Long,
+        segments: List<AudioGenderAnalyzer.SpeakerSegment>,
+        selected: Set<Int>,
+        crossfadeMs: Int,
+    ): Boolean {
+        val globalEndSample = globalStartSample + length
+        val fade = (crossfadeMs.coerceAtLeast(0) * MdxDsp.SAMPLE_RATE / 1000).coerceAtLeast(1)
+        var touched = false
+        for (seg in segments) {
+            if (seg.speakerId !in selected) continue
+            val segA = seg.startMs * MdxDsp.SAMPLE_RATE / 1000L
+            val segB = seg.endMs * MdxDsp.SAMPLE_RATE / 1000L
+            if (segB <= segA) continue
+            val interA = maxOf(segA, globalStartSample)
+            val interB = minOf(segB, globalEndSample)
+            if (interB <= interA) continue
+            touched = true
+            var g = interA
+            while (g < interB) {
+                val d0 = g - segA
+                val d1 = segB - 1 - g
+                val f = minOf(d0, d1, fade.toLong()).toFloat() / fade
+                val localIdx = offset + (g - globalStartSample).toInt()
+                if (f > weights[localIdx]) weights[localIdx] = f
+                g++
+            }
+        }
+        return touched
     }
 
     /**

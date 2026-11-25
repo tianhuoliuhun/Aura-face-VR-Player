@@ -366,6 +366,8 @@ fun VRPlayerScreen(
     var customBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     val audioProcessor = remember { StereoChannelSwappingAudioProcessor() }
+    val genderFilterProcessor = remember { GenderFilterAudioProcessor() }
+    var isGenderFilterEnabled by remember { mutableStateOf(false) }
     val sliderInteractionSource = remember { MutableInteractionSource() }
     val isSliderDragged by sliderInteractionSource.collectIsDraggedAsState()
 
@@ -721,6 +723,9 @@ fun VRPlayerScreen(
     var liveAsrHinted by remember { mutableStateOf(false) }
     // v2.6.24（直播 P3）：断流/缓冲提示的采样计数（避免一次瞬时 buffering 就弹提示）
     val liveBufferStreak = remember { intArrayOf(0) }
+    // v2.8.6（直播主线 A 尾项）：断流指数退避自动重连状态
+    var liveReconnectAttempt by remember { mutableIntStateOf(0) }
+    var liveReconnectJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     // v2.6.24（直播 P1）：流内嵌字幕轨（HLS 的 CC/TTML）自动选中 —— 只尝试一次，
     // 避免每秒覆盖用户后来手动选的轨
     var liveTextTrackPicked by remember { mutableStateOf(false) }
@@ -2899,6 +2904,7 @@ fun VRPlayerScreen(
     // Video info dialog + track selection (8/2 功能)
     var videoInfoDialogText by remember { mutableStateOf<String?>(null) }
     var trackDialogOpen by remember { mutableStateOf(false) }
+    var selectedVideoTrack by remember { mutableIntStateOf(-1) }
     var selectedAudioTrack by remember { mutableIntStateOf(-1) }
     var selectedTextTrack by remember { mutableIntStateOf(-1) }
     // 播放位置恢复：v119 起改由 PlaybackPositions 按媒体 URI 持久化，
@@ -3277,13 +3283,19 @@ fun VRPlayerScreen(
                             com.google.common.collect.ImmutableList.of(trackIndex)
                         )
                     )
+                } else if (groupType == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
+                    // 视频轨 -1 表示恢复自动自适应码率（ABR），绝不能 setTrackTypeDisabled(true)
+                    params.clearOverridesOfType(groupType)
+                    params.setTrackTypeDisabled(groupType, false)
                 } else {
                     // Disable this track type (e.g. turn embedded subtitles off)
                     params.clearOverridesOfType(groupType)
                     params.setTrackTypeDisabled(groupType, true)
                 }
                 p.trackSelectionParameters = params.build()
-                if (groupType == androidx.media3.common.C.TRACK_TYPE_AUDIO) {
+                if (groupType == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
+                    selectedVideoTrack = trackIndex
+                } else if (groupType == androidx.media3.common.C.TRACK_TYPE_AUDIO) {
                     selectedAudioTrack = trackIndex
                 } else if (groupType == androidx.media3.common.C.TRACK_TYPE_TEXT) {
                     selectedTextTrack = trackIndex
@@ -4170,7 +4182,7 @@ fun VRPlayerScreen(
                     enableAudioTrackPlaybackParams: Boolean
                 ): androidx.media3.exoplayer.audio.AudioSink? {
                     return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
-                        .setAudioProcessors(arrayOf(audioProcessor, teeAudioProcessor))
+                        .setAudioProcessors(arrayOf(audioProcessor, teeAudioProcessor, genderFilterProcessor))
                         .build()
                 }
 
@@ -4313,6 +4325,10 @@ fun VRPlayerScreen(
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_READY) {
                             isVideoPlaying = playWhenReady
+                            if (liveReconnectAttempt > 0) {
+                                liveReconnectAttempt = 0
+                                if (isLiveStream) videoDurationText = "\u25CF LIVE"
+                            }
                         }
                     }
 
@@ -4361,6 +4377,38 @@ fun VRPlayerScreen(
                                 Toast.LENGTH_SHORT
                             ).show()
                             cookieRetryTrigger++
+                            return
+                        }
+                        val exoType = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.type ?: -1
+                        // v2.8.6（直播主线 A 尾项）：直播断流指数退避自动重连
+                        val isLiveNow = isLiveStream || (uriNow != null && MediaFormats.isLikelyLiveStream(Uri.parse(uriNow)))
+                        if (isLiveNow && uriNow != null &&
+                            LiveReconnectPolicy.isRetryableLiveError(error.errorCode, exoType) &&
+                            liveReconnectAttempt < LiveReconnectPolicy.MAX_ATTEMPTS
+                        ) {
+                            val delayMs = LiveReconnectPolicy.nextDelayMs(liveReconnectAttempt)
+                            val attemptNum = liveReconnectAttempt + 1
+                            liveReconnectAttempt = attemptNum
+                            videoDurationText = "\u25CF LIVE \u00B7 " + context.getString(
+                                R.string.live_reconnecting,
+                                attemptNum,
+                                LiveReconnectPolicy.MAX_ATTEMPTS
+                            )
+                            Log.w(
+                                "VRPlayerScreen",
+                                "直播流异常断开（code=${error.errorCode}, type=$exoType），${delayMs}ms 后自动重连（$attemptNum/${LiveReconnectPolicy.MAX_ATTEMPTS}）"
+                            )
+                            liveReconnectJob?.cancel()
+                            liveReconnectJob = scope.launch {
+                                delay(delayMs)
+                                if (selectedMediaItem.uri == uriNow) {
+                                    playerInstance?.exo?.let { liveExo ->
+                                        liveExo.seekToDefaultPosition()
+                                        liveExo.prepare()
+                                        liveExo.playWhenReady = true
+                                    }
+                                }
+                            }
                             return
                         }
                         // ==========================================================
@@ -4420,7 +4468,6 @@ fun VRPlayerScreen(
                         //   TYPE_UNEXPECTED = 其它非解码类异常（Loader 把解析器抛的
                         //                     IndexOutOfBounds 包装后的那种）。
                         //   TYPE_DECODER 交给上面的软解回退，不在这里抢。
-                        val exoType = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.type ?: -1
                         val sourceLikeFailure =
                             exoType == androidx.media3.exoplayer.ExoPlaybackException.TYPE_SOURCE ||
                                 exoType == androidx.media3.exoplayer.ExoPlaybackException.TYPE_UNEXPECTED
@@ -4582,7 +4629,17 @@ fun VRPlayerScreen(
         liveAsrHinted = false
         liveForceExoUri = null
         liveTextTrackPicked = false
+        liveReconnectJob?.cancel()
+        liveReconnectJob = null
+        liveReconnectAttempt = 0
+        selectedVideoTrack = -1
         cookieRetryAttemptedUri = null
+        val cachedGenderWav = MdxStreamingPipeline.cachedFileIfReady(context, selectedMediaItem.uri)
+        genderFilterProcessor.setFilteredWav(cachedGenderWav)
+        if (cachedGenderWav == null) {
+            isGenderFilterEnabled = false
+            genderFilterProcessor.isFilterEnabled = false
+        }
         if (currentGlSurfaceView == null) return@LaunchedEffect
 
         if (selectedMediaItem.isVideo) {
@@ -4904,6 +4961,9 @@ fun VRPlayerScreen(
                     // v2.6.24（直播 P0）：直播**不写进度与时间文本** —— 直播的 duration 可能是
                     // 「滑动窗口时长」（实测 12~15s）而非 0，若这里照写会把上面刚设置的
                     // 「● LIVE」覆盖回 00:08 / 00:15（冒烟实测踩到）。
+                    if (isGenderFilterEnabled) {
+                        genderFilterProcessor.updatePlaybackPositionMs(current)
+                    }
                     if (!isSeekingActive && duration > 0 && !isLiveStream) {
                         videoPlaybackProgress = current.toFloat() / duration.toFloat()
                         val curSec = (current / 1000).toInt()
@@ -8686,6 +8746,22 @@ fun VRPlayerScreen(
                                         prefs.edit().putString("subtitle_search_api_key", it).apply()
                                     },
                                     defaultSearchQuery = selectedMediaItem.title,
+                                    isGenderFilterEnabled = isGenderFilterEnabled,
+                                    onGenderFilterEnabledChange = { on ->
+                                        isGenderFilterEnabled = on
+                                        genderFilterProcessor.isFilterEnabled = on
+                                        if (on) {
+                                            playerInstance?.currentPosition?.let {
+                                                genderFilterProcessor.updatePlaybackPositionMs(it, forceResync = true)
+                                            }
+                                        }
+                                    },
+                                    onGenderFilterWavReady = { wav ->
+                                        genderFilterProcessor.setFilteredWav(wav)
+                                        playerInstance?.currentPosition?.let {
+                                            genderFilterProcessor.updatePlaybackPositionMs(it, forceResync = true)
+                                        }
+                                    },
                                     // v117 修复：此前未接线，落到 SubtitleSettingsPanel 里的空实现默认值，
                                     // 于是"已下载并加载"只是文案 —— 文件从未被解析，字幕永远不显示。
                                     onSubtitleFileLoaded = { file ->
@@ -9093,6 +9169,7 @@ fun VRPlayerScreen(
             val groups = playerInstance?.exo?.currentTracks?.groups ?: emptyList()
             TrackSelectionDialog(
                 groups = groups,
+                selectedVideoTrack = selectedVideoTrack,
                 selectedAudioTrack = selectedAudioTrack,
                 selectedTextTrack = selectedTextTrack,
                 onSelectTrack = { type, idx -> selectMediaTrack(type, idx) },

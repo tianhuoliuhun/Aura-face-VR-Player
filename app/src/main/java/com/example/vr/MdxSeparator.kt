@@ -177,7 +177,31 @@ object MdxSeparator {
         }
     }
 
-    /** 处理一个外层块（15s），把结果写进 [outL]/[outR] 的对应区间。 */
+    /**
+     * 流式分窗分离入口：对单块（<= OUTER_CHUNK）进行人声分离，将结果写入 [outVocalL]/[outVocalR]（与输入同坐标），
+     * 并返回本块已裁掉重叠边界后的有效区间 `[from, to)`；失败返回 null。
+     */
+    internal fun separateSingleWindow(
+        context: Context,
+        winL: FloatArray,
+        winR: FloatArray,
+        length: Int,
+        isFirst: Boolean,
+        isLast: Boolean,
+        outVocalL: FloatArray,
+        outVocalR: FloatArray,
+    ): IntRange? {
+        val s = ensureSession(context) ?: return null
+        if (length <= 0 || length > OUTER_CHUNK) return null
+        return try {
+            processOuterChunk(s, winL, winR, 0, length, isFirst, isLast, outVocalL, outVocalR, outBaseOffset = 0)
+        } catch (t: Throwable) {
+            Log.e(TAG, "流式分窗分离失败: ${t.javaClass.simpleName}: ${t.message}", t)
+            null
+        }
+    }
+
+    /** 处理一个外层块（15s），把结果写进 [outL]/[outR] 的对应区间，返回相对块起点的有效区间 `[from, to)`。 */
     private fun processOuterChunk(
         s: OrtSession,
         left: FloatArray,
@@ -188,7 +212,8 @@ object MdxSeparator {
         isLast: Boolean,
         outL: FloatArray,
         outR: FloatArray,
-    ) {
+        outBaseOffset: Int = start,
+    ): IntRange {
         val blockLen = end - start
         val trim = MdxDsp.TRIM
         val chunkSize = MdxDsp.CHUNK_SIZE
@@ -222,7 +247,7 @@ object MdxSeparator {
         val tensorBuf = FloatArray(4 * MdxDsp.DIM_F * MdxDsp.DIM_T)
         val inName = inputName!!
         // OrtEnvironment 是可空字段，这里取一次非空引用（会话已建成 ⇒ 必然非空）
-        val ortEnv = env ?: return
+        val ortEnv = env ?: return IntRange.EMPTY
 
         for (seg in 0 until numSeg) {
             val base = seg * genSize
@@ -268,9 +293,10 @@ object MdxSeparator {
         val from = if (isFirst) 0 else OUTER_MARGIN
         val to = if (isLast) innerTotal - pad else innerTotal - pad - OUTER_MARGIN
         if (to > from) {
-            System.arraycopy(innerL, from, outL, start + from, to - from)
-            System.arraycopy(innerR, from, outR, start + from, to - from)
+            System.arraycopy(innerL, from, outL, outBaseOffset + from, to - from)
+            System.arraycopy(innerR, from, outR, outBaseOffset + from, to - from)
         }
+        return from until to
     }
 
     fun release() {

@@ -180,8 +180,11 @@ fun TrackSelectionDialog(
     selectedTextTrack: Int,
     onSelectTrack: (trackType: Int, index: Int) -> Unit,
     onDismiss: () -> Unit,
-    accentColor: Color = Color(0xFFD0BCFF)
+    accentColor: Color = Color(0xFFD0BCFF),
+    selectedVideoTrack: Int = -1
 ) {
+    val videoGroup = groups.firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO }
+    val hasMultiVideoQuality = videoGroup != null && videoGroup.mediaTrackGroup.length > 1
     val audioGroup = groups.firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO }
     val textGroup = groups.firstOrNull { it.type == androidx.media3.common.C.TRACK_TYPE_TEXT }
     AlertDialog(
@@ -204,12 +207,71 @@ fun TrackSelectionDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (audioGroup == null && textGroup == null) {
+                if (!hasMultiVideoQuality && audioGroup == null && textGroup == null) {
                     Text(
                         stringResource(R.string.track_none),
                         color = Color.White.copy(alpha = 0.5f),
                         fontSize = 11.sp
                     )
+                }
+
+                if (hasMultiVideoQuality && videoGroup != null) {
+                    Text(
+                        stringResource(R.string.track_video_quality),
+                        color = accentColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (selectedVideoTrack == -1) Color(0x33D0BCFF) else Color.White.copy(alpha = 0.05f))
+                            .clickable { onSelectTrack(androidx.media3.common.C.TRACK_TYPE_VIDEO, -1) }
+                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (selectedVideoTrack == -1) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                            contentDescription = null,
+                            tint = if (selectedVideoTrack == -1) accentColor else Color.White.copy(alpha = 0.4f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.track_video_auto),
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 10.sp
+                        )
+                    }
+                    for (i in 0 until videoGroup.mediaTrackGroup.length) {
+                        val f = videoGroup.mediaTrackGroup.getFormat(i)
+                        val isSel = selectedVideoTrack == i
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSel) Color(0x33D0BCFF) else Color.White.copy(alpha = 0.05f))
+                                .clickable { onSelectTrack(androidx.media3.common.C.TRACK_TYPE_VIDEO, i) }
+                                .padding(horizontal = 8.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isSel) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                tint = if (isSel) accentColor else Color.White.copy(alpha = 0.4f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = LiveReconnectPolicy.formatVideoTrackLabel(f.width, f.height, f.bitrate, i),
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
 
                 audioGroup?.let { g ->

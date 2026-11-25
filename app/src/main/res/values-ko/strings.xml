@@ -306,6 +306,9 @@
     <string name="licenses_desc">이 앱이 사용한 오픈소스, 폰트, 모델을 확인할 수 있습니다</string>
     <string name="action_view">보기</string>
     <string name="track_dialog_title">오디오/자막 트랙</string>
+    <string name="track_video_quality">화질</string>
+    <string name="track_video_auto">자동 (적응형)</string>
+    <string name="live_reconnecting">재연결 중 (%1$d/%2$d)</string>
     <string name="track_none">전환할 오디오/자막 트랙이 없습니다</string>
     <string name="toast_switched_codec">전환됨: %1$s</string>
     <string name="subtitle_loaded_toast">자막 생성 및 로드: %1$s (%2$d줄)</string>
@@ -1054,7 +1057,10 @@
     <string name="media_cast_desc">DLNA 캐스트 수신으로 가져옴</string>
     <!-- v2.4.64：音频性别分析（实验，离线） -->
     <string name="audio_gender_title">오디오 성별 분석(실험)</string>
-    <string name="audio_gender_desc">어느 구간이 남성/여성 음성인지 기본 주파수로 판정합니다. 이 버전은 인식 검증만 하며 재생은 건드리지 않습니다.</string>
+    <string name="audio_gender_desc">남성/여성 음성 구간을 검출하고 장편 스트리밍 분리 및 실시간 필터 전환을 지원합니다.</string>
+    <string name="audio_gender_realtime_toggle">실시간 음성 필터</string>
+    <string name="audio_gender_cache_info">캐시됨 (%1$d MB) · 실시간 전환 가능</string>
+    <string name="audio_gender_cancel_streaming">처리 중 %1$d%% (탭하여 취소)</string>
     <string name="audio_gender_models_ready">모델 준비 완료(%1$d MB)</string>
     <string name="audio_gender_models_need">다운로드 필요: 약 %1$d MB</string>
     <string name="audio_gender_download">모델 다운로드</string>

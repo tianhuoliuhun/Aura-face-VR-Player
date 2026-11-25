@@ -129,6 +129,9 @@ fun SubtitleSettingsPanel(
     maxLines: Int = 2,
     // v2.4.64：音频性别分析要分析的媒体（默认 null = 面板单独预览时无媒体）
     audioGenderMediaUri: String? = null,
+    isGenderFilterEnabled: Boolean = false,
+    onGenderFilterEnabledChange: (Boolean) -> Unit = {},
+    onGenderFilterWavReady: (File?) -> Unit = {},
     onMaxLinesChange: (Int) -> Unit = {},
     subtitleSearchApiKey: String = "",
     onSubtitleSearchApiKeyChange: (String) -> Unit = {},
@@ -881,6 +884,9 @@ fun SubtitleSettingsPanel(
                     AudioGenderSection(
                         accentColor = accentColor,
                         mediaUri = audioGenderMediaUri,
+                        isFilterEnabled = isGenderFilterEnabled,
+                        onFilterEnabledChange = onGenderFilterEnabledChange,
+                        onFilterWavReady = onGenderFilterWavReady,
                     )
 
                     // API Key & Base URL Inputs for engines that require a key.

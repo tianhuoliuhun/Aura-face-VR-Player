@@ -323,6 +323,9 @@
     <string name="licenses_desc">查看本项目使用的开源组件、字体与模型</string>
     <string name="action_view">查看</string>
     <string name="track_dialog_title">音轨与字幕轨</string>
+    <string name="track_video_quality">画质 / 清晰度</string>
+    <string name="track_video_auto">自动（自适应码率）</string>
+    <string name="live_reconnecting">重连中 (%1$d/%2$d)</string>
     <string name="track_none">当前媒体没有可切换的音轨/字幕轨</string>
     <string name="toast_switched_codec">已切换为：%1$s</string>
     <string name="subtitle_loaded_toast">字幕已生成并加载：%1$s（%2$d 句）</string>
@@ -1088,7 +1091,10 @@
     <string name="media_cast_desc">由投屏接收（DLNA）导入</string>
     <!-- v2.4.64：音频性别分析（实验，离线） -->
     <string name="audio_gender_title">音频性别分析（实验）</string>
-    <string name="audio_gender_desc">检测视频里哪些时间段是男声 / 女声（按基频判定）。本版只做识别验证，不改动播放。</string>
+    <string name="audio_gender_desc">检测视频里哪些时间段是男声 / 女声（按基频判定）。支持长片流式人声过滤与实时播放切换。</string>
+    <string name="audio_gender_realtime_toggle">实时去男声过滤</string>
+    <string name="audio_gender_cache_info">已缓存流式过滤音轨 (%1$d MB)，可随时开关</string>
+    <string name="audio_gender_cancel_streaming">流式处理中 %1$d%%（点击取消）</string>
     <string name="audio_gender_models_ready">模型已就绪（%1$d MB）</string>
     <string name="audio_gender_models_need">需下载模型：约 %1$d MB</string>
     <string name="audio_gender_download">下载模型</string>
