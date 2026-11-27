@@ -179,7 +179,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile var onVideoSurfaceCreated: ((SurfaceTexture) -> Unit)? = null
     
     // Google MediaPipe Face Landmarking & Smart Detection Manager
-    private var mediaPipeManager: MediaPipeFaceManager? = null
+    internal var mediaPipeManager: MediaPipeFaceManager? = null
 
     // Real-time Face Detection parameters updated smoothly via background thread
     @Volatile var faceDetectedUniform = 0
@@ -207,20 +207,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // ===== v2.6.22（多脸）：shader 直接消费的数组 uniform（最多 MAX_FACES 张）=====
     // 每张脸一组，索引 0 是主脸。用「交错数组」而非 List<数组>：glUniform2fv 一次传一整组，
     // 每帧零分配（这些数组长期复用）。
-    @Volatile private var faceCountUniform = 0
+    @Volatile internal var faceCountUniform = 0
     /** 各脸中心 (x,y) 交错 */
-    private val faceCentersXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    internal val faceCentersXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
     /** 各脸两眼距离（视口 UV 尺度） */
-    private val eyeDistancesArr = FloatArray(MediaPipeFaceManager.MAX_FACES) { 0.14f }
+    internal val eyeDistancesArr = FloatArray(MediaPipeFaceManager.MAX_FACES) { 0.14f }
     /** 各脸是否有精细点位（0/1） */
-    private val hasDetailedsArr = IntArray(MediaPipeFaceManager.MAX_FACES)
-    private val eyeLeftsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
-    private val eyeRightsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
-    private val mouthPossXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
-    private val chinsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
-    private val mouthHalfWsArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
-    private val mouthHalfHsArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
-    private val mouthAnglesArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
+    internal val hasDetailedsArr = IntArray(MediaPipeFaceManager.MAX_FACES)
+    internal val eyeLeftsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    internal val eyeRightsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    internal val mouthPossXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    internal val chinsXY = FloatArray(MediaPipeFaceManager.MAX_FACES * 2)
+    internal val mouthHalfWsArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
+    internal val mouthHalfHsArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
+    internal val mouthAnglesArr = FloatArray(MediaPipeFaceManager.MAX_FACES)
 
     // 人脸检测的**回读长边**（检测输入尺寸）。
     // v2.6.22（用户要求对齐 AI 弹幕链路）：采样区从「视口中央 512×512 裁剪」改成
@@ -228,7 +228,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // 只剩 ~25px，MediaPipe 检出率骤降（那是"改完反而更差"的陷阱）。
     // 取 512：人脸占画面 1/10 时仍有 ~51px，与旧的"中央块"方案精度相当；
     // 而回读字节数反而更少（1920×1080 → 512×288 = 590KB，旧的 512×512 = 1MB）。
-    private val faceSampleSize = 512
+    internal val faceSampleSize = 512
 
     // 历史：faceReadSize（中央块边长 512）已随 v2.6.22 的整帧采样一并废弃，
     // 保留此说明避免后来者再去"恢复"中央块裁剪 —— 那会重新引入「脸不在中心就采不到」。
@@ -248,13 +248,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * （12 帧 ≈ 0.2~0.4 s @30~60fps），但多脸场景下三张脸同时快速移动本身就少见，
      * 观感上主要是「转头时妆容跟得稍慢」。
      */
-    private var faceSampleInterval = 8
+    internal var faceSampleInterval = 8
 
     /** v2.0.173：人脸检测连续失败计数 —— 连续 3 次失败才把 faceDetectedUniform 置 0（防妆容闪烁） */
-    private var faceMissStreak = 0
+    internal var faceMissStreak = 0
 
     /** v2.6.22（多脸）：多脸检测成功计数，每 60 次打一行诊断（确认检出张数） */
-    private var faceDiagCount = 0
+    internal var faceDiagCount = 0
 
     /**
      * 采样窗口相对**单个视口**的缩放比例（`rw/vpW`、`rh/vpH`）。
@@ -263,18 +263,18 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 采样区只占视口中央一小块，不做这层换算就会「脸越靠边、妆容越跑偏」。
      */
     @Volatile
-    private var faceCropScaleX = 1f
+    internal var faceCropScaleX = 1f
 
     @Volatile
-    private var faceCropScaleY = 1f
+    internal var faceCropScaleY = 1f
 
     /** GL 线程私有的回读缓冲（复用，避免每 8 帧新建 1MB DirectByteBuffer） */
-    private var faceReadBuffer: java.nio.ByteBuffer? = null
+    internal var faceReadBuffer: java.nio.ByteBuffer? = null
 
     /** 待检测帧的数组池：GL 线程生产、faceExecutor 消费，用完归还（避免每帧 1MB 垃圾） */
-    private var faceFramePool: ByteArray? = null
+    internal var faceFramePool: ByteArray? = null
 
-    private val faceExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    internal val faceExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /**
      * v2.4.38（美颜审查 #10）：GPUPixel **后台初始化**线程。
@@ -294,7 +294,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 检测期间 GPU 空转、GPU 处理期间 CPU 空转（实测检测段占 T_proc 的 40~60%）。
      * 拆成两条线程后，T_proc ≈ max(检测, GPU) 而非二者之和。
      */
-    private val gpDetectExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    internal val gpDetectExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /**
      * v2.6.22（美颜审查 P0-1）：线程池是否已 `shutdownNow()`。
@@ -310,7 +310,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *
      * 修法：置位后所有提交点提前返回；提交本身也统一走 [submitSafely] 捕获拒绝异常并回滚计数。
      */
-    @Volatile private var executorsClosed = false
+    @Volatile internal var executorsClosed = false
 
     /**
      * GPUPixel 路径的在途任务计数（检测 + GL 处理各算 1）。
@@ -320,20 +320,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * （回读会取走帧池里那块正被读的数组 → 数据被覆盖），也不会有新结果可贴回。
      * 归零时才允许下一帧回读，并把帧归还池 —— 顺序上保证「读完之后才复用」。
      */
-    private val gpInFlight = java.util.concurrent.atomic.AtomicInteger(0)
+    internal val gpInFlight = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** 检测线程产出、GL 处理线程消费（volatile 发布；数组本身不可变，引用换代即"新值"） */
-    @Volatile private var gpCachedLandmarks: FloatArray? = null
+    @Volatile internal var gpCachedLandmarks: FloatArray? = null
 
     /** 连续检测失败次数：达阈值才清缓存（对齐 GLSL 路径 faceMissStreak 的防抖思想） */
-    private var gpDetectMissStreak = 0
+    internal var gpDetectMissStreak = 0
 
     /** v2.6.23：GPUPixel 检测低频诊断计数（每 60 次打一行检出张数） */
-    private var gpDiagCount = 0
+    internal var gpDiagCount = 0
 
     /** 检测降频计数器与间隔（每 N 帧真检一次；其余帧复用上次 landmarks） */
-    private var gpFrameTick = 0
-    @Volatile private var gpDetectInterval = 2
+    internal var gpFrameTick = 0
+    @Volatile internal var gpDetectInterval = 2
 
     // ===== v2.0.186：分段性能诊断（每 120 帧一行）=====
     // 用于验证「检测与 GL 处理并行」的实际收益：detect 与 gpu 两段应互不叠加，
@@ -345,11 +345,11 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var gpProfReadbackNanos = 0L
     private var gpProfPboWaitFrames = 0
 
-    private fun gpProfLogDetect(nanos: Long) {
+    internal fun gpProfLogDetect(nanos: Long) {
         gpProfDetectNanos += nanos
     }
 
-    private fun gpProfLogGpu(nanos: Long) {
+    internal fun gpProfLogGpu(nanos: Long) {
         gpProfGpuNanos += nanos
         gpProfFrames++
         if (gpProfFrames >= 120) {
@@ -374,20 +374,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     /** @param waited 本帧是否因 fence 未就绪而放弃（仅 PBO 路径可能为 true） */
-    private fun gpProfLogReadback(nanos: Long, waited: Boolean) {
+    internal fun gpProfLogReadback(nanos: Long, waited: Boolean) {
         gpProfReadbackNanos += nanos
         if (waited) gpProfPboWaitFrames++
     }
 
     /** v2.0.156：MediaPipe 实例改为后台创建（原先在 GL 线程同步创建，会造成首帧明显卡顿） */
     private val faceInitExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private val isDetectingFace = java.util.concurrent.atomic.AtomicBoolean(false)
-    private var faceFrameCounter = 0
+    internal val isDetectingFace = java.util.concurrent.atomic.AtomicBoolean(false)
+    internal var faceFrameCounter = 0
 
     // v84：检测线程缓冲复用（避免每帧创建 Bitmap/数组）
-    private var faceArgBuffer: IntArray? = null
-    private var faceBmp: Bitmap? = null
-    private var faceScaledBmp: Bitmap? = null
+    internal var faceArgBuffer: IntArray? = null
+    internal var faceBmp: Bitmap? = null
+    internal var faceScaledBmp: Bitmap? = null
 
     /**
      * v2.6.17：`glReadPixels(GL_RGBA)` 的输出能否**直接** `copyPixelsFromBuffer` 进
@@ -395,21 +395,21 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *
      * 取值：0 = 未探测，1 = 可直拷，2 = 需回退逐像素重排。探测只做一次（1×1 位图）。
      */
-    private var faceDirectCopy = 0
+    internal var faceDirectCopy = 0
 
     // v2.6.17：GLSL 检测段的分段计时（每 60 次输出一行）—— 用于真机确认
     // 「前置 CPU 段（回读字节 → Bitmap）已压到底」，即 prep 应远小于 detect。
-    private var faceProfCount = 0
-    private var faceProfPrepNanos = 0L
-    private var faceProfDetectNanos = 0L
+    internal var faceProfCount = 0
+    internal var faceProfPrepNanos = 0L
+    internal var faceProfDetectNanos = 0L
 
     // Frame transfer between the GL thread and the face-detection executor.
     // The GL thread publishes a freshly allocated frame, and the executor consumes it,
     // so there is no shared mutable array being written and read concurrently.
-    private val faceFrameLock = Any()
-    private var pendingFaceFrame: ByteArray? = null
-    private var pendingFaceFrameW = 0
-    private var pendingFaceFrameH = 0
+    internal val faceFrameLock = Any()
+    internal var pendingFaceFrame: ByteArray? = null
+    internal var pendingFaceFrameW = 0
+    internal var pendingFaceFrameH = 0
 
     // ===== v2.0.187 阶段2：texture 输入通道的待处理纹理 =====
     /**
@@ -418,9 +418,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 阶段 2 下回读只用于人脸检测（小图），**处理**直接吃这张纹理 —— 免去每帧
      * 8.29 MB 的 `glTexImage2D` 上传。
      */
-    @Volatile private var pendingInputTexId = 0
-    @Volatile private var pendingInputTexW = 0
-    @Volatile private var pendingInputTexH = 0
+    @Volatile internal var pendingInputTexId = 0
+    @Volatile internal var pendingInputTexW = 0
+    @Volatile internal var pendingInputTexH = 0
     /** 最近一次成功美颜结果的纹理（供「本帧无新结果」时复用，避免回落到原始帧） */
     @Volatile private var gpLastResultTex = 0
 
@@ -478,60 +478,9 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var boxVertexCount = 0
 
     // GL SL shaders variables
-    private class GLProgram(
-        val programId: Int,
-        val hMVPMatrix: Int,
-        val hPosition: Int,
-        val hTextureCoord: Int,
-        val hIsVideo: Int,
-        val hSamplerImage: Int,
-        val hSamplerVideo: Int,
-        val hProjectionMode: Int,
-        val hStereoMode: Int,
-        val hLeftEye: Int,
-        val hBeautyStrength: Int,
-        val hTextureDetail: Int,
-        val hBrightness: Int,
-        val hContrast: Int,
-        val hTexelSize: Int,
-        val hIsMirrored: Int,
-        val hWarpMode: Int,
-        val hCurvature: Int,
-        /** v2.1.211：鱼眼视场角句柄 */
-        val hFisheyeFov: Int,
-        val hWhitening: Int,
-        val hFaceSlimming: Int,
-        val hBigEyes: Int,
-        val hDarkCircles: Int,
-        val hNoseSlimming: Int,
-        val hMouth: Int,
-        val hTeethWhitening: Int,
-        val hLipstick: Int,
-        val hBlush: Int,
-        val hEyebrows: Int,
-        val hLongLegs: Int,
-        val hSmallHead: Int,
-        val hFaceDetected: Int,
-        // v2.6.22（多脸）：全部改成数组 uniform 的位置（数组首元素的 location 即可，
-        // glUniform*v 会连续写入 N 个元素）。
-        val hFaceCount: Int,
-        val hFaceCenters: Int,
-        val hEyeDistances: Int,
-        val hHasDetaileds: Int,
-        val hEyeLefts: Int,
-        val hEyeRights: Int,
-        val hMouthPoss: Int,
-        val hMouthHalfWs: Int,
-        val hMouthHalfHs: Int,
-        val hMouthAngles: Int,
-        val hChins: Int,
-        val hWarpDualCenter: Int,
-        val hLutTexture: Int,
-        val hLutMix: Int
-    )
 
-    private var videoProgram: GLProgram? = null
-    private var imageProgram: GLProgram? = null
+    private var videoProgram: VRMainGLProgram? = null
+    private var imageProgram: VRMainGLProgram? = null
     private var fallbackProgramId = -1
     private var hFallbackPosition = -1
     private var hFallbackTexCoord = -1
@@ -544,108 +493,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // 双线性放大几乎不可辨；而高频细节（毛孔、发丝）本来就靠 detail * uTextureDetail
     // 从全分辨率原图叠回去 —— 拆分后这个「叠回」在合成 pass 里做，纹理保留度不受影响。
     //
-    // 三个 pass：
-    //   down  : 主渲染结果(全分辨率纹理) → 降采样 1/2
-    //   blur  : 半分辨率上做 8 邻域保边均值（频域分离的低频层）
-    //   blend : 全分辨率原图 + 半分辨率低频，按皮肤判定与 uBeautyStrength 混合上屏
-    //
-    // 收益：磨皮 pass 的片元数降到 1/4（该 pass 开销 ↓75%）。
-    private var pDownProgram = 0
-    private var pBlurProgram = 0
-    private var pBlendProgram = 0
-    private var downTexId = 0        // 主渲染结果的**全分辨率**拷贝
-    private var downFboId = 0
-    private var halfLowTexId = 0     // 半分辨率低频层
-    private var halfLowFboId = 0
-    private var halfTexId = 0        // 半分辨率原图（供 blur pass 采样）
-    private var halfFboId = 0
-    private var halfW = 0
-    private var halfH = 0
-    private var halfFboW = 0
-    private var halfFboH = 0
-    private var downFboW = 0
-    private var downFboH = 0
-
-    // ===== v2.0.206：MEMC / FSR 的 program 与 FBO 资源 =====
-    // FSR：EASU（两级输入变体）→ RCAS，ping-pong 两张目标分辨率纹理
-    private var pFsrEasuOes = 0      // EASU，输入为 ExternalOES（视频源）
-    private var pFsrEasu2d = 0       // EASU，输入为普通 2D（图片源，或 MEMC 的输出）
-    private var pFsrRcas = 0
-    private var fsrTexA = 0
-    private var fsrFboA = 0
-    private var fsrTexB = 0
-    private var fsrFboB = 0
-    private var fsrW = 0
-    private var fsrH = 0
-
-    // MEMC：拷贝 → 双帧持有 → ME → MC，另加一张 1x1 的场景切换检测
-    private var pMemcCopyOes = 0
-    private var pMemcCopy2d = 0
-    private var pMemcMe = 0
-    private var pMemcMc = 0
-    private var pMemcDiff = 0
-    private var memcPrevTex = 0
-    private var memcPrevFbo = 0
-    private var memcCurrTex = 0
-    private var memcCurrFbo = 0
-    private var memcOutTex = 0
-    private var memcOutFbo = 0
-    private var memcMvFTex = 0
-    private var memcMvFFbo = 0
-    private var memcMvBTex = 0
-    private var memcMvBFbo = 0
-    private var memcDiffTex = 0
-    private var memcDiffFbo = 0
-    private var memcW = 0
-    private var memcH = 0
-    private var memcMvW = 0
-    private var memcMvH = 0
-
-    /** 是否已攒够「上一帧」。首帧没有 prev 可插，必须先直通一次 */
-    private var memcHasPrev = false
-
-    /** 记录源帧到达时刻（uptimeMillis），用于按真实时间算插帧相位 */
-    private var memcPrevTimeMs = 0L
-    private var memcCurrTimeMs = 0L
-
-    /** 场景切换标记：为 true 时本帧不插帧（直接输出 curr），由 1x1 帧差检测回读得到 */
-    private var memcSceneCut = false
-
-    /** 本帧实际使用的插帧相位，仅用于日志诊断 */
-    private var memcLastPhase = 0f
-
-    /** MEMC 目标帧率的节流计时（毫秒） */
-    private var memcThrottleMs = 0L
-
-    // ===== v2.0.206 诊断：低频日志，用于实机验证增强链是否**真的在跑** =====
-    // 设计原则：状态变化时打一行 + 每 120 帧一行统计。
-    // 这样既能证明「开关真的传到了渲染层、ME/MC 真的在算」，又不会刷屏淹没其他日志。
-    private var lastEnhanceStateKey = ""
-    private var memcFrameCount = 0L
-    private var fsrFrameCount = 0L
-    private var memcSceneCutCount = 0L
-
-    /** 相位落在 (0.05, 0.95) 的帧数 —— 「插帧真的发生了」的直接证据 */
-    private var memcInterpCount = 0L
-
-    /** 上一次诊断打印时用的增强纹理 id，变化时才重新打印（避免刷屏） */
     private var lastDiagEnhanceTex = -1
     private var lastDiagProgKind = ""
-    private var fsrSrcW = 0
-    private var fsrSrcH = 0
-
-    private val halfQuad: java.nio.FloatBuffer = java.nio.ByteBuffer.allocateDirect(4 * 4 * 4)
-        .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer().apply {
-            put(floatArrayOf(
-                -1f, -1f, 0f, 0f,
-                1f, -1f, 1f, 0f,
-                -1f, 1f, 0f, 1f,
-                1f, 1f, 1f, 1f
-            ))
-            position(0)
-        }
-    /** 半分辨率 pass 是否为本次 onDrawFrame 铺好了数据（决定上屏走合成还是直绘） */
-    private var halfPassReady = false
 
     // ===== 美颜对比模式（v102：GPUPixel 已移除，纯 shader 美颜）=====
     /** v2.0.160：美颜总开关（由原「对比原图」改造而来；false = 直通原图）。v2.0.172：默认改为关 */
@@ -717,8 +566,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // v2.4.34（#8）：数据与尺寸封装进同一对象、用 AtomicReference 原子取走，
     // 避免「先读 bytes 再置 null」两步之间被 faceExecutor 的新写入覆盖（丢帧），
     // 以及分辨率变化时「旧 bytes 配新 W/H」导致的 glTexSubImage2D 尺寸错配。
-    private data class GpRegion(val bytes: ByteArray, val w: Int, val h: Int)
-    private val gpRegionPending = java.util.concurrent.atomic.AtomicReference<GpRegion?>(null)
+    internal data class GpRegion(val bytes: ByteArray, val w: Int, val h: Int)
+    internal val gpRegionPending = java.util.concurrent.atomic.AtomicReference<GpRegion?>(null)
     // v2.0.186：删除 gpRegionPool 复用池 —— JNI 侧 nativeGetRgbaBuffer 每次都
     // NewByteArray + SetByteArrayRegion（jni_sink_raw_data.cc:97-104），Java 拿到的
     // 必然是全新数组，"native 复用输出 buffer" 对 Java 层不成立。原先再 arraycopy
@@ -736,7 +585,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 因为「未跳读但后台未完成」的帧同样没有新结果、同样会闪；
      * 本字段保留用于诊断打点（区分「后台忙」与「后台空闲但未出结果」两种来源）。
      */
-    private var gpSkipReadThisFrame = false
+    internal var gpSkipReadThisFrame = false
     /** 最近一次成功的「美颜结果 FBO 快照」纹理（含全部 GPUPixel 处理），跳过回读时用它上屏 */
     private var gpResultTexId = 0
 
@@ -747,7 +596,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 与 [gpRegionPending] 语义对应：二者都表示「后台产出了一个可用的新结果」，
      * 只是载体不同（GPU texture vs CPU 字节数组）。
      */
-    @Volatile private var gpResultTexIdPending = 0
+    @Volatile internal var gpResultTexIdPending = 0
     /**
      * texture 通道是否已确认可用：`null` = 尚未校验。
      *
@@ -757,7 +606,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      */
     private var gpTexturePathOk: Boolean? = null
     /** 已请求回退到 raw-data 通道（Pipeline 下次 ensure 时重建为 SinkRawData） */
-    @Volatile private var gpTextureFallbackRequested = false
+    @Volatile internal var gpTextureFallbackRequested = false
     /** texture 通道成功贴回的帧数（诊断） */
     private var gpTextureAppliedFrames = 0
     private var gpResultFboId = 0
@@ -788,8 +637,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /** 连续同向调整计数（≥2 才真正换档，抑制横跳）；[gpAdaptiveLastDir] 记录上次方向 */
     private var gpAdaptiveDirStreak = 0
     private var gpAdaptiveLastDir = 0
-    private var lastSampleX0 = 0
-    private var lastSampleY0 = 0
+    internal var lastSampleX0 = 0
+    internal var lastSampleY0 = 0
 
     // ===== v2.0.177：GPUPixel 回读收窄到人脸 ROI =====
     /**
@@ -831,7 +680,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 瘦脸 / 大眼依赖 Mars-Face 关键点定位，1/2 分辨率下人脸仍有 100+ 像素宽，精度足够。
      * 故统一按 0.5 倍回读 —— 内存流量降到 1/4（1920×1080 → 960×540 ≈ 2.1 MB）。
      */
-    private val gpReadDownscale = 2
+    internal val gpReadDownscale = 2
 
     /**
      * v2.0.185：自适应降采样的**上限**档位。
@@ -847,7 +696,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val gpReadMinSide = 128
 
     /** 本帧是否为「全覆盖」模式（2D 全视频 或 VR 全屏）；false = 旧的人脸 ROI 模式 */
-    private var gpFullCoverageThisFrame = false
+    internal var gpFullCoverageThisFrame = false
 
     /**
      * 是否启用「全覆盖」（v2.0.182 起默认为 true）。
@@ -865,15 +714,15 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *   - 人脸 ROI：UV 覆盖 = 该矩形在视口里的实际位置与占比。
      * 若误用回读像素尺寸当目标矩形，降采样后只能填住视口左上角一小块。
      */
-    private var gpReadUvX0 = 0f
-    private var gpReadUvY0 = 0f
-    private var gpReadUvW = 1f
-    private var gpReadUvH = 1f
+    internal var gpReadUvX0 = 0f
+    internal var gpReadUvY0 = 0f
+    internal var gpReadUvW = 1f
+    internal var gpReadUvH = 1f
     /** 上一帧实际生效的回读区（像素，窗口坐标）—— 贴回时必须与回读一致 */
-    private var gpLastReadX0 = 0
-    private var gpLastReadY0 = 0
-    private var gpLastReadW = 0
-    private var gpLastReadH = 0
+    internal var gpLastReadX0 = 0
+    internal var gpLastReadY0 = 0
+    internal var gpLastReadW = 0
+    internal var gpLastReadH = 0
 
     // v2.0.182：降采样结果的中转纹理（上传 → GPU 上采样拉伸贴回 FBO）
     private var gpUploadTexId = 0
@@ -883,10 +732,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var gpScaledBlitQuad: java.nio.FloatBuffer? = null
 
     // GPUPixel 模式的离屏渲染目标（画到 FBO → 区域处理贴回 → blit 上屏）
-    private var gpFboId = 0
-    private var gpFboTexId = 0
-    private var gpFboW = 0
-    private var gpFboH = 0
+    internal var gpFboId = 0
+    internal var gpFboTexId = 0
+    internal var gpFboW = 0
+    internal var gpFboH = 0
 
     // ===== v2.0.187 阶段2：输入帧缓冲改**双缓冲轮转** =====
     // 引入 texture 输入通道后，GPUPixel 后台线程会直接采样 gpFbo 的纹理；若只有一张，
@@ -914,7 +763,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 本项目 EGL 上下文是 ES3（`VRGLSurfaceView` 用 `setEGLContextClientVersion(3)`），
      * 故 `glBlitFramebuffer` 可用。
      */
-    private var gpHalfFboId = 0
+    internal var gpHalfFboId = 0
     private var gpHalfFboTexId = 0
     private var gpHalfFboW = 0
     private var gpHalfFboH = 0
@@ -936,13 +785,13 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     /** 下一个要写入的 PBO 槽（收割的是 1 - gpPboIdx） */
     private var gpPboIdx = 0
     /** 是否有已提交、尚未收割的回读 */
-    private var gpPboActive = false
+    internal var gpPboActive = false
     /** 上一次提交的回读字节数与尺寸（用于检测"尺寸变化 → 在途数据作废"） */
-    private var gpPboPendingBytes = 0
-    private var gpPboPendingW = 0
-    private var gpPboPendingH = 0
+    internal var gpPboPendingBytes = 0
+    internal var gpPboPendingW = 0
+    internal var gpPboPendingH = 0
     /** 运行时探测：一旦某步 GL 调用出错就永久回退同步读（护旧驱动） */
-    @Volatile private var gpPboEnabled = true
+    @Volatile internal var gpPboEnabled = true
     /** fence 连续未就绪的帧数：达阈值判定驱动异常，回退同步读（正常应在一帧内 signal） */
     private var gpPboStall = 0
     /**
@@ -968,8 +817,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile private var pendingLutRgba: ByteArray? = null // 待上传（UI 线程写入，GL 线程消费）
 
     // Viewport and matrices
-    private var displayWidth = 1080
-    private var displayHeight = 1920
+    internal var displayWidth = 1080
+    internal var displayHeight = 1920
     private var lastScaleX = 0f
     private var lastScaleY = 0f
     private var lastSrcW = 0
@@ -981,37 +830,6 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private val mvpMatrix = FloatArray(16)
 
     // Shaders source code
-    private val vertexShaderCode = """
-        uniform mat4 uMVPMatrix;
-        attribute vec4 aPosition;
-        attribute vec2 aTextureCoord;
-        varying vec2 vTextureCoord;
-        void main() {
-            gl_Position = uMVPMatrix * aPosition;
-            vTextureCoord = aTextureCoord;
-        }
-    """.trimIndent()
-
-    // Minimal fallback shader used when the main shader fails to compile on a
-    // strict device driver. Keeps photos/panoramas visible (plain textured quad).
-    private val fallbackVertexShaderCode = """
-        attribute vec4 aPosition;
-        attribute vec2 aTextureCoord;
-        varying vec2 vTextureCoord;
-        void main() {
-            gl_Position = aPosition;
-            vTextureCoord = aTextureCoord;
-        }
-    """.trimIndent()
-
-    private val fallbackFragmentShaderCode = """
-        precision mediump float;
-        varying vec2 vTextureCoord;
-        uniform sampler2D uSampler;
-        void main() {
-            gl_FragColor = texture2D(uSampler, vTextureCoord);
-        }
-    """.trimIndent()
 
     // Latest shader compile error, surfaced to the UI so black-screen causes are visible
     @Volatile var shaderError: String? = null
@@ -1050,672 +868,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     //   VIDEO_OES defined  -> uSamplerVideo is samplerExternalOES (video playback)
     //   VIDEO_OES undefined -> uSamplerVideo is sampler2D (images/panoramas, keeps
     //                          strict GPU drivers from touching an empty OES slot)
-    private val fragmentShaderCode = """
-        #ifdef VIDEO_OES
-        #extension GL_OES_EGL_image_external : enable
-        #endif
-        precision highp float;
-        
-        varying vec2 vTextureCoord;
-        
-        uniform int uIsVideo;
-        uniform sampler2D uSamplerImage;
-        #ifdef VIDEO_OES
-        uniform samplerExternalOES uSamplerVideo;
-        #else
-        uniform sampler2D uSamplerVideo;
-        #endif
-        
-        // Settings
-        uniform int uProjectionMode; // 0 = Standard, 1 = FishEye, 2 = 360 Sphere, 3 = 180 Dome
-        uniform int uStereoMode;     // 0 = Mono, 1 = SBS, 2 = TAB
-        uniform int uLeftEye;        // 1 = Left, 0 = Right
-        uniform int uIsMirrored;
-        uniform int uWarpMode;
-        uniform float uCurvature;
-        // v2.1.211：鱼眼视场角（度）。仅 uProjectionMode==1 时被读取
-        uniform float uFisheyeFov;
-        
-        uniform float uBeautyStrength; 
-        uniform float uBrightness;
-        uniform float uContrast;
-        uniform vec2 uTexelSize;
-        
-        // Detailed cosmetics uniforms
-        // v2.0.159：磨皮「高频保留度」—— 频域分离后的纹理叠回系数（<1 更平滑，>1 相当于 USM 锐化）
-        uniform float uTextureDetail;
-        uniform float uWhitening;
-        uniform float uFaceSlimming;
-        uniform float uBigEyes;
-        uniform float uDarkCircles;
-        uniform float uNoseSlimming;
-        uniform float uMouth;
-        uniform float uTeethWhitening;
-        uniform float uLipstick;
-        uniform float uBlush;
-        uniform float uEyebrows;
-        uniform float uLongLegs;
-        uniform float uSmallHead;
-        
-        // Face recognition tracking uniforms
-        uniform int uFaceDetected;
-        uniform int uFaceCount;
-        // v2.6.22（多脸）：每张脸一组锚点，最多 3 张（与 MediaPipe setNumFaces(3) 一致）
-        uniform vec2 uFaceCenters[3];
-        uniform float uEyeDistances[3];
-        
-        // Precise MediaPipe 468-point features (normalized UV space)
-        uniform int uHasDetaileds[3];
-        uniform vec2 uEyeLefts[3];
-        uniform vec2 uEyeRights[3];
-        uniform vec2 uMouthPoss[3];
-        // v2.0.159：嘴部形状参数（由 MediaPipe 唇部关键点算出）—— 供椭圆 mask 使用，
-        // 取代原先「以嘴中心为圆心的正圆」。值为 0 表示未取到（shader 内回退到 fUnit 比例）。
-        uniform float uMouthHalfWs[3];
-        uniform float uMouthHalfHs[3];
-        uniform float uMouthAngles[3];
-        uniform vec2 uChins[3];
-        uniform int uWarpDualCenter;
-        
-        // v104 LUT 视频滤镜（512x512 RGBA 打包：8x8 网格，每格 64x64）
-        uniform sampler2D uLutTexture;
-        uniform float uLutMix;   // 0 = 关闭，1 = 完全应用
-        
-        // 3D LUT 查找：层 z 位于 row=z/8, col=z%8，格内 x=r, y=g；
-        // 像素中心偏移避免格间泄漏，GL_LINEAR 提供格内双线性 + 层间 mix
-        vec3 applyLut(vec3 color) {
-            const float SIZE = 64.0;
-            const float GRID = 8.0;
-            float scale = (SIZE - 1.0) / SIZE;
-            float offset = 0.5 / SIZE;
-            vec3 c = clamp(color, 0.0, 1.0) * scale + offset;
-            float slice = floor(c.b * (SIZE - 1.0));  // v104 修复：用 SIZE-1 (63) 而非 GRID (8)，覆盖 64 个 slice
-            float frac = c.b * (SIZE - 1.0) - slice;
-            float row = floor(slice / GRID);
-            float col = mod(slice, GRID);
-            vec2 uv = vec2((col + c.r) / GRID, (row + c.g) / GRID);
-            float slice2 = min(slice + 1.0, SIZE - 1.0);
-            float row2 = floor(slice2 / GRID);
-            float col2 = mod(slice2, GRID);
-            vec2 uv2 = vec2((col2 + c.r) / GRID, (row2 + c.g) / GRID);
-            vec3 lut0 = texture2D(uLutTexture, uv).rgb;
-            vec3 lut1 = texture2D(uLutTexture, uv2).rgb;
-            return mix(lut0, lut1, frac);
-        }
-        
-        // Simple fast skin tone thresholding in RGB
-        bool isSkin(vec3 rgb) {
-            float r = rgb.r;
-            float g = rgb.g;
-            float b = rgb.b;
-            return (r > 0.35 && g > 0.15 && b > 0.08 && r > g && r > b && (r - g) > 0.05);
-        }
 
-        // v2.0.159：soft-light 混合 —— 用于腮红 / 口红等妆容。
-        // 相比原来的「纯加法」，它能保留底层皮肤的明暗层次，不会把脸颊糊成一片纯色，
-        // 也不会把高光区顶到溢出。
-        vec3 softLight(vec3 base, vec3 blend) {
-            vec3 lo = 2.0 * base * blend + base * base * (1.0 - 2.0 * blend);
-            vec3 hi = sqrt(max(base, vec3(0.0))) * (2.0 * blend - 1.0) + 2.0 * base * (1.0 - blend);
-            return clamp(mix(lo, hi, step(vec3(0.5), blend)), 0.0, 1.0);
-        }
-
-        // v2.0.159：带倾角的椭圆软遮罩，返回 0~1 权重（1 = 中心，0 = 边界外）。
-        // 取代原来「以关键点为圆心的正圆」判定 —— 嘴唇是横向长条、腮红是椭圆、眉是斜长条，
-        // 正圆必然「圆小涂不到嘴角、圆大溢出到下巴」。softness 控制边界羽化宽度（0.2~0.4 效果自然）。
-        // 参数名刻意避开 center / scale —— main() 里有同名局部变量，免得遮蔽后看代码犯迷糊
-        float ellipseMask(vec2 p, vec2 ctr, vec2 rad, float angle, float softness) {
-            float ca = cos(angle);
-            float sa = sin(angle);
-            vec2 d = p - ctr;
-            vec2 q = vec2(ca * d.x - sa * d.y, sa * d.x + ca * d.y);
-            float rr = length(q / max(rad, vec2(1e-4)));
-            return 1.0 - smoothstep(1.0 - softness, 1.0, rr);
-        }
-
-        void main() {
-            vec2 tc = vTextureCoord;
-            
-            // 1. Calculate active sub-frame center and scale for 3D stereoscopic offset mappings
-            vec2 center = vec2(0.5, 0.5);
-            vec2 scale = vec2(1.0, 1.0);
-            
-            if (uStereoMode == 1) { // Side-by-Side (SBS)
-                scale.x = 0.5;
-                if (uLeftEye == 1) {
-                    center.x = 0.25;
-                } else {
-                    center.x = 0.75;
-                }
-            } else if (uStereoMode == 2) { // Top-Bottom (TAB)
-                scale.y = 0.5;
-                if (uLeftEye == 1) {
-                    center.y = 0.25;
-                } else {
-                    center.y = 0.75;
-                }
-            }
-            
-            // Map texture coordinates to active eye segment first
-            if (uStereoMode == 1) { // Side-by-Side (SBS)
-                if (uLeftEye == 1) {
-                    tc.x = tc.x * 0.5;
-                } else {
-                    tc.x = 0.5 + tc.x * 0.5;
-                }
-            } else if (uStereoMode == 2) { // Top-Bottom (TAB)
-                if (uLeftEye == 1) {
-                    tc.y = tc.y * 0.5;
-                } else {
-                    tc.y = 0.5 + tc.y * 0.5;
-                }
-            }
-            
-            // 双中心变形：2:1 全景（VR_360 + MONO）左右半区各自以 25%/75% 为变形中心，
-            // 使左右两侧的变形/透视效果对称自然（如 360° 球面观看时正前/正后不变形）。
-            if (uWarpDualCenter == 1 && uStereoMode == 0) {
-                center.x = (tc.x < 0.5) ? 0.25 : 0.75;
-            }
-            
-            // 2. Lens imaging distortion: cylindrical / spherical / curved viewing-lens
-            //    warps applied in the active eye segment coordinate space. This only
-            //    distorts the rendered image (the "lens" you look through) and never
-            //    modifies the video source itself.
-            //    优化：所有变形因子用 clamp 防止高曲率下变负导致纹理翻转/崩溃，
-            //    并使用平滑二次曲线使变形过渡自然。
-            float curv = clamp(uCurvature, 0.0, 1.0);
-            if (uWarpMode == 1) { // Original Cylinder (等距矩形柱面)
-                vec2 coord = (tc - center) / (0.5 * scale);
-                float k = curv * (coord.x * coord.x);
-                coord.y = coord.y * clamp(1.0 + k * 1.2, 0.1, 3.0);
-                coord.x = coord.x * clamp(1.0 + k * 0.5, 0.1, 2.0);
-                tc = center + coord * (0.5 * scale);
-            }
-            else if (uWarpMode == 2) { // Cylinder (等距圆柱)
-                vec2 coord = (tc - center) / (0.5 * scale);
-                float k = curv * (coord.x * coord.x);
-                coord.y = coord.y * clamp(1.0 + k * 2.5, 0.1, 3.0);
-                coord.x = coord.x * clamp(1.0 + k * 1.0, 0.1, 2.0);
-                tc = center + coord * (0.5 * scale);
-            }
-            else if (uWarpMode == 3) { // Sphere (立体球面)
-                vec2 coord = (tc - center) / (0.5 * scale);
-                float r = length(coord);
-                if (r > 0.001) {
-                    // 平滑枕形：边缘按 r² 平滑拉伸，clamp 防爆
-                    float rf = r * clamp(1.0 + curv * r * r * 2.0, 0.1, 2.5);
-                    tc = center + (coord / r) * rf * (0.5 * scale);
-                }
-            }
-            else if (uWarpMode == 4) { // Curve (环幕曲面)
-                vec2 coord = (tc - center) / (0.5 * scale);
-                float k = curv * abs(coord.x);
-                coord.y = coord.y * clamp(1.0 + k * 1.5, 0.1, 2.5);
-                tc = center + coord * (0.5 * scale);
-            }
-            else if (uWarpMode == 5) { // Anti-Sphere (反向球面/桶形)
-                vec2 coord = (tc - center) / (0.5 * scale);
-                float r = length(coord);
-                if (r > 0.001) {
-                    // 桶形畸变：边缘向内收缩，clamp 保证非负（防纹理翻转）
-                    float rf = r * clamp(1.0 - curv * r * r * 1.2, 0.1, 1.5);
-                    tc = center + (coord / r) * rf * (0.5 * scale);
-                }
-            }
-            else if (uWarpMode == 6) { // Anti-Curve (反向曲面)
-                vec2 coord = (tc - center) / (0.5 * scale);
-                float k = curv * abs(coord.x);
-                coord.y = coord.y * clamp(1.0 - k * 1.0, 0.1, 1.5);
-                tc = center + coord * (0.5 * scale);
-            }
-            
-            // Mirror horizontally correctly within each eye segment center:
-            // VR_360 (2) and VR_180 (3) spheres are inherently flipped on the inside.
-            // v2.1.210：5 = EAC（同样是球体内侧，翻转方向与 360/180 一致，一并纳入）
-            if (uProjectionMode == 2 || uProjectionMode == 3 || uProjectionMode == 5 ||
-                uProjectionMode == 6) {
-                if (uIsMirrored == 1) {
-                    // Naturally mirrored is already mirrored, so keep it as is
-                } else {
-                    // Normal state: un-reverse the naturally mirrored sphere mapping
-                    tc.x = center.x - (tc.x - center.x);
-                }
-            } else {
-                if (uIsMirrored == 1) {
-                    tc.x = center.x - (tc.x - center.x);
-                }
-            }
-            
-            // Fish-eye local polar radial warp coordinate simulation, centered inside active video view segment
-            // 优化：全域连续处理（r 最大 ~0.707），边缘平滑过渡无突变
-            if (uProjectionMode == 1) {
-                vec2 d = (tc - center) / scale;
-                float r = length(d);
-                float rMax = 0.7071;
-                if (r > 0.0001) {
-                    float theta = atan(d.y, d.x);
-                    // 标准穹顶压缩：r 归一化后平方压缩，全域平滑
-                    float rn = clamp(r / rMax, 0.0, 1.0);
-                    // v2.1.211：**FOV 可调** —— 以 180° 为基准（压缩指数 2.0），
-                    // FOV 越大则边缘压缩越强（视场越广、边缘越"卷")。
-                    // ⚠️ 注意本模式是「把平面画面压成穹顶观感」的**观感滤镜**，
-                    //    不是还原真实鱼眼片源 —— 所以这里调的是压缩强度，
-                    //    而非教科书里的「屏幕半径 → 球面角」映射。
-                    //    用错方向（把指数改小）会得到「边缘被拉平、画面鼓出」的反效果。
-                    float fovK = clamp(uFisheyeFov, 160.0, 240.0) / 180.0;
-                    float rf = pow(rn, 2.0 * fovK) * rMax;
-                    // 中心区域保持线性（小 r 时不变形过多），边缘平滑压缩
-                    float blend = smoothstep(0.0, 1.0, rn);
-                    rf = mix(r * 0.5, rf, blend);
-                    tc = center + vec2(cos(theta), sin(theta)) * rf * scale;
-                }
-            }
-            
-            // Dynamic Geometry Squeezes / Deformations for beauty properties.
-            // IMPORTANT: geometry deformations (thin face / big eyes / nose / mouth /
-            // long legs / small head) only apply when a face is actually tracked,
-            // otherwise a flat 2D picture gets squeezed/stretched for no reason.
-            if (uProjectionMode == 0 && uFaceDetected == 1) {
-                // ===== v2.6.22（多脸）：长腿是**全屏**形变，必须先于逐脸循环 =====
-                // 它只依赖 tc.y，与具体哪张脸无关。放进 per-face 循环会被每张脸各拉伸一次，
-                // 3 张脸叠加后人物会被拉成面条。
-                float normY = (tc.y - center.y) / scale.y;
-                
-                // 1. Long Legs vertical stretch (bottom part of standard flat video projection)
-                if (normY > 0.05) {
-                    normY = normY - (normY - 0.05) * (uLongLegs * 0.08);
-                    tc.y = center.y + normY * scale.y;
-                }
-
-                // ===== v2.6.22（多脸）：逐脸形变，最多 3 张 =====
-                // 每张脸先做包围盒剔除：形变影响半径 ≤ 1.1 * fUnit，盒外像素直接跳过。
-                for (int fi = 0; fi < 3; fi++) {
-                    if (fi >= uFaceCount) break;
-                    vec2 fCenter = uFaceCenters[fi];
-                    float fUnit = clamp(uEyeDistances[fi], 0.02, 0.25);
-                    // 包围盒剔除（形变最大影响半径 1.1 * fUnit，宽高各留余量）
-                    if (abs(tc.x - fCenter.x) > 1.4 * fUnit || abs(tc.y - fCenter.y) > 1.5 * fUnit) continue;
-
-                    // Derive facial feature anchors. When MediaPipe 468-point landmarks are
-                    // available, use them for pixel-accurate cosmetic placement.
-                    vec2 eyeL = fCenter + vec2(-0.5 * fUnit, 0.0);
-                    vec2 eyeR = fCenter + vec2(0.5 * fUnit, 0.0);
-                    vec2 mouthC = fCenter + vec2(0.0, 0.75 * fUnit);
-                    float chinY = fCenter.y + fUnit;
-                    if (uHasDetaileds[fi] == 1) {
-                        eyeL = uEyeLefts[fi];
-                        eyeR = uEyeRights[fi];
-                        mouthC = uMouthPoss[fi];
-                        chinY = uChins[fi].y;
-                    }
-
-
-                    // 2. Face Slimming (centered around the chin/jawline relative to tracked face center)
-                    float jawY = uHasDetaileds[fi] == 1 ? chinY - 0.15 * fUnit : fCenter.y + 0.5 * fUnit;
-                    float distYFace = abs(tc.y - jawY);
-                    if (distYFace < 1.1 * fUnit) {
-                        float factor = (1.0 - distYFace / (1.1 * fUnit)) * uFaceSlimming * 0.08;
-                        tc.x = mix(tc.x, fCenter.x, factor);
-                    }
-
-                    // Small Head (squeezing forehead region horizontally)
-                    float headY = uHasDetaileds[fi] == 1 ? (eyeL.y + eyeR.y) * 0.5 - 0.55 * fUnit : fCenter.y - 0.7 * fUnit;
-                    float distYHead = abs(tc.y - headY);
-                    if (distYHead < 1.1 * fUnit) {
-                        float factor = (1.0 - distYHead / (1.1 * fUnit)) * uSmallHead * 0.08;
-                        tc.x = mix(tc.x, fCenter.x, factor);
-                    }
-
-                    // 3. Big Eyes radial expansion around tracked pupils
-                    float distEyeL = distance(tc, eyeL);
-                    if (distEyeL < 0.5 * fUnit) {
-                        float f = (1.0 - distEyeL / (0.5 * fUnit)) * uBigEyes * 0.15;
-                        tc = mix(tc, eyeL, -f);
-                    }
-                    float distEyeR = distance(tc, eyeR);
-                    if (distEyeR < 0.5 * fUnit) {
-                        float f = (1.0 - distEyeR / (0.5 * fUnit)) * uBigEyes * 0.15;
-                        tc = mix(tc, eyeR, -f);
-                    }
-
-                    // 4. Nose Slimming inside tracked nasal bridge
-                    vec2 noseCenter = uHasDetaileds[fi] == 1
-                        ? vec2((eyeL.x + eyeR.x) * 0.5, mix((eyeL.y + eyeR.y) * 0.5, chinY, 0.35))
-                        : fCenter + vec2(0.0, 0.25 * fUnit);
-                    float distNoseWidth = abs(tc.x - noseCenter.x);
-                    float distNoseHeight = abs(tc.y - noseCenter.y);
-                    if (distNoseWidth < 0.4 * fUnit && distNoseHeight < 0.4 * fUnit) {
-                        float f = (1.0 - distNoseWidth / (0.4 * fUnit)) * uNoseSlimming * 0.12;
-                        tc.x = mix(tc.x, noseCenter.x, f);
-                    }
-
-                    // 5. Mouth resizing (squeeze slightly around mouth lip centroid)
-                    float distMouthArea = distance(tc, mouthC);
-                    if (distMouthArea < 0.45 * fUnit) {
-                        float f = (1.0 - distMouthArea / (0.45 * fUnit)) * uMouth * 0.10;
-                        tc = mix(tc, mouthC, f);
-                    }
-                }
-            }
-            
-            // Read source frame pixel
-            vec4 color;
-            if (tc.x < 0.0 || tc.x > 1.0 || tc.y < 0.0 || tc.y > 1.0) {
-                color = vec4(0.0, 0.0, 0.0, 1.0);
-            } else {
-                if (uIsVideo == 1) {
-                    color = texture2D(uSamplerVideo, tc);
-                } else {
-                    color = texture2D(uSamplerImage, tc);
-                }
-            }
-            
-            // Realtime Skin-Smoothing Bilateral bilateral filter 3x3
-            // ===== v2.0.177：皮肤判定前置，非皮肤像素**跳过 8 次邻域采样** =====
-            // 旧实现：先把 8 个远邻域全采样完，最后才按 isSkin 决定混合强度
-            // （皮肤 1.0 / 非皮肤 0.25）—— 而非皮肤区（背景、头发、衣物）占画面 60~80%，
-            // 这些像素白付 8 次纹理采样，最后只换来一个乘 0.25 的轻微降噪（视频场景肉眼不可见）。
-            // 移动 GPU 上纹理采样是 fragment 的主要瓶颈：1080p60 下 8 次/像素 ≈ 每秒 10 亿次采样，
-            // 其中约 6.5 亿次是纯浪费。前置判定后，非皮肤区采样数 9 → 1。
-            //
-            // ⚠️ 这是一个「失败即退化」的优化：isSkin 是 RGB 阈值快速判定（见其定义处），
-            //    对暖光墙 / 木地板 / 肤色家具会**误判成皮肤** → 只是退化回全采样路径，
-            //    只损失收益、绝不会画错。这正是该优化风险极低的根本原因。
-            // 注：GPU 以 2x2 quad 为单位执行分支，quad 内皮肤/非皮肤混合时两条分支都会跑
-            //    （无收益但无害）；因 isSkin 在局部区域高度一致，quad 分歧概率低，收益基本保留。
-            if (uBeautyStrength > 0.01) {
-                // ===== v2.0.159：磨皮改为「频域分离」 =====
-                // 把画面拆成两层：
-                //   低频 = 大半径**保边**均值 → 色块与光影（痘印 / 色斑就住在这层）
-                //   高频 = 原图 − 低频        → 毛孔、发丝、五官边缘
-                // 只平滑低频、再按 uTextureDetail 把高频叠回去 —— 于是「磨皮强度」与「纹理保留度」
-                // 解耦：既能抹平色块，又不会变成塑料脸。
-                // （旧实现是单尺度双边 + 0.90 强混合：半径不足只能靠混合硬拉，观感是"糊"不是"净"。）
-                if (isSkin(color.rgb)) {   // ← v2.0.177：纯标量比较，零采样成本
-                // v2.4.36 审查 #11：磨皮半径固定 6 纹素 → 随分辨率变化覆盖范围。
-                //   改成按画面宽度相对 1080p 等比缩放（用 1/uTexelSize.x 反推宽度，免新增 uniform），
-                //   使 4K 与 1080p 的皮肤覆盖一致。
-                float smoothRadiusScale = (1.0 / uTexelSize.x) / 1080.0;
-                vec2 stepF = uTexelSize * 6.0 * smoothRadiusScale;
-
-                // 8 个远邻域（±6 像素，已按分辨率缩放）
-                vec4 n1 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepF) : texture2D(uSamplerImage, tc + stepF);
-                vec4 n2 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepF) : texture2D(uSamplerImage, tc - stepF);
-                vec4 n3 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + vec2(stepF.x, 0.0)) : texture2D(uSamplerImage, tc + vec2(stepF.x, 0.0));
-                vec4 n4 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - vec2(stepF.x, 0.0)) : texture2D(uSamplerImage, tc - vec2(stepF.x, 0.0));
-                vec4 n5 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + vec2(0.0, stepF.y)) : texture2D(uSamplerImage, tc + vec2(0.0, stepF.y));
-                vec4 n6 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - vec2(0.0, stepF.y)) : texture2D(uSamplerImage, tc - vec2(0.0, stepF.y));
-                vec4 n7 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + vec2(stepF.x, -stepF.y)) : texture2D(uSamplerImage, tc + vec2(stepF.x, -stepF.y));
-                vec4 n8 = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - vec2(stepF.x, -stepF.y)) : texture2D(uSamplerImage, tc - vec2(stepF.x, -stepF.y));
-
-                // 保边权重：邻域色差越大权重越低。大半径下阈值放宽到 0.30 ——
-                // 否则远邻域会被整片判成"边缘"，权重全 0，低频层退化成原图、磨皮等于没做。
-                float deltaThres = 0.30;
-                float w1 = max(0.0, 1.0 - distance(color.rgb, n1.rgb) / deltaThres);
-                float w2 = max(0.0, 1.0 - distance(color.rgb, n2.rgb) / deltaThres);
-                float w3 = max(0.0, 1.0 - distance(color.rgb, n3.rgb) / deltaThres);
-                float w4 = max(0.0, 1.0 - distance(color.rgb, n4.rgb) / deltaThres);
-                float w5 = max(0.0, 1.0 - distance(color.rgb, n5.rgb) / deltaThres);
-                float w6 = max(0.0, 1.0 - distance(color.rgb, n6.rgb) / deltaThres);
-                float w7 = max(0.0, 1.0 - distance(color.rgb, n7.rgb) / deltaThres);
-                float w8 = max(0.0, 1.0 - distance(color.rgb, n8.rgb) / deltaThres);
-
-                vec4 low = (color + n1 * w1 + n2 * w2 + n3 * w3 + n4 * w4
-                    + n5 * w5 + n6 * w6 + n7 * w7 + n8 * w8)
-                    / (1.0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8);
-
-                // 高频层：纹理 + 边缘
-                vec3 detail = color.rgb - low.rgb;
-
-                // 低频 + 高频×保留度：uTextureDetail < 1 更平滑，> 1 相当于 USM 锐化（找回通透感）
-                vec3 smoothed = low.rgb + detail * uTextureDetail;
-
-                color.rgb = mix(color.rgb, smoothed, uBeautyStrength);
-                } else {
-                    // ===== v2.0.178 修复「美颜只显示一小块区域」 =====
-                    // v2.0.177 让非皮肤像素**完全不做**磨皮（省 8 次采样）。但 isSkin 是
-                    // RGB 阈值判定，实测一段真实视频（1920x1080，人物占中下 3/4）：
-                    //   上 1/4 的粉/紫背景 → 通过率 0%，中下人物区 → 20~93%，总通过率仅 35%。
-                    // 于是皮肤区被磨皮、背景完全没动，**看上去就是「美颜只在小块区域生效」**，
-                    // 且皮肤/背景交界处出现可见的一圈分界。
-                    //
-                    // 这里恢复「非皮肤也轻度处理」，但**只采 2 个垂直邻域**（不是旧的 8 个）：
-                    //   · 采样数 9 → 3（仅比 v2.0.177 多 2 次，远低于旧的 9 次）
-                    //   · 背景获得极轻降噪 → 分界线消失，观感统一
-                    // 权重固定 0.25（与 v2.0.176 的非皮肤分支一致），保持「背景不被过度处理」。
-                    // v2.4.34（#12）：非皮肤分支改为对称 2D 采样（上下左右 4 邻域），
-                    // 消除对水平边缘（窗框/地平线/字幕）造成的纵向拖影。
-                    vec2 stepV = vec2(0.0, uTexelSize.y * 6.0);
-                    vec2 stepH = vec2(uTexelSize.x * 6.0, 0.0);
-                    vec3 vUp = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepV).rgb
-                                               : texture2D(uSamplerImage, tc + stepV).rgb;
-                    vec3 vDn = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepV).rgb
-                                               : texture2D(uSamplerImage, tc - stepV).rgb;
-                    vec3 vL  = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc - stepH).rgb
-                                               : texture2D(uSamplerImage, tc - stepH).rgb;
-                    vec3 vR  = (uIsVideo == 1) ? texture2D(uSamplerVideo, tc + stepH).rgb
-                                               : texture2D(uSamplerImage, tc + stepH).rgb;
-                    vec3 vAvg = (color.rgb + vUp + vDn + vL + vR) / 5.0;
-                    color.rgb = mix(color.rgb, vAvg, uBeautyStrength * 0.25);
-                }
-            }
-            
-            // ===== v2.0.190 修复：GLSL 美白改为**全屏生效** =====
-            // 此前美白被放在下方 `if (uProjectionMode == 0 && uFaceDetected == 1)` 之内，导致：
-            //   ① 未检出人脸时**完全不生效**（用户反馈的「GLSL 美白不生效」正是此现象）；
-            //   ② VR / 全景模式（uProjectionMode != 0）下**根本不执行**。
-            // 美白只依赖肤色判定 isSkin()，**既不需要人脸位置，也不该受投影模式限制** ——
-            // 现在与 GPUPixel 引擎（磨皮/美白全屏生效、不依赖检测）的行为对齐。
-            // 开销可忽略：isSkin 是纯比较运算（无纹理采样），全屏皮肤像素只多做一次加法。
-            // 注：黑眼圈/口红/腮红/白牙等**必须**有人脸位置的妆容仍留在下方块内（逻辑不变）。
-            if (isSkin(color.rgb)) {
-                color.rgb += vec3(uWhitening * 0.14) * (1.0 - color.rgb);
-            }
-
-            // Apply advanced fine cosmetics
-            // v2.0.173：妆容/局部效果 gate 到 uFaceDetected == 1 —— 检测丢失时完全不画
-            // （否则会按默认中心 (0.5,0.45) 把口红/腮红画到画面中央，产生跳变）。
-            // 与 Kotlin 侧的「连续 3 次失败才置 0」防抖配合，短暂检测失败不再闪。
-            if (uProjectionMode == 0 && uFaceDetected == 1) {
-                // ===== v2.6.22（多脸）：逐脸妆容，最多 3 张 =====
-                // 每张脸各自做包围盒剔除（妆容最远半径 1.5/1.8 * fUnit），
-                // 因此画面上大部分像素只会为「离自己最近的那张脸」付出算术开销。
-                for (int fi = 0; fi < 3; fi++) {
-                    if (fi >= uFaceCount) break;
-                    vec2 fCenter = uFaceCenters[fi];
-                    float fUnit = clamp(uEyeDistances[fi], 0.02, 0.25);
-
-                    // ===== v2.0.177：妆容 gate 到人脸包围盒 =====
-                    // 下方整段妆容（美白/黑眼圈/眉毛/口红/腮红/白牙）要跑 10+ 次 ellipseMask，
-                    // 每次含 cos/sin/length/smoothstep —— 这些是**纯算术**开销（无纹理采样）。
-                    // 但人脸通常只占画面一小部分，画面上 80%+ 的像素算完 mask 发现权重为 0 就丢弃。
-                    // 这里先做一次包围盒剔除：最远的腮红中心距 fCenter 约 0.72*fUnit、半径约 0.46*fUnit，
-                    // 再加上椭圆边界羽化，1.5*fUnit / 1.8*fUnit 的包围盒足以包住全部妆容区域且有余量。
-                    // ⚠️ 注意：这只是算术优化的「快路径」，盒外像素直接跳过整段妆容计算。
-                    bool inFaceBox =
-                        abs(tc.x - fCenter.x) < 1.5 * fUnit &&
-                        abs(tc.y - fCenter.y) < 1.8 * fUnit;
-
-                    if (inFaceBox) {
-                    // Derive facial feature anchors (MediaPipe 468-point aware)
-                    vec2 eyeL = fCenter + vec2(-0.5 * fUnit, 0.0);
-                    vec2 eyeR = fCenter + vec2(0.5 * fUnit, 0.0);
-                    vec2 mouthC = fCenter + vec2(0.0, 0.75 * fUnit);
-                    if (uHasDetaileds[fi] == 1) {
-                        eyeL = uEyeLefts[fi];
-                        eyeR = uEyeRights[fi];
-                        mouthC = uMouthPoss[fi];
-                    }
-
-                    // 2. Dark Circles removal (黑眼圈) just below the tracked eyes
-                    vec2 bagL = eyeL + vec2(0.0, 0.3 * fUnit);
-                    vec2 bagR = eyeR + vec2(0.0, 0.3 * fUnit);
-                    float distBagL = distance(tc, bagL);
-                    float distBagR = distance(tc, bagR);
-                    // v2.0.159：正圆 → 横向椭圆（眼袋是横卧在眼下的月牙形），并保留「保高光提亮」
-                    vec2 bagRadius = vec2(0.28 * fUnit, 0.13 * fUnit);
-                    float bagMask = max(
-                        ellipseMask(tc, bagL, bagRadius, 0.0, 0.55),
-                        ellipseMask(tc, bagR, bagRadius, 0.0, 0.55)
-                    );
-                    if (bagMask > 0.001 && isSkin(color.rgb)) {
-                        color.rgb += vec3(uDarkCircles * 0.15) * (1.0 - color.rgb) * bagMask;
-                    }
-
-                    // 3. Eyebrows definitions (眉毛) darkening directly above the eyes
-                    vec2 browL = eyeL + vec2(0.0, -0.5 * fUnit);
-                    vec2 browR = eyeR + vec2(0.0, -0.5 * fUnit);
-                    float distBrowL = distance(tc, browL);
-                    float distBrowR = distance(tc, browR);
-                    // v2.0.159：正圆 → **横向椭圆**（眉是斜长条，正圆只会涂成一团）。
-                    // 倾角用固定 ±0.14 rad（≈8°）近似眉毛走向。
-                    vec2 browRadius = vec2(0.30 * fUnit, 0.115 * fUnit);
-                    float browMaskL = ellipseMask(tc, browL, browRadius, -0.14, 0.45);
-                    if (browMaskL > 0.001) {
-                        color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskL * uEyebrows * 0.70);
-                    }
-                    float browMaskR = ellipseMask(tc, browR, browRadius, 0.14, 0.45);
-                    if (browMaskR > 0.001) {
-                        color.rgb = mix(color.rgb, color.rgb * vec3(0.52, 0.50, 0.53), browMaskR * uEyebrows * 0.70);
-                    }
-
-                    // 4. Lipstick coloring (口红) around the tracked mouth
-                    float distLip = distance(tc, mouthC);
-                    // v2.0.159：正圆 → **贴合唇形的椭圆**。宽/高/倾角来自 MediaPipe 唇部关键点
-                    // （uMouthHalfWs[fi] 为 0 表示未取到，回退按 fUnit 估算，兼容 FaceDetector 兜底路径）。
-                    // 采样图 y 与视口 UV 的 y 方向相反，所以倾角取负。
-                    vec2 mouthRadius = (uMouthHalfWs[fi] > 0.0001)
-                        ? vec2(uMouthHalfWs[fi] * 1.18, max(uMouthHalfHs[fi], uMouthHalfWs[fi] * 0.30) * 1.60)
-                        : vec2(0.34 * fUnit, 0.13 * fUnit);
-                    float lipMask = ellipseMask(tc, mouthC, mouthRadius, -uMouthAngles[fi], 0.35);
-                    if (lipMask > 0.001) {
-                        // soft-light 上色：保留唇部原有明暗与高光（不再三通道硬拉）
-                        color.rgb = mix(
-                            color.rgb,
-                            softLight(color.rgb, vec3(0.74, 0.16, 0.26)),
-                            lipMask * uLipstick * 0.70
-                        );
-                    }
-
-                    // 5. Cheek Blush coloring (腮红) on the cheeks outside the eyes
-                    vec2 blushL = eyeL + vec2(-0.55 * fUnit, 0.55 * fUnit);
-                    vec2 blushR = eyeR + vec2(0.55 * fUnit, 0.55 * fUnit);
-                    float distBlushL = distance(tc, blushL);
-                    float distBlushR = distance(tc, blushR);
-                    // v2.0.159：正圆 → 椭圆（腮红是沿脸颊斜向下的大椭圆），并保留 soft-light 上色
-                    vec2 blushRadius = vec2(0.46 * fUnit, 0.30 * fUnit);
-                    float blushMaskL = ellipseMask(tc, blushL, blushRadius, -0.28, 0.50);
-                    if (blushMaskL > 0.001 && isSkin(color.rgb)) {
-                        color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskL * uBlush * 0.75);
-                    }
-                    float blushMaskR = ellipseMask(tc, blushR, blushRadius, 0.28, 0.50);
-                    if (blushMaskR > 0.001 && isSkin(color.rgb)) {
-                        color.rgb = mix(color.rgb, softLight(color.rgb, vec3(0.93, 0.62, 0.66)), blushMaskR * uBlush * 0.75);
-                    }
-
-                    // 6. Teeth Whitening (白牙) inside the lip cavity
-                    float distTeethSpace = distance(tc, mouthC);
-                    // v2.0.159：正圆 → 细长椭圆（牙齿在嘴腔里是横条），并跟随嘴的倾角
-                    vec2 teethRadius = (uMouthHalfWs[fi] > 0.0001)
-                        ? vec2(uMouthHalfWs[fi] * 0.72, max(uMouthHalfHs[fi], uMouthHalfWs[fi] * 0.30) * 0.55)
-                        : vec2(0.20 * fUnit, 0.075 * fUnit);
-                    float teethMask = ellipseMask(tc, mouthC, teethRadius, -uMouthAngles[fi], 0.40);
-                    if (teethMask > 0.001) {
-                        float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-                        if (luma > 0.45) {
-                            color.rgb = mix(color.rgb, vec3(luma + 0.12), teethMask * uTeethWhitening * 0.75);
-                        }
-                    }
-                    }   // v2.0.177: end if (inFaceBox)
-                }
-            }
-            
-            // Brightness
-            color.rgb += uBrightness;
-            
-            // Contrast Adjustment
-            color.rgb = (color.rgb - vec3(0.5)) * uContrast + vec3(0.5);
-            
-            // v104 LUT 视频滤镜（在调色之后、输出之前应用，可混合强度）
-            if (uLutMix > 0.001) {
-                color.rgb = mix(color.rgb, applyLut(color.rgb), uLutMix);
-            }
-            
-            color.rgb = clamp(color.rgb, 0.0, 1.0);
-            gl_FragColor = color;
-        }
-    """.trimIndent()
-
-    private fun buildMainProgram(videoVariant: Boolean): GLProgram? {
-        return try {
-            val vShader = compileShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode)
-            val fCode = if (videoVariant) "#define VIDEO_OES 1\n" + fragmentShaderCode else fragmentShaderCode
-            val fShader = compileShader(GLES20.GL_FRAGMENT_SHADER, fCode)
-            val progId = GLES20.glCreateProgram().apply {
-                GLES20.glAttachShader(this, vShader)
-                GLES20.glAttachShader(this, fShader)
-                GLES20.glLinkProgram(this)
-                val linkStatus = IntArray(1)
-                GLES20.glGetProgramiv(this, GLES20.GL_LINK_STATUS, linkStatus, 0)
-                if (linkStatus[0] == 0) {
-                    val log = GLES20.glGetProgramInfoLog(this)
-                    throw RuntimeException("GL Program link error: $log")
-                }
-            }
-            GLProgram(
-                programId = progId,
-                hMVPMatrix = GLES20.glGetUniformLocation(progId, "uMVPMatrix"),
-                hPosition = GLES20.glGetAttribLocation(progId, "aPosition"),
-                hTextureCoord = GLES20.glGetAttribLocation(progId, "aTextureCoord"),
-                hIsVideo = GLES20.glGetUniformLocation(progId, "uIsVideo"),
-                hSamplerImage = GLES20.glGetUniformLocation(progId, "uSamplerImage"),
-                hSamplerVideo = GLES20.glGetUniformLocation(progId, "uSamplerVideo"),
-                hProjectionMode = GLES20.glGetUniformLocation(progId, "uProjectionMode"),
-                hStereoMode = GLES20.glGetUniformLocation(progId, "uStereoMode"),
-                hLeftEye = GLES20.glGetUniformLocation(progId, "uLeftEye"),
-                hBeautyStrength = GLES20.glGetUniformLocation(progId, "uBeautyStrength"),
-                hTextureDetail = GLES20.glGetUniformLocation(progId, "uTextureDetail"),
-                hBrightness = GLES20.glGetUniformLocation(progId, "uBrightness"),
-                hContrast = GLES20.glGetUniformLocation(progId, "uContrast"),
-                hTexelSize = GLES20.glGetUniformLocation(progId, "uTexelSize"),
-                hIsMirrored = GLES20.glGetUniformLocation(progId, "uIsMirrored"),
-                hWarpMode = GLES20.glGetUniformLocation(progId, "uWarpMode"),
-                hCurvature = GLES20.glGetUniformLocation(progId, "uCurvature"),
-                hFisheyeFov = GLES20.glGetUniformLocation(progId, "uFisheyeFov"),
-                hWhitening = GLES20.glGetUniformLocation(progId, "uWhitening"),
-                hFaceSlimming = GLES20.glGetUniformLocation(progId, "uFaceSlimming"),
-                hBigEyes = GLES20.glGetUniformLocation(progId, "uBigEyes"),
-                hDarkCircles = GLES20.glGetUniformLocation(progId, "uDarkCircles"),
-                hNoseSlimming = GLES20.glGetUniformLocation(progId, "uNoseSlimming"),
-                hMouth = GLES20.glGetUniformLocation(progId, "uMouth"),
-                hTeethWhitening = GLES20.glGetUniformLocation(progId, "uTeethWhitening"),
-                hLipstick = GLES20.glGetUniformLocation(progId, "uLipstick"),
-                hBlush = GLES20.glGetUniformLocation(progId, "uBlush"),
-                hEyebrows = GLES20.glGetUniformLocation(progId, "uEyebrows"),
-                hLongLegs = GLES20.glGetUniformLocation(progId, "uLongLegs"),
-                hSmallHead = GLES20.glGetUniformLocation(progId, "uSmallHead"),
-                hFaceDetected = GLES20.glGetUniformLocation(progId, "uFaceDetected"),
-                hFaceCount = GLES20.glGetUniformLocation(progId, "uFaceCount"),
-                hFaceCenters = uniformArrayLocation(progId, "uFaceCenters"),
-                hEyeDistances = uniformArrayLocation(progId, "uEyeDistances"),
-                hHasDetaileds = uniformArrayLocation(progId, "uHasDetaileds"),
-                hEyeLefts = uniformArrayLocation(progId, "uEyeLefts"),
-                hEyeRights = uniformArrayLocation(progId, "uEyeRights"),
-                hMouthPoss = uniformArrayLocation(progId, "uMouthPoss"),
-                hMouthHalfWs = uniformArrayLocation(progId, "uMouthHalfWs"),
-                hMouthHalfHs = uniformArrayLocation(progId, "uMouthHalfHs"),
-                hMouthAngles = uniformArrayLocation(progId, "uMouthAngles"),
-                hChins = uniformArrayLocation(progId, "uChins"),
-                hWarpDualCenter = GLES20.glGetUniformLocation(progId, "uWarpDualCenter"),
-                hLutTexture = GLES20.glGetUniformLocation(progId, "uLutTexture"),
-                hLutMix = GLES20.glGetUniformLocation(progId, "uLutMix")
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to compile/link ${if (videoVariant) "video" else "image"} GLES program", e)
-            shaderError = e.message ?: "shader compile failed"
-            null
-        }
-    }
+    private fun buildMainProgram(videoVariant: Boolean): VRMainGLProgram? = VRGLShaders.buildMainProgram(videoVariant) { shaderError = it }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         // 🔴 v2.4.46（模糊 UI 审查 #1）：**GL 上下文重建后，旧的 FBO/纹理句柄全部失效**。
@@ -1725,23 +879,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         //    → 用户看到「模糊再也不跟着画面动」。
         //    ⚠️ 只清 id、**不要 delete**：上下文已经丢了，对那些 id 调 glDelete* 无意义，
         //       还可能污染错误状态。
-        bdFboId = 0
-        bdTexId = 0
-        bdW = 0
-        bdH = 0
-        bdBuffer = null
-        bdPixels = null
-        bdRow = null
-        // v2.6.20：PBO / fence 同属旧上下文 —— 只清状态，不调 glDelete（理由同上）
-        bdPboIds[0] = 0
-        bdPboIds[1] = 0
-        bdPboFence[0] = 0L
-        bdPboFence[1] = 0L
-        bdPboCapBytes = 0
-        bdPboIdx = 0
-        resetBackdropCapture()
-        // v2.4.47：把采样间隔暴露给设置页「玻璃诊断」（便于核对「30ms 一帧」是否生效）
-        VideoBackdrop.captureIntervalMs = bdCaptureIntervalMs
+        backdropAndDanmu.onSurfaceCreatedReset()
 
         GLES20.glClearColor(0.04f, 0.05f, 0.07f, 1.0f) // Dark night canvas background Hex #0a0c12
         GLES20.glDisable(GLES20.GL_DEPTH_TEST) // 2D or spherically projected mapping, depth test is unneeded
@@ -1779,8 +917,8 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // Fallback program: keep images/panoramas visible even if the main shader
         // is rejected by a strict device driver.
         try {
-            val vShader = compileShader(GLES20.GL_VERTEX_SHADER, fallbackVertexShaderCode)
-            val fShader = compileShader(GLES20.GL_FRAGMENT_SHADER, fallbackFragmentShaderCode)
+            val vShader = VRGLShaders.compileShader(GLES20.GL_VERTEX_SHADER, VRGLShaders.fallbackVertexShaderCode)
+            val fShader = VRGLShaders.compileShader(GLES20.GL_FRAGMENT_SHADER, VRGLShaders.fallbackFragmentShaderCode)
             fallbackProgramId = GLES20.glCreateProgram().apply {
                 GLES20.glAttachShader(this, vShader)
                 GLES20.glAttachShader(this, fShader)
@@ -2222,7 +1360,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 抽成独立函数是因为**华为 VR 双眼通路与内置分屏通路都要用**，
      * 且必须保证两条路径的纹理单元分配完全一致（unit1 = OES 视频、unit2 = LUT）。
      */
-    private fun bindActiveTextures(prog: GLProgram, enhanceTexId: Int = 0) {
+    private fun bindActiveTextures(prog: VRMainGLProgram, enhanceTexId: Int = 0) {
         if (enhanceTexId != 0) {
             // v2.0.206：增强纹理（MEMC / FSR 的输出）走 2D sampler 槽位。
             // ⚠️ 此时 prog 必然是 imageProgram（调用方已保证尺寸选择），其
@@ -2439,7 +1577,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glDisableVertexAttribArray(hFallbackTexCoord)
     }
 
-    private fun drawActiveGeometry(prog: GLProgram) {
+    private fun drawActiveGeometry(prog: VRMainGLProgram) {
         var posBuf: FloatBuffer = quadPositionBuffer
         var texBuf: FloatBuffer = quadTexCoordBuffer
         var totalVertices = GeometryHelper.quadVertexCount
@@ -2524,7 +1662,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     // Helper functions
-    private fun compileShader(type: Int, code: String): Int {
+    private fun VRGLShaders.compileShader(type: Int, code: String): Int {
         val shaderId = GLES20.glCreateShader(type)
         if (shaderId == 0) {
             throw RuntimeException("Could not create shader descriptor!")
@@ -2699,11 +1837,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         videoSurfaceTexture = null
         try {
             // v2.0.177：半分辨率磨皮 pass 的 FBO / program 清理
-            releaseHalfPassFbos()
-            if (pDownProgram != 0) { GLES20.glDeleteProgram(pDownProgram); pDownProgram = 0 }
-            if (pBlurProgram != 0) { GLES20.glDeleteProgram(pBlurProgram); pBlurProgram = 0 }
-            if (pBlendProgram != 0) { GLES20.glDeleteProgram(pBlendProgram); pBlendProgram = 0 }
-            halfPassReady = false
+            halfPassBeauty.releasePrograms()
             // v2.0.206：画质增强（MEMC / FSR）的 program 与 FBO 清理
             releaseVideoEnhance()
         } catch (e: Throwable) {
@@ -2751,7 +1885,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 因此不开这些效果的用户**完全不必付出**每 8 帧回读 1MB 的代价。
      * 「对比原图」模式下 shader 会强制 `uFaceDetected = 0`，同样无需检测。
      */
-    private fun isBeautyActive(): Boolean {
+    internal fun isBeautyActive(): Boolean {
         if (!beautyMasterEnabled) return false
         // v2.0.160：GPUPixel 引擎激活时（含 VR 人脸美颜），区域处理本身也需要采样
         if (isGpuPixelActive()) return true
@@ -2771,7 +1905,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * （1080p 下最大偏差约 ±0.27 屏宽）。因为采样区**居中且对称**，换算就是
      * 「以 0.5 为中心按比例缩放」。
      */
-    private fun mapCropXToViewport(cx: Float): Float = 0.5f + (cx - 0.5f) * faceCropScaleX
+    internal fun mapCropXToViewport(cx: Float): Float = 0.5f + (cx - 0.5f) * faceCropScaleX
 
     /**
      * 同上，y 方向**额外翻转一次**：
@@ -2779,10 +1913,10 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 于是 Bitmap 相对屏幕上下颠倒 —— MediaPipe 报上来的 y 与屏幕方向相反。
      * 采样区垂直居中，故翻转与缩放合并为 `0.5 - (cy - 0.5) * scaleY`。
      */
-    private fun mapCropYToViewport(cy: Float): Float = 0.5f - (cy - 0.5f) * faceCropScaleY
+    internal fun mapCropYToViewport(cy: Float): Float = 0.5f - (cy - 0.5f) * faceCropScaleY
 
     /** 长度量（如眼距）按水平比例缩放：眼距主要是水平距离，见 [mapCropXToViewport] */
-    private fun mapCropLenToViewport(len: Float): Float = len * faceCropScaleX
+    internal fun mapCropLenToViewport(len: Float): Float = len * faceCropScaleX
 
     /**
      * 视情况采一帧屏幕内容交给后台做人脸检测（v2.0.156 重构）。
@@ -2811,7 +1945,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *   - 3D / VR（VR_360 / VR_180 / VR_BOX 等）：由 [gpuPixelVrFaceBeauty] 控制
      * 开关关闭时 VR 下退回**纯 GLSL 美颜**（GLSL 在 VR 下的面部效果本就受限，见下方注释）。
      */
-    private fun isGpuPixelActive(): Boolean {
+    internal fun isGpuPixelActive(): Boolean {
         if (!beautyMasterEnabled || effectiveBeautyEngine != BEAUTY_ENGINE_GPUPIXEL) return false
         if (!GpuPixelBeauty.available) return false
         return isPlanarProjection() || gpuPixelVrFaceBeauty
@@ -3069,672 +2203,20 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     // =======================================================================
-    // v2.1.233：backdrop 背景采样
-    //
-    // 目的：把当前画面降采样成一张极小的图交给 Compose，让玻璃/模糊效果**真的有内容可糊**。
-    // 背景（详见 VideoBackdrop 的注释）：SurfaceView 是打洞的独立窗口，Compose 的
-    // layer backdrop 采不到它 —— backdrop 里只有一层纯色，模糊纯色等于没模糊。
-    //
-    // ⚠️ 必须在「本帧绘制完成、eglSwapBuffers 之前」读取，否则拿到的是已被换走的缓冲。
-    // ⚠️ 尺寸刻意极小（96×N）：glReadPixels 是同步调用，全分辨率回读会卡死帧率
-    //    （本项目 v2.0.182 就踩过 8MB 回读的坑），而这里只有约 5 千像素。
-    // =======================================================================
-    private var bdFboId = 0
-    private var bdTexId = 0
-    private var bdW = 0
-    private var bdH = 0
-    private var bdBuffer: java.nio.IntBuffer? = null
-    private var bdPixels: IntArray? = null
-    private var bdRow: IntArray? = null
-    private var bdFrame = 0
-    /**
-     * v2.4.46（模糊 UI 审查 #1）：失败**不再永久停用**。
-     *
-     * 旧实现任何一次 GL 错误就把 `bdDisabled` 永久置 true —— 一次偶发失败（切后台、
-     * 上下文短暂丢失、驱动抖动）之后，**本次会话的模糊就再也不更新**。
-     * 现改为：记失败次数 + 下次重试时刻，最多重试 [BD_MAX_RETRIES] 次、间隔 [BD_RETRY_DELAY_MS]。
-     */
-    private var bdDisabled = false
-    private var bdFailCount = 0
-    private var bdRetryAtMs = 0L
-
-    /** 上一帧的采样开关状态（捕捉 false→true 跳变，用于重建采样资源） */
-    private var bdWasEnabled = false
-
-    // =======================================================================
-    // v2.2.0（P3）：AI 弹幕取帧
-    //
-    // 用途：给「AI 弹幕」业务层提供「用户当前看到的画面」的低频快照。
-    //
-    // ⚠️ 与 backdrop 采样的三点关键差异：
-    //   1) **独立 FBO** —— 刻意不复用 `bdFboId` / `gpHalfFboId`。
-    //      本项目已有多条回读链路（美颜 GPUPixel、背景采样），共用 FBO 会出现
-    //      「谁最后绑定谁赢了」的竞态，且尺寸需求不同（弹幕要 1024 宽，backdrop 只要 96）。
-    //   2) **由业务层按需触发**（`requestDanmuFrame()`），不是每帧自动跑。
-    //   3) **分屏时只取左眼** —— 送模型只需一张单眼图，送整屏（并排双画面）
-    //      会让模型看到两张一样的图并生成重复弹幕（方案文档 D5 决策）。
-    //
-    // ⚠️ glReadPixels 是**同步阻塞**调用（会让 GL 线程 flush 整条 GPU 管线），
-    //    因此本功能有两重节流：业务层按 intervalSec 触发 + 此处的最小帧间隔守卫。
-    //    反面判例见 v2.0.182（8.29MB 全分辨率回读拖垮帧率）。
-    // =======================================================================
-    private var danmuFboId = 0
-    private var danmuTexId = 0
-    private var danmuW = 0
-    private var danmuH = 0
-    private var danmuBuffer: java.nio.IntBuffer? = null
-    private var danmuPixels: IntArray? = null
-    private var danmuRow: IntArray? = null
-
-    /** 待取帧请求：非 null 表示本帧结束后要回读一次。值为目标最大宽度。 */
-    @Volatile private var danmuPendingMaxWidth: Int = 0
-
-    /** 最近一次成功回读的结果（RGBA_8888 ARGB 数组 + 尺寸）。业务层取走即清空。 */
-    @Volatile private var danmuResultPixels: IntArray? = null
-    @Volatile private var danmuResultW: Int = 0
-    @Volatile private var danmuResultH: Int = 0
-
-    /** 失败计数：连续失败超过阈值就停用，避免每帧刷日志 */
-    private var danmuFailCount = 0
-    private var danmuDisabled = false
-
-    /** 上次实际回读的时间戳（ms）。用于最小间隔守卫。 */
-    private var danmuLastCaptureMs = 0L
-
-    /**
-     * 请求在**本帧结束后**回读一张画面快照（低频、按需）。
-     *
-     * @param maxWidth 目标最大宽度（会被裁剪到 [256, 1920]）。业务层应传 1024 左右。
-     * @return true 表示请求已受理；false 表示当前不可用（已被停用/尺寸未就绪/节流中）。
-     *
-     * 线程安全：只写一个 `@Volatile Int`，实际回读发生在 GL 线程的 [onDrawFrame]。
-     * 结果通过 [takeDanmuFrame] 取走。
-     */
-    fun requestDanmuFrame(maxWidth: Int = 1024): Boolean {
-        if (danmuDisabled) return false
-        if (displayWidth <= 0 || displayHeight <= 0) return false
-        // 最小间隔守卫：即便业务层调用过密，也不会连续多帧阻塞 GL 线程
-        val now = System.currentTimeMillis()
-        if (now - danmuLastCaptureMs < DANMU_MIN_CAPTURE_INTERVAL_MS) return false
-        danmuPendingMaxWidth = maxWidth.coerceIn(256, 1920)
-        return true
-    }
-
-    /**
-     * 取走最近一次回读结果（业务层在任意线程调用）。
-     *
-     * @return (pixels, width, height)；无新结果时返回 null。
-     *         pixels 为 ARGB_8888 可直接填进 `Bitmap.setPixels` 的 IntArray，
-     *         行序**已翻正**（自上而下），业务层无需再处理。
-     *
-     * ⚠️ 取出后即清空（一次性消费），避免业务层意外重复使用同一块内存。
-     */
-    fun takeDanmuFrame(): Triple<IntArray, Int, Int>? {
-        val px = danmuResultPixels ?: return null
-        val w = danmuResultW
-        val h = danmuResultH
-        danmuResultPixels = null
-        danmuResultW = 0
-        danmuResultH = 0
-        if (w <= 0 || h <= 0 || px.size < w * h) return null
-        return Triple(px, w, h)
-    }
-
-    private fun releaseDanmuTarget() {
-        if (danmuFboId != 0) {
-            GLES20.glDeleteFramebuffers(1, intArrayOf(danmuFboId), 0)
-            danmuFboId = 0
-        }
-        if (danmuTexId != 0) {
-            GLES20.glDeleteTextures(1, intArrayOf(danmuTexId), 0)
-            danmuTexId = 0
-        }
-        danmuW = 0
-        danmuH = 0
-        danmuBuffer = null
-        danmuPixels = null
-        danmuRow = null
-    }
-
-    private fun ensureDanmuTarget(w: Int, h: Int) {
-        if (danmuFboId != 0 && danmuW == w && danmuH == h) return
-        releaseDanmuTarget()
-        val tex = IntArray(1)
-        val fbo = IntArray(1)
-        GLES20.glGenTextures(1, tex, 0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        GLES20.glTexImage2D(
-            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
-            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+    private val backdropAndDanmu: VRGLBackdropAndDanmu by lazy {
+        VRGLBackdropAndDanmu(
+            getDisplayWidth = { displayWidth },
+            getDisplayHeight = { displayHeight },
+            isSplitScreen = { isSplitScreenVR },
         )
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glGenFramebuffers(1, fbo, 0)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
-        GLES20.glFramebufferTexture2D(
-            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-            GLES20.GL_TEXTURE_2D, tex[0], 0
-        )
-        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-            Log.w(TAG, "danmu FBO incomplete: 0x${Integer.toHexString(status)}")
-            GLES20.glDeleteTextures(1, tex, 0)
-            GLES20.glDeleteFramebuffers(1, fbo, 0)
-            return
-        }
-        danmuTexId = tex[0]
-        danmuFboId = fbo[0]
-        danmuW = w
-        danmuH = h
-        danmuBuffer = java.nio.IntBuffer.allocate(w * h)
-        danmuPixels = IntArray(w * h)
-        danmuRow = IntArray(w)
     }
 
-    /**
-     * 在本帧绘制完成后调用（见 [onDrawFrame] 末尾，与 [captureBackdropIfNeeded] 同级）。
-     *
-     * 实现要点（四条都是本项目踩过的坑）：
-     *  ① `glReadPixels` **只裁剪、不缩放** → 必须先用 `glBlitFramebuffer` 真缩放到小 FBO
-     *     （v2.0.182 判例：误以为减小宽高就是缩略图，实际只拿到左下角 1/4）
-     *  ② `glReadPixels` 行序**自下而上** → 填进 Bitmap 前必须翻转，否则画面颠倒
-     *  ③ `glGetError()` 要在 `glBindFramebuffer` **之前**取（bind 会改写错误状态）
-     *  ④ 🔴 **颜色通道序**：`GL_RGBA` + `GL_UNSIGNED_BYTE` 写出的是**字节序 `R,G,B,A`**；
-     *     而按 `IntBuffer` 逐元素取出时（小端设备）会组装成 **ABGR**，
-     *     但 `Bitmap.createBitmap(int[], w, h, ARGB_8888)` 期望 **ARGB**
-     *     → **R 与 B 互换 → 红蓝偏色**。
-     *     ⚠️ 这是用户报的「传给模型的图偏色」的**真正根因**，
-     *        且**与压缩无关** —— 在 GL 回读这一刻就已经错了，
-     *        后面的缩放/JPEG 只是把错的颜色原样带给模型。v2.4.11 修。
-     */
-    private fun captureDanmuFrameIfNeeded() {
-        if (danmuDisabled) return
-        val reqW = danmuPendingMaxWidth
-        if (reqW <= 0) return
-        danmuPendingMaxWidth = 0
-
-        val dw = displayWidth
-        val dh = displayHeight
-        if (dw <= 0 || dh <= 0) return
-
-        // 分屏时屏幕是「并排双画面」：只取左眼那一半，避免模型看到两张一样的图。
-        // 非分屏（单眼铺满）时整屏即单眼画面，无需裁剪。
-        val srcX = 0
-        val srcW = if (isSplitScreenVR) dw / 2 else dw
-        val srcY = 0
-        val srcH = dh
-        if (srcW <= 0 || srcH <= 0) return
-
-        // ⚠️ v2.4.11：改用**长边**等比缩放（见 ImageScale），且与 DanmuVisionClient 用**同一套**。
-        //    旧代码 `tw = reqW.coerceAtMost(srcW)` 是「按宽」——
-        //    竖屏片源下会得到长边远超设定值的图（设 256 却得到 256×455，白耗 token）。
-        val fitted = ImageScale.fitLongSide(srcW, srcH, reqW)
-        var tw = fitted[0]
-        var th = fitted[1]
-        // ⚠️ 内存保护：回读要分配两份堆数组（每像素 4 字节 × 2），
-        //    长边 4320 的竖屏视频会要 ~84MB 堆 → 必 OOM。
-        //    超限就等比缩到上限以内（仍给出合法图，只是小于所设档位）。
-        val totalPx = tw.toLong() * th
-        if (totalPx > ImageScale.READBACK_MAX_PIXELS) {
-            val k = kotlin.math.sqrt(ImageScale.READBACK_MAX_PIXELS.toDouble() / totalPx)
-            tw = (tw * k).toInt().coerceAtLeast(1)
-            th = (th * k).toInt().coerceAtLeast(1)
-            Log.w(TAG, "danmu 取帧受内存上限约束：$totalPx px → ${tw}x$th")
-        }
-
-        try {
-            ensureDanmuTarget(tw, th)
-            if (danmuFboId == 0) {
-                danmuFailCount++
-                if (danmuFailCount >= 3) {
-                    danmuDisabled = true
-                    Log.w(TAG, "danmu 取帧目标创建失败 3 次，已停用")
-                }
-                return
-            }
-
-            // ① 先真缩放（只读源区域 = 左眼）
-            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
-            GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, danmuFboId)
-            GLES30.glBlitFramebuffer(
-                srcX, srcY, srcX + srcW, srcY + srcH,
-                0, 0, tw, th,
-                GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_LINEAR
-            )
-            val err1 = GLES20.glGetError()
-            if (err1 != GLES20.GL_NO_ERROR) {
-                Log.w(TAG, "danmu blit failed err=$err1")
-                danmuFailCount++
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-                if (danmuFailCount >= 3) danmuDisabled = true
-                return
-            }
-
-            // ② 再回读
-            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, danmuFboId)
-            val buf = danmuBuffer ?: return
-            buf.position(0)
-            GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
-            val err2 = GLES20.glGetError()
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            if (err2 != GLES20.GL_NO_ERROR) {
-                Log.w(TAG, "danmu readPixels failed err=$err2")
-                danmuFailCount++
-                if (danmuFailCount >= 3) danmuDisabled = true
-                return
-            }
-
-            // ③ 行序翻转（GL 自下而上 → Bitmap 自上而下）
-            buf.position(0)
-            val px = danmuPixels ?: return
-            buf.get(px)
-            val row = danmuRow ?: return
-            var y = 0
-            while (y < th / 2) {
-                val a = y * tw
-                val b = (th - 1 - y) * tw
-                System.arraycopy(px, a, row, 0, tw)
-                System.arraycopy(px, b, px, a, tw)
-                System.arraycopy(row, 0, px, b, tw)
-                y++
-            }
-
-            // ④ 🔴 v2.4.11：**修正红蓝通道互换** —— 「传给模型的图偏色」的根因
-            //     glReadPixels 写入字节序 R,G,B,A；按 IntBuffer 取出（小端）得到 ABGR；
-            //     而 Bitmap 期望 ARGB → R/B 被交换 → 画面红蓝偏色。
-            //     ⚠️ 必须在**行翻转之后**做（两者互不干扰，但集中在一处便于阅读）。
-            ImageScale.swapRedBlueInPlace(px, tw * th)
-
-            danmuFailCount = 0
-            danmuLastCaptureMs = System.currentTimeMillis()
-            danmuResultPixels = px.copyOf(tw * th)  // 复制一份交给业务层，避免被下帧覆盖
-            danmuResultW = tw
-            danmuResultH = th
-        } catch (t: Throwable) {
-            Log.w(TAG, "danmu capture 异常：${t.message}")
-            danmuFailCount++
-            if (danmuFailCount >= 3) danmuDisabled = true
-        }
-    }
-
-    // ===== v2.6.20（P1，用户选定）：backdrop 回读 PBO 双缓冲 =====
-    // 与美颜链路的 gpPbo* 同一套思路（fence + 双槽轮转），但状态独立：
-    // 美颜的回读尺寸/节奏与玻璃采样完全不同，共用状态机只会互相绊倒。
-    // 玻璃采样 40ms 一次，每次收割的是"上一帧提交"的 PBO —— 40ms 足够 GPU 完成
-    // blit+copy，glClientWaitSync 几乎必然立即返回，GL 线程不再被管线 flush 阻塞。
-    private val bdPboIds = IntArray(2)
-    private val bdPboFence = LongArray(2)
-    private var bdPboCapBytes = 0
-    /** 下一个要写入的 PBO 槽（收割 1 - bdPboIdx） */
-    private var bdPboIdx = 0
-    /** PBO 异步回读总开关：任何一步 GL 异常 / fence 异常 → 永久回退同步读（护旧驱动） */
-    @Volatile private var bdPboEnabled = true
-
-    private fun ensureBdPbo(needBytes: Int) {
-        if (!bdPboEnabled) return
-        if (bdPboIds[0] == 0) GLES30.glGenBuffers(2, bdPboIds, 0)
-        if (bdPboCapBytes < needBytes) {
-            for (id in bdPboIds) {
-                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, id)
-                GLES30.glBufferData(GLES30.GL_PIXEL_PACK_BUFFER, needBytes, null, GLES30.GL_STREAM_READ)
-            }
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
-            bdPboCapBytes = needBytes
-            bdPboIdx = 0
-            bdPboFence[0] = 0L
-            bdPboFence[1] = 0L
-        }
-    }
-
-    private fun releaseBdPbo() {
-        for (f in bdPboFence) if (f != 0L) GLES30.glDeleteSync(f)
-        bdPboFence[0] = 0L
-        bdPboFence[1] = 0L
-        if (bdPboIds[0] != 0) {
-            GLES30.glDeleteBuffers(2, bdPboIds, 0)
-            bdPboIds[0] = 0
-            bdPboIds[1] = 0
-        }
-        bdPboCapBytes = 0
-        bdPboIdx = 0
-    }
-
-    private fun releaseBackdropTarget() {
-        if (bdFboId != 0) {
-            GLES20.glDeleteFramebuffers(1, intArrayOf(bdFboId), 0)
-            bdFboId = 0
-        }
-        if (bdTexId != 0) {
-            GLES20.glDeleteTextures(1, intArrayOf(bdTexId), 0)
-            bdTexId = 0
-        }
-        bdW = 0
-        bdH = 0
-        bdBuffer = null
-        bdPixels = null
-        bdRow = null
-        releaseBdPbo()
-    }
-
-    private fun ensureBackdropTarget(w: Int, h: Int) {
-        if (bdFboId != 0 && bdW == w && bdH == h) return
-        releaseBackdropTarget()
-        val tex = IntArray(1)
-        val fbo = IntArray(1)
-        GLES20.glGenTextures(1, tex, 0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        GLES20.glTexImage2D(
-            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
-            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
-        )
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glGenFramebuffers(1, fbo, 0)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
-        GLES20.glFramebufferTexture2D(
-            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-            GLES20.GL_TEXTURE_2D, tex[0], 0
-        )
-        val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-            Log.w(TAG, "backdrop FBO incomplete: 0x${Integer.toHexString(status)}")
-            releaseBackdropTarget()
-            return
-        }
-        bdTexId = tex[0]
-        bdFboId = fbo[0]
-        bdW = w
-        bdH = h
-        bdBuffer = java.nio.IntBuffer.allocate(w * h)
-        bdPixels = IntArray(w * h)
-        bdRow = IntArray(w)
-        ensureBdPbo(w * h * 4)
-    }
-
-    /** v2.4.46（审查 #1）：采样失败最多重试次数 */
-    private val bdMaxRetries = 3
-
-    /** v2.4.46（审查 #1）：采样失败后的重试间隔（ms） */
-    private val bdRetryDelayMs = 30_000L
-
-    /**
-     * v2.4.47（用户要求）：**背景采样间隔**（≈33fps）。
-     *
-     * 旧实现是「每 3 帧采一次」—— 节奏随屏幕刷新率漂移（120Hz 屏只有 25ms、60Hz 屏 50ms），
-     * 而且帧时间过短会让 backdrop 层频繁重录。改成固定节流后节奏稳定、开销可控。
-     *
-     * 🔴 v2.6.19：**30ms → 50ms**（33fps → 20fps），是「显化效果 + 显著降耗」的一半。
-     * 🔴 v2.6.20（用户指定）：**50ms → 40ms**（25fps）。
-     * 这个间隔同时是 Compose 侧的重录节奏（[VideoBackdrop.commit] 每提交一帧推进一次 tick），
-     * 所以它直接决定：整屏 backdrop layer 的录制次数、以及每个玻璃元素重跑 lens pass 的次数。
-     *
-     * v2.6.20 说明：分辨率已经从 960 砍到 320（回读量 1.66MB → 0.18MB），
-     * 单帧成本大幅下降，所以间隔可以回到 40ms 让边缘折射更跟手；
-     * 而玻璃**本体已全透明**（透出真实视频），本体不依赖这张位图，滞后完全不可见。
-     */
-    private val bdCaptureIntervalMs = 40L
-
-    /** 上次采样时刻（elapsedRealtime）—— 与 [bdCaptureIntervalMs] 配合做时间节流 */
-    private var bdLastCaptureMs = 0L
-
-    /**
-     * v2.4.46（审查 #1）：记录一次采样失败 —— 写入诊断原因（设置页「玻璃诊断」会显示），
-     * 按退避策略安排重试；**超过 [bdMaxRetries] 次才真正停用**（旧实现一次失败就永久停用）。
-     */
-    private fun bdFail(reason: String) {
-        bdFailCount++
-        bdDisabled = true
-        bdRetryAtMs = android.os.SystemClock.elapsedRealtime() + bdRetryDelayMs
-        VideoBackdrop.lastError = reason
-        Log.w(TAG, "backdrop 采样失败(${bdFailCount}/${bdMaxRetries})：$reason")
-    }
-
-    /** 在本帧绘制完成后调用（见 [onDrawFrame] 末尾） */
-    private fun captureBackdropIfNeeded() {
-        // v2.4.46（审查 #1）：采样开关 false→true 时重建资源（用户切到玻璃档 / 从后台回来）
-        if (VideoBackdrop.enabled != bdWasEnabled) {
-            bdWasEnabled = VideoBackdrop.enabled
-            if (VideoBackdrop.enabled) {
-                bdFailCount = 0
-                bdRetryAtMs = 0L
-                resetBackdropCapture()
-                releaseBackdropTarget()
-            }
-        }
-        if (!VideoBackdrop.enabled) return
-        if (bdDisabled) {
-            // 次数用尽 → 本会话不再采样；否则等到重试时刻再清掉失效资源重来
-            if (bdFailCount >= bdMaxRetries) return
-            if (android.os.SystemClock.elapsedRealtime() < bdRetryAtMs) return
-            releaseBackdropTarget()
-            bdDisabled = false
-            Log.i(TAG, "backdrop 采样重试（第 ${bdFailCount + 1}/${bdMaxRetries} 次）")
-        }
-        val dw = displayWidth
-        val dh = displayHeight
-        if (dw <= 0 || dh <= 0) return
-
-        // v2.4.47（用户要求）：**按时间节流 —— 30ms 一帧**（原来「每 3 帧」会随刷新率漂移：
-        //   120Hz 屏 25ms、60Hz 屏 50ms；帧时间过短还会让 backdrop 层频繁重录）。
-        //   糊掉的背景不需要更高新鲜度，30ms（≈33fps）足够。
-        bdFrame++
-        val nowMs = android.os.SystemClock.elapsedRealtime()
-        if (nowMs - bdLastCaptureMs < bdCaptureIntervalMs) return
-        bdLastCaptureMs = nowMs
-
-        val tw = VideoBackdrop.TARGET_W
-        // v2.6.18：上限 256 → 1280 —— TARGET_W 提高到 640 后，竖屏/极端比例的高度会超过旧上限
-        //（截断会让 backdrop 变形 → 折射方向错乱）。1280 覆盖 640 宽下的所有常见长宽比。
-        val th = (tw * dh / dw).coerceIn(1, 1280)
-        try {
-            ensureBackdropTarget(tw, th)
-            if (bdFboId == 0) {
-                bdFail("离屏 FBO 创建失败")
-                return
-            }
-            // ⚠️ glReadPixels 只裁剪不缩放 —— 必须先用 glBlitFramebuffer 缩到小 FBO
-            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
-            GLES20.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, bdFboId)
-            GLES30.glBlitFramebuffer(
-                0, 0, dw, dh,
-                0, 0, tw, th,
-                GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_LINEAR
-            )
-            val err1 = GLES20.glGetError()
-            if (err1 != GLES20.GL_NO_ERROR) {
-                bdFail("blit 失败 err=$err1")
-                return
-            }
-            GLES20.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, bdFboId)
-            val px = bdPixels!!
-            // v2.6.20（P1）：优先走 PBO 异步回读；链路异常时本帧立即用同步路径兜底并永久回退
-            var committed = false
-            if (bdPboEnabled) {
-                committed = captureBackdropPbo(tw, th, px)
-                if (!bdPboEnabled) committed = captureBackdropSync(tw, th, px)
-            } else {
-                committed = captureBackdropSync(tw, th, px)
-            }
-            // v2.1.233：低频统计日志（约每 120 次采样一行 = 每 360 帧一次）。
-            // 用途：确认「给玻璃/模糊效果喂画面」这条链路真的在跑 —— 高斯模糊
-            // 「看不出效果」的根因就是这条链路没内容可糊（backdrop 只有一层纯色）。
-            // 保留它是为了让下次排查能一眼分辨「没采样」与「采样了但糊得不对」。
-            if (committed && bdFrame % 360 == 0) {
-                // v2.4.53 诊断：顺带统计采样帧的平均亮度，用于区分「玻璃惨白」的两类根因——
-                // 若平均RGB 接近 255 说明喂给玻璃的视频帧本身就是白的（需靠面板薄遮罩压住）；
-                // 若平均RGB 偏暗但玻璃仍白，则问题在合成层而非视频帧。
-                //
-                // 🔴 v2.4.54：修「数组越界」—— px 是 IntArray(tw*th)，每个 Int 已经是一个
-                //    打包好的像素（与 VideoBackdrop.commit() 直接喂给 Bitmap.setPixels 的格式一致）。
-                //    ⚠️ v2.4.62 更正：这里原写「即 ARGB：R 在第 16~23 位…」是**错的** ——
-                //    在补上上方 `swapRedBlueInPlace` 之前，px 实际是 GL 回读的 **ABGR**，
-                //    所以当时打印出来的「平均RGB」把 B 当成了 R。补齐交换后，下面的
-                //    `ushr 16 / ushr 8 / and 0xFF` 才真正对应 R / G / B。
-                //    旧代码按「每像素 4 个数组元素」访问 px[bi*4]/[bi*4+1]/[bi*4+2]，而循环条件
-                //    只写了 bi<n（n=tw*th，没有再除以 4）—— bi 超过约 n/4 时 bi*4+2 必然越界，
-                //    每次执行这段代码都 100% 抛 ArrayIndexOutOfBoundsException，异常被下面的
-                //    catch 吞掉后当成一次采样失败计入 bdFail()，连续 3 次就把整条采样链路
-                //    永久停用。这段诊断代码本身从未成功打印过一行「平均RGB=」日志，
-                //    也从未真正验证过「视频帧偏白」这个判断（本段注释上面那句话落空了）。
-                //    包裹一层独立 try/catch：这段纯诊断代码出错不该拖垮采样本身。
-                try {
-                    var sr = 0L; var sg = 0L; var sb = 0L
-                    val n = tw * th
-                    var bi = 0
-                    while (bi < n) {
-                        val p = px[bi]
-                        sr += (p ushr 16) and 0xFF
-                        sg += (p ushr 8) and 0xFF
-                        sb += p and 0xFF
-                        bi++
-                    }
-                    val ar = (sr / n).toInt(); val ag = (sg / n).toInt(); val ab = (sb / n).toInt()
-                    val whiteFlag = if (ar > 200 && ag > 200 && ab > 200) " ⚠️帧偏白" else ""
-                    Log.d(TAG, "backdrop 采样正常: " + tw + "x" + th + " <- 屏幕 " + dw + "x" + dh + " (version=" + VideoBackdrop.version + ") 平均RGB=" + ar + "," + ag + "," + ab + whiteFlag)
-                } catch (t: Throwable) {
-                    Log.w(TAG, "backdrop 诊断统计出错（不影响采样本身）：${t.message}")
-                }
-            }
-        } catch (t: Throwable) {
-            bdFail("异常：${t.message}")
-        } finally {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        }
-    }
-
-    /** 采样开关变化时重建资源（尺寸变化由 ensureBackdropTarget 自行处理） */
-    private fun resetBackdropCapture() {
-        bdDisabled = false
-        bdFrame = 0
-    }
-
-    /**
-     * 同步回读（兜底路径）：`glReadPixels` 直达 heap IntBuffer → 统一处理 → commit。
-     * PBO 链路异常时 [captureBackdropIfNeeded] 会退到这里。
-     */
-    private fun captureBackdropSync(tw: Int, th: Int, px: IntArray): Boolean {
-        val buf = bdBuffer!!
-        buf.position(0)
-        GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
-        val err = GLES20.glGetError()
-        if (err != GLES20.GL_NO_ERROR) {
-            bdFail("readPixels 失败 err=$err")
-            return false
-        }
-        buf.position(0)
-        buf.get(px)
-        processAndCommitBackdrop(px, tw, th)
-        return true
-    }
-
-    /**
-     * v2.6.20（P1，用户选定）：**PBO 双缓冲异步回读**。
-     *
-     * 每次采样（40ms）做两件事：
-     *   1. **收割上一帧**：`glClientWaitSync`（40ms 间隔下 GPU 早已完成，几乎必立即返回）
-     *      → `glMapBufferRange` 拷出像素 → 走统一后处理 → commit；
-     *   2. **提交本帧**：`glReadPixels(offset=0)` 写进另一个 PBO（异步，不阻塞管线）+ 挂 fence。
-     *
-     * 任何一步 GL 出错 / fence 8ms 内仍未就绪 → 关闭 [bdPboEnabled] 永久回退同步路径
-     * （调用方本帧立即用 [captureBackdropSync] 兜底，采样不中断）。
-     *
-     * ⚠️ 代价：commit 的内容比同步路径旧一个提交间隔（40ms → 视觉滞后 ≈80ms）。
-     * 折射带只有 2dp，环带内容滞后不可感知；本体又是全透明的，无影响。
-     *
-     * @return 是否 commit 了像素（首帧只提交、无上一帧可收割 → false 但不算失败）
-     */
-    private fun captureBackdropPbo(tw: Int, th: Int, px: IntArray): Boolean {
-        var harvested = false
-        val readSlot = 1 - bdPboIdx
-        val fence = bdPboFence[readSlot]
-        if (fence != 0L) {
-            val status = GLES30.glClientWaitSync(fence, 0, 8_000_000L)
-            GLES30.glDeleteSync(fence)
-            bdPboFence[readSlot] = 0L
-            if (status == GLES30.GL_ALREADY_SIGNALED || status == GLES30.GL_CONDITION_SATISFIED) {
-                val need = tw * th * 4
-                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, bdPboIds[readSlot])
-                val mapped = GLES30.glMapBufferRange(
-                    GLES30.GL_PIXEL_PACK_BUFFER, 0, need, GLES30.GL_MAP_READ_BIT
-                )
-                if (mapped != null) {
-                    val ib = (mapped as java.nio.ByteBuffer)
-                        .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-                        .asIntBuffer()
-                    ib.position(0)
-                    ib.get(px, 0, tw * th)
-                    GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER)
-                    harvested = true
-                }
-                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
-                if (GLES20.glGetError() != GLES20.GL_NO_ERROR) harvested = false
-            } else {
-                Log.w(TAG, "backdrop PBO fence 未就绪(status=$status) → 回退同步回读")
-            }
-        } else {
-            // 首帧：没有上一帧可收割，只做提交
-            harvested = false
-        }
-        if (!harvested && bdPboFence[readSlot] != 0L) {
-            // 走到这说明收割失败且 fence 已删 —— 保守起见整体回退同步
-            bdPboEnabled = false
-            return false
-        }
-        if (GLES20.glGetError() != GLES20.GL_NO_ERROR) {
-            bdPboEnabled = false
-            return false
-        }
-
-        // 本帧异步提交到另一个槽
-        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, bdPboIds[bdPboIdx])
-        GLES30.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, 0)
-        val err = GLES20.glGetError()
-        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
-        if (err != GLES20.GL_NO_ERROR) {
-            Log.w(TAG, "backdrop PBO glReadPixels 失败 err=$err → 回退同步回读")
-            bdPboEnabled = false
-            return false
-        }
-        bdPboFence[bdPboIdx] = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
-        if (bdPboFence[bdPboIdx] == 0L) {
-            bdPboEnabled = false
-            return false
-        }
-        bdPboIdx = 1 - bdPboIdx
-
-        if (harvested) processAndCommitBackdrop(px, tw, th)
-        return harvested
-    }
-
-    /**
-     * 回读像素的统一后处理：红蓝交换 → 垂直翻转 → 提交 [VideoBackdrop.commit]。
-     * 同步与 PBO 两条路径共用（红蓝/翻转的完整机理说明见原内联版本的 v2.4.62 注释，
-     * 已随代码移到此处）。
-     */
-    private fun processAndCommitBackdrop(px: IntArray, tw: Int, th: Int) {
-        // 🔴 v2.4.62：**补红蓝交换** —— `glReadPixels` 按 R,G,B,A 字节序写入，IntBuffer（小端）
-        //    逐元素取出后是 ABGR；而 `VideoBackdrop.commit` 的契约是 ARGB（直接 setPixels 进
-        //    ARGB_8888 位图）。漏掉这步，玻璃背后的画面红蓝颠倒（高饱和画面明显偏蓝）。
-        ImageScale.swapRedBlueInPlace(px, tw * th)
-        // GL 的行序是自下而上，Bitmap 是自上而下 —— 必须翻转，否则背景是倒的
-        val row = bdRow!!
-        var y = 0
-        while (y < th / 2) {
-            val a = y * tw
-            val b = (th - 1 - y) * tw
-            System.arraycopy(px, a, row, 0, tw)
-            System.arraycopy(px, b, px, a, tw)
-            System.arraycopy(row, 0, px, b, tw)
-            y++
-        }
-        VideoBackdrop.commit(px, tw, th)
-    }
+    fun requestDanmuFrame(maxWidth: Int = 1024): Boolean = backdropAndDanmu.requestDanmuFrame(maxWidth)
+    fun takeDanmuFrame(): Triple<IntArray, Int, Int>? = backdropAndDanmu.takeDanmuFrame()
+    private fun releaseDanmuTarget() = backdropAndDanmu.releaseDanmuTarget()
+    private fun releaseBackdropTarget() = backdropAndDanmu.releaseBackdropTarget()
+    internal fun captureDanmuFrameIfNeeded() = backdropAndDanmu.captureDanmuFrameIfNeeded()
+    private fun captureBackdropIfNeeded() = backdropAndDanmu.captureBackdropIfNeeded()
 
     private fun snapshotGpResult() {
         if (gpFboTexId == 0 || gpFboId == 0) return
@@ -3766,7 +2248,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *
      * 返回是否成功（FBO 不完整 / 尺寸非法则返回 false，调用方退回全分辨率回读）。
      */
-    private fun blitFboToHalf(srcUvX: Float, srcUvY: Float, srcUvW: Float, srcUvH: Float,
+    internal fun blitFboToHalf(srcUvX: Float, srcUvY: Float, srcUvW: Float, srcUvH: Float,
                               dstW: Int, dstH: Int): Boolean {
         if (gpFboId == 0 || gpFboTexId == 0) return false
         if (dstW <= 0 || dstH <= 0) return false
@@ -3814,7 +2296,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *
      * @return 是否可继续使用 PBO 路径
      */
-    private fun ensureGpPbo(bytes: Int): Boolean {
+    internal fun ensureGpPbo(bytes: Int): Boolean {
         if (!gpPboEnabled) return false
         if (gpPboIds[0] != 0 && gpPboIds[1] != 0 && gpPboCapBytes >= bytes) return true
         releaseGpPbo()
@@ -3852,7 +2334,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     /** 释放 PBO 与在途 fence（也用于「尺寸变化 → 在途作废」的重置） */
-    private fun releaseGpPbo() {
+    internal fun releaseGpPbo() {
         discardGpPboPending()
         for (i in 0..1) {
             if (gpPboIds[i] != 0) {
@@ -3865,7 +2347,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     /** 丢弃在途 fence 与尺寸记账（PBO 本体保留，可继续复用） */
-    private fun discardGpPboPending() {
+    internal fun discardGpPboPending() {
         for (i in 0..1) {
             if (gpPboFence[i] != 0L) {
                 GLES30.glDeleteSync(gpPboFence[i])
@@ -3887,7 +2369,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *    调用方应把本帧交给保底帧（不阻塞、不丢帧）
      *  - 返回 null 且 [gpPboActive] 为 false：本来就没有在途任务（首帧 / 刚重置）
      */
-    private fun collectGpPbo(need: Int): ByteArray? {
+    internal fun collectGpPbo(need: Int): ByteArray? {
         if (!gpPboActive) return null
         val prev = 1 - gpPboIdx
         val st = GLES30.glClientWaitSync(
@@ -3956,7 +2438,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *
      * @return 是否提交成功（失败则由调用方回退同步路径）
      */
-    private fun submitGpPboRead(
+    internal fun submitGpPboRead(
         srcIsHalf: Boolean, x0: Int, y0: Int, rw: Int, rh: Int, need: Int
     ): Boolean {
         val pbo = gpPboIds[gpPboIdx]
@@ -4040,791 +2522,54 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return id
     }
 
-    // ===== v2.0.177：磨皮半分辨率 pass 的三个 program =====
-
-    /** 全屏 quad 的顶点着色器：pos(-1..1) + tex(0..1)，直接透传，不做任何变换 */
-    private val halffsVs = "attribute vec2 aPos;attribute vec2 aTex;varying vec2 vTex;" +
-        "void main(){gl_Position=vec4(aPos,0.0,1.0);vTex=aTex;}"
-
-    /** down pass：把全分辨率纹理降采样到 1/2（GL_LINEAR 自带 2x2 平均，已足够） */
-    private val halfDownFs = "precision mediump float;varying vec2 vTex;uniform sampler2D uTex;" +
-        "void main(){gl_FragColor=texture2D(uTex,vTex);}"
-
-    /**
-     * blur pass：半分辨率上做 8 邻域**保边**均值（频域分离的低频层）。
-     *
-     * 与主 shader 内联版算法的唯一区别是采样半径：主 shader 用 ±6 个**全分辨率**像素，
-     * 这里纹理已是半分辨率，故半径取 ±6 个半分辨率像素 —— 视觉上等效于全分辨率的 ±12，
-     * 只让低频更平滑一点（磨皮本就只要低频），并不会改变观感量级。
-     * `uTexelSize` 由 Kotlin 侧按**半分辨率纹理**传入（绝不能复用全分辨率那份，
-     * 否则半径会翻倍成 ±12 半分辨率像素 ≈ 全分辨率 ±24，磨皮会糊成一片）。
-     */
-    private val halfBlurFs = """
-        precision mediump float;
-        varying vec2 vTex;
-        uniform sampler2D uTex;
-        uniform vec2 uTexelSize;
-        void main() {
-            vec4 color = texture2D(uTex, vTex);
-            // v2.4.36 审查 #11：半分辨率 pass 的磨皮半径同样按源宽度相对 1080p 缩放，
-            //   与上面主 shader 的语义对齐（uTexelSize 此处是半分辨率纹理的纹素尺寸，
-            //   反推出的宽度是半分辨率宽度，缩放后落在源像素上仍与全分辨率路径一致）。
-            float smoothRadiusScale = (1.0 / uTexelSize.x) / 1080.0;
-            vec2 stepF = uTexelSize * 6.0 * smoothRadiusScale;
-            vec4 n1 = texture2D(uTex, vTex + stepF);
-            vec4 n2 = texture2D(uTex, vTex - stepF);
-            vec4 n3 = texture2D(uTex, vTex + vec2(stepF.x, 0.0));
-            vec4 n4 = texture2D(uTex, vTex - vec2(stepF.x, 0.0));
-            vec4 n5 = texture2D(uTex, vTex + vec2(0.0, stepF.y));
-            vec4 n6 = texture2D(uTex, vTex - vec2(0.0, stepF.y));
-            vec4 n7 = texture2D(uTex, vTex + vec2(stepF.x, -stepF.y));
-            vec4 n8 = texture2D(uTex, vTex - vec2(stepF.x, -stepF.y));
-            float deltaThres = 0.30;
-            float w1 = max(0.0, 1.0 - distance(color.rgb, n1.rgb) / deltaThres);
-            float w2 = max(0.0, 1.0 - distance(color.rgb, n2.rgb) / deltaThres);
-            float w3 = max(0.0, 1.0 - distance(color.rgb, n3.rgb) / deltaThres);
-            float w4 = max(0.0, 1.0 - distance(color.rgb, n4.rgb) / deltaThres);
-            float w5 = max(0.0, 1.0 - distance(color.rgb, n5.rgb) / deltaThres);
-            float w6 = max(0.0, 1.0 - distance(color.rgb, n6.rgb) / deltaThres);
-            float w7 = max(0.0, 1.0 - distance(color.rgb, n7.rgb) / deltaThres);
-            float w8 = max(0.0, 1.0 - distance(color.rgb, n8.rgb) / deltaThres);
-            gl_FragColor = (color + n1 * w1 + n2 * w2 + n3 * w3 + n4 * w4
-                + n5 * w5 + n6 * w6 + n7 * w7 + n8 * w8)
-                / (1.0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8);
-        }
-    """.trimIndent()
-
-    /**
-     * blend pass：全分辨率原图 + 半分辨率低频 → 上屏。
-     *
-     * 频域分离在这里完成：
-     *   低频 = texture2D(uLowTex, vTex)        （半分辨率，双线性上采样）
-     *   高频 = 原图 - 低频                      （全分辨率，含毛孔/发丝/五官边缘）
-     *   结果 = 低频 + 高频 × uTextureDetail
-     * 再按 isSkin 与 uBeautyStrength 决定混合强度 —— 与主 shader 内联版语义完全一致，
-     * 只是**皮肤判定也从主 shader 搬到了这里**（主 shader 不再做磨皮）。
-     */
-    private val halfBlendFs = """
-        precision highp float;
-        varying vec2 vTex;
-        uniform sampler2D uFullTex;   // 全分辨率原图（主渲染结果）
-        uniform sampler2D uLowTex;    // 半分辨率低频层
-        uniform float uBeautyStrength;
-        uniform float uTextureDetail;
-        bool isSkin(vec3 rgb) {
-            float r = rgb.r;
-            float g = rgb.g;
-            float b = rgb.b;
-            return (r > 0.35 && g > 0.15 && b > 0.08 && r > g && r > b && (r - g) > 0.05);
-        }
-        void main() {
-            vec4 full = texture2D(uFullTex, vTex);
-            if (uBeautyStrength <= 0.01) {
-                gl_FragColor = full;
-                return;
-            }
-            vec3 low = texture2D(uLowTex, vTex).rgb;
-            vec3 detail = full.rgb - low;
-            vec3 smoothed = low + detail * uTextureDetail;
-            if (isSkin(full.rgb)) {
-                gl_FragColor = vec4(mix(full.rgb, smoothed, uBeautyStrength), full.a);
-            } else {
-                // v2.0.178 修复：与主 shader 一致 —— 非皮肤像素不再「完全跳过」。
-                // 实测真实视频 isSkin 总通过率仅 35%（粉/紫背景 0%），若背景完全不动，
-                // 皮肤与背景之间会出现可见的一圈分界，观感即「美颜只在一小块生效」。
-                // 这里用半分辨率低频层也做一次 0.25 权重的轻度混合（零额外采样）。
-                gl_FragColor = vec4(mix(full.rgb, smoothed, uBeautyStrength * 0.25), full.a);
-            }
-        }
-    """.trimIndent()
-
-    /** 编译并链接一个「aPos + aTex」全屏 pass program；失败返回 0 */
-    private fun buildHalfPassProgram(fs: String): Int {
-        return try {
-            val vsId = compileGpuShader(GLES20.GL_VERTEX_SHADER, halffsVs)
-            val fsId = compileGpuShader(GLES20.GL_FRAGMENT_SHADER, fs)
-            val prog = GLES20.glCreateProgram()
-            GLES20.glAttachShader(prog, vsId)
-            GLES20.glAttachShader(prog, fsId)
-            GLES20.glLinkProgram(prog)
-            val st = IntArray(1)
-            GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, st, 0)
-            if (st[0] == 0) {
-                Log.e(TAG, "半分辨率磨皮 pass 链接失败: ${GLES20.glGetProgramInfoLog(prog)}")
-                0
-            } else {
-                prog
-            }
-        } catch (e: Throwable) {
-            Log.e(TAG, "半分辨率磨皮 pass 编译失败", e)
-            0
-        }
-    }
-
-    private fun ensureHalfPassPrograms() {
-        if (pDownProgram == 0) pDownProgram = buildHalfPassProgram(halfDownFs)
-        if (pBlurProgram == 0) pBlurProgram = buildHalfPassProgram(halfBlurFs)
-        if (pBlendProgram == 0) pBlendProgram = buildHalfPassProgram(halfBlendFs)
-    }
-
-    /** 创建一个可作 FBO attachment 的 RGBA 纹理（LINEAR + CLAMP_TO_EDGE） */
-    private fun createFboTexture(w: Int, h: Int): Int {
-        val tex = IntArray(1)
-        GLES20.glGenTextures(1, tex, 0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        GLES20.glTexImage2D(
-            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
-            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null
+    private val halfPassBeauty: VRGLHalfPassBeauty by lazy {
+        VRGLHalfPassBeauty(
+            getDisplayWidth = { displayWidth },
+            getDisplayHeight = { displayHeight },
+            isBeautyEnabled = { beautyMasterEnabled },
+            getBeautyLevel = { beautyLevel },
+            getTextureDetail = { beautyTextureDetail },
+            getEffectiveEngine = { effectiveBeautyEngine },
+            isGpuPixelActiveFn = { isGpuPixelActive() },
         )
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-        return tex[0]
     }
-
-    private fun createFboFor(texId: Int): Int {
-        val fbo = IntArray(1)
-        GLES20.glGenFramebuffers(1, fbo, 0)
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo[0])
-        GLES20.glFramebufferTexture2D(
-            GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-            GLES20.GL_TEXTURE_2D, texId, 0
-        )
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        return fbo[0]
-    }
-
-    /** 按需（重）建半分辨率 pass 的 FBO 组。尺寸变化时才重建 */
-    private fun ensureHalfPassFbos(w: Int, h: Int) {
-        if (downTexId != 0 && downFboW == w && downFboH == h) return
-        releaseHalfPassFbos()
-        downTexId = createFboTexture(w, h)
-        downFboId = createFboFor(downTexId)
-        halfW = (w / 2).coerceAtLeast(1)
-        halfH = (h / 2).coerceAtLeast(1)
-        halfTexId = createFboTexture(halfW, halfH)
-        halfFboId = createFboFor(halfTexId)
-        halfLowTexId = createFboTexture(halfW, halfH)
-        halfLowFboId = createFboFor(halfLowTexId)
-        downFboW = w
-        downFboH = h
-        halfFboW = halfW
-        halfFboH = halfH
-    }
-
-    private fun releaseHalfPassFbos() {
-        if (downTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(downTexId), 0)
-        if (downFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(downFboId), 0)
-        if (halfTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(halfTexId), 0)
-        if (halfFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(halfFboId), 0)
-        if (halfLowTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(halfLowTexId), 0)
-        if (halfLowFboId != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(halfLowFboId), 0)
-        downTexId = 0; downFboId = 0
-        halfTexId = 0; halfFboId = 0
-        halfLowTexId = 0; halfLowFboId = 0
-        downFboW = 0; downFboH = 0; halfFboW = 0; halfFboH = 0
-    }
-
-    /**
-     * 是否启用「磨皮半分辨率 pass」。
-     *
-     * 仅在**内置分屏/全屏通路**下启用（GPUPixel 通路走自己的渲染目标，
-     * 混进来会把 FBO 绑定搞乱）。且必须磨皮真的在跑（GLSL 引擎 + 总开关 + 强度 > 0）。
-     */
-    private fun isHalfPassActive(): Boolean =
-            !isGpuPixelActive() &&
-            beautyMasterEnabled &&
-            // v2.4.33（#1）：用 effectiveBeautyEngine —— GPUPixel 不可用时按 GLSL 跑半分辨率磨皮，
-            // 而不是「三个判断全为假 → 美颜无输出」。
-            effectiveBeautyEngine == BEAUTY_ENGINE_GLSL &&
-            beautyLevel > 0.01f &&
-            displayWidth > 0 && displayHeight > 0
-
-    /**
-     * 绘制一个全屏 quad 到当前绑定的 framebuffer（供三个 pass 复用）。
-     * [texUnit0] / [texUnit1] 为 -1 表示不绑定该单元。
-     */
-    private fun drawHalfQuad(prog: Int, texUnit0: Int, texUnit1: Int, texelW: Float, texelH: Float) {
-        val posLoc = GLES20.glGetAttribLocation(prog, "aPos")
-        val texLoc = GLES20.glGetAttribLocation(prog, "aTex")
-        GLES20.glUseProgram(prog)
-        if (texUnit0 != -1) {
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texUnit0)
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uTex"), 0)
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uFullTex"), 0)
-            GLES20.glUniform2f(GLES20.glGetUniformLocation(prog, "uTexelSize"), texelW, texelH)
-        }
-        if (texUnit1 != -1) {
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texUnit1)
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uLowTex"), 1)
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        }
-        halfQuad.position(0)
-        GLES20.glVertexAttribPointer(posLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
-        GLES20.glEnableVertexAttribArray(posLoc)
-        halfQuad.position(2)
-        GLES20.glVertexAttribPointer(texLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
-        GLES20.glEnableVertexAttribArray(texLoc)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glDisableVertexAttribArray(posLoc)
-        GLES20.glDisableVertexAttribArray(texLoc)
-    }
-
-    /**
-     * 跑三个 pass，把「低频层」准备好。
-     *
-     * ⚠️ 副作用：结束时**不恢复 framebuffer 绑定**（停在 0 = 屏幕）。
-     *    调用方需自行绑定到 [downFboId] 做正式绘制。
-     */
-    private fun runHalfSmoothingPasses() {
-        ensureHalfPassPrograms()
-        if (pDownProgram == 0 || pBlurProgram == 0 || pBlendProgram == 0) {
-            halfPassReady = false
-            return
-        }
-        ensureHalfPassFbos(displayWidth, displayHeight)
-
-        // pass 1：全分辨率 → 半分辨率
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, halfFboId)
-        GLES20.glViewport(0, 0, halfW, halfH)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        drawHalfQuad(pDownProgram, downTexId, -1, 0f, 0f)
-
-        // pass 2：半分辨率 8 邻域保边均值 → 半分辨率低频层
-        // ⚠️ texel 尺寸必须按**半分辨率纹理**算（1/halfW），不能用 1/displayWidth
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, halfLowFboId)
-        GLES20.glViewport(0, 0, halfW, halfH)
-        drawHalfQuad(pBlurProgram, halfTexId, -1, 1.0f / halfW, 1.0f / halfH)
-
-        halfPassReady = true
-        // 交给调用方绑定 downFbo 做正式绘制（不在此恢复 framebuffer，避免多一次切换）
-    }
-
-    /**
-     * 磨皮半分辨率 pass 的合成上屏：全分辨率原图 + 半分辨率低频 → 屏幕。
-     *
-     * 全程 `glDisable(GL_BLEND)`：主渲染用的是直写（不混合），而 FBO 预乘/混合语义易踩坑。
-     */
-    private fun blendHalfPassToScreen() {
-        if (!halfPassReady || pBlendProgram == 0 || downTexId == 0 || halfLowTexId == 0) return
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        GLES20.glViewport(0, 0, displayWidth, displayHeight)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        val prog = pBlendProgram
-        GLES20.glUseProgram(prog)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uBeautyStrength"), beautyLevel)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uTextureDetail"), beautyTextureDetail)
-        drawHalfQuad(prog, downTexId, halfLowTexId, 0f, 0f)
-    }
-
-    // ========================================================================
-    // v2.0.206：画质增强（MEMC 插帧 + FSR 超分）
-    // ========================================================================
-    //
-    // 管线顺序：源帧 → MEMC(ME→MC) → FSR(EASU→RCAS) → 主 shader
-    // 「为什么 MEMC 必须在前」的三条理由见 VideoEnhanceShaders 的头部注释。
-    //
-    // 【主 shader 如何拿到增强结果 —— 零 shader 改动】
-    // 主 shader 里 uIsVideo 只有「选哪张纹理采样」这一处用途：
-    //     if (uIsVideo == 1) color = texture2D(uSamplerVideo, tc); else ...
-    // 而 imageProgram（VIDEO_OES 未定义的那份变体）里 uSamplerVideo 被声明为普通
-    // sampler2D。于是只要：
-    //     ① program 选 imageProgram，
-    //     ② 把增强纹理绑到 samplerVideo 的槽位（TEXTURE1），
-    //     ③ uIsVideo 置 1，
-    // 主 shader 就直接采样增强结果 —— 不必给 shader 加任何分支或宏。
-    // 这是本方案相对「改 15 处采样点」最大的风险削减。
+    private val halfQuad: java.nio.FloatBuffer get() = halfPassBeauty.halfQuad
+    private val downFboId: Int get() = halfPassBeauty.downFboId
+    private fun buildHalfPassProgram(fs: String): Int = halfPassBeauty.buildQuadProgram(fs)
+    private fun ensureHalfPassPrograms() = halfPassBeauty.ensurePrograms()
+    private fun ensureHalfPassFbos(w: Int, h: Int) = halfPassBeauty.ensureFbos(w, h)
+    private fun releaseHalfPassFbos() = halfPassBeauty.releaseFbos()
+    private fun isHalfPassActive(): Boolean = halfPassBeauty.isActive()
+    private fun runHalfSmoothingPasses() = halfPassBeauty.runSmoothingPasses()
+    private fun blendHalfPassToScreen() = halfPassBeauty.blendToScreen()
     //
     // ⚠️ 【一律不在此链路里做截图/回读】，只有 scene-cut 那一处 1x1 回读是必需的。
     //    全屏 glReadPixels 的教训见项目记忆（v2.0.182/183 的错位事故）。
 
-    /** 缓存 GL_MAX_TEXTURE_SIZE（进程内不变，查一次即可） */
-    private var cachedMaxTexSize = 0
-
-    /** 上一帧输出的增强纹理，用于「目标帧率节流」时复用 */
-    private var lastEnhanceTexId = 0
-
-    /** 上一次输出增强结果的时刻，配合 memcTargetFps 做节流 */
-    private var memcLastOutputMs = 0L
-
-    private val memcBlockSize = 16f
-    private val memcSearchRadius = 16f
-    private val memcSadThreshold = 0.55f
-    private val memcOcclusionThresh = 0.12f
-    private val memcSceneCutDiff = 0.12f
-    private val fsrRcasSharpness = 0.2f
-
-    /** 是否请求了画质增强（任一开关打开即可能生效） */
-    private fun isEnhanceRequested(): Boolean = memcEnabled || fsrEnabled
-
-    /**
-     * 查询 GL_MAX_TEXTURE_SIZE。
-     *
-     * ⚠️ 必须查：自定义规则里用户可以把目标选到 4320p（7680x4320），
-     * 而多数移动 GPU 的上限是 4096 或 8192。超限时 glTexImage2D 会静默失败，
-     * 之后绑到 0 号纹理 → 画面全黑，且没有任何报错。
-     * 宁可降级成「不超分」也绝不能黑屏。
-     */
-    private fun maxTexSize(): Int {
-        if (cachedMaxTexSize > 0) return cachedMaxTexSize
-        val v = IntArray(1)
-        GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, v, 0)
-        cachedMaxTexSize = if (v[0] > 0) v[0] else 4096
-        return cachedMaxTexSize
+    private val videoEnhance: VRGLVideoEnhance by lazy {
+        VRGLVideoEnhance(halfQuad) { fs -> buildHalfPassProgram(fs) }
     }
-
-    /** 把一张纹理绑到指定 unit 并设置 sampler uniform（location 为 -1 时静默跳过） */
-    private fun bindEnhanceTex(prog: Int, unit: Int, texId: Int, uniformName: String) {
-        if (texId == 0) return
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
-        val loc = GLES20.glGetUniformLocation(prog, uniformName)
-        if (loc != -1) GLES20.glUniform1i(loc, unit)
+    private fun syncVideoEnhanceState() {
+        videoEnhance.memcEnabled = memcEnabled
+        videoEnhance.memcTargetFps = memcTargetFps
+        videoEnhance.fsrEnabled = fsrEnabled
+        videoEnhance.fsrTargetWidth = fsrTargetWidth
+        videoEnhance.fsrTargetHeight = fsrTargetHeight
+        videoEnhance.isVideoActive = isVideoActive
+        videoEnhance.videoTextureId = videoTextureId
+        videoEnhance.imageTextureId = imageTextureId
+        videoEnhance.videoWidth = videoWidth
+        videoEnhance.videoHeight = videoHeight
+        videoEnhance.imageWidth = imageWidth
+        videoEnhance.imageHeight = imageHeight
+        videoEnhance.displayWidth = displayWidth
+        videoEnhance.displayHeight = displayHeight
     }
-
-    /** 设置一个 float uniform（location 为 -1 时静默跳过） */
-    private fun setEnhanceFloat(prog: Int, name: String, v: Float) {
-        val loc = GLES20.glGetUniformLocation(prog, name)
-        if (loc != -1) GLES20.glUniform1f(loc, v)
-    }
-
-    /** 设置一个 vec2 uniform */
-    private fun setEnhanceVec2(prog: Int, name: String, x: Float, y: Float) {
-        val loc = GLES20.glGetUniformLocation(prog, name)
-        if (loc != -1) GLES20.glUniform2f(loc, x, y)
-    }
-
-    /** 绘制全屏 quad（复用磨皮 pass 的 halfQuad，顶点布局一致） */
-    private fun drawEnhanceQuad(prog: Int) {
-        val posLoc = GLES20.glGetAttribLocation(prog, "aPos")
-        val texLoc = GLES20.glGetAttribLocation(prog, "aTex")
-        halfQuad.position(0)
-        GLES20.glVertexAttribPointer(posLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
-        GLES20.glEnableVertexAttribArray(posLoc)
-        halfQuad.position(2)
-        GLES20.glVertexAttribPointer(texLoc, 2, GLES20.GL_FLOAT, false, 16, halfQuad)
-        GLES20.glEnableVertexAttribArray(texLoc)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glDisableVertexAttribArray(posLoc)
-        GLES20.glDisableVertexAttribArray(texLoc)
-    }
-
-    /** 编译并链接一个全屏增强 pass（复用磨皮 pass 的编译路径） */
-    private fun buildEnhanceProgram(fs: String): Int = buildHalfPassProgram(fs)
-
-    /** 懒加载 MEMC 的全部 program */
-    private fun ensureMemcPrograms() {
-        if (pMemcCopyOes == 0) pMemcCopyOes = buildEnhanceProgram(VideoEnhanceShaders.memcCopyFragment(true))
-        if (pMemcCopy2d == 0) pMemcCopy2d = buildEnhanceProgram(VideoEnhanceShaders.memcCopyFragment(false))
-        if (pMemcMe == 0) pMemcMe = buildEnhanceProgram(VideoEnhanceShaders.MEMC_ME_FS)
-        if (pMemcMc == 0) pMemcMc = buildEnhanceProgram(VideoEnhanceShaders.MEMC_MC_FS)
-        if (pMemcDiff == 0) pMemcDiff = buildEnhanceProgram(VideoEnhanceShaders.MEMC_FRAME_DIFF_FS)
-    }
-
-    /** 懒加载 FSR 的全部 program */
-    private fun ensureFsrPrograms() {
-        if (pFsrEasuOes == 0) pFsrEasuOes = buildEnhanceProgram(VideoEnhanceShaders.fsrEasuFragment(true))
-        if (pFsrEasu2d == 0) pFsrEasu2d = buildEnhanceProgram(VideoEnhanceShaders.fsrEasuFragment(false))
-        if (pFsrRcas == 0) pFsrRcas = buildEnhanceProgram(VideoEnhanceShaders.FSR_RCAS_FS)
-    }
-
-    /** 重建 MEMC 的 FBO 组（工作尺寸或块尺寸变化时调用） */
-    private fun releaseMemcFbos() {
-        for (t in intArrayOf(memcPrevTex, memcCurrTex, memcOutTex, memcMvFTex, memcMvBTex, memcDiffTex)) {
-            if (t != 0) GLES20.glDeleteTextures(1, intArrayOf(t), 0)
-        }
-        for (f in intArrayOf(memcPrevFbo, memcCurrFbo, memcOutFbo, memcMvFFbo, memcMvBFbo, memcDiffFbo)) {
-            if (f != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(f), 0)
-        }
-        memcPrevTex = 0; memcPrevFbo = 0
-        memcCurrTex = 0; memcCurrFbo = 0
-        memcOutTex = 0; memcOutFbo = 0
-        memcMvFTex = 0; memcMvFFbo = 0
-        memcMvBTex = 0; memcMvBFbo = 0
-        memcDiffTex = 0; memcDiffFbo = 0
-        memcW = 0; memcH = 0; memcMvW = 0; memcMvH = 0
-        memcHasPrev = false
-    }
-
-    private fun ensureMemcFbos(w: Int, h: Int) {
-        if (memcPrevTex != 0 && memcW == w && memcH == h) return
-        releaseMemcFbos()
-        memcW = w.coerceAtLeast(2)
-        memcH = h.coerceAtLeast(2)
-        memcPrevTex = createFboTexture(memcW, memcH); memcPrevFbo = createFboFor(memcPrevTex)
-        memcCurrTex = createFboTexture(memcW, memcH); memcCurrFbo = createFboFor(memcCurrTex)
-        memcOutTex = createFboTexture(memcW, memcH); memcOutFbo = createFboFor(memcOutTex)
-        // MV 场按块网格降采样：每个块只存一个 MV，MC 采样时用 LINEAR 自动插值回全分辨率。
-        // 这样 ME 的成本是「块数 × 搜索步数 × 16」，而不是「全分辨率像素数 × ...」。
-        memcMvW = ((memcW + memcBlockSize.toInt() - 1) / memcBlockSize.toInt()).coerceAtLeast(1)
-        memcMvH = ((memcH + memcBlockSize.toInt() - 1) / memcBlockSize.toInt()).coerceAtLeast(1)
-        memcMvFTex = createFboTexture(memcMvW, memcMvH); memcMvFFbo = createFboFor(memcMvFTex)
-        memcMvBTex = createFboTexture(memcMvW, memcMvH); memcMvBFbo = createFboFor(memcMvBTex)
-        memcDiffTex = createFboTexture(1, 1); memcDiffFbo = createFboFor(memcDiffTex)
-        memcHasPrev = false
-    }
-
-    private fun releaseFsrFbos() {
-        if (fsrTexA != 0) GLES20.glDeleteTextures(1, intArrayOf(fsrTexA), 0)
-        if (fsrFboA != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fsrFboA), 0)
-        if (fsrTexB != 0) GLES20.glDeleteTextures(1, intArrayOf(fsrTexB), 0)
-        if (fsrFboB != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(fsrFboB), 0)
-        fsrTexA = 0; fsrFboA = 0; fsrTexB = 0; fsrFboB = 0
-        fsrW = 0; fsrH = 0
-    }
-
-    /** @return 是否成功分配了目标尺寸的 FBO（超限时为 false，调用方需降级） */
-    private fun ensureFsrFbos(w: Int, h: Int): Boolean {
-        if (fsrTexA != 0 && fsrW == w && fsrH == h) return true
-        val limit = maxTexSize()
-        if (w > limit || h > limit) {
-            Log.w(TAG, "FSR 目标 ${w}x${h} 超出 GL_MAX_TEXTURE_SIZE=$limit，本帧降级为不超分")
-            return false
-        }
-        releaseFsrFbos()
-        fsrW = w
-        fsrH = h
-        fsrTexA = createFboTexture(w, h); fsrFboA = createFboFor(fsrTexA)
-        fsrTexB = createFboTexture(w, h); fsrFboB = createFboFor(fsrTexB)
-        Log.i(TAG, "FSR FBO 已建立：${w}x${h}")
-        return true
-    }
-
-    /**
-     * 跑完整条增强链，返回供主 shader 采样的纹理 id。
-     *
-     * ⚠️ 副作用：结束时会把 framebuffer 绑回 0 并恢复 viewport —— 调用方
-     *    可以当作「什么都没发生过」，随后自行绑定主渲染目标。
-     *
-     * @param newVideoFrame 本帧是否刚消费到一个新的视频帧（updateTexImage 被调用）
-     * @return 增强后的纹理 id；0 表示「不启用增强，走原始通路」
-     */
     private fun runVideoEnhance(newVideoFrame: Boolean): Int {
-        if (!isEnhanceRequested()) {
-            // 关掉开关时清一次跨帧状态，避免下次打开时拿到陈旧的 prev
-            if (memcHasPrev) memcHasPrev = false
-            lastEnhanceTexId = 0
-            return 0
-        }
-
-        // ---- MEMC 目标帧率的节流 ----
-        // 「目标帧率」是用户直接调的输出节奏，必须真的限制输出帧率，而不只是
-        // 影响插帧相位。未到下一帧的时间点就复用上一帧的增强结果。
-        //
-        // ⚠️ 这里只复用纹理、**不跳过 onDrawFrame 的绘制** —— 画面仍按屏幕刷新率
-        //    重绘（投影矩阵、陀螺仪姿态照常更新），所以 VR 下转头依旧跟手，
-        //    只是视频内容停留在上一张。若直接 return 掉整个 onDrawFrame，
-        //    转头的卡顿会非常明显（这是本设计与「限帧即跳帧」的关键区别）。
-        if (memcEnabled && memcTargetFps > 0 && lastEnhanceTexId != 0) {
-            val budgetMs = 1000L / memcTargetFps
-            val nowMs = android.os.SystemClock.uptimeMillis()
-            if (nowMs - memcLastOutputMs < budgetMs) {
-                return lastEnhanceTexId
-            }
-            memcLastOutputMs = nowMs
-        }
-
-        // 状态变化时打一行 —— 这是「开关有没有真的传到渲染层」最直接的证据。
-        // 若用户拨了开关但这里没打印，说明 LaunchedEffect 没触发（例如 videoSource 未更新）。
-        val stateKey = "MEMC=$memcEnabled@${memcTargetFps}fps FSR=$fsrEnabled@${fsrTargetWidth}x${fsrTargetHeight}"
-        if (stateKey != lastEnhanceStateKey) {
-            lastEnhanceStateKey = stateKey
-            Log.i(TAG, "画质增强状态变更: $stateKey")
-        }
-
-        var tex = 0
-
-        // ---------- 第一段：MEMC ----------
-        if (memcEnabled && isVideoActive) {
-            tex = runMemc(newVideoFrame)
-        }
-
-        // ---------- 第二段：FSR ----------
-        if (fsrEnabled && fsrTargetWidth > 0 && fsrTargetHeight > 0) {
-            val out = runFsr(tex)
-            if (out != 0) tex = out
-        }
-
-        // 恢复 GL 状态，交给调用方（默认 framebuffer + 满屏 viewport）
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-        GLES20.glViewport(0, 0, displayWidth, displayHeight)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        lastEnhanceTexId = tex
-        return tex
+        syncVideoEnhanceState()
+        return videoEnhance.run(newVideoFrame)
     }
-
-    /**
-     * MEMC：把当前视频帧插值成「更密的帧」。
-     *
-     * 【为什么必须先把 OES 拷成 2D】
-     * ME/MC 要**同时**持有 prev 与 curr 两张纹理，而 SurfaceTexture 只提供唯一一张
-     * ExternalOES（且 updateTexImage 原地更新）。所以每来一帧都要先落到自己的
-     * 2D 纹理里，才能构成「双帧」。
-     *
-     * 【时间驱动相位，而不是计数驱动】
-     * phase 由「当前渲染时刻落在 [prev, curr] 区间的比例」决定，而不是简单地
-     * 每次 +1/N。这样渲染循环与源帧率不同步（30fps 源 + 90Hz 屏）时也不会出现
-     * 相位跳变/抖动。
-     *
-     * @return 插帧结果纹理；0 表示本帧不具备插帧条件（已退化为直接给 curr）
-     */
-    private fun runMemc(newVideoFrame: Boolean): Int {
-        ensureMemcPrograms()
-        if (pMemcCopyOes == 0 || pMemcMe == 0 || pMemcMc == 0) return 0
-
-        val workW = if (videoWidth > 0) videoWidth else displayWidth
-        val workH = if (videoHeight > 0) videoHeight else displayHeight
-        if (workW <= 0 || workH <= 0) return 0
-        ensureMemcFbos(workW, workH)
-        if (memcPrevTex == 0 || memcOutTex == 0) return 0
-
-        val now = android.os.SystemClock.uptimeMillis()
-
-        if (newVideoFrame || !memcHasPrev) {
-            // 新帧到达：curr 降级为 prev，新帧写入 curr
-            if (memcHasPrev) {
-                // prev ← curr（整帧拷贝）
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcPrevFbo)
-                GLES20.glViewport(0, 0, memcW, memcH)
-                GLES20.glDisable(GLES20.GL_BLEND)
-                GLES20.glUseProgram(pMemcCopy2d)
-                bindEnhanceTex(pMemcCopy2d, 0, memcCurrTex, "uSrc")
-                drawEnhanceQuad(pMemcCopy2d)
-                memcPrevTimeMs = memcCurrTimeMs
-            } else {
-                memcPrevTimeMs = now
-            }
-
-            // 新视频帧 → curr（OES → 2D）
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcCurrFbo)
-            GLES20.glViewport(0, 0, memcW, memcH)
-            GLES20.glDisable(GLES20.GL_BLEND)
-            GLES20.glUseProgram(pMemcCopyOes)
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureId)
-            val copyLoc = GLES20.glGetUniformLocation(pMemcCopyOes, "uSrc")
-            if (copyLoc != -1) GLES20.glUniform1i(copyLoc, 0)
-            drawEnhanceQuad(pMemcCopyOes)
-            // ⚠️ 必须在此更新 curr 的时间戳：相位 = (now - prevTime) / (currTime - prevTime)，
-            //    漏了这一行 currTime 永远是 0，span 恒为负 → 相位恒为 1 → 插帧永不生效。
-            memcCurrTimeMs = now
-
-            // 首帧时 prev 与 curr 还不是同一张，直接复制一份，避免第一帧就插出鬼影
-            if (!memcHasPrev) {
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcPrevFbo)
-                GLES20.glViewport(0, 0, memcW, memcH)
-                GLES20.glUseProgram(pMemcCopy2d)
-                bindEnhanceTex(pMemcCopy2d, 0, memcCurrTex, "uSrc")
-                drawEnhanceQuad(pMemcCopy2d)
-                memcHasPrev = true
-            }
-
-            // 场景切换检测：只在新帧时做一次（prev/curr 只在这时变化）
-            memcSceneCut = detectSceneCut()
-            if (memcSceneCut) memcSceneCutCount++
-        }
-
-        // ---- 相位 ----
-        // ⚠️ 必须用「显示时刻 = now − 一个源帧间隔」来算，**不能直接用 now**。
-        //    判例（v2.0.206 装机实测，2026-10-01）：此前写的是
-        //        phase = (now - prevTime) / (currTime - prevTime)
-        //    而 currTime 就是「本帧刚取到的 now」（新帧分支里 memcCurrTimeMs = now），
-        //    于是新帧到达那一帧恒得 1.0；渲染循环帧率 ≥ 源帧率时每一帧都踩中该分支
-        //    → **相位永远钉在 1，插帧从头到尾没发生过**
-        //    （logcat 连续 15 次打印 `phase=1.00` 证实）。
-        //    减去一个源帧间隔后，相位才会真正在 [0,1] 之间推进：
-        //        新帧刚到达      → phase = 0（显示 prev）
-        //        下一帧到来之前  → phase → 1（显示 curr）
-        //        中间时刻        → phase ∈ (0,1)  ← 插帧真正发生的地方
-        //    代价是输出延迟一个源帧间隔（MEMC 的固有代价；30fps 源约 33ms，肉眼不可察）。
-        val span = memcCurrTimeMs - memcPrevTimeMs
-        var phase = if (span <= 0L) {
-            // 首帧 / 时间戳未推进（还没攒够两帧）→ 直接显示 curr
-            1f
-        } else {
-            ((now - span - memcPrevTimeMs).toFloat() / span.toFloat()).coerceIn(0f, 1f)
-        }
-        // 场景切换 → 不插帧，直接显示 curr（否则会插出两个场景叠加的鬼影）
-        if (memcSceneCut) phase = 1f
-        memcLastPhase = phase
-        // 相位落在中间区间才算「插帧真的发生了」—— 比 phase 的瞬时值更硬的证据
-        if (phase > 0.05f && phase < 0.95f) memcInterpCount++
-
-        // ---- ME 两次（前向 / 反向）----
-        runMemcMe(memcPrevTex, memcCurrTex, memcMvFFbo)
-        runMemcMe(memcCurrTex, memcPrevTex, memcMvBFbo)
-
-        // ---- MC 插帧 ----
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcOutFbo)
-        GLES20.glViewport(0, 0, memcW, memcH)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glUseProgram(pMemcMc)
-        bindEnhanceTex(pMemcMc, 0, memcPrevTex, "uTexPrev")
-        bindEnhanceTex(pMemcMc, 1, memcCurrTex, "uTexCurr")
-        bindEnhanceTex(pMemcMc, 2, memcMvFTex, "uTexMvF")
-        bindEnhanceTex(pMemcMc, 3, memcMvBTex, "uTexMvB")
-        setEnhanceVec2(pMemcMc, "uTexelSize", 1.0f / memcW, 1.0f / memcH)
-        setEnhanceFloat(pMemcMc, "uSearchRadius", memcSearchRadius)
-        setEnhanceFloat(pMemcMc, "uPhase", phase)
-        setEnhanceFloat(pMemcMc, "uOcclusionThresh", memcOcclusionThresh)
-        drawEnhanceQuad(pMemcMc)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-
-        // 每 120 帧一行统计。
-        // ⚠️ 判读要点：phase 必须**在 0~1 之间变化**；若恒为 1.00，说明插帧没有生效
-        //    （最常见原因：currTime 没更新 → span 恒负 → 被 clamp 成 1）。
-        //    「场景切换累计」在正常播放时应缓慢增长；若疯长说明阈值偏低、频繁误判。
-        memcFrameCount++
-        if (memcFrameCount == 1L || memcFrameCount % 120L == 0L) {
-            Log.i(
-                TAG,
-                "MEMC 运行中 #$memcFrameCount phase=${"%.2f".format(memcLastPhase)} " +
-                    "插帧帧数=$memcInterpCount 场景切换累计=$memcSceneCutCount " +
-                    "工作=${memcW}x${memcH} MV=${memcMvW}x${memcMvH}"
-            )
-        }
-
-        return memcOutTex
-    }
-
-    /** 跑一次 ME：把 (prev, curr) 的 MV 场渲染到 dstFbo */
-    private fun runMemcMe(prevTex: Int, currTex: Int, dstFbo: Int) {
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, dstFbo)
-        GLES20.glViewport(0, 0, memcMvW, memcMvH)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glUseProgram(pMemcMe)
-        bindEnhanceTex(pMemcMe, 0, prevTex, "uTexPrev")
-        bindEnhanceTex(pMemcMe, 1, currTex, "uTexCurr")
-        setEnhanceVec2(pMemcMe, "uTexelSize", 1.0f / memcW, 1.0f / memcH)
-        setEnhanceFloat(pMemcMe, "uSearchRadius", memcSearchRadius)
-        setEnhanceFloat(pMemcMe, "uBlockSize", memcBlockSize)
-        setEnhanceFloat(pMemcMe, "uSadThreshold", memcSadThreshold)
-        drawEnhanceQuad(pMemcMe)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-    }
-
-    /**
-     * 场景切换检测：跑一次 1x1 的帧差 pass 并回读单个像素。
-     *
-     * ⚠️ 这是整条增强链里**唯一**的回读。1 个像素 4 字节，代价可忽略；
-     *    但必须读 —— 场景切换时任何 MV 都是噪声，不跳过插帧就会出鬼影。
-     */
-    private fun detectSceneCut(): Boolean {
-        if (pMemcDiff == 0 || memcDiffFbo == 0) return false
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, memcDiffFbo)
-        GLES20.glViewport(0, 0, 1, 1)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glUseProgram(pMemcDiff)
-        bindEnhanceTex(pMemcDiff, 0, memcPrevTex, "uTexPrev")
-        bindEnhanceTex(pMemcDiff, 1, memcCurrTex, "uTexCurr")
-        drawEnhanceQuad(pMemcDiff)
-        val buf = java.nio.ByteBuffer.allocateDirect(4).order(java.nio.ByteOrder.nativeOrder())
-        GLES20.glReadPixels(0, 0, 1, 1, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        buf.position(0)
-        val diff = (buf.get(0).toInt() and 0xFF) / 255f
-        return diff > memcSceneCutDiff
-    }
-
-    /**
-     * FSR：把 srcTex（0 表示直接从视频源/图片源取）超分到目标分辨率。
-     *
-     * 两个 pass：EASU 上采样 → RCAS 锐化。
-     * ⚠️ 为什么不做成单 pass：RCAS 需要 EASU 输出结果的**邻域**，
-     *    而单 pass 里拿不到「别的输出像素」的值，只能退化成对 4 个源邻域
-     *    各跑一次 EASU（采样数 ×4）。两 pass 反而更省。
-     *
-     * @return 超分结果纹理；0 表示失败（已降级，调用方应使用原始通路）
-     */
-    private fun runFsr(srcTex: Int): Int {
-        ensureFsrPrograms()
-        if (pFsrRcas == 0) return 0
-        if (!ensureFsrFbos(fsrTargetWidth, fsrTargetHeight)) return 0
-        if (fsrTexA == 0 || fsrTexB == 0) return 0
-
-        // 选择 EASU 程序与输入尺寸：MEMC 输出 / 图片 = 2D；视频源 = OES
-        val fromMemcOrImage = srcTex != 0 || !isVideoActive
-        val easuProg = if (fromMemcOrImage) pFsrEasu2d else pFsrEasuOes
-        if (easuProg == 0) return 0
-
-        val inputTex = when {
-            srcTex != 0 -> srcTex
-            isVideoActive -> videoTextureId
-            else -> imageTextureId
-        }
-        if (inputTex == 0) return 0
-
-        val srcW = when {
-            srcTex != 0 -> memcW
-            isVideoActive -> if (videoWidth > 0) videoWidth else displayWidth
-            else -> if (imageWidth > 0) imageWidth else displayWidth
-        }
-        val srcH = when {
-            srcTex != 0 -> memcH
-            isVideoActive -> if (videoHeight > 0) videoHeight else displayHeight
-            else -> if (imageHeight > 0) imageHeight else displayHeight
-        }
-        if (srcW <= 0 || srcH <= 0) return 0
-
-        // ---- pass 1：EASU 上采样 → fsrFboA ----
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fsrFboA)
-        GLES20.glViewport(0, 0, fsrW, fsrH)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glUseProgram(easuProg)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        val isOesInput = (srcTex == 0 && isVideoActive)
-        if (isOesInput) {
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, inputTex)
-        } else {
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, inputTex)
-        }
-        val easuLoc = GLES20.glGetUniformLocation(easuProg, "uSrc")
-        if (easuLoc != -1) GLES20.glUniform1i(easuLoc, 0)
-        setEnhanceVec2(easuProg, "uSrcTexel", 1.0f / srcW, 1.0f / srcH)
-        drawEnhanceQuad(easuProg)
-
-        // ---- pass 2：RCAS 锐化 → fsrFboB ----
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fsrFboB)
-        GLES20.glViewport(0, 0, fsrW, fsrH)
-        GLES20.glUseProgram(pFsrRcas)
-        bindEnhanceTex(pFsrRcas, 0, fsrTexA, "uTex")
-        setEnhanceVec2(pFsrRcas, "uTexel", 1.0f / fsrW, 1.0f / fsrH)
-        setEnhanceFloat(pFsrRcas, "uSharpness", fsrRcasSharpness)
-        drawEnhanceQuad(pFsrRcas)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-
-        fsrSrcW = srcW
-        fsrSrcH = srcH
-        fsrFrameCount++
-        if (fsrFrameCount == 1L || fsrFrameCount % 120L == 0L) {
-            Log.i(TAG, "FSR 运行中 #$fsrFrameCount ${srcW}x${srcH} -> ${fsrW}x${fsrH}")
-        }
-
-        return fsrTexB
-    }
-
-    /** 释放画质增强的全部 GL 资源 */
-    private fun releaseVideoEnhance() {
-        try {
-            releaseMemcFbos()
-            releaseFsrFbos()
-            if (pMemcCopyOes != 0) { GLES20.glDeleteProgram(pMemcCopyOes); pMemcCopyOes = 0 }
-            if (pMemcCopy2d != 0) { GLES20.glDeleteProgram(pMemcCopy2d); pMemcCopy2d = 0 }
-            if (pMemcMe != 0) { GLES20.glDeleteProgram(pMemcMe); pMemcMe = 0 }
-            if (pMemcMc != 0) { GLES20.glDeleteProgram(pMemcMc); pMemcMc = 0 }
-            if (pMemcDiff != 0) { GLES20.glDeleteProgram(pMemcDiff); pMemcDiff = 0 }
-            if (pFsrEasuOes != 0) { GLES20.glDeleteProgram(pFsrEasuOes); pFsrEasuOes = 0 }
-            if (pFsrEasu2d != 0) { GLES20.glDeleteProgram(pFsrEasu2d); pFsrEasu2d = 0 }
-            if (pFsrRcas != 0) { GLES20.glDeleteProgram(pFsrRcas); pFsrRcas = 0 }
-            lastEnhanceTexId = 0
-        } catch (e: Throwable) {
-            Log.w(TAG, "releaseVideoEnhance 失败", e)
-        }
-    }
+    private fun releaseVideoEnhance() = videoEnhance.release()
 
     /**
      * 把 GPUPixel 结果 FBO 整帧上屏。
@@ -4880,7 +2625,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * ⚠️ 这里用 `glTexSubImage2D` 到临时纹理仍然是零拷贝上传（一次 `ByteBuffer.wrap`），
      *    真正的缩放交给 GPU 的线性采样完成，比 CPU 上采样便宜得多。
      */
-    private fun uploadPendingGpRegion() {
+    internal fun uploadPendingGpRegion() {
         // v2.4.34（#8）：原子「读 + 置 null」一步完成，避免与 faceExecutor 的新写入竞争丢帧
         val region = gpRegionPending.getAndSet(null) ?: return
         // v2.0.186（P0-A）：不再有输出复用池 —— 每帧的 bytes 是 sink 新建的独立数组，
@@ -5036,7 +2781,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * 与 [computeGpCoverRegion] 的区别：后者按自适应档位决定清晰度；这里固定 1/2，
      * **不受自适应影响** —— 检测精度不应随性能档位波动。
      */
-    private fun computeGpDetectRegion(w: Int, h: Int): IntArray {
+    internal fun computeGpDetectRegion(w: Int, h: Int): IntArray {
         val d = 2
         var rw = (w / d).coerceAtLeast(gpReadMinSide).coerceAtMost(w)
         var rh = (h / d).coerceAtLeast(gpReadMinSide).coerceAtMost(h)
@@ -5045,7 +2790,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return intArrayOf(0, 0, rw, rh)
     }
 
-    private fun computeGpCoverRegion(w: Int, h: Int): IntArray {
+    internal fun computeGpCoverRegion(w: Int, h: Int): IntArray {
         // VR / 3D 投影下屏幕内容更「高频」（球面网格线、几何边缘），降采样过猛会看出软化，
         // 故平面模式用 gpReadDownscale，非平面（VR）模式降一档（更保守）。
         //
@@ -5077,7 +2822,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *   - 人脸 ROI：回读区只覆盖视口一小块 → scale = rw/w（< 1），必须放大回全域
      *   - 全覆盖：回读区覆盖整个视口（只是分辨率低）→ scale = 1，坐标无需换算
      */
-    private fun gpCoverScale(): Float = 1.0f
+    internal fun gpCoverScale(): Float = 1.0f
 
     // ===== v2.0.185：自适应降采样 =====
 
@@ -5098,7 +2843,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      *  - 帧预算取 30fps（33 ms）而非 60fps：GPUPixel 是异步管线，允许它慢于渲染帧率，
      *    只要画面更新率 ≥ ~30fps 观感就已流畅，不必为此把分辨率压到最低。
      */
-    private fun updateGpAdaptiveDownscale(elapsedNanos: Long) {
+    internal fun updateGpAdaptiveDownscale(elapsedNanos: Long) {
         if (elapsedNanos <= 0) return
         // v2.0.185：预热期样本直接丢弃（含模型加载 / 管线首建 / shader 编译的一次性开销）
         if (gpAdaptiveSamples < gpAdaptiveWarmup) {
@@ -5154,7 +2899,7 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
      * ⚠️ VR 分屏：调用方传进来的 w 已是**单眼视口宽度**（`displayWidth / 2`），
      *    左右眼各自渲染时 faceCenterXUniform 也在各自视口 UV 空间内，故每只眼独立成 ROI。
      */
-    private fun computeGpRoi(w: Int, h: Int): IntArray {
+    internal fun computeGpRoi(w: Int, h: Int): IntArray {
         val detected = faceDetectedUniform == 1
         if (!detected) {
             // 检测失败：沿用上一帧 ROI（若还没有过，退回一个居中的保守尺寸）
@@ -5222,789 +2967,14 @@ class VRGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         return intArrayOf(rx, ry, rw, rh)
     }
 
-    /**
-     * v2.6.17 一次性探测：`Config.ARGB_8888` 的内存字节序是否等于 R,G,B,A。
-     *
-     * 依据：Android 的 N32 在小端机器上按 R,G,B,A 字节落盘，与 `glReadPixels` 的
-     * `GL_RGBA` + `GL_UNSIGNED_BYTE` 输出一致 —— 因此「回读字节 → 位图」本可零转换。
-     * 但这属平台实现细节，故用 1×1 位图实测：写入**纯红**的 RGBA 字节后读回像素，
-     * 得到 `0xFFFF0000` 才算成立；若读到 `0xFF0000FF`（红蓝互换）则回退逐像素重排。
-     */
-    private fun probeFaceDirectCopy(): Boolean = try {
-        val bmp = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-        bmp.setHasAlpha(false)
-        val probe = java.nio.ByteBuffer.allocateDirect(4)
-            .order(java.nio.ByteOrder.nativeOrder())
-        probe.put(0, 0xFF.toByte())  // R
-        probe.put(1, 0x00.toByte())  // G
-        probe.put(2, 0x00.toByte())  // B
-        probe.put(3, 0xFF.toByte())  // A
-        probe.position(0)
-        bmp.copyPixelsFromBuffer(probe)
-        val px = bmp.getPixel(0, 0)
-        bmp.recycle()
-        val ok = px == 0xFFFF0000.toInt()
-        Log.i(
-            TAG,
-            "face direct-copy probe: pixel=0x${Integer.toHexString(px)} → " +
-                if (ok) "direct (零转换)" else "convert (回退逐像素重排)"
-        )
-        ok
-    } catch (e: Throwable) {
-        Log.w(TAG, "face direct-copy probe failed", e)
-        false
-    }
+    private val facePipeline = VRGLFacePipeline(this)
 
-    /**
-     * 视情况采一帧屏幕内容交给后台做人脸检测 / GPUPixel 处理（v2.0.156 重构，v2.0.177 收窄 ROI）。
-     */
-    private fun maybeScheduleFaceSampling() {
-        // v2.6.22（P0-1）：渲染器已释放（线程池 shutdown）后不再回读 —— 白耗一次
-        // glReadPixels 与一次 1MB 拷贝，且提交必然被拒。
-        if (executorsClosed) return
-        if (!isBeautyActive()) {
-            faceFrameCounter = 0
-            return
-        }
-        // v2.0.173：GPUPixel 路径**每帧**采样处理 —— 贴回间隔 > 1 帧时，显示内容在
-        // 「美颜帧 / 原始帧」之间交替，肉眼可见闪烁；每帧处理则屏幕恒为「上一帧的美颜帧」，
-        // 只有整体 1~2 帧延迟（不可感知）。v2.0.177 收窄到人脸 ROI 后**同样必须保持 1**。
-        // GLSL 检测路径维持 8 帧节奏（它只消费人脸坐标，磨皮/美白是 shader 实时全帧）。
-        val gpFullFrame = isGpuPixelActive()
-        val interval = if (gpFullFrame) 1 else faceSampleInterval
-        faceFrameCounter++
-        if (faceFrameCounter < interval) return
-        faceFrameCounter = 0
+    internal fun maybeScheduleFaceSampling() = facePipeline.maybeScheduleFaceSampling()
 
-        // v2.0.173：后台仍在处理上一帧时跳过本次回读（白回读只制造 GC 压力），
-        // 贴回间隔自适应 = max(1 帧, 实际处理耗时)
-        //
-        // ⚠️⚠️ v2.0.185：**这里就是「全屏闪烁」的源头**。
-        // 跳过后本帧不会产生新的贴回，gpFbo 里只有**未经 GPUPixel 处理的原始渲染结果**；
-        // 若照常上屏，画面便在「美颜帧 ↔ 原始帧」之间交替（处理耗时 > 帧时长时必然发生，
-        // 模拟器/低端机尤其明显）。故此处**必须记账**，让上屏阶段改用保底帧复现上一张美颜画面。
-        //
-        // v2.0.186：判据由 isDetectingFace 改为 gpInFlight —— 检测与 GL 处理现在跑在两条
-        // 线程上，必须两者都做完才算「不忙」（见 gpInFlight 的说明）。
-        if (gpFullFrame && gpInFlight.get() > 0) {
-            gpSkipReadThisFrame = true
-            return
-        }
-        gpSkipReadThisFrame = false
-
-        // v2.0.182：全覆盖模式下回读区就是**整个物理屏幕**（VR 分屏也整屏，不取单眼）——
-        // 因为 GPUPixel 在此是屏幕空间后处理，且用户要求「VR 覆盖全屏」。
-        // 注意：只在 GPUPixel 全帧路径（gpFullFrame）下才用整屏；GLSL 检测路径仍用单眼
-        // （跨两眼取样会得到两张脸拼一起，MediaPipe 无法检测）。
-        val vpW = if (isSplitScreenVR && !gpFullFrame) (displayWidth / 2) else displayWidth
-        val w = vpW.coerceAtLeast(1)
-        val h = displayHeight.coerceAtLeast(1)
-        // v2.0.172：GPUPixel 引擎把美颜作用范围从「视口中央 512×512 人脸区域」扩到
-        // **整个播放视口**（用户要求全屏生效）—— 回读整帧交 GPUPixel 全帧处理：
-        // 磨皮/美白作用于全部画面，瘦脸/大眼由其内部 Mars-Face 检测定位人脸。
-        // GLSL 引擎仍用中央 512×512 小图做人脸检测（它只消费人脸坐标，
-        // 磨皮/美白在 shader 里本就是全屏皮肤色判定，无需大图）。
-        //
-        // ===== v2.0.177：GPUPixel 回读从「全屏」收窄到「人脸 ROI」 =====
-        // 旧实现每帧回读 1920×1080×4 ≈ 8.29 MB，且 glReadPixels 是**同步阻塞**
-        // （GL 线程停下等 GPU 回传），之后还要再拷一份 → ≈16 MB/帧内存流量。
-        // 收窄到人脸 ROI 后典型 640×640 ≈ 1.6 MB（↓80%），远景小脸可降到 384×384（↓97%）。
-        // 计算复用本项目已有的人脸坐标（uFaceCenter / uEyeDistance，均为**视口 UV** 空间）
-        // 与已有基础设施（faceCropScaleX/Y + mapCrop*ToViewport + uploadPendingGpRegion 局部贴回）。
-        //
-        // ===== v2.0.182：恢复「全覆盖」，但用降采样把代价压回去 =====
-        // 用户明确要求：**2D 覆盖全视频范围、3D/VR 覆盖全屏**。
-        // 直接回读整帧会回到 v2.0.177 之前的 8.3 MB/帧 → 故按 gpReadDownscale(=2) 降采样回读，
-        // 处理完再上采样贴回，内存流量 = 整帧 / 4（1920×1080 → 960×540 ≈ 2.1 MB）。
-        // 磨皮/美白是低频效果，降采样几乎无感；瘦脸/大眼在 1/2 分辨率下人脸仍 ≥100 px，定位可靠。
-        //
-        // ⚠️ 3D/VR 模式下**不再**按人脸 ROI 收窄：VR 是屏幕空间后处理，收窄会出现
-        //    「只有中间一块被美颜」的矩形分界（用户反馈的原始问题）。改为覆盖整个物理屏幕。
-        val rw: Int
-        val rh: Int
-        val x0: Int
-        val y0: Int
-        if (gpFullFrame) {
-            if (gpCoverageFull) {
-                // v2.0.182（默认）：全覆盖 —— 整个视口（2D 即全视频；VR 即整屏，见上方 vpW 注释）
-                //
-                // ⚠️ v2.0.187 阶段2：这里的回读**只用于人脸检测**了 ——
-                //    处理输入改走 texture 通道（SourceTexture 直接吃 gpFbo 的纹理，
-                //    免去每帧 8.29 MB 的 glTexImage2D 上传）。因此回读尺寸按「检测够用」
-                //    来定，用固定的 1/2 尺寸（数据量 ↓75%，Mars-Face 在 1/2 图上检测稳定）。
-                val cov = if (gpuPixelHalfResBeauty) {
-                    // 半分辨率处理（默认）：开销低，细节略软化
-                    computeGpDetectRegion(w, h)
-                } else {
-                    // 全分辨率处理：画质最佳，开销更大（自适应档位决定降采样比）
-                    computeGpCoverRegion(w, h)
-                }
-                rw = cov[2]; rh = cov[3]; x0 = cov[0]; y0 = cov[1]
-                gpFullCoverageThisFrame = true
-                // 检测小图覆盖整个视口 → UV 范围就是全域
-                gpReadUvX0 = 0f; gpReadUvY0 = 0f; gpReadUvW = 1f; gpReadUvH = 1f
-            } else {
-                // 降级路径：v2.0.177 的「仅人脸 ROI」省电模式
-                val roi = computeGpRoi(w, h)
-                rw = roi[2]; rh = roi[3]; x0 = roi[0]; y0 = roi[1]
-                gpFullCoverageThisFrame = false
-                // 人脸 ROI：UV 范围 = 该矩形在视口里的实际位置与占比
-                gpReadUvX0 = x0.toFloat() / w
-                gpReadUvY0 = y0.toFloat() / h
-                gpReadUvW = rw.toFloat() / w
-                gpReadUvH = rh.toFloat() / h
-            }
-        } else {
-            // ==========================================================================
-            // 🔴 v2.6.22（用户要求「采样参考已修复的 AI 弹幕取帧链路」）：
-            //    **从「视口中央 faceReadSize×faceReadSize 裁剪」改成「整帧（分屏取单眼）等比缩放」**。
-            //
-            // 旧实现的问题（实测体感：美颜"只有磨皮，瘦脸大眼没反应"）：
-            //   · 采样区只有屏幕正中的 512×512 —— **竖屏视频**（1080×2400）里人脸通常在
-            //     画面中上部，正中那一块经常**完全不含脸**；远景点的人脸、VR 里视线偏到
-            //     边缘时的脸、多人场景里非中心的那张脸，同理全部采不到；
-            //   · 每 8 帧采一次，一旦每次都落空 → faceMissStreak 持续增长 →
-            //     形变/妆容永远是 0（磨皮/美白不依赖检测，所以看起来"只有磨皮生效"）。
-            //
-            // 弹幕链路（captureDanmuFrameIfNeeded）早已改成「整帧 + 长边等比缩放 + blit 真缩放」，
-            // 所以任何位置的内容都能看到。这里对齐同一套做法：
-            //   · 采样区 = 整个视口（分屏时 w 已是半屏宽，见上方 vpW 的推导）；
-            //   · 由 blitFboToHalf 真缩放到长边 ≤ faceSampleSize（glReadPixels 只裁剪不缩放）；
-            //   · faceCropScale 自然退化为 1.0（rw/w），mapCrop*ToViewport 变成恒等映射，
-            //     坐标换算链路无需改动。
-            // ==========================================================================
-            rw = w
-            rh = h
-            x0 = 0
-            y0 = 0
-            gpFullCoverageThisFrame = false
-            gpReadUvX0 = 0f
-            gpReadUvY0 = 0f
-            gpReadUvW = 1f
-            gpReadUvH = 1f
-        }
-
-        // ===== v2.6.17：GLSL 检测路径改用「GPU 预缩放 + 零拷贝直拷」 =====
-        // v2.6.22：采样**区域**已改为整帧（见上方 !gpFullFrame 分支），这里只负责把整帧
-        // 由 GPU 缩到检测输入尺寸（长边 ≤ faceSampleSize，等比）：
-        //   ① glReadPixels 是 GL 线程上的同步阻塞，数据量 1 MB → 约 0.25 MB（↓75%）；
-        //   ② 后台线程不必再做 512→256 的 Skia 缩放（原先每 8 帧一次 Canvas.drawBitmap）。
-        // blit 失败时保持原全尺寸回读，正确性不受影响（只是慢回旧路径）。
-        var readW = rw
-        var readH = rh
-        var readFromHalfFbo = false
-        if (!gpFullFrame) {
-            // 等比缩到长边 ≤ faceSampleSize（复用 ImageScale.fitLongSide，已有单测覆盖）；
-            // 采样区本就比检测尺寸还小时不放大（放大只会徒增回读字节，letterbox 会补回尺寸）。
-            val fit = ImageScale.fitLongSide(rw, rh, faceSampleSize)
-            val wantW = minOf(fit[0], rw)
-            val wantH = minOf(fit[1], rh)
-            if (wantW != rw || wantH != rh) {
-                if (blitFboToHalf(gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, wantW, wantH)) {
-                    readW = wantW
-                    readH = wantH
-                    readFromHalfFbo = true
-                }
-            }
-        }
-
-        // v2.0.182：scale 的语义分两种（这是全覆盖与人脸 ROI 的关键差异）
-        //   - 全覆盖：回读区（降采样）覆盖整个视口 → 裁剪图坐标 = 视口坐标，scale = 1
-        //   - 人脸 ROI：回读区只覆盖视口一小块 → scale = rw/w，需放大回全域
-        if (gpFullCoverageThisFrame) {
-            faceCropScaleX = gpCoverScale()
-            faceCropScaleY = gpCoverScale()
-        } else {
-            faceCropScaleX = rw.toFloat() / w
-            faceCropScaleY = rh.toFloat() / h
-        }
-        // v2.0.160：记录回读区域（窗口坐标）—— GPUPixel 的处理结果要贴回同一区域
-        lastSampleX0 = x0
-        lastSampleY0 = y0
-        // v2.0.182：全覆盖模式还要记住回读区尺寸，贴回时按同一区域 glTexSubImage2D
-        gpLastReadX0 = x0
-        gpLastReadY0 = y0
-        gpLastReadW = rw
-        gpLastReadH = rh
-
-        // v2.0.187 阶段2：记录本帧要交给 GPUPixel 的**输入纹理**（= 当前 gpFbo）。
-        // 后台线程用它走零拷贝输入通道，替代「回读的像素再上传」。
-        // 仅在 texture 通道可用时才有意义；raw-data 路径会忽略它。
-        if (gpFullFrame && !gpTextureFallbackRequested) {
-            pendingInputTexId = gpFboTexId
-            pendingInputTexW = gpFboW
-            pendingInputTexH = gpFboH
-        }
-
-        try {
-            // v2.6.17：按**实际回读尺寸**（readW×readH）算字节数 —— GLSL 路径下它已是
-            // GPU 预缩放后的检测尺寸，比采样区 rw×rh 小得多。
-            val need = readW * readH * 4
-
-            // v2.0.183：降采样回读必须先「真正缩放」再读 —— glReadPixels 只裁剪不缩放。
-            // 用 glBlitFramebuffer 把主 FBO 的 [gpReadUv*] 区域缩小渲染到降采样 FBO，
-            // 再从降采样 FBO 读（此时读到的才是整屏缩略图，坐标与视口 UV 一一对应）。
-            //
-            // v2.0.185 修复：blit 失败时**不再**退回「左上角裁剪 + 拉伸铺满」的错误回退
-            // （原实现只改了 FBO 绑定，却仍按 rw×rh 在左上角裁剪，随后被 needsScale 判定为
-            // 需要缩放、把这一小块拉伸到全屏 → 该帧画面异常放大）。
-            // 现改为：blit 失败即视为「本帧不回读」，交给保底帧显示上一张美颜画面 ——
-            // 既不放大也不闪烁，下一帧会自动重试。
-            val needsDownscale = gpFullCoverageThisFrame && (rw < w || rh < h)
-
-            // ===== v2.0.186（P1-C）：先试 PBO 异步回读（消除 GL 线程硬阻塞） =====
-            // 节奏：本帧「收割上一帧（非阻塞）→ blit → 提交本帧」，数据下一帧到位。
-            var pboHandled = false
-            if (gpAsyncReadback && gpPboEnabled && ensureGpPbo(need)) {
-                // 回读尺寸变化（降采样档位切换 / 分辨率变化）→ 在途数据尺寸不匹配，作废
-                if (gpPboActive && gpPboPendingBytes != need) discardGpPboPending()
-
-                val tw0 = System.nanoTime()
-                val collected = collectGpPbo(need)
-                gpProfLogReadback(System.nanoTime() - tw0, gpPboActive)
-                if (gpPboEnabled) {
-                    if (gpPboActive) {
-                        // 在途 fence 未 signal（GPU 还没拷完）→ 本帧没有新输入可投递，
-                        // 交给保底帧复现上一张美颜画面（不阻塞、不闪烁）
-                        gpSkipReadThisFrame = true
-                        return
-                    }
-                    if (collected != null) {
-                        synchronized(faceFrameLock) {
-                            pendingFaceFrame = collected
-                            pendingFaceFrameW = gpPboPendingW
-                            pendingFaceFrameH = gpPboPendingH
-                        }
-                        triggerBackgroundFaceDetection()
-                    }
-                    // 本帧的降采样 blit 必须在提交回读之前完成
-                    // （v2.6.17：GLSL 路径已在函数开头预缩放过，readFromHalfFbo 时跳过）
-                    if (!readFromHalfFbo && needsDownscale && !blitFboToHalf(
-                            gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
-                        )
-                    ) {
-                        gpSkipReadThisFrame = true
-                        return
-                    }
-                    pboHandled = submitGpPboRead(
-                        readFromHalfFbo || needsDownscale,
-                        if (readFromHalfFbo) 0 else x0,
-                        if (readFromHalfFbo) 0 else y0,
-                        readW, readH, need
-                    )
-                    if (!pboHandled) {
-                        Log.w(TAG, "PBO submit failed, fallback to sync readback")
-                        gpPboEnabled = false
-                        releaseGpPbo()
-                    }
-                }
-            }
-
-            if (!pboHandled) {
-                // ===== 同步回读（原路径 / PBO 不可用或失败时的回退）=====
-                val tr0 = System.nanoTime()
-                val buf = faceReadBuffer?.takeIf { it.capacity() >= need }
-                    ?: java.nio.ByteBuffer.allocateDirect(need)
-                        .order(java.nio.ByteOrder.nativeOrder())
-                        .also { faceReadBuffer = it }
-                buf.clear()
-
-                if (!readFromHalfFbo && needsDownscale && !blitFboToHalf(
-                        gpReadUvX0, gpReadUvY0, gpReadUvW, gpReadUvH, rw, rh
-                    )
-                ) {
-                    gpSkipReadThisFrame = true
-                    return
-                }
-                // 降采样成功 → 从降采样 FBO 全图读；否则（本就 1:1）从 gpFbo 的 (x0,y0) 读同尺寸区域
-                val srcIsHalf = readFromHalfFbo || needsDownscale
-                GLES20.glBindFramebuffer(
-                    GLES20.GL_FRAMEBUFFER,
-                    if (srcIsHalf) gpHalfFboId else gpFboId
-                )
-                GLES20.glReadPixels(
-                    if (srcIsHalf) 0 else x0,
-                    if (srcIsHalf) 0 else y0,
-                    readW, readH, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
-                )
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-                buf.rewind()
-
-                // 从池里取一块装这一帧（所有权转移给后台线程，用完后归还）
-                val recycled = synchronized(faceFrameLock) {
-                    faceFramePool?.takeIf { it.size >= need }?.also { faceFramePool = null }
-                }
-                val frame = recycled ?: ByteArray(need)
-                buf.get(frame, 0, need)
-                gpProfLogReadback(System.nanoTime() - tr0, false)
-
-                synchronized(faceFrameLock) {
-                    pendingFaceFrame = frame
-                    pendingFaceFrameW = readW
-                    pendingFaceFrameH = readH
-                }
-                triggerBackgroundFaceDetection()
-            }
-        } catch (e: Exception) {
-            // Ignore transient surface resizing safety errors
-        }
-    }
-
-    private fun triggerBackgroundFaceDetection() {
-        // v2.0.186：两条路径的「忙」判据不同
-        //   - GPUPixel：gpInFlight（检测 + GL 处理跑在两条线程，都做完才算空闲）
-        //   - MediaPipe：isDetectingFace（单线程，原语义）
-        if (isGpuPixelActive()) {
-            if (gpInFlight.get() > 0) return
-        } else if (isDetectingFace.get()) {
-            return
-        }
-
-        var frame: ByteArray? = null
-        var fw = 0
-        var fh = 0
-        synchronized(faceFrameLock) {
-            frame = pendingFaceFrame
-            pendingFaceFrame = null
-            fw = pendingFaceFrameW
-            fh = pendingFaceFrameH
-        }
-        val rgbaData = frame ?: return
-        if (fw <= 0 || fh <= 0) return
-
-        // ===== v2.0.186（P0-B）：GPUPixel 走「检测 ∥ GL 处理」双线程流水线 =====
-        // 一次回读的像素同时作为两套资源的输入（共享的是像素，不是检测结果）：
-        //   · gpDetectExecutor → Mars-Face（纯 CPU）
-        //   · faceExecutor     → GPUPixel GL 链（独立 EGL context）
-        // 两者读同一块 rgbaData（只读），由 gpInFlight 保证读完前不被复用。
-        if (isGpuPixelActive()) {
-            val stride = fw * 4
-            // 检测降频：landmark 是「形变」的唯一输入，滞后 ≤ gpDetectInterval 帧
-            // （叠加回读/贴回本身的 1~2 帧延迟，同量级，视觉不可感知）；
-            // 磨皮/美白完全不依赖检测，降频对它们零影响。
-            val interval = gpDetectInterval.coerceAtLeast(1)
-            // v2.4.34（#5）：无脸场景也要降频。此前 `gpCachedLandmarks == null` 一旦成立
-            // （连续 3 次未检出脸后被清空），`== null` 分支会让检测**每帧**都跑 →
-            // 风景/无脸画面 CPU 满载、VR 设备发热明显。改为：无脸时放大检测间隔（退避），
-            // 有脸时仍按 gpDetectInterval 正常降频。首帧 gpFrameTick=0 仍会立即检测一次。
-            val noFaceInterval = 8
-            val detectInterval = if (gpCachedLandmarks == null) noFaceInterval else interval
-            val doDetect = gpFrameTick % detectInterval == 0
-            gpFrameTick++
-
-            gpInFlight.addAndGet(if (doDetect) 2 else 1)
-
-            if (doDetect) {
-                // v2.6.22（P0-1）：提交失败要回滚刚预支的那 1 个在途计数，
-                // 否则 gpInFlight 永不归零 → 「忙」判据恒真 → 检测永久停摆
-                submitSafely(
-                    gpDetectExecutor, "GPUPixel 人脸检测",
-                    rollback = { finishGpTask(null) },
-                ) {
-                    try {
-                        // v2.0.186：分段计时 —— 这一段是纯 Mars-Face 检测（含首次模型加载）
-                        val td0 = System.nanoTime()
-                        val lm = GpuPixelBeauty.getOrCreatePipeline().detect(rgbaData, fw, fh, stride)
-                        gpProfLogDetect(System.nanoTime() - td0)
-                        // v2.6.23：低频诊断 —— Mars 一条日志都不打，出问题时只能靠这行判断
-                        // 「是没检出脸」还是「检出了但形变没下发」。
-                        gpDiagCount++
-                        if (gpDiagCount >= 60) {
-                            gpDiagCount = 0
-                            val n = (lm?.size ?: 0) / GpuPixelBeauty.FLOATS_PER_FACE
-                            Log.i(TAG, "GPUPixel 人脸检测：$n 张（输入 ${fw}x$fh）")
-                        }
-                        if (lm != null && lm.isNotEmpty()) {
-                            gpDetectMissStreak = 0
-                            // v2.6.23：缓存的是**语义锚点**（每脸 6 个点），不是 Mars 原始 111 点。
-                            // FaceReshapeFilter 的 shader 只认这 6 个解剖锚点，绕开了
-                            // 「GPUPixel 106 点索引表 vs Mars 111 点」的点序不匹配问题。
-                            gpCachedLandmarks = GpuPixelBeauty.anchorsFromLandmarks(lm)
-                        } else {
-                            gpDetectMissStreak++
-                            // v2.0.186 防抖：连续 3 次拿不到脸才清空缓存。
-                            // 单次失败（遮挡/侧脸/运动模糊）不再瞬间把美型归零 ——
-                            // 这既是稳定性提升，也避免了「形变忽有忽无」的抖动。
-                            if (gpDetectMissStreak >= 3) gpCachedLandmarks = null
-                        }
-                    } catch (e: Throwable) {
-                        Log.e(TAG, "GPUPixel background detect failed", e)
-                    } finally {
-                        finishGpTask(null)
-                    }
-                }
-            }
-
-            // v2.6.22（P0-1）：同检测侧 —— 提交失败回滚在途计数（此时计数已是 1 或 2）
-            submitSafely(
-                faceExecutor, "GPUPixel 图像处理",
-                rollback = { finishGpTask(rgbaData) },
-            ) {
-                try {
-                    // v2.0.185：实测处理耗时供自适应降采样使用。
-                    // v2.0.186：这里只剩 **GL 段**（检测已移到 gpDetectExecutor），
-                    // 故 EMA 反映的是纯 GPU 开销，降采样决策比之前更准确。
-                    val t0 = System.nanoTime()
-                    val pipeline = GpuPixelBeauty.getOrCreatePipeline()
-
-                    // v2.0.187：GL 线程判定 texture 通道不可用时，在这里把链切回 raw-data。
-                    // 必须在这里（faceExecutor 上）做 —— 它持有 GPUPixel context 的线程语义，
-                    // 且此刻没有在途处理（gpInFlight 保证了串行）。
-                    if (gpTextureFallbackRequested && pipeline.isTextureMode()) {
-                        pipeline.fallbackToRawDataSink()
-                    }
-
-                    val useTexChannel =
-                        GpuPixelBeauty.useTextureSink && !gpTextureFallbackRequested
-                    if (useTexChannel) {
-                        // ---- 全零拷贝通道 ----
-                        // 输入：直接吃 gpFbo 的纹理（免去每帧 8.29 MB 的 glTexImage2D 上传）
-                        // 输出：SinkTexture 暴露的纹理 id（免去 glReadPixels 回读 + JNI 拷贝）
-                        val inTex = pendingInputTexId
-                        val ok = if (inTex != 0) {
-                            pipeline.processFrameFromTexture(
-                                inTex, pendingInputTexW, pendingInputTexH,
-                                beautyLevel, beautyWhitening, beautyFaceSlimming, beautyBigEyes,
-                                gpCachedLandmarks
-                            )
-                        } else {
-                            // 罕见：本帧没有可用的输入纹理（启动瞬间 / 尺寸未就绪）
-                            // → 退回 CPU 上传路径，保证仍有结果产出
-                            pipeline.processFrameTexture(
-                                rgbaData, fw, fh, stride,
-                                beautyLevel, beautyWhitening, beautyFaceSlimming, beautyBigEyes,
-                                gpCachedLandmarks
-                            )
-                        }
-                        if (ok) {
-                            gpResultTexIdPending = pipeline.resultTextureId
-                        }
-                    } else {
-                        // ---- raw-data 通道（回退）：CPU 回读字节 ----
-                        val out = pipeline.processFrame(
-                            rgbaData, fw, fh, stride,
-                            beautyLevel, beautyWhitening, beautyFaceSlimming, beautyBigEyes,
-                            gpCachedLandmarks
-                        )
-                        if (out != null) {
-                            // v2.0.186（P0-A）：直接移交所有权，**不再 arraycopy**。
-                            // 依据：jni_sink_raw_data.cc nativeGetRgbaBuffer 每次都
-                            // env->NewByteArray(size) + SetByteArrayRegion 拷进新数组，
-                            // 故 out 是本次调用独有的新数组（native 侧 rgba_buffer_ 的复用
-                            // 被 JNI 边界隔离），GL 线程下一帧消费它不存在竞争。
-                            // v2.4.34（#8）：数据与尺寸打包成同一对象原子写入，
-                            // 避免分辨率变化时「旧 bytes 配新 W/H」的尺寸错配
-                            gpRegionPending.set(GpRegion(out, fw, fh))
-                        }
-                    }
-
-                    val glNanos = System.nanoTime() - t0
-                    updateGpAdaptiveDownscale(glNanos)
-                    gpProfLogGpu(glNanos)
-                } catch (e: Throwable) {
-                    Log.e(TAG, "GPUPixel background process failed", e)
-                } finally {
-                    finishGpTask(rgbaData)
-                }
-            }
-            return
-        }
-
-        // ===== MediaPipe（GLSL 引擎）路径：单线程，原逻辑 =====
-        isDetectingFace.set(true)
-        // v2.6.22（P0-1）：提交被拒时必须把标志与帧缓冲都还回去 ——
-        // 否则 isDetectingFace 恒 true，「忙」判据永真 → 检测永久停摆
-        submitSafely(
-            faceExecutor, "MediaPipe 人脸检测",
-            rollback = {
-                synchronized(faceFrameLock) { faceFramePool = rgbaData }
-                isDetectingFace.set(false)
-            },
-        ) {
-            // v2.6.17：前置段（回读字节 → Bitmap）起点
-            val facePrepStartNs = System.nanoTime()
-            try {
-                // ===== v2.6.17：回读数据**零转换**直拷进 Bitmap =====
-                // 旧实现逐像素做 RGBA→ARGB 重排（512×512 = 262144 次字节读取 + 移位），
-                // 再 setPixels 二次遍历（又一次 262144 次写）—— 检测前置的纯 CPU 段里最贵的一环。
-                // 事实依据：`Bitmap.Config.ARGB_8888` 的**内存字节序就是 R,G,B,A**
-                // （小端 N32 == RGBA8888），与 `glReadPixels(GL_RGBA, GL_UNSIGNED_BYTE)` 的
-                // 输出完全一致 → `copyPixelsFromBuffer` 一次 memcpy 即可，循环整个消失。
-                // 首次使用前用 1×1 位图探测一次（见 probeFaceDirectCopy），探测失败自动回退旧循环。
-                if (faceDirectCopy == 0) faceDirectCopy = if (probeFaceDirectCopy()) 1 else 2
-                if (faceBmp == null || faceBmp!!.width != fw || faceBmp!!.height != fh) {
-                    faceBmp?.recycle()
-                    faceBmp = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
-                    // glReadPixels 的 alpha 通道不可靠（未开混合时常为 0）→ 按不透明处理。
-                    // 否则直拷出来的位图全透明，drawBitmap 后 MediaPipe 看到的是一张全黑图。
-                    faceBmp!!.setHasAlpha(false)
-                }
-                val srcBmp = faceBmp!!
-                if (faceDirectCopy == 1) {
-                    srcBmp.copyPixelsFromBuffer(
-                        java.nio.ByteBuffer.wrap(rgbaData, 0, fw * fh * 4)
-                            .order(java.nio.ByteOrder.nativeOrder())
-                    )
-                } else {
-                    // ===== 回退路径（探测失败）：逐像素重排 + setPixels =====
-                    val area = fw * fh
-                    if (faceArgBuffer == null || faceArgBuffer!!.size < area) {
-                        faceArgBuffer = IntArray(area)
-                    }
-                    val argb = faceArgBuffer!!
-                    for (i in 0 until area) {
-                        val r = rgbaData[i * 4].toInt() and 0xff
-                        val g = rgbaData[i * 4 + 1].toInt() and 0xff
-                        val b = rgbaData[i * 4 + 2].toInt() and 0xff
-                        argb[i] = (0xff shl 24) or (r shl 16) or (g shl 8) or b
-                    }
-                    srcBmp.setPixels(argb, 0, fw, 0, 0, fw, fh)
-                }
-
-                // ===== v2.6.23 🔴 修复「美颜完全没效果」：送检前必须把图**上下翻正** =====
-                // `glReadPixels` 的行序是自下而上（GL 惯例），直接塞进 Bitmap 后整幅图是**倒立**的。
-                // 此前这条链路一直没翻 —— MediaPipe 的 BlazeFace 对 180° 倒置人脸检出率≈0，
-                // 于是每次采样都"未检出" → faceMissStreak 一路涨到 3 → uFaceCount/uFaceDetected=0
-                // → 瘦脸/大眼/妆容/口红恒为 0，只剩不依赖检测的磨皮与美白。
-                // 用户体感就是「没看出美颜效果」。实测（MuMu + 5 人同框测试视频）：送检图确认倒立。
-                //
-                // 翻转放在这唯一一次绘制里（canvas.scale(1, -1)），零额外内存、零额外拷贝。
-                // 代价：合并了原来的「方形直通」分支 —— 现在方形也要画一次，可忽略（512×512 一次 blit）。
-                if (faceScaledBmp == null) {
-                    faceScaledBmp = Bitmap.createBitmap(faceSampleSize, faceSampleSize, Bitmap.Config.ARGB_8888)
-                }
-                val canvasBmp = faceScaledBmp!!
-                val scaledSizeF = faceSampleSize.toFloat()
-                val fitScale = minOf(scaledSizeF / fw, scaledSizeF / fh)
-                val drawW = (fw * fitScale).toInt().coerceAtLeast(1)
-                val drawH = (fh * fitScale).toInt().coerceAtLeast(1)
-                val lbOffX = (faceSampleSize - drawW) / 2
-                val lbOffY = (faceSampleSize - drawH) / 2
-                // 黑边区域先擦除，否则复用位图会残留上一帧内容
-                canvasBmp.eraseColor(android.graphics.Color.BLACK)
-                run {
-                    val canvas = android.graphics.Canvas(canvasBmp)
-                    canvas.save()
-                    // 垂直翻转：把目标矩形的原点移到内容区**底边**，再按 y 轴 -1 缩放
-                    canvas.translate(0f, (lbOffY + drawH).toFloat())
-                    canvas.scale(1f, -1f)
-                    canvas.drawBitmap(
-                        srcBmp,
-                        android.graphics.Rect(0, 0, fw, fh),
-                        android.graphics.Rect(lbOffX, 0, lbOffX + drawW, drawH),
-                        null
-                    )
-                    canvas.restore()
-                }
-                val scaledBmp: Bitmap = canvasBmp
-                // MediaPipe 返回的是「整张 512×512 画布（含黑边）」的归一化坐标，
-                // 须先换算回内容子矩形再套 mapCrop*ToViewport 得到视口 UV。
-                val lbX0: Float = lbOffX / scaledSizeF
-                val lbY0: Float = lbOffY / scaledSizeF
-                val lbW: Float = drawW / scaledSizeF
-                val lbH: Float = drawH / scaledSizeF
-                val mpX: (Float) -> Float = { px -> mapCropXToViewport((px - lbX0) / lbW) }
-                // ⚠️ 图已翻正 → MediaPipe 给的 y 是「自上而下」；而 mapCropYToViewport 的公式
-                // 是按「倒立图（自下而上）」推导的（它内部自带一次 0.5-(cy-0.5)*scaleY 的翻转）。
-                // 这里先换回内容内、自下而上的等价坐标，公式本身不动 —— 改动面最小，也保证
-                // 与历史映射行为完全一致。
-                val mpY: (Float) -> Float = { py -> mapCropYToViewport(1f - (py - lbY0) / lbH) }
-                val mpLenX: (Float) -> Float = { len -> mapCropLenToViewport(len / lbW) }
-
-                // Track face landmarks using Google MediaPipe (with legacy fallback)
-                val manager = mediaPipeManager
-                val faceDetectStartNs = System.nanoTime()
-                faceProfPrepNanos += faceDetectStartNs - facePrepStartNs
-                if (manager != null) {
-                    // v2.6.22（多脸）：一次拿回最多 3 张脸（按两眼距离降序，第 0 张是主脸）
-                    val faces = manager.detectFaces(scaledBmp)
-                    faceProfDetectNanos += System.nanoTime() - faceDetectStartNs
-                    if (faces.isNotEmpty()) {
-                        // v2.0.156：MediaPipe 给的是「采样裁剪图」空间的坐标，必须换算成视口 UV
-                        // 再喂给 shader —— 否则人脸一偏离画面中心，妆容与变形就整体错位。
-                        faceMissStreak = 0
-                        faceDetectedUniform = 1
-
-                        val n = minOf(faces.size, MediaPipeFaceManager.MAX_FACES)
-                        faceCountUniform = n
-                        // v2.6.23：按检出脸数动态降频 —— landmark 回归是逐脸做的，
-                        // 3 张脸的成本约是 1 张的 2 倍多（实测 100ms+ vs 40~60ms）。
-                        faceSampleInterval = when {
-                            n >= 3 -> 12
-                            n == 2 -> 10
-                            else -> 8
-                        }
-                        // v2.6.22（多脸）：低频诊断 —— 每 60 次成功检测打一行，
-                        // 用来确认「到底检出了几张脸」（多脸效果的唯一可观测指标）。
-                        faceDiagCount++
-                        if (faceDiagCount >= 60) {
-                            faceDiagCount = 0
-                            Log.i(
-                                TAG,
-                                "多脸检测：$n 张（主脸 eyeDist=${"%.4f".format(eyeDistancesArr[0])}，" +
-                                    "精细点位=${if (faces[0].hasDetailedLandmarks) "有" else "无"}）"
-                            )
-                        }
-                        for (i in 0 until n) {
-                            val f = faces[i]
-                            val o = i * 2
-                            // 每张脸各自做低通（0.75/0.25），抑制检测抖动。
-                            // ⚠️ 跨帧是按**索引**对应的 —— 返回顺序已按面积降序稳定化，
-                            //   但两人大小接近时仍可能交换，表现为两张脸的妆容短暂互换位置。
-                            //   这是「无 ID 跟踪」的固有局限（换检测器也一样），实测可接受。
-                            faceCentersXY[o] = faceCentersXY[o] * 0.75f + mpX(f.centerX) * 0.25f
-                            faceCentersXY[o + 1] = faceCentersXY[o + 1] * 0.75f + mpY(f.centerY) * 0.25f
-                            eyeDistancesArr[i] = eyeDistancesArr[i] * 0.75f + mpLenX(f.eyeDistance) * 0.25f
-
-                            if (f.hasDetailedLandmarks) {
-                                hasDetailedsArr[i] = 1
-                                eyeLeftsXY[o] = eyeLeftsXY[o] * 0.75f + mpX(f.eyeLeftX) * 0.25f
-                                eyeLeftsXY[o + 1] = eyeLeftsXY[o + 1] * 0.75f + mpY(f.eyeLeftY) * 0.25f
-                                eyeRightsXY[o] = eyeRightsXY[o] * 0.75f + mpX(f.eyeRightX) * 0.25f
-                                eyeRightsXY[o + 1] = eyeRightsXY[o + 1] * 0.75f + mpY(f.eyeRightY) * 0.25f
-                                mouthPossXY[o] = mouthPossXY[o] * 0.75f + mpX(f.mouthX) * 0.25f
-                                mouthPossXY[o + 1] = mouthPossXY[o + 1] * 0.75f + mpY(f.mouthY) * 0.25f
-                                chinsXY[o] = chinsXY[o] * 0.75f + mpX(f.chinX) * 0.25f
-                                chinsXY[o + 1] = chinsXY[o + 1] * 0.75f + mpY(f.chinY) * 0.25f
-                                mouthHalfWsArr[i] = mouthHalfWsArr[i] * 0.75f +
-                                    mpLenX(f.mouthHalfWidth) * 0.25f
-                                mouthHalfHsArr[i] = mouthHalfHsArr[i] * 0.75f +
-                                    ((f.mouthHalfHeight / lbH) * faceCropScaleY) * 0.25f
-                                // v2.6.23：图已翻正 → 嘴角连线的 y 方向与「倒立图」相反，
-                                // 角度取负还原（shader 里用的是 -uMouthAngles[fi]，符号错会让口红椭圆拧反）
-                                mouthAnglesArr[i] = -f.mouthAngle
-                            } else {
-                                hasDetailedsArr[i] = 0
-                            }
-                        }
-
-                        // ---- 主脸镜像：GPUPixel 的 ROI / 日志仍按「一张脸」工作 ----
-                        val main = faces[0]
-                        faceCenterXUniform = faceCentersXY[0]
-                        faceCenterYUniform = faceCentersXY[1]
-                        eyeDistanceUniform = eyeDistancesArr[0]
-                        if (main.hasDetailedLandmarks) {
-                            hasDetailedLandmarks = 1
-                            eyeLeftXUniform = eyeLeftsXY[0]
-                            eyeLeftYUniform = eyeLeftsXY[1]
-                            eyeRightXUniform = eyeRightsXY[0]
-                            eyeRightYUniform = eyeRightsXY[1]
-                            mouthXUniform = mouthPossXY[0]
-                            mouthYUniform = mouthPossXY[1]
-                            chinXUniform = chinsXY[0]
-                            chinYUniform = chinsXY[1]
-                            mouthHalfWidthUniform = mouthHalfWsArr[0]
-                            mouthHalfHeightUniform = mouthHalfHsArr[0]
-                            mouthAngleUniform = mouthAnglesArr[0]
-                        } else {
-                            hasDetailedLandmarks = 0
-                        }
-                    } else {
-                        // v2.0.173：防抖 —— 检测按 8 帧节奏进行，单次失败（遮挡/侧脸/运动模糊）
-                        // 就硬切 0 会让妆容与变形在「出现/消失」间高频跳变（表现为闪烁）。
-                        // 连续 3 次失败（≈半秒）才判定真正丢失；期间保持最后位置不漂移。
-                        faceMissStreak++
-                        if (faceMissStreak >= 3) {
-                            // v2.6.22（整帧采样改造的配套诊断）：只在"刚判定丢失"那一次打一行，
-                            // 便于真机上区分「画面里真的没有人脸」与「整帧缩放后脸太小、检出率不够」
-                            // —— 后者把 faceSampleSize 调大（512 → 640/768）即可，不必回退中央块裁剪。
-                            if (faceMissStreak == 3) {
-                                Log.w(
-                                    TAG,
-                                    "人脸检测连续 3 次未检出：输入 ${fw}x$fh（整帧等比缩放，长边上限 $faceSampleSize）；" +
-                                        "若画面确实有人脸，考虑调大 faceSampleSize"
-                                )
-                            }
-                            faceDetectedUniform = 0
-                            hasDetailedLandmarks = 0
-                            // v2.6.22（多脸）：张数归零 —— shader 的逐脸循环第一轮就 break，
-                            // 否则会拿「最后一张脸的残留坐标」继续画（表现为妆容停在原地）。
-                            faceCountUniform = 0
-                            // v2.6.23：丢失后回到 8 帧（尽快重新抓到脸），不要停在多脸时的长间隔
-                            faceSampleInterval = 8
-                            // Decay smoothly back to default screen center coordinates
-                            faceCenterXUniform = faceCenterXUniform * 0.92f + 0.50f * 0.08f
-                            faceCenterYUniform = faceCenterYUniform * 0.92f + 0.45f * 0.08f
-                            eyeDistanceUniform = eyeDistanceUniform * 0.92f + 0.14f * 0.08f
-                        }
-                    }
-                }
-                // v84：复用缓冲，不 recycle（仅尺寸变化时才重建）
-            } catch (e: Throwable) {
-                Log.e(TAG, "Background Google MediaPipe face tracking failed", e)
-            } finally {
-                // v2.6.17：分段统计（每 60 次一行）。prep = 回读字节 → Bitmap 的纯 CPU 前置，
-                // detect = MediaPipe 推理。改动的目标就是让 prep 相对 detect 可忽略。
-                faceProfCount++
-                if (faceProfCount >= 60) {
-                    val n = faceProfCount
-                    Log.i(
-                        TAG,
-                        "face profile(${n}x): prep=${faceProfPrepNanos / n / 1_000_000} ms, " +
-                            "detect=${faceProfDetectNanos / n / 1_000_000} ms, " +
-                            "read=${fw}x${fh}, copy=${if (faceDirectCopy == 1) "direct" else "convert"}"
-                    )
-                    faceProfCount = 0
-                    faceProfPrepNanos = 0
-                    faceProfDetectNanos = 0
-                }
-                // v2.0.156：把这一帧的数组还给池，下一次采样即可复用（省掉每 8 帧 1MB 的分配）
-                synchronized(faceFrameLock) { faceFramePool = rgbaData }
-                isDetectingFace.set(false)
-            }
-        }
-    }
-
-    /**
-     * v2.6.22（美颜审查 P0-1）：**带保护的线程池提交**。
-     *
-     * 之前所有提交点都是裸 `executor.execute {}`：
-     *  - [release] 里 `shutdownNow` 之后若还有提交 → `RejectedExecutionException`
-     *    冒到 GL 线程的 `onDrawFrame`；
-     *  - 更隐蔽的是**计数泄漏** —— 调用方在提交**前**已经把 `gpInFlight` 加了 1
-     *    （MediaPipe 路径是 `isDetectingFace.set(true)`），任务没提交成功就永远回不来，
-     *    于是「忙」判据恒真，**本渲染器生命周期内人脸检测彻底停摆**。
-     *
-     * @param rollback 提交失败时的回滚动作（把提交前预支的计数/标志还回去、归还帧缓冲）
-     * @return 是否真的提交成功
-     */
     private fun submitSafely(
         executor: java.util.concurrent.ExecutorService,
         tag: String,
         rollback: () -> Unit,
         task: () -> Unit,
-    ): Boolean {
-        if (executorsClosed) {
-            runCatching { rollback() }
-            return false
-        }
-        return try {
-            executor.execute { task() }
-            true
-        } catch (e: java.util.concurrent.RejectedExecutionException) {
-            Log.w(TAG, "$tag 提交被拒绝（线程池已关闭），回滚计数", e)
-            runCatching { rollback() }
-            false
-        } catch (e: Throwable) {
-            Log.e(TAG, "$tag 提交失败，回滚计数", e)
-            runCatching { rollback() }
-            false
-        }
-    }
-
-    /**
-     * v2.0.186（P0-B）：GPUPixel 双线程流水线的任务收尾。
-     *
-     * 计数归零意味着**所有读取者都已读完**本帧像素，此时才能：
-     *  ① 把帧归还池，供下一帧回读复用；
-     *  ② 让 GL 线程重新开始回读（[maybeScheduleFaceSampling] 的节流判据）。
-     *
-     * 传入 `null` 的任务（检测）不归还帧 —— 帧只由「处理」侧归还，
-     * 避免两个任务同时写池。
-     */
-    private fun finishGpTask(rgbaData: ByteArray?) {
-        if (gpInFlight.decrementAndGet() <= 0 && rgbaData != null) {
-            synchronized(faceFrameLock) { faceFramePool = rgbaData }
-        }
-    }
+    ): Boolean = facePipeline.submitSafely(executor, tag, rollback, task)
 }

@@ -96,8 +96,8 @@
 
 | 项目 | 说明 / Notes |
 |---|---|
-| 产物 | **单个 APK**（含解码内核；ASR 模型改为按需下载）；文件名由 Gradle 任务**自动带版本号**：`Aura-Lens-v<版本>-<flavor>.apk`（发版用 `all`，如 `Aura-Lens-v2.6.9-all.apk`）/ Single APK with the decoder kernels bundled (the ASR model is downloaded on demand); the Gradle rename task stamps the version into the file name: `Aura-Lens-v<version>-<flavor>.apk` (`all` for releases) |
-| 体积 | 约 **110MB**（`all` 全兼容包；原生解码 / 推理库约 43MB。ASR 模型 ~100MB 改为首次使用时下载）/ ~110MB (the `all` build; ~43MB native decoder / inference libs). The ~100MB ASR model is downloaded on first use |
+| 产物 | **单个 APK**（含解码内核；ASR 模型改为按需下载）；文件名由 Gradle 任务**自动带版本号**：`Aura-Lens-v<版本>-<flavor>.apk`（主线发版用 `standard`，如 `Aura-Lens-v2.8.6-standard.apk`）/ Single APK with the decoder kernels bundled (the ASR model is downloaded on demand); the Gradle rename task stamps the version into the file name: `Aura-Lens-v<version>-<flavor>.apk` (`standard` for mainline releases) |
+| 体积 | 约 **70MB**（`standard` 主线包，含原生解码 / 推理库约 39MB。ASR 模型 ~100MB 改为首次使用时下载）/ ~70MB (the `standard` build; ~39MB native decoder / inference libs). The ~100MB ASR model is downloaded on first use |
 | 包含 ABI | **仅 `arm64-v8a`**（v2.4.10 起）。闭源预编译库（旷视 Mars-Face / MediaPipe / VR SDK）只提供 arm64 / v7a，`CMakeLists.txt` 对缺失 ABI 是 `FATAL_ERROR`，故 **x86 / x86_64 物理上无法构建** / **`arm64-v8a` only** (since v2.4.10): the closed-source prebuilt libs ship only arm64 / v7a and CMake fails hard on a missing ABI, so x86 / x86_64 cannot be built at all |
 | 安装 | 普通手机与 VR 眼镜均直接安装，系统自动选原生库 / Installs directly on both phones and VR glasses; the OS picks the native libs |
 
@@ -105,8 +105,8 @@
 
 | flavor | 用途 / Purpose | OpenXR |
 |---|---|---|
-| `standard` | 主线包（日常自用，体积最小，不编 OpenXR）/ Mainline build (daily use, smallest, no OpenXR) | — |
-| `all` | **全兼容发版包** / All-in-one release build | ✓ |
+| `standard` | **主线发版包**（日常及发版主线，体积最小，不编 OpenXR）/ **Mainline release build** (smallest, no OpenXR) | — |
+| `all` | 全兼容包（含 OpenXR）/ All-in-one build (with OpenXR) | ✓ |
 | `pico` · `quest` | 单眼镜优化包 / Single-glasses builds | ✓ |
 
 > 说明：早期版本曾按 ABI 拆分为 4 个包发布，v116 起改为**单包**发布；v2.4.10 起 ABI 进一步收敛为 **arm64-v8a**。
@@ -121,10 +121,10 @@
 #    ⚠️ 本仓库不含 Gradle Wrapper（无 gradlew），请直接调用本机 gradle
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot"   # 按本机路径调整
 
-# 1) 构建 —— ⚠️ 必须带 flavor，否则 assembleRelease 会把 5 个 flavor 全编一遍
-gradle.bat :app:assembleStandardRelease                     # 日常主线包（体积最小，不编 OpenXR）
-gradle.bat :app:assembleAllRelease -x lintVitalAllRelease   # 发版全兼容包
-# 产物：app\build\outputs\apk\all\release\Aura-Lens-v<版本>-all.apk（单 APK，arm64-v8a）
+# 1) 构建 —— ⚠️ 必须带 flavor，否则 assembleRelease 会把所有 flavor 全编一遍
+gradle.bat :app:assembleStandardRelease -x lintVitalStandardRelease   # 主线发版包（体积最小，不编 OpenXR）
+gradle.bat :app:assembleAllRelease -x lintVitalAllRelease             # 全兼容包（含 OpenXR）
+# 产物：app\build\outputs\apk\standard\release\Aura-Lens-v<版本>-standard.apk（单 APK，arm64-v8a）
 
 # 可选：需要「ASR 模型随包内置」的自建全量包时，把模型预置回 assets
 #       （默认不内置 —— 装包因此小约 100MB，运行时首次使用会自动下载）

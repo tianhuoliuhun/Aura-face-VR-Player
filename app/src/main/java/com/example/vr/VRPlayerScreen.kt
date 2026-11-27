@@ -1147,159 +1147,43 @@ fun VRPlayerScreen(
      * 且原实现依赖整片转写生成的临时文件——该链路已随实时字幕方案移除。
      * 现在直接从内存字幕缓存导出：实时字幕与手动加载的字幕都能导出。
      */
-    fun exportSubtitleSrt() {
-        // v2.6.24：后台模式下 realtimeCues 同样是有效数据（只是没显示），一并可导出
-        val cues = if (isRealtimeAsrActive) realtimeCues else loadedSubtitleCues
-        if (cues.isEmpty()) {
-            Toast.makeText(context, context.getString(R.string.toast_no_subtitle_export), Toast.LENGTH_SHORT).show()
-            return
-        }
-        // v2.0.155：先统计有多少条还没译文 —— 导出**只吃缓存、不发起请求**，
-        // 未翻译的条目会以原文写入，必须如实告知，否则用户会以为导出坏了。
-        val untranslated =
-            if (subtitleTranslator.config.isEnabled) {
-                cues.count { subtitleTranslator.cachedTranslationOf(it.text) == null }
-            } else 0
-        val f = SubtitleExporter.exportSrt(
-            context,
-            selectedMediaItem.title,
-            cues,
-            SubtitleExporter.langSuffix(subtitleTranslator),
-            isStripSubtitlePunctuation,
-            { subtitleTranslator.exportTextFor(it) }
-        )
-        Toast.makeText(
-            context,
-            when {
-                f == null -> context.getString(R.string.toast_subtitle_export_failed)
-                untranslated > 0 -> context.getString(
-                    R.string.toast_subtitle_exported_untranslated,
-                    cues.size,
-                    untranslated,
-                    f.absolutePath
-                )
-                else -> context.getString(R.string.toast_subtitle_exported, cues.size, f.absolutePath)
-            },
-            Toast.LENGTH_LONG
-        ).show()
-    }
+    fun exportSubtitleSrt() = VRPlayerTrackAndAsrOps.exportSubtitleSrt(
+        context = context,
+        isRealtimeAsrActive = isRealtimeAsrActive,
+        realtimeCues = realtimeCues,
+        loadedSubtitleCues = loadedSubtitleCues,
+        subtitleTranslator = subtitleTranslator,
+        selectedMediaItem = selectedMediaItem,
+        isStripSubtitlePunctuation = isStripSubtitlePunctuation,
+    )
 
-    /** v127e：重新生成实时字幕（清空缓存后按当前播放点重新走优先级调度） */
-    fun regenerateRealtimeSubtitle() {
-        // v2.6.24：后台模式也算引擎在跑，允许重新生成（弹幕素材同样受益）
-        if (!isRealtimeAsrActive) {
-            Toast.makeText(context, context.getString(R.string.toast_enable_realtime_first), Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!selectedMediaItem.isVideo) {
-            Toast.makeText(context, context.getString(R.string.toast_image_no_audio), Toast.LENGTH_SHORT).show()
-            return
-        }
-        realtimeCues = emptyList()
-        realtimeDone = false
-        realtimeSubtitleEngine.restart()
-        Toast.makeText(context, context.getString(R.string.toast_subtitle_restarted), Toast.LENGTH_SHORT).show()
-    }
+    fun regenerateRealtimeSubtitle() = VRPlayerTrackAndAsrOps.regenerateRealtimeSubtitle(
+        context = context,
+        isRealtimeAsrActive = isRealtimeAsrActive,
+        selectedMediaItem = selectedMediaItem,
+        realtimeSubtitleEngine = realtimeSubtitleEngine,
+        onResetRealtime = {
+            realtimeCues = emptyList()
+            realtimeDone = false
+        },
+    )
 
-    /**
-     * v2.0.136：加载应用 data 目录 subtitles/ 下的历史字幕文件，
-     * 并把字幕源切换到本地（关闭实时生成——内容相同，省电省 CPU）。
-     */
-    fun loadSavedSubtitleFile(f: File) {
-        // ⚠️ 读文件 + 解析字幕**必须**放 IO 线程：字幕文件从几十 KB 到几 MB 不等，
-        //    而这个函数是从 `.clickable { }` 里直接调的（也就是**主线程**）——
-        //    主线程做这件事会在用户点下去之后冻住 UI 一段时间（文件越大越明显）。
-        //    ⚠️ 同一功能的另一处「设置面板 → 已下载字幕加载」早就用了
-        //       `scope.launch(Dispatchers.IO)`，只有这里漏了 —— 典型的「同功能两处实现、
-        //       改一处漏一处」。两处现在都走 IO 线程。
-        scope.launch(Dispatchers.IO) {
-            try {
-                // ⚠️ v2.1.248：读字节自行解码（GBK/Big5 老字幕）+ 走统一嗅探入口
-                //    （自动识别 ASS/SSA）。见 SubtitleParser.decodeBytes / parse。
-                val content = SubtitleParser.decodeBytes(f.readBytes())
-                val cues = SubtitleParser.parse(content)
-                withContext(Dispatchers.Main) {
-                    if (cues.isEmpty()) {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.toast_subtitle_empty_format, f.name),
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@withContext
-                    }
-                    loadedSubtitleCues = cues
-                    loadedSubtitleFileName = f.name
-                    isSubtitleEnabled = true
-                    isRealtimeSubtitleEnabled = false
-                    if (isMemoryModeEnabled) {
-                        prefs.edit().putBoolean("realtime_subtitle_enabled", false).apply()
-                    }
-                    Toast.makeText(context, context.getString(R.string.toast_subtitle_autoloaded, f.name, cues.size), Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Log.w("VRPlayerScreen", "load saved subtitle failed: ${e.message}")
-            }
-        }
-    }
+    fun loadSavedSubtitleFile(f: File) = VRPlayerTrackAndAsrOps.loadSavedSubtitleFile(
+        context = context,
+        prefs = prefs,
+        scope = scope,
+        f = f,
+        isMemoryModeEnabled = isMemoryModeEnabled,
+        onLoaded = { cues, name ->
+            loadedSubtitleCues = cues
+            loadedSubtitleFileName = name
+            isSubtitleEnabled = true
+            isRealtimeSubtitleEnabled = false
+        },
+    )
 
-    // 后台生成全片 SRT 字幕（v110）：支持双引擎 Vosk / Qwen3-ASR
     fun startBatchTranscribe() {
-        // v127：整片转写（生成 _asr.srt）已停用，改为边播边生成的实时字幕
-        // （RealtimeSubtitleEngine）。原实现保留于此以便回退，不再参与交互。
-        /*
-        val uriStr = selectedMediaItem.uri ?: return
-        if (isBatchTranscribing) return
-        // v123：图片没有音轨，此前直接开跑会在解码阶段才失败（提示"音轨解码失败"，
-        // 用户无从判断）。这里提前拦下并给明确说明。
-        if (!selectedMediaItem.isVideo) {
-            batchTranscribeStatus = stringResource(R.string.toast_image_no_audio_gen)
-            Toast.makeText(context, batchTranscribeStatus, Toast.LENGTH_SHORT).show()
-            return
-        }
-        scope.launch {
-            isBatchTranscribing = true
-            batchTranscribeProgress = 0f
-            batchTranscribeStatus = if (asrEngineType != AsrEngineType.VOSK) "准备 $asrEngineType 引擎..." else "准备 Vosk 识别模型..."
-            val file = run {
-                batchTranscriber.transcribeToSrtSherpa(
-                    mediaUri = Uri.parse(uriStr),
-                    videoTitle = selectedMediaItem.title,
-                    engine = asrEngineType,
-                    language = sherpaLangCode,
-                    onStatus = { batchTranscribeStatus = it },
-                    onProgress = { batchTranscribeProgress = it }
-                )
-            } else {
-                val modelOption = asrManager.config.modelOption
-                batchTranscriber.transcribeToSrt(
-                    mediaUri = Uri.parse(uriStr),
-                    videoTitle = selectedMediaItem.title,
-                    modelOption = modelOption,
-                    modelProvider = { opt -> asrManager.ensureModelForBatch(opt) },
-                    onStatus = { batchTranscribeStatus = it },
-                    onProgress = { batchTranscribeProgress = it }
-                )
-            }
-            isBatchTranscribing = false
-            if (file != null) {
-                // v89：生成后自动加载并显示字幕
-                // v2.1.248：改走解码 + 嗅探统一入口（与其余字幕加载点保持一致）
-                val content = withContext(Dispatchers.IO) { SubtitleParser.decodeBytes(file.readBytes()) }
-                val cues = SubtitleParser.parse(content)
-                loadedSubtitleCues = cues
-                loadedSubtitleFileName = file.name
-                isSubtitleEnabled = true
-                // v2.6.10：文案走 strings（五语）—— 原来硬编码中文，英日韩用户看到中文
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.subtitle_loaded_toast, file.name, cues.size),
-                    Toast.LENGTH_LONG
-                ).show()
-            } else {
-                Toast.makeText(context, context.getString(R.string.toast_subtitle_gen_failed, batchTranscriber.statusMessage), Toast.LENGTH_LONG).show()
-            }
-        }
-        */
+        // v127：整片转写已停用，改为边播边生成的实时字幕（RealtimeSubtitleEngine）。
     }
 
 
@@ -2208,475 +2092,23 @@ fun VRPlayerScreen(
     }
     var currentGlSurfaceView by remember { mutableStateOf<VRGLSurfaceView?>(null) }
 
-    // ===== v2.3.1（P2 + P4）：AI 弹幕编排 =====
-    // 链路：定时触发 → GL 取帧（P3）→ 视觉模型（P2）→ 引擎入队/去重/分轨（P4）→ 渲染（P5，未做）
-    //
-    // ⚠️ 本版**只做「取帧→请求→入队」**，弹幕**尚未上屏**（渲染层 P5 在下一版）。
-    //    因此这里产生的结果会存进 danmuEngine，供下一版渲染层直接消费。
-    // ⚠️ 本块**必须位于 `currentGlSurfaceView` 声明之后**（依赖它取 renderer）。
-    //
-    // 设计要点（对应方案文档 P2/P4）：
-    // - 视觉客户端与引擎都 remember 一次，不随重组重建
-    // - 定时器用 LaunchedEffect + while(true) + delay，**仅在开启时运行**（关闭即取消协程）
-    // - 请求在 IO 线程、串行（一次未回来不再发起下一次），天然限流
-    // - 帧异常/请求失败一律静默跳过，绝不影响播放
-    val danmuVisionClient = remember { DanmuVisionClient() }
-    val danmuEngine = remember { DanmuEngine() }
-    // v2.4.7：导入弹幕的内容缓存（解析结果驻留内存，播放期间只做游标推进）
-    val danmuImportStore = remember { DanmuImportStore() }
-    // 供 UI 显示「已生成」条数（渲染层未接前，用于确认链路已通）
-    var danmuGeneratedCount by remember { mutableIntStateOf(0) }
-    var danmuLastError by remember { mutableStateOf("") }
-    // v2.4.7：导入弹幕的加载状态（供 UI 显示"正在读取/导入成功 N 条/失败原因"）
-    var danmuImportStatus by remember { mutableStateOf<DanmuImportStore.LoadResult?>(null) }
-    var danmuImportCount by remember { mutableIntStateOf(0) }
-    var danmuImportName by remember { mutableStateOf("") }
-
-    // v2.4.7：接上日志钩子（解析器与导入器刻意不直接依赖 android.util.Log，
-    // 否则它们的 catch 容错分支会在纯 JVM 单测里因 Log 未 mock 而崩溃）。
-    // 挂在 remember 里只执行一次；用 SideEffect 而非 LaunchedEffect 是因为它需要
-    // 在**首次组合完成前**就生效（加载可能立刻发生）。
-    remember { DanmuImporter.enableAndroidLog(); DanmuImportStore.enableAndroidLog(); true }
-
-    // v2.4.7：导入弹幕的文件选择器（B 站 XML / JSON）。
-    //
-    // ⚠️ 这里**必须**走 `OpenDocument` 而不是 `GetContent`：导入的弹幕文件 URI 会被
-    //    持久化进 prefs（`danmu_import_uri`），下次启动还要能读。`GetContent` 返回的
-    //    是**一次性临时授权**，重启后必然 `SecurityException`；`OpenDocument` 配合
-    //    `takePersistableUriPermission` 才能跨进程重启继续读。
-    //
-    // MIME 用 `*/*`：各文件管理器对 `.xml` / `.json` 的 MIME 上报并不统一
-    //    （`application/xml`、`text/xml`、`application/json`、`text/plain` 都有），
-    //    写死单一 MIME 会出现「文件明明在却选不到」。格式正确性交给解析器判。
-    val danmuImportPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            keepUiAlight()
-            // 申请持久读权限；个别 provider（如下载管理器）不支持持久化会抛异常，
-            // 此时降级为「本次进程内有效」，不影响当前会话使用。
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            val name = danmuImportStore.displayNameOf(context.contentResolver, uri)
-            danmuConfig = danmuConfig.copy(importedUri = uri.toString(), importedName = name)
-            // v2.4.41（弹幕审查 #16）：记下「这份弹幕是给哪个视频选的」。
-            // 换到别的视频时给一句提示 —— **不自动清除**（同剧多集共用一份弹幕是合法用法）。
-            if (isMemoryModeEnabled) {
-                prefs.edit().putString("danmu_import_for_video", selectedMediaItem.uri.orEmpty()).apply()
-            }
-        }
-    }
-
-    // v2.4.41（弹幕审查 #16）：导入的弹幕文件绑定的是「选择它时的那个视频」；换片时提示时间轴可能对不上。
-    // ⚠️ 只提示、不自动清除 —— 「是否预期」属产品决策，清除入口在弹幕面板里本来就有。
-    LaunchedEffect(selectedMediaItem.uri, danmuConfig.importedUri, danmuConfig.isEnabled) {
-        if (!danmuConfig.isEnabled || danmuConfig.importedUri.isBlank()) return@LaunchedEffect
-        val bound = prefs.getString("danmu_import_for_video", "").orEmpty()
-        val cur = selectedMediaItem.uri.orEmpty()
-        if (bound.isNotBlank() && cur.isNotBlank() && bound != cur) {
-            danmuLastError = context.getString(R.string.danmu_import_bound_other_video)
-        }
-    }
-
-    // 运行参数跟随配置变化
-    // ⚠️ v2.4.10：autoTracks 也必须进 key 列表 —— 漏了会导致「开关切换后引擎侧不更新」
-    //    （本项目「设置持久化三处同步」的同型坑，见 MEMORY.md）。
-    LaunchedEffect(
-        danmuConfig.speedPxPerSec,
-        danmuConfig.maxTracks,
-        danmuConfig.autoTracks,
-        danmuConfig.dedupThresholdPercent
-    ) {
-        danmuEngine.speedPxPerSec = danmuConfig.speedPxPerSec
-        danmuEngine.maxTracks = danmuConfig.maxTracks
-        danmuEngine.autoTracks = danmuConfig.autoTracks
-        danmuEngine.dedupThresholdPercent = danmuConfig.dedupThresholdPercent
-    }
-
-    // v2.4.7：预置的导入 URI → 启动时读一次（只读 URI，内容不存 prefs）
-    //
-    // ⚠️ key 用 `importedUri`：用户在面板里换了文件就重新读。
-    //    清空 URI（点「清除导入」）时同步清掉内存缓存与 UI 计数。
-    LaunchedEffect(danmuConfig.importedUri) {
-        val u = danmuConfig.importedUri
-        if (u.isBlank()) {
-            danmuImportStore.clear()
-            danmuImportStatus = null
-            danmuImportCount = 0
-            danmuImportName = ""
-            return@LaunchedEffect
-        }
-        // 已经是同一个文件且已加载成功 → 不重复读（避免每次重组都做 IO）
-        if (danmuImportStore.uri == u && danmuImportStore.hasContent) {
-            danmuImportCount = danmuImportStore.items.size
-            danmuImportName = danmuImportStore.fileName
-            return@LaunchedEffect
-        }
-        danmuImportStatus = null  // 进入"读取中"（UI 用 null + 计数 0 表示 loading）
-        val uri = android.net.Uri.parse(u)
-        val name = danmuConfig.importedName.ifBlank { uri.lastPathSegment.orEmpty() }
-        val result = danmuImportStore.load(context.contentResolver, uri, name)
-        danmuImportStatus = result
-        danmuImportCount = danmuImportStore.items.size
-        danmuImportName = danmuImportStore.fileName
-        // 读取失败时把错误同时显示到状态卡（用户一眼能看到原因）
-        danmuLastError = when (result) {
-            is DanmuImportStore.LoadResult.Failure -> when (result.error) {
-                DanmuImportStore.Error.UNREADABLE -> context.getString(R.string.danmu_import_fail_unreadable)
-                DanmuImportStore.Error.BAD_FORMAT -> context.getString(R.string.danmu_import_fail_format)
-                DanmuImportStore.Error.EMPTY -> context.getString(R.string.danmu_import_fail_empty)
-            }
-            is DanmuImportStore.LoadResult.Success -> ""
-        }
-    }
-
-    // 关闭弹幕时清空（避免重新打开后立刻涌出旧弹幕）
-    LaunchedEffect(danmuConfig.isEnabled) {
-        if (!danmuConfig.isEnabled) {
-            danmuEngine.reset()
-            danmuGeneratedCount = 0
-            danmuLastError = ""
-        }
-    }
-
-    // 主循环：按 intervalSec 周期执行一次「取素材 → 请求 → 入队」
-    //
-    // v2.4.1：素材不再只有截图 —— 由 `danmuConfig.sourceMode` 决定：
-    //   · 需要画面 → 走 GL 取帧（P3）
-    //   · 需要台词 → 从当前播放位置附近的 AI 字幕里裁一段（DanmuSubtitleSnippet）
-    // 仅台词模式**完全不碰 GL**（不请求、不轮询），因此更快、也不占用渲染线程。
-    //
-    // v2.4.7：本循环**只管 AI 生成**。导入模式走独立的调度循环（见下方
-    //   `danmuConfig.isImportMode` 那个 LaunchedEffect）—— 两者是**二选一**，
-    //   因此这里在导入模式下直接 return（不发任何请求、不读 GL、不读字幕）。
-    LaunchedEffect(danmuConfig.isEnabled, danmuConfig.intervalSec, danmuConfig.sourceTypeId) {
-        if (!danmuConfig.isEnabled) return@LaunchedEffect
-        if (danmuConfig.isImportMode) return@LaunchedEffect  // 导入模式：交给下面的调度循环
-        if (!danmuConfig.isReadyToRequest()) {
-            danmuLastError = context.getString(R.string.danmu_err_not_configured)
-            return@LaunchedEffect
-        }
-        // v2.4.2：URL 拼错（如 `hhttps://`）要**明确指出**，不能混进「意外错误」。
-        // 这是最容易犯、也最容易被误判成「网络/密钥问题」的一类配置错误。
-        val urlErr = when (danmuConfig.baseUrlProblem()) {
-            DanmuConfig.BaseUrlProblem.EMPTY -> context.getString(R.string.danmu_err_url_empty)
-            DanmuConfig.BaseUrlProblem.MISSING_SCHEME -> context.getString(R.string.danmu_err_url_no_scheme)
-            DanmuConfig.BaseUrlProblem.BAD_SCHEME -> context.getString(R.string.danmu_err_url_bad_scheme)
-            DanmuConfig.BaseUrlProblem.MISSING_HOST -> context.getString(R.string.danmu_err_url_no_host)
-            null -> ""
-        }
-        if (urlErr.isNotEmpty()) {
-            danmuLastError = urlErr
-            return@LaunchedEffect
-        }
-        val periodMs = danmuConfig.intervalSec.coerceIn(
-            DanmuConfig.MIN_INTERVAL_SEC, DanmuConfig.MAX_INTERVAL_SEC
-        ) * 1000L
-        // 首次稍作等待，避免刚进页面就抓一帧（可能还是黑帧/加载图）
-                // v2.6.8：连续失败计数 —— 驱动 DanmuRetryPolicy 的指数退避。
-                // 成功一次即清零（见下方），所以"偶发失败"不会累积成长时间等待。
-                var danmuFailStreak = 0
-        delay(FIRST_CAPTURE_DELAY_MS)
-        while (true) {
-            // v2.4.40（弹幕审查 #2）：**暂停时不请求模型**。
-            // 旧实现暂停期间仍每 periodMs 抓帧 → 请求 → 入队：白耗 API 与电量，
-            // 且入队用的是墙钟时刻、与画面脱节（与 #1 叠加后还会在恢复时整体偏移）。
-            // ⚠️ 与下方导入循环同款写法：直接读 state 取当前值，无需把它加进 LaunchedEffect key。
-            if (!isVideoPlaying) {
-                delay(periodMs)
-                continue
-            }
-            try {
-                // ① 取画面
-                // ⚠️ v2.4.13：本地 LLM 模式下 `needsImage` 恒为 false（它不知道运行时
-                //    是否装了 mmproj），但**mmproj 已就绪时本地模型也能看图** →
-                //    这种情况同样要取帧。两条判据任一成立即取。
-                var frame: android.graphics.Bitmap? = null
-                // v2.4.41（弹幕审查 #10）：记下**本批截图的播放位置** ——
-                //   ① 响应到达时若播放位置已明显偏离 → 丢弃该批（内容对应的画面已经过去了）；
-                //   ② 未偏离时，出生时刻按「截图位置」倒推，使屏上位置与画面时间轴一致。
-                val capturePosMs = currentPositionMs
-                val needFrame = danmuConfig.needsImage ||
-                    (danmuConfig.useLocalLlm && LocalLlmManager.visionAvailable)
-                if (needFrame) {
-                    val renderer = currentGlSurfaceView?.renderer
-                    if (renderer == null) {
-                        danmuLastError = context.getString(R.string.danmu_err_no_renderer)
-                        delay(periodMs)
-                        continue
-                    }
-                    // 请求一帧（GL 线程在下一帧末尾回读；false 表示间隔未到/已禁用）
-                    val requested = renderer.requestDanmuFrame(danmuConfig.imageMaxLongSide)
-                    if (!requested) {
-                        // 节流中（距上次太近）—— 等下一周期，不算错误
-                        delay(periodMs)
-                        continue
-                    }
-                    // 轮询取出结果（GL 回读发生在下一帧，给它若干次机会）
-                    var tries = 0
-                    while (tries < FRAME_POLL_MAX_TRIES && frame == null) {
-                        delay(FRAME_POLL_INTERVAL_MS)
-                        val taken = renderer.takeDanmuFrame()
-                        if (taken != null) {
-                            val (px, w, h) = taken
-                            // 渲染层交给我们的 pix 行序已翻正，可直接构 Bitmap
-                            frame = android.graphics.Bitmap.createBitmap(
-                                px, w, h, android.graphics.Bitmap.Config.ARGB_8888
-                            )
-                        }
-                        tries++
-                    }
-                    if (frame == null) {
-                        danmuLastError = context.getString(R.string.danmu_err_capture_timeout)
-                        delay(periodMs)
-                        continue
-                    }
-                }
-
-                // ② 取台词（仅当本模式需要台词时）
-                //    只取**当前播放位置附近**的一段：前 15s / 后 5s（DanmuConfig 常量）。
-                //    ⚠️ 字幕可能尚未生成到当前位置（ASR 是 1x 速度），此时 substring 为空串 →
-                //       在「仅台词」模式下就变成"没有素材"，用专门的错误文案提示，便于用户理解。
-                val subtitleText = if (danmuConfig.needsSubtitle) {
-                    // v2.6.24：后台执行 AI 字幕时**不显示字幕但台词照样可用** ——
-                    // 弹幕取词读的就是这里，所以判据用 isRealtimeAsrActive（跑没跑 ASR），
-                    // 而不是 isRealtimeSubtitleEnabled（显不显示字幕）。
-                    val cues = if (isRealtimeAsrActive) realtimeCues else loadedSubtitleCues
-                    // v2.6.23（用户要求「AI 弹幕链路同时获得字幕的原稿和翻译」）：
-                    // 每条台词拼「原文\n译文」—— 译文从翻译缓存只读查询（peekTranslation，不触发网络），
-                    // 查不到就退回纯原文；双语后字数上限翻倍，保持可覆盖的台词时长不变。
-                    DanmuSubtitleSnippet.extract(
-                        cues = cues,
-                        positionMs = currentPositionMs,
-                        maxChars = DanmuConfig.SUBTITLE_TEXT_MAX_CHARS * 2,
-                        translationOf = { src -> subtitleTranslator.peekTranslation(src) }
-                    )
-                } else {
-                    ""
-                }
-                // ⚠️ v2.4.13：用 needFrame 而非 needsImage —— 本地视觉模式下前者为 true，
-                //    此时「没台词但有画面」是**合法**的，不该报「没有素材」。
-                if (danmuConfig.needsSubtitle && subtitleText.isBlank() && !needFrame) {
-                    danmuLastError = context.getString(R.string.danmu_err_no_subtitle)
-                    delay(periodMs)
-                    continue
-                }
-
-                // ③ 交给视觉模型（内部已切 IO；失败返回结构化结果，不抛）
-                //    ⚠️ v2.4.5：改用 fetchDanmu（带失败原因），不再用只返回列表的 requestDanmu。
-                //       此前失败一律塌缩成空列表 → 无论真实原因是 401 还是 404，
-                //       UI 都只显示「模型未返回可用弹幕」，把用户引向错误方向
-                //       （实测事故：日志是 `HTTP 401 Invalid bearer token`）。
-                // v2.4.12：**本地 LLM / 云端视觉模型的分岔**
-                // ⚠️ 本地模式不请求截图（`needsImage` 恒 false）→ 此处 frame 必为 null，
-                //    所以本地只用台词。见 LocalDanmuGenerator 的说明。
-                // ⚠️ 返回值统一成 DanmuFetchResult，好让下面的错误展示逻辑**完全复用** ——
-                //    否则「本地失败」要走一条独立的提示路径，很容易漏掉或写得不一致。
-                val fetched = if (danmuConfig.useLocalLlm) {
-                    val lines = LocalDanmuGenerator.generate(
-                        context = context,
-                        subtitleText = subtitleText,
-                        personaPrompt = danmuConfig.personaPrompt,
-                        batchSize = danmuConfig.batchSize,
-                        // v2.4.13：mmproj 就绪时把画面也交给本地模型（否则内部自动退回纯文本）
-                        frame = frame
-                    )
-                    // ⚠️ 这两个类型**嵌套在 DanmuVisionClient 里**，必须写限定名
-                    //    （直接写 DanmuFetchResult 会 Unresolved reference）。
-                    DanmuVisionClient.DanmuFetchResult(
-                        lines = lines,
-                        kind = if (lines.isEmpty()) {
-                            DanmuVisionClient.ChatErrorKind.NO_CONTENT
-                        } else {
-                            DanmuVisionClient.ChatErrorKind.NONE
-                        },
-                        // ⚠️ 该字段是**非空 String**（不是 String?）→ 成功时传空串而非 null
-                        detail = if (lines.isEmpty()) "local-llm" else ""
-                    )
-                } else {
-                    danmuVisionClient.fetchDanmu(frame, danmuConfig, subtitleText)
-                }
-                // ⚠️ 用完立刻回收：1024×576 ARGB ≈ 2.3 MB，long-running 页面不能泄漏
-                if (frame != null && !frame.isRecycled) frame.recycle()
-
-                if (!fetched.isSuccess) {
-                    // v2.6.8：**按错误类别退避**（见 DanmuRetryPolicy）。
-                    // 之前是「失败 → 记一句文案 → delay(periodMs) 继续」，即固定周期无条件重试：
-                    //   · 密钥/模型名这类致命错误重试一万次也不会成功，却仍按周期打请求；
-                    //   · 429 / 5xx / 断网时等于持续加压；
-                    //   · 用户也看不出"系统还在等多久后自愈"。
-                    // ⚠️ 故意不 break：本 LaunchedEffect 的 key 不含密钥/模型名，
-                    //    用户改完配置不会重启循环 —— break 会导致永远不恢复，只能手动关开弹幕。
-                    danmuFailStreak++
-                    val retryInMs = DanmuRetryPolicy.nextDelayMs(
-                        periodMs, danmuFailStreak, fetched.kind
-                    )
-                    danmuLastError = danmuRetryHint(
-                        context, danmuErrorText(context, fetched.kind), retryInMs, danmuFailStreak
-                    )
-                    // ⚠️ 自己 delay 后 continue，跳过循环末尾的 delay(periodMs)；
-                    //    否则实际间隔变成「退避 + 周期」，退避等于失效。
-                    delay(retryInMs)
-                    continue
-                }
-
-                // 成功：清零计数，让下一次失败重新从最短退避开始
-                danmuFailStreak = 0
-                danmuLastError = ""
-                val now = android.os.SystemClock.elapsedRealtime()
-                // v2.4.41（弹幕审查 #10）：请求耗时 2~10s（读超时最长 30s），期间画面已推进 ——
-                //   偏离超过阈值就丢弃该批（否则内容对应的是「已经过去」的画面，明显滞后）。
-                val driftMs = kotlin.math.abs(currentPositionMs - capturePosMs)
-                if (driftMs > DANMU_LATE_DROP_MS) {
-                    android.util.Log.i(
-                        "VRPlayerScreen",
-                        "弹幕批丢弃：响应与截图位置相差 ${driftMs}ms（>${DANMU_LATE_DROP_MS}ms）"
-                    )
-                } else {
-                    // 🔴 v2.6.2：**不再倒推出生时刻**。
-                    //    旧实现 `spawnBaseMs = now - driftMs` 是为了让弹幕位置"对齐截图那一刻的画面
-                    //    时间轴"，但代价是 bornMs 早于当前时刻 → 位置公式里 elapsed > 0 →
-                    //    弹幕一出生就已经在屏幕内部（用户反馈的「从屏幕中间冒出」）。
-                    //    「对齐时间轴」与「必须从右缘飞入」本质冲突，只能二选一 ——
-                    //    既然要求只能从右缘飞入，就不再补偿这段已过去的时长：
-                    //    偏离过大（> DANMU_LATE_DROP_MS）的批次上面已经整批丢弃，
-                    //    剩下的滞后在可接受范围内。
-                    val spawnBaseMs = now
-                    val added = danmuEngine.enqueue(fetched.lines, spawnBaseMs)
-                    danmuGeneratedCount += added
-                    // 顺手回收过期项（正常情况下应由渲染层每帧调；此处兜底）
-                    danmuEngine.prune(now)
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e  // 协程取消必须原样抛出，否则 LaunchedEffect 无法正确结束
-            } catch (e: Exception) {
-                // 任何意外都不能让弹幕拖垮播放页
-                android.util.Log.e("VRPlayerScreen", "弹幕编排循环异常: ${e.message}", e)
-                danmuLastError = context.getString(R.string.danmu_err_unexpected)
-            }
-            delay(periodMs)
-        }
-    }
-
-    // ===== v2.4.7：导入模式的调度循环 =====
-    //
-    // 与 AI 循环的**根本区别**：这里不请求模型、不取帧 —— 弹幕**早已在内存里**，
-    // 我们只是按「播放到哪一刻」把它们放出来。
-    //
-    // ## 为什么按位置投递而不是按墙钟
-    // 导入的弹幕自带「视频内出现时间」。用**播放位置**驱动才能与暂停 / 拖动 / 变速
-    // 天然一致（暂停时位置不动 → 弹幕暂停；拖动后位置跳变 → 由 seek 处理重置游标）。
-    // 若用墙钟计时，暂停时弹幕会继续涌出，与画面完全脱节。
-    //
-    // ## 轮询间隔
-    // 用 [DANMU_IMPORT_TICK_MS]（默认 120ms）而不是挂到播放器的位置回调上：
-    // 位置回调的频率由播放内核决定（各内核不同），这里自持一个固定节拍更可控；
-    // 120ms 相对弹幕时间戳（毫秒级）足够精细，肉眼无法察觉延迟。
-    LaunchedEffect(danmuConfig.isEnabled, danmuConfig.sourceTypeId, danmuConfig.importedUri) {
-        if (!danmuConfig.isEnabled) return@LaunchedEffect
-        if (!danmuConfig.isImportMode) return@LaunchedEffect
-        // 等内容就绪（URI 已设置且文件已解析）。这里等待而不是报错：
-        // 用户可能刚切到导入模式、还没选文件，`danmuLastError` 由下面的分支负责提示。
-        while (true) {
-            if (danmuImportStore.hasContent) break
-            if (danmuConfig.importedUri.isBlank()) {
-                danmuLastError = context.getString(R.string.danmu_err_import_no_file)
-                return@LaunchedEffect
-            }
-            // 有 URI 但还没加载完（IO 进行中）→ 稍等
-            delay(DANMU_IMPORT_TICK_MS)
-        }
-        // 进入循环前把游标对齐到**当前播放位置**：
-        // 用户可能在播放到一半时才切到导入模式或选好文件，此时不该把前面积压的弹幕全补投。
-        danmuImportStore.resetCursorTo(currentPositionMs)
-        danmuLastError = ""
-        // v2.4.41（弹幕审查 #6）：**待投递队列** —— 本拍拿不到轨道的条目暂存于此，下一拍重试；
-        // 超过 [DANMU_IMPORT_RETRY_WINDOW_MS] 仍未上屏才丢弃（旧实现直接丢，密集时大量消失）。
-        val pending = mutableListOf<Triple<String, Long, Color?>>()
-        while (true) {
-            if (isVideoPlaying) {
-                val pos = currentPositionMs
-                val due = danmuImportStore.drainUntil(pos)
-                if (due.isNotEmpty() || pending.isNotEmpty()) {
-                    val now = android.os.SystemClock.elapsedRealtime()
-                    // 颜色：文件里指定的色优先；没写颜色（null）时才由引擎回落到配置色。
-                    // ⚠️ 不走 `DanmuColorMode` 随机 —— 文件已经表达了自己的颜色意图，
-                    //    再随机就把它覆盖了（用户会觉得"导入的颜色没生效"）。
-                    //
-                    // ⚠️ v2.4.41（弹幕审查 #6）①：出生时刻**按「当前播放位置 − 该条时间戳」换算**。
-                    //    旧实现所有到期条目都用同一个 `now` → 时间戳被"打平"、同批拥挤同一代轨道，
-                    //    且屏上位置与画面脱节。
-                    val fresh = due.map { d ->
-                        val lateMs = (pos - d.timeMs).coerceAtLeast(0L)
-                        Triple(d.text, now - lateMs, d.color)
-                    }
-                    pending.addAll(fresh)
-                    val batch = pending.toList()
-                    pending.clear()
-                    // ⚠️ v2.4.41（弹幕审查 #5）：导入路径**不做相似度去重**（dedupe = false）——
-                    //    文件是「已知正确」的数据，「哈哈哈」这类重复是真实弹幕的一部分。
-                    val outcome = danmuEngine.enqueueTimed(batch, dedupe = false)
-                    danmuGeneratedCount += outcome.placed
-                    val deadline = now - DANMU_IMPORT_RETRY_WINDOW_MS
-                    pending.addAll(outcome.unplaced.filter { it.second >= deadline })
-                    danmuEngine.prune(now)
-                }
-            }
-            delay(DANMU_IMPORT_TICK_MS)
-        }
-    }
-
-    // 退出页面时清理（引擎是纯内存对象，reset 即释放）
-    DisposableEffect(Unit) {
-        onDispose {
-            danmuEngine.reset()
-        }
-    }
-
-    // ===== v2.4.0（P6）：弹幕与播放状态的联动 =====
-
-    /** 上一次观察到的播放位置，用于识别 seek 突跳。 */
-    var danmuLastPosMs by remember { mutableLongStateOf(0L) }
-
-    // ① 暂停/恢复：v2.4.40（弹幕审查 #1）起**改由渲染层用虚拟时钟冻结**弹幕 ——
-    //    上层不再记录暂停时刻、也不再平移 bornMs。
-    //    ⚠️ 旧做法是「渲染层暂停期间照走时钟」+「恢复时 shiftBornTime(暂停时长)」，
-    //       两者互相抵消 → 用户看到「暂停还在动、恢复向右跳一下」。两处已一并移除。
-    //    现在暂停由 `DanmuOverlay(isPaused = !isVideoPlaying)` 直接冻结，位置天然连续。
-
-    // ② seek 后清空弹幕。
-    //
-    // 理由：跳转后旧弹幕的「出生时间」与新画面毫无关系，会以一堆陈旧文本糊在屏幕上；
-    // 且它们的 x 多已越界，视觉上表现为「跳转后突然闪一下错位弹幕」。
-    // 判据复用实时字幕的「位置突跳 > 2 秒」—— 这样不必逐个改各 seek 调用点，
-    // 进度条拖动 / 章节跳转 / 双击重置都能被统一捕获。
-    //
-    // ⚠️ **不能把 currentPositionMs 当 LaunchedEffect 的 key**：它是高频写入的 state
-    //    （上游每 ~100ms 写一次），用作 key 会让协程不断重启 → 每帧新建协程。
-    //    改为在长驻协程内轮询比较（与实时字幕同款做法），开销可控且语义清晰。
-    LaunchedEffect(danmuConfig.isEnabled) {
-        if (!danmuConfig.isEnabled) return@LaunchedEffect
-        while (true) {
-            val pos = currentPositionMs
-            val jumped = kotlin.math.abs(pos - danmuLastPosMs) > 2_000L
-            danmuLastPosMs = pos
-            if (jumped) {
-                // clear 保留去重窗口：跳转后模型很可能给出相似内容，继续压制能避免刷屏
-                danmuEngine.clear()
-                // v2.4.7：导入模式下还要把**投递游标**对齐到跳转后的位置。
-                // ⚠️ 不重置的话：向前跳会把中间几十分钟的弹幕一次性补投（几千条）；
-                //    向后跳则所有弹幕都判为"已投过"、再也不出现。
-                //    这个坑在"用下标做游标"的方案里必然存在，必须与 seek 联动。
-                if (danmuConfig.isImportMode) {
-                    danmuImportStore.resetCursorTo(pos)
-                }
-            }
-            kotlinx.coroutines.delay(DANMU_SEEK_POLL_MS)
-        }
-    }
+    // ===== v2.3.1（P2 + P4）：AI 弹幕编排（已拆至 VRPlayerDanmuOrchestrator.kt）=====
+    val danmuState = rememberDanmuOrchestratorEffects(
+        context = context,
+        prefs = prefs,
+        isMemoryModeEnabled = isMemoryModeEnabled,
+        selectedMediaItem = selectedMediaItem,
+        danmuConfig = danmuConfig,
+        onDanmuConfigChange = { danmuConfig = it },
+        subtitleTranslator = subtitleTranslator,
+        getCurrentPositionMs = { currentPositionMs },
+        getIsVideoPlaying = { isVideoPlaying },
+        getCurrentGlSurfaceView = { currentGlSurfaceView },
+        getIsRealtimeAsrActive = { isRealtimeAsrActive },
+        getRealtimeCues = { realtimeCues },
+        getLoadedSubtitleCues = { loadedSubtitleCues },
+        onKeepUiAlight = { keepUiAlight() },
+    )
 
     // v104：手机自选 LUT 文件（.cube）选择器
     val lutPickerLauncher = rememberLauncherForActivityResult(
@@ -2731,9 +2163,7 @@ fun VRPlayerScreen(
         val builtin = LutUtils.findBuiltin(lutName) ?: return@LaunchedEffect
         val rgba = withContext(Dispatchers.IO) {
             try {
-                context.assets.open("luts/${builtin.fileName}.cube").use {
-                    LutUtils.parseCubeToRgba(it)
-                }
+                LutUtils.loadBuiltinLut(context, builtin.fileName)
             } catch (e: Exception) {
                 Log.e("VRPlayerScreen", "恢复 LUT 失败：${builtin.fileName}", e)
                 null
@@ -2911,123 +2341,13 @@ fun VRPlayerScreen(
     // 不再使用跨媒体共享的 restorePositionMs 变量（详见该 object 注释 #7）
 
     // Media3 Transformer downscaling function
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    fun startDownscalingTranscode() {
-        val uriStr = selectedMediaItem.uri ?: return
-        if (maxResolution == MaxResolution.UNRESTRICTED) {
-            Toast.makeText(context, context.getString(R.string.toast_select_resolution_first), Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val targetHeight = maxResolution.height
-        val targetWidth = maxResolution.width
-        
-        // Uniquely identify transcoded file by item id and target height to avoid collision
-        val cacheFile = File(context.cacheDir, "transcoded_${selectedMediaItem.id}_${targetHeight}.mp4")
-
-        // If cached file already exists, load and play it immediately
-        if (cacheFile.exists() && cacheFile.length() > 1024) {
-            Toast.makeText(context, context.getString(R.string.toast_cached_downscale, context.getString(maxResolution.labelRes)), Toast.LENGTH_SHORT).show()
-            val transcodedMediaItem = selectedMediaItem.copy(
-                title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, context.getString(maxResolution.labelRes)),
-                uri = cacheFile.absolutePath,
-                isDemo = false
-            )
-            selectedMediaItem = transcodedMediaItem
-            showResolutionTip = false
-            photoReloadTrigger++
-            return
-        }
-
-        isTranscoding = true
-        transcodingProgress = 0
-        transcodingStatusText = context.getString(R.string.toast_transcode_init)
-
-        scope.launch(Dispatchers.Main) {
-            var tempOutFile: File? = null
-            try {
-                val inputUri = Uri.parse(uriStr)
-                
-                // Create Media3 effects list with presentation resizing
-                val presentation = Presentation.createForHeight(targetHeight)
-                val videoEffects = ImmutableList.of<Effect>(presentation)
-                
-                val editedMediaItem = EditedMediaItem.Builder(ExoMediaItem.fromUri(inputUri))
-                    .setEffects(Effects(ImmutableList.of(), videoEffects))
-                    .build()
-
-                tempOutFile = File(context.cacheDir, "transcoding_${System.currentTimeMillis()}.mp4")
-                withContext(Dispatchers.IO) {
-                    if (tempOutFile.exists()) tempOutFile.delete()
-                }
-
-                val transformer = Transformer.Builder(context)
-                    .build()
-
-                var completed = false
-                var errorException: Exception? = null
-
-                transformer.addListener(object : Transformer.Listener {
-                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                        completed = true
-                    }
-
-                    override fun onError(
-                        composition: Composition,
-                        exportResult: ExportResult,
-                        exception: ExportException
-                    ) {
-                        errorException = exception
-                    }
-                })
-
-                // Start the export process on the main thread
-                transformer.start(editedMediaItem, tempOutFile.absolutePath)
-
-                // Poll progress
-                val progressHolder = ProgressHolder()
-                while (!completed && errorException == null) {
-                    val progressState = transformer.getProgress(progressHolder)
-                    if (progressState == Transformer.PROGRESS_STATE_AVAILABLE) {
-                        transcodingProgress = progressHolder.progress
-                        transcodingStatusText = context.getString(R.string.toast_transcoding_progress, context.getString(maxResolution.labelRes), transcodingProgress)
-                        keepUiAlight()
-                    }
-                    delay(500)
-                }
-
-                if (errorException != null) {
-                    throw errorException!!
-                }
-
-                // Copy temp file to cache file
-                withContext(Dispatchers.IO) {
-                    if (tempOutFile.exists()) {
-                        if (cacheFile.exists()) cacheFile.delete()
-                        tempOutFile.renameTo(cacheFile)
-                    }
-                }
-
-                isTranscoding = false
-                Toast.makeText(context, context.getString(R.string.toast_transcode_ok, context.getString(maxResolution.labelRes)), Toast.LENGTH_LONG).show()
-                val transcodedMediaItem = selectedMediaItem.copy(
-                    title = selectedMediaItem.title + context.getString(R.string.media_downscale_suffix, context.getString(maxResolution.labelRes)),
-                    uri = cacheFile.absolutePath,
-                    isDemo = false
-                )
-                selectedMediaItem = transcodedMediaItem
-                showResolutionTip = false
-                photoReloadTrigger++
-            } catch (e: Exception) {
-                Log.e("VRPlayerScreen", "Transformer transcoding failed", e)
-                isTranscoding = false
-                withContext(Dispatchers.IO) {
-                    tempOutFile?.let { if (it.exists()) it.delete() }
-                }
-                Toast.makeText(context, context.getString(R.string.toast_transcode_failed, e.localizedMessage), Toast.LENGTH_LONG).show()
-            }
-        }
-    }
+    fun startDownscalingTranscode() = VRPlayerMediaOps.startDownscalingTranscode(
+        context = context, scope = scope, selectedMediaItem = selectedMediaItem, maxResolution = maxResolution,
+        onSelectMedia = { selectedMediaItem = it }, onShowResolutionTipChange = { showResolutionTip = it },
+        onTranscodingChange = { isTranscoding = it }, onTranscodeProgressChange = { transcodingProgress = it },
+        onTranscodeStatusChange = { transcodingStatusText = it }, onPhotoReload = { photoReloadTrigger++ },
+        onKeepUiAlight = { keepUiAlight() },
+    )
 
     // Dynamic track selection parameters update when maxResolution limit is changed
     LaunchedEffect(maxResolution) {
@@ -3040,76 +2360,19 @@ fun VRPlayerScreen(
         }
     }
 
-    fun encodeSmb(url: String): String {
-        val m = Regex("""smb://([^@/]+@)?([^/]+)(/.*)?""").find(url) ?: return url
-        val creds = m.groupValues[1]
-        val host = m.groupValues[2]
-        val path = m.groupValues[3] ?: "/"
-        val encodedPath = path.split("/").joinToString("/") { seg ->
-            if (seg.isEmpty()) "" else java.net.URLEncoder.encode(seg, "UTF-8").replace("+", "%20")
-        }
-        return "smb://$creds$host$encodedPath"
-    }
-
-    fun browseSmb(path: String) {
-        smbError = ""
-        scope.launch(Dispatchers.IO) {
-            try {
-                val dir = jcifs.smb.SmbFile(path)
-                if (!dir.exists() || !dir.isDirectory) {
-                    withContext(Dispatchers.Main) { smbError = context.getString(R.string.toast_path_not_exist, path) }
-                    return@launch
-                }
-                val entries = dir.listFiles()?.toList() ?: emptyList()
-                withContext(Dispatchers.Main) {
-                    smbPath = path
-                    smbEntries = entries
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { smbError = context.getString(R.string.toast_connect_failed, (e.message ?: "")) }
-            }
-        }
-    }
-
-    fun connectSmb() {
-        val host = smbHost.trim()
-        if (host.isEmpty()) {
-            smbError = context.getString(R.string.toast_enter_server_addr)
-            return
-        }
-        val creds = if (smbUser.isNotBlank()) "${smbUser}:${smbPass}@" else ""
-        browseSmb("smb://$creds$host/")
-    }
-
-    fun playSmbFile(entry: jcifs.smb.SmbFile) {
-        val smbUri = encodeSmb(entry.path)
-        selectedMediaItem = MediaItem(
-            id = "smb_" + System.currentTimeMillis(),
-            title = entry.name,
-            uri = smbUri,
-            isVideo = true
-        )
-        smbDialogOpen = false
-        photoReloadTrigger++
-
-        // v2.1.241：SMB 上的 WMV / ASF 是**当前架构下唯一无解的组合**，提前告知而不是让它黑屏。
-        //
-        // 为什么无解：
-        //  · WMV/ASF 必须走 IJK（EXO 不解析 ASF 容器）；
-        //  · 但 IJK 的 FFmpeg **没有 smb 协议**（见 IjkPlayerBackend 的类注释第 3 条），
-        //    它的数据源也拿不到本项目 jcifs 的 SmbDataSource → 只会回退 EXO；
-        //  · 回退到 EXO 后依然不认 ASF → 最终失败。
-        // 所以这里直接在**点开时**给提示，用户就不用等它转一圈再报错。
-        // 本地文件 / HTTP 上的 WMV 不受此限（走得到 IJK）。
-        val ext = MediaFormats.extensionOfName(entry.name)
-        if (MediaFormats.requiresIjk(ext)) {
-            Toast.makeText(
-                context,
-                context.getString(R.string.toast_smb_ffmpeg_only, ext.uppercase()),
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
+    fun encodeSmb(url: String): String = VRPlayerMediaOps.encodeSmb(url)
+    fun browseSmb(path: String) = VRPlayerMediaOps.browseSmb(
+        context = context, scope = scope, path = path,
+        onSmbErrorChange = { smbError = it }, onSmbPathChange = { smbPath = it }, onSmbEntriesChange = { smbEntries = it },
+    )
+    fun connectSmb() = VRPlayerMediaOps.connectSmb(
+        context = context, scope = scope, smbHost = smbHost, smbUser = smbUser, smbPass = smbPass,
+        onSmbErrorChange = { smbError = it }, onSmbPathChange = { smbPath = it }, onSmbEntriesChange = { smbEntries = it },
+    )
+    fun playSmbFile(entry: jcifs.smb.SmbFile) = VRPlayerMediaOps.playSmbFile(
+        context = context, entry = entry, onSelectMedia = { selectedMediaItem = it },
+        onSmbDialogOpenChange = { smbDialogOpen = it }, onPhotoReload = { photoReloadTrigger++ },
+    )
 
     /**
      * Auto-fixes a video whose container does not support seeking (position resets
@@ -3118,287 +2381,37 @@ fun VRPlayerScreen(
      * ⚠️ v2.4.26：从「MediaExtractor+MediaMuxer → MP4」改为「FFmpeg → MP4(MKV 兜底)」。
      *    MediaMuxer 要求时间戳单调，含 B 帧的源会被「退帧跳过」砍掉 90%+ 帧 → 卡顿。
      */
-    fun startRemuxFix() {
-        val uriStr = selectedMediaItem.uri ?: return
-        if (isRemuxing) return
-        // v2.4.25：当前已是本机修复产物 → 不再重复修复。
-        // 否则排队的 seek 校验协程会把「已修复文件」再修一次（输入=输出同路径），
-        // 造成同一文件反复重封装、标题反复追加"（已修复）"、反复重载 → 卡顿。
-        if (isContainerFixOutput(uriStr)) return
-        isRemuxing = true
-        seekUnsupported = false
-        Toast.makeText(
-            context,
-            context.getString(R.string.toast_fixing_container),
-            Toast.LENGTH_LONG
-        ).show()
+    fun startRemuxFix() = VRPlayerMediaOps.startRemuxFix(
+        context = context, scope = scope, selectedMediaItem = selectedMediaItem, isRemuxing = isRemuxing,
+        onRemuxingChange = { isRemuxing = it }, onSelectMedia = { selectedMediaItem = it },
+        onSeekUnsupportedChange = { seekUnsupported = it }, onPhotoReload = { photoReloadTrigger++ },
+    )
+    fun effectiveOutputSize(w: Int, h: Int): Pair<Int, Int> = VRPlayerMediaOps.effectiveOutputSize(w, h, downscaleOutputEnabled)
+    fun startLevelPatchFix() = VRPlayerMediaOps.startLevelPatchFix(
+        context = context, scope = scope, selectedMediaItem = selectedMediaItem, isRemuxing = isRemuxing,
+        level51Enabled = level51Enabled, spoofResolutionEnabled = spoofResolutionEnabled, levelPatchEnabled = levelPatchEnabled,
+        onRemuxingChange = { isRemuxing = it }, onSelectMedia = { selectedMediaItem = it },
+        onPhotoReload = { photoReloadTrigger++ },
+    )
 
-        scope.launch(Dispatchers.IO) {
-            // v2.4.26：容器修复改用 **FFmpeg(libavformat) 转封装**（输出 MP4），
-            //   不再用 MediaExtractor + MediaMuxer。实测根因：源片含 B 帧（fMP4 的 trun
-            //   带非零 sample_composition_time_offset → PTS 在解码顺序下非单调），而
-            //   MediaMuxer 要求时间戳单调递增，旧实现「时间戳倒退就跳过样本」把 6302 帧
-            //   砍到 464 帧（≈2fps）→ 修复后播放极卡。
-            //   FFmpeg 的 av_interleaved_write_frame 会缓冲重排、写出 ctts，**不丢帧**；
-            //   stbl 采样表保证 ExoPlayer 可 seek。MP4 收不下时（如裸 PCM 音频）退回 MKV。
-            val base = "remuxed_${selectedMediaItem.id}"
-            val mp4Out = File(context.cacheDir, "$base.mp4")
-            var out = mp4Out
-            var result = try {
-                FfmpegRemuxer.remuxToMp4(context, Uri.parse(uriStr), mp4Out)
-            } catch (t: Throwable) {
-                FfmpegRemuxer.Result(false, null, -200, t.message)
-            }
-            if (!result.success) {
-                val mkvOut = File(context.cacheDir, "$base.mkv")
-                val r2 = try {
-                    FfmpegRemuxer.remuxToMkv(context, Uri.parse(uriStr), mkvOut)
-                } catch (t: Throwable) {
-                    FfmpegRemuxer.Result(false, null, -200, t.message)
-                }
-                if (r2.success) {
-                    result = r2
-                    out = mkvOut
-                }
-            }
-            // v2.4.28：产物必须先**验能播**（含视频轨）再切换 —— 防止「修复后反而播不了」。
-            // ⚠️ 这一步放在 IO 线程（MediaExtractor 打开文件是 IO）。
-            val valid = result.success && out.length() > 1024 && hasVideoTrack(out)
-            withContext(Dispatchers.Main) {
-                isRemuxing = false
-                if (valid) {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.toast_container_fixed),
-                        Toast.LENGTH_LONG
-                    ).show()
-                    selectedMediaItem = selectedMediaItem.copy(
-                        uri = Uri.fromFile(out).toString(),
-                        title = selectedMediaItem.title + context.getString(R.string.suffix_fixed)
-                    )
-                    photoReloadTrigger++
-                } else {
-                    // 失败 / 产物不合格：**保留原文件**（宁可不修，也不能把能播的搞坏），
-                    // 并标记 seekUnsupported 以免每次拖动都重试。
-                    seekUnsupported = true
-                    Log.w(
-                        "VRPlayerScreen",
-                        "容器修复未采用：success=${result.success} size=${out.length()} " +
-                            "code=${result.code} ${result.message}"
-                    )
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.toast_seek_unsupported),
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
-        }
-    }
+    fun selectMediaTrack(groupType: Int, trackIndex: Int) = VRPlayerTrackAndAsrOps.selectMediaTrack(
+        playerInstance = playerInstance,
+        groupType = groupType,
+        trackIndex = trackIndex,
+        onVideoTrackSelected = { selectedVideoTrack = it },
+        onAudioTrackSelected = { selectedAudioTrack = it },
+        onTextTrackSelected = { selectedTextTrack = it },
+    )
 
-    // Helper inside Compose to rebuild/re-bind Android ExoPlayer to GLES
-    // D. When downscale output is enabled, cap the surface texture buffer to
-    // 1920px wide (aspect preserved) to lower bandwidth/OOM during 8K hard decode. (8/3 功能)
-    fun effectiveOutputSize(w: Int, h: Int): Pair<Int, Int> {
-        if (!downscaleOutputEnabled || w <= 0 || h <= 0) return w to h
-        val maxWidth = 1920
-        if (w <= maxWidth) return w to h
-        val nh = (h.toLong() * maxWidth / w).toInt().coerceAtLeast(1)
-        return maxWidth to nh
-    }
-
-    /**
-     * Rewrites the SPS (level_idc and/or width/height) so the hardware
-     * decoder accepts the stream. No re-encoding. (8/2-8/3 功能)
-     */
-    fun startLevelPatchFix() {
-        val uriStr = selectedMediaItem.uri ?: return
-        if (isRemuxing) return
-        // v2.4.25：已是本机修复产物 → 不再重复改写 SPS（防 8K 场景反复重编码）。
-        if (isContainerFixOutput(uriStr)) return
-        isRemuxing = true
-        Toast.makeText(
-            context,
-            context.getString(R.string.toast_patching_header),
-            Toast.LENGTH_LONG
-        ).show()
-
-        scope.launch(Dispatchers.IO) {
-            val out = File(context.cacheDir, "levelpatched_${selectedMediaItem.id}.mp4")
-            val levelIdc = if (level51Enabled) 0x33 else 0x3D // 5.1 or 6.1
-            val result = if (spoofResolutionEnabled) {
-                VideoRemuxer.remuxWithSpsSpoof(
-                    context,
-                    Uri.parse(uriStr),
-                    out,
-                    targetWidth = 3840,
-                    targetHeight = 2160,
-                    levelIdc = if (levelPatchEnabled) levelIdc else null
-                )
-            } else {
-                VideoRemuxer.remuxWithLevelPatch(
-                    context,
-                    Uri.parse(uriStr),
-                    out,
-                    levelIdc = levelIdc
-                )
-            }
-            withContext(Dispatchers.Main) {
-                isRemuxing = false
-                if (result.success && out.length() > 1024) {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.toast_hw_patch_ok),
-                        Toast.LENGTH_LONG
-                    ).show()
-                    selectedMediaItem = selectedMediaItem.copy(
-                        uri = Uri.fromFile(out).toString(),
-                        title = selectedMediaItem.title + context.getString(R.string.suffix_hw_patched)
-                    )
-                    photoReloadTrigger++
-                } else {
-                    Toast.makeText(
-                        context,
-                        "修改编码头失败：${result.message ?: "未知错误"}，可尝试手动降级转码",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    // 音轨/字幕轨选择（8/2 功能）
-    fun selectMediaTrack(groupType: Int, trackIndex: Int) {
-        // v2.1.233：轨道切换仅 Exo 支持（ijk 无等效 API）→ 用 exo 逃生舱口
-        playerInstance?.exo?.let { p ->
-            try {
-                val groups = p.currentTracks?.groups ?: return@let
-                val group = groups.firstOrNull { it.type == groupType } ?: return@let
-                val params = p.trackSelectionParameters.buildUpon()
-                if (trackIndex >= 0 && trackIndex < group.mediaTrackGroup.length) {
-                    params.setTrackTypeDisabled(groupType, false)
-                    params.addOverride(
-                        androidx.media3.common.TrackSelectionOverride(
-                            group.mediaTrackGroup,
-                            com.google.common.collect.ImmutableList.of(trackIndex)
-                        )
-                    )
-                } else if (groupType == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
-                    // 视频轨 -1 表示恢复自动自适应码率（ABR），绝不能 setTrackTypeDisabled(true)
-                    params.clearOverridesOfType(groupType)
-                    params.setTrackTypeDisabled(groupType, false)
-                } else {
-                    // Disable this track type (e.g. turn embedded subtitles off)
-                    params.clearOverridesOfType(groupType)
-                    params.setTrackTypeDisabled(groupType, true)
-                }
-                p.trackSelectionParameters = params.build()
-                if (groupType == androidx.media3.common.C.TRACK_TYPE_VIDEO) {
-                    selectedVideoTrack = trackIndex
-                } else if (groupType == androidx.media3.common.C.TRACK_TYPE_AUDIO) {
-                    selectedAudioTrack = trackIndex
-                } else if (groupType == androidx.media3.common.C.TRACK_TYPE_TEXT) {
-                    selectedTextTrack = trackIndex
-                }
-            } catch (e: Exception) {
-                Log.e("VRPlayerScreen", "selectMediaTrack failed", e)
-            }
-        }
-    }
-
-    // 视频信息收集（8/2 功能）
-    fun showVideoInfo() {
-        val uriStr = selectedMediaItem.uri ?: return
-        val title = selectedMediaItem.title
-        val displayName = getMediaDisplayName()
-        val sb = StringBuilder()
-        sb.append(context.getString(R.string.info_file, displayName))
-        if (title != null && title != displayName) {
-            sb.append(context.getString(R.string.info_title, title))
-        }
-        var gotAny = false
-        // v2.1.233：轨道信息仅 Exo 提供（ijk 无 Tracks API）→ 用 exo 逃生舱口
-        playerInstance?.exo?.let { p ->
-            try {
-                val dur = p.duration
-                if (dur > 0) {
-                    gotAny = true
-                    sb.append(context.getString(R.string.info_duration, dur / 1000 / 60, (dur / 1000) % 60))
-                }
-                val groups = p.currentTracks?.groups
-                if (groups != null && groups.isNotEmpty()) {
-                    gotAny = true
-                    for (g in groups) {
-                        val f = g.mediaTrackGroup.getFormat(0)
-                        val mime = f.sampleMimeType ?: context.getString(R.string.unknown)
-                        if (mime.startsWith("video/")) {
-                            if (f.width > 0 && f.height > 0) {
-                                sb.append(context.getString(R.string.info_resolution, f.width, f.height))
-                            }
-                            sb.append(context.getString(R.string.info_video_codec, mime))
-                            if (f.frameRate > 0f) sb.append(context.getString(R.string.info_fps, f.frameRate))
-                            if (f.bitrate > 0) sb.append(context.getString(R.string.info_bitrate, f.bitrate / 1000))
-                        } else if (mime.startsWith("audio/")) {
-                            sb.append("音轨: $mime ${f.language ?: ""}\n")
-                        } else {
-                            sb.append("轨道: $mime ${f.language ?: ""}\n")
-                        }
-                    }
-                }
-                sb.append("解码: ${if (isSoftwareDecoding) "软件" else context.getString(R.string.info_hw)}\n")
-            } catch (e: Exception) {
-                Log.e("VRPlayerScreen", "video info player read failed", e)
-            }
-        }
-
-        scope.launch(Dispatchers.IO) {
-            var retriever: android.media.MediaMetadataRetriever? = null
-            try {
-                retriever = android.media.MediaMetadataRetriever()
-                val configured = try {
-                    if (uriStr.startsWith("content://") || uriStr.startsWith("file://")) {
-                        retriever.setDataSource(context, Uri.parse(uriStr))
-                    } else {
-                        retriever.setDataSource(uriStr, java.util.HashMap<String, String>())
-                    }
-                    true
-                } catch (e: Exception) {
-                    try {
-                        val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uriStr), "r")
-                        pfd?.use { retriever.setDataSource(it.fileDescriptor) }
-                        true
-                    } catch (e2: Exception) {
-                        false
-                    }
-                }
-                if (configured) {
-                    gotAny = true
-                    val w = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-                    val h = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                    if (w != null && h != null && !sb.contains(context.getString(R.string.label_resolution))) {
-                        sb.append(context.getString(R.string.info_resolution2, w, h))
-                    }
-                    val rotation = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                    if (rotation != null && rotation != "0") sb.append(context.getString(R.string.info_rotation, rotation))
-                    val fps = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
-                    if (fps != null && fps != "-1" && !sb.contains(context.getString(R.string.label_fps))) sb.append(context.getString(R.string.info_fps2, fps))
-                    val bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)
-                    if (bitrate != null && !sb.contains(context.getString(R.string.label_bitrate))) sb.append(context.getString(R.string.info_bitrate2, bitrate.toLong() / 1000))
-                    val mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
-                    if (mime != null && !sb.contains(context.getString(R.string.label_codec))) sb.append(context.getString(R.string.info_codec, mime))
-                }
-            } catch (e: Exception) {
-                Log.e("VRPlayerScreen", "video info retriever failed", e)
-            } finally {
-                try { retriever?.release() } catch (_: Exception) {}
-            }
-
-            val info = if (gotAny) sb.toString() else context.getString(R.string.info_unavailable)
-            withContext(Dispatchers.Main) {
-                videoInfoDialogText = info
-            }
-        }
-    }
+    fun showVideoInfo() = VRPlayerTrackAndAsrOps.showVideoInfo(
+        context = context,
+        scope = scope,
+        selectedMediaItem = selectedMediaItem,
+        displayName = getMediaDisplayName(),
+        playerInstance = playerInstance,
+        isSoftwareDecoding = isSoftwareDecoding,
+        onInfoReady = { videoInfoDialogText = it },
+    )
 
     /**
      * v2.1.241：在主线程弹一个 Toast。
@@ -3446,1056 +2459,77 @@ fun VRPlayerScreen(
 
     // Helper inside Compose to rebuild/re-bind Android ExoPlayer to GLES
     fun setupVideoPlayer(surfaceTexture: SurfaceTexture, videoUriStr: String) {
-        try {
-            playerInstance?.release()
-            isVideoPlaying = false
-
-            val decodedUri = Uri.parse(videoUriStr)
-            // v2.1.234：记录下来供「视频信息」面板显示（见 currentVideoUri 的声明处）
-            currentVideoUri = decodedUri
-
-            // v119 修复(#7)：按当前媒体 URI 读取上次播放位置（不再跨媒体共享同一个变量）
-            // v2.6.24（直播 P1）：**直播不恢复断点** —— 断点表里存的是上一场的播放位置，
-            // 对实时流是失效位置：轻则被 clamp 到窗口边缘（画面顿一下才追到实时），
-            // 重则触发一次重连。P0 只挡住了"写"，这里补上"读"。
-            var resumeMs =
-                if (MediaFormats.isLikelyLiveStream(decodedUri)) 0L
-                else PlaybackPositions.load(prefs, videoUriStr)
-            var resumeApplied = resumeMs <= 0L
-            
-            // Default dimensions prior to ExoPlayer onVideoSizeChanged callback
-            var videoWidth = 1920
-            var videoHeight = 1080
-
-            // Bind measurements directly to active GLES renderer standard viewport calculations
-            currentGlSurfaceView?.renderer?.let { r ->
-                r.videoWidth = videoWidth
-                r.videoHeight = videoHeight
-            }
-
-            surfaceTexture.setDefaultBufferSize(videoWidth, videoHeight)
-            // 审查 #13：释放上一次绑定的 Surface，避免每次切片累积泄漏
-            surfaceHolder.getAndSet(null)?.let { runCatching { it.release() } }
-            val nativeSurface = Surface(surfaceTexture)
-            surfaceHolder.set(nativeSurface)
-        // ===================================================================
-        // v2.1.233：视频尺寸处理 —— **Exo 与 ijk 共用同一份**
-        // 原先这段逻辑整个写在 Exo 的 onVideoSizeChanged 里；接入 ijk 后如果
-        // 照抄一份，就会变成「同一个功能两份实现」—— 本项目反复出事的根源。
-        // 抽成局部函数后，两个内核都只调它，行为天然一致。
-        // ===================================================================
-            fun applyVideoSize(width: Int, height: Int) {
-                if (width <= 0 || height <= 0) return
-            try {
-                surfaceTexture.setDefaultBufferSize(
-                    effectiveOutputSize(width, height).first,
-                    effectiveOutputSize(width, height).second
-                )
-                currentGlSurfaceView?.renderer?.let { r ->
-                    r.videoWidth = width
-                    r.videoHeight = height
-                }
-                // v2.0.206：同步进 state 供 FSR 默认规则判定与 UI 显示。
-                // ⚠️ 只写 renderer 是不会触发重组的 —— 那样 FSR 的判定结果
-                //    会永远停在初始的 0x0（「等待视频信息」），开关看起来失灵。
-                videoSourceWidth = width
-                videoSourceHeight = height
-                // v2.1.233：这条日志原本写死 "ExoPlayer onVideoSizeChanged"，但抽成共用函数后
-            // **ijk 也会走到这里** —— 实测日志里出现「ExoPlayer onVideoSizeChanged」而实际
-            // 跑的是 ijk，会直接把排查带偏。改成带上当前内核名。
-            Log.d(
-                "VRPlayerScreen",
-                "视频尺寸回调[" + decoderEngine.displayName + "]: 更新 SurfaceTexture 缓冲为 " + width + "x" + height
-            )
-            
-                // Smart projection detection: only while the user has not
-                // manually chosen a mode AND the feature switch is on. (8/1 功能)
-                // 强制视频类型判断（优先于自动检测）：用户手动指定视频类型
-                if (forceVideoType != 0) {
-                    val targetMode: ProjectionMode
-                    val targetStereo: StereoMode
-                    // v2.6.9：强制「3D 左右 / 3D 上下」时**不要再把投影锁死成平面**。
-                    //   用户选这两项表达的是"这是拼接 3D 片源"，与投影是否球面无关；
-                    //   原来固定 STANDARD，导致上下拼接的全景只能被压扁着看，
-                    //   想正确观看必须先选 3D 上下、再手动改投影（而且会被自动检测覆盖）。
-                    //   现在：当前已经是全景（360/180）就保留，否则仍按平面处理（与旧行为一致）。
-                    val keepPano = projectionMode == ProjectionMode.VR_360 ||
-                        projectionMode == ProjectionMode.VR_180
-                    when (forceVideoType) {
-                        1 -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
-                        2 -> { targetMode = ProjectionMode.VR_360; targetStereo = StereoMode.MONO }
-                        3 -> { targetMode = ProjectionMode.VR_180; targetStereo = StereoMode.MONO }
-                        4 -> {
-                            targetMode = if (keepPano) projectionMode else ProjectionMode.STANDARD
-                            targetStereo = StereoMode.SBS
-                        }
-                        5 -> {
-                            targetMode = if (keepPano) projectionMode else ProjectionMode.STANDARD
-                            targetStereo = StereoMode.TAB
-                        }
-                        else -> { targetMode = ProjectionMode.STANDARD; targetStereo = StereoMode.MONO }
-                    }
-                    if (projectionMode != targetMode || stereoMode != targetStereo) {
-                        projectionMode = targetMode
-                        stereoMode = targetStereo
-                        currentGlSurfaceView?.renderer?.warpDualCenter =
-                            forceVideoType == 2 && (targetMode == ProjectionMode.VR_360)
-                        projectionModeUserAdjusted = true // 强制锁定，防止自动检测覆盖
-                        Toast.makeText(
-                            context,
-                            "已强制切换为 ${context.getString(targetMode.labelRes)}${if (targetStereo != StereoMode.MONO) " + ${context.getString(targetStereo.labelRes)}" else ""}",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                } else if (isSmartProjectionEnabled && !projectionModeUserAdjusted) {
-                    // v2.6.8：判定规则抽到 ProjectionAutoDetector（可单测、阈值单一来源）。
-                    //   ① 360 窗口由 1.80~2.20 收窄到 1.95~2.05 —— 原窗口把 1.85:1 与 2.2:1
-                    //      的**普通电影**也判成全景，画面被塞进球面投影严重变形；
-                    //   ② 新增 4:1 → 360 + SBS（左右立体 3D 全景），此前这类片源会被判成
-                    //      平面并清掉立体模式，等于完全不可用；
-                    //   ③ 尺寸无效（解码器初始回调 0x0）返回 null，不套用任何结论；
-                    //   ④ v2.6.9：扩充平面 3D 左右 (Full-SBS/HSBS) 与上下 (TAB) 识别，自动联动分屏 VR。
-                    val mediaTitle = selectedMediaItem.title ?: selectedMediaItem.uri ?: ""
-                    val suggestion = ProjectionAutoDetector.detect(width, height, mediaTitle)
-                    val needsApply = suggestion != null && when (suggestion.reason) {
-                        // 平面：只在投影模式不对时动手；立体复位交给下面那段独立的逻辑，
-                        // 避免同一判断在两处各写一遍（那样很容易只改一处）。
-                        ProjectionAutoDetector.Reason.FLAT ->
-                            projectionMode != ProjectionMode.STANDARD
-
-                        else -> projectionMode != suggestion.mode || stereoMode != suggestion.stereo
-                    }
-                    if (suggestion != null && needsApply) {
-                        projectionMode = suggestion.mode
-                        stereoMode = suggestion.stereo
-                        currentGlSurfaceView?.renderer?.warpDualCenter = suggestion.warpDualCenter
-                        // 识别到左右立体片源时，自动联动打开左右分屏 VR
-                        if (suggestion.reason == ProjectionAutoDetector.Reason.PLANAR_3D_SBS ||
-                            suggestion.reason == ProjectionAutoDetector.Reason.EQUIRECT_360_SBS
-                        ) {
-                            isSplitScreenVR = true
-                        }
-                        val toastRes = when (suggestion.reason) {
-                            ProjectionAutoDetector.Reason.EQUIRECT_360 -> R.string.toast_detected_360
-                            ProjectionAutoDetector.Reason.EQUIRECT_360_SBS -> R.string.toast_detected_360_sbs
-                            // v2.6.9：上下拼接全景（1:1，上下各一张 2:1）
-                            ProjectionAutoDetector.Reason.EQUIRECT_360_TAB -> R.string.toast_detected_360_tab
-                            // v2.6.9：平面 3D 左右与上下
-                            ProjectionAutoDetector.Reason.PLANAR_3D_SBS -> R.string.toast_detected_planar_sbs
-                            ProjectionAutoDetector.Reason.PLANAR_3D_TAB -> R.string.toast_detected_planar_tab
-                            ProjectionAutoDetector.Reason.FLAT -> R.string.toast_detected_2d
-                        }
-                        Toast.makeText(context, context.getString(toastRes), Toast.LENGTH_SHORT).show()
-                    }
-                }
-
-                // Independent stereo reset: a leftover SBS/TAB mode on a plain
-                // 2D video renders only half the frame stretched full-screen.
-                // 3D framing only makes sense on 3D sources, so we always fall
-                // back to mono for ordinary aspect videos in planar projection.
-                // v2.6.8：阈值改用 ProjectionAutoDetector.isEquirect 单一来源 ——
-                //   原先这里和上面的检测各写一份 `1.80f..2.20f`，收窄窗口时极容易出现
-                //   「检测按 1.95~2.05 判 2D、这里却按 1.80~2.20 保留 SBS」的自相矛盾。
-                // v2.6.9：当片源为平面 3D（Full-SBS 或文件名带 SBS/TAB）或用户手动调整过立体模式时，禁止误重置为单目！
-                val vidAspect = width.toFloat() / height.toFloat()
-                val isPlanar = projectionMode == ProjectionMode.STANDARD ||
-                    projectionMode == ProjectionMode.FISHEYE
-                val curTitle = selectedMediaItem.title ?: selectedMediaItem.uri ?: ""
-                val isSbsSource = ProjectionAutoDetector.isSbsPlanar(vidAspect) || ProjectionAutoDetector.isSbsName(curTitle)
-                val isTabSource = ProjectionAutoDetector.isTabName(curTitle)
-                if (isSmartProjectionEnabled && isPlanar &&
-                    !projectionModeUserAdjusted &&
-                    !isSbsSource && !isTabSource &&
-                    !ProjectionAutoDetector.isEquirect(vidAspect) && stereoMode != StereoMode.MONO
-                ) {
-                    stereoMode = StereoMode.MONO
-                    Toast.makeText(context, context.getString(R.string.toast_2d_mono), Toast.LENGTH_SHORT).show()
-                }
-            
-                // Detect ultra high resolution (like 8K or exceeds user set resolution limit)
-                if (width > maxResolution.width || height > maxResolution.height) {
-                    resolutionTipText = context.getString(R.string.toast_res_exceeds, width, height)
-                    showResolutionTip = true
-                } else if (width >= 7680 || height >= 4320) {
-                    resolutionTipText = context.getString(R.string.toast_8k_hint, width, height)
-                    showResolutionTip = true
-                } else {
-                    showResolutionTip = false
-                }
-
-                // 8K 硬解：视频超出硬件解码标称上限时，重封装并改写 SPS level
-                // （实验性，默认关闭，levelPatchEnabled / spoofResolutionEnabled）
-                if ((levelPatchEnabled || spoofResolutionEnabled) &&
-                    !isTranscoding && !isRemuxing && (width >= 7680 || height >= 4320)
-                ) {
-                    val cap = DecoderCapabilities.getBestHardwareDecoderMax()
-                    if (cap != null && (width > cap.width || height > cap.height)) {
-                        resolutionTipText = context.getString(R.string.toast_8k_patching, width, height)
-                        showResolutionTip = true
-                        startLevelPatchFix()
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("VRPlayerScreen", "Error setting SurfaceTexture buffer size to ${width}x${height}", e)
-            }
-        }
-
-
-        // ======================================================================
-        // v2.1.241：容器感知的**内核自动路由**（WMV / ASF / ISO）
-        //
-        // 背景：WMV(ASF) 与 ISO 镜像 EXO 与系统解码都接不住（EXO 的
-        // DefaultExtractorsFactory 没有 ASF 解析器；MediaPlayer 同理；
-        // 两者也都不认 UDF 文件系统），只有 IJK 的 FFmpeg 能解 ——
-        // 已在 libijkplayer.so 里实测到 wmv3/vc1/wmav2/wmapro/ff_asf_demuxer/udf。
-        //
-        // 若不自动路由，用户选了 EXO 打开一个 .wmv，会得到 ExoPlaybackException
-        // 然后**被现有的错误处理静默吞掉** —— 表现就是「点了没反应/黑屏」，
-        // 完全无从判断是片源问题还是应用问题。
-        //
-        // ⚠️ 刻意**不写回 prefs**：只改这一次播放用的 `effectiveEngine`。
-        //    用户的「解码器」设置保持原样 —— 否则打开一个 WMV 就永久改成 IJK，
-        //    下次播普通 MP4 也走 FFmpeg 软解，白掉性能（用户会以为是 bug）。
-        // ======================================================================
-        // ⚠️ v2.4.19：相册返回的 `content://media/...` URI **没有扩展名** → 下面的内核
-        //    路由（AVI/WMV→MPV）会整体失效（用户表现为「改了路由没生效」）。
-        //    用选择时记下的 MIME 兜底；两条都没有才返回空串。
-        val containerExt = MediaFormats.extensionOf(decodedUri)
-            .ifEmpty { MediaFormats.extFromMime(selectedMediaItem.mimeType) }
-        var effectiveEngine = decoderEngine
-        // ======================================================================
-        // v2.6.13：**该文件超出硬件解码上限 → 本次改用软解内核**
-        // ----------------------------------------------------------------------
-        // 判据与置位都在 Exo 的 onPlayerError（解码器初始化/解码失败 → 探测真实尺寸 →
-        //   DecoderCapabilities.findHardwareFit 确认没有硬解能吃），这里只负责消费：
-        //   ① IJK 优先：内置 FFmpeg 软解，不需要额外下载，8K 也能出画面；
-        //   ② IJK 不可用（native 库缺失）→ MPV（若已安装）；
-        //   ③ 两者都没有 → 保持原内核（外层原有错误提示仍在，不会静默）。
-        // ⚠️ 与 mpvRetryUri 同理：只改本次 `effectiveEngine`，**不写回 prefs**。
-        // ======================================================================
-        if (softRetryUri != null && softRetryUri == selectedMediaItem.uri &&
-            decoderEngine != DecoderEngine.IJK && decoderEngine != DecoderEngine.MPV
-        ) {
-            effectiveEngine = when {
-                // supports(uri) 也要判：SMB 等 FFmpeg 协议集外的源切过去只会静默回退 Exo
-                IjkPlayerFactory.supports(decodedUri) && IjkPlayerFactory.ensureLibraries() ->
-                    DecoderEngine.IJK
-                MpvPlayerFactory.isAvailable(context) -> DecoderEngine.MPV
-                else -> decoderEngine
-            }
-            Log.i(
-                "VRPlayerScreen",
-                "该片超出本机硬件解码上限 → 本次改用软解内核 $effectiveEngine"
-            )
-        }
-        // ======================================================================
-        // v2.4.32：**该文件 Exo 打开失败过 → 本次直接用 MPV**（只对这一个文件、只重试一次）
-        // ----------------------------------------------------------------------
-        // 与下方容器路由同为「只改 effectiveEngine、不写回 prefs」：用户的解码器设置不变。
-        // 置位见 Exo 的 `onPlayerError`（换软/硬解救不了的**解析类**失败）。
-        if (mpvRetryUri != null && mpvRetryUri == selectedMediaItem.uri &&
-            decoderEngine != DecoderEngine.MPV
-        ) {
-            effectiveEngine = DecoderEngine.MPV
-            Log.i("VRPlayerScreen", "该文件 Exo 打开失败过 → 本次改用 MPV（顺带确认 vo 预判）")
-        }
-        // ======================================================================
-        // v2.1.244：**预判式选 vo** —— MPV 的视频输出模式
-        // ----------------------------------------------------------------------
-        // 背景：EMBED（mediacodec_embed）只吃硬件帧格式（mpv 源码 query_format 只认
-        //   IMGFMT_MEDIACODEC），而 WMV/ASF/RM/RMVB 这类老容器**几乎必然没有硬解器**
-        //   → mpv 退回软解输出 yuv420p → vo 拒收 → END_FILE 失败。
-        // 做法：**在创建播放器之前**就按容器选好 vo，而不是等失败后重建。
-        //
-        // ⚠️⚠️ 为什么不能「失败后重建」（第一版方案，实测直接崩）
-        //   MPV 是**全局单例**（`is.xyz.mpv.MPVLib` 是 Kotlin object，所有调用打到同一份
-        //   native context）。失败后重建会再次调 `MPVLib.create()` + `init()`，
-        //   mpv 断言 `../player/main.c:347: assertion "!mpctx->initialized" failed`
-        //   → **SIGABRT 直接崩在 libmpv.so**（实测 tombstone 已确认）。
-        //   因此本方案**只改一次、不重建**。
-        // ======================================================================
-        // 判据：**可能没有硬解器**的容器 → 直接给 GPU 模式（软硬解都能出画）。
-        //   ⚠️ v2.4.19：改用 `prefersMpvGpuVo` 而**不是** `shouldRouteToMpv` —— 后者
-        //   现在含 AVI（路由判据），而这里是 **vo 判据**：AVI 里常见的 Xvid/DivX
-        //   （MPEG-4 Part 2）在多数新机已无硬解器，用 `mediacodec_embed` 会因
-        //   「只吃硬件帧」而拒收软解帧 → 黑屏。两个概念必须分开，见方法注释。
-        //   代价：硬解路径多一次 GPU 拷贝；但这些容器本来就走软解，没有损失。
-        if (MediaFormats.prefersMpvGpuVo(containerExt)) {
-            if (mpvVoMode != MpvVoMode.GPU) mpvVoMode = MpvVoMode.GPU
-            Log.i("VRPlayerScreen", "容器 .$containerExt 可能无硬解器，MPV 采用 vo=gpu（软硬解均可出画）")
-        } else if (mpvVoMode != MpvVoMode.EMBED) {
-            // 其它格式（含用户手动选 MPV 播 mp4 等）用 EMBED —— 零拷贝，真机最优
-            mpvVoMode = MpvVoMode.EMBED
-        }
-        // ⚠️ v2.1.243：先判 MPV，再判 IJK。顺序不能反 ——
-        //    wmv/rm 这类格式**两边都可能被 shouldXxx 命中**（requiresMpv 与
-        //    shouldAutoRouteToIjk 的集合都是 IJK_ONLY 的子集），但只有 MPV 能真正解，
-        //    所以必须先给 MPV 优先权。
-        if (MediaFormats.shouldRouteToMpv(containerExt) && decoderEngine != DecoderEngine.MPV) {
-            // SMB 例外：MPV 有没有 smb 协议取决于 libmpv 的 protocol 白名单，
-            // 本项目未验证 → 与 IJK 一样不做自动切换，直接提示。
-            val scheme = decodedUri.scheme?.lowercase()
-            if (scheme == "smb") {
-                Log.w("VRPlayerScreen", "SMB 上的 $containerExt 无内核可稳定解（MPV 的 smb 未验证），按原内核尝试")
-            } else if (MpvPlayerFactory.isAvailable(context)) {
-                effectiveEngine = DecoderEngine.MPV
-                // ⚠️ v2.4.19：**只有「严格需 MPV」的容器才 Toast 告知**
-                //    （WMV/ASF/RM/RMVB/ivf —— EXO/IJK 根本解不了，用户需要知道换了核）。
-                //    AVI 属于「默认走 MPV」而非「必须」：EXO 也能开，只是无 `idx1` 时 seek
-                //    要靠重封装补救。每次都弹「需完整 FFmpeg」既不准确又烦人 → **静默切换**。
-                if (MediaFormats.requiresMpv(containerExt)) {
-                    Log.i("VRPlayerScreen", "容器 .$containerExt 需完整 FFmpeg，本次自动改用 MPV 内核")
-                    postToast(context.getString(R.string.toast_auto_switch_mpv, containerExt.uppercase()))
-                } else {
-                    Log.i("VRPlayerScreen", "容器 .$containerExt 默认走 MPV（无索引亦可 seek），本次自动切换（静默）")
-                }
-            } else {
-                // MPV 未装（native 库需按需下载）→ 明确提示去哪装，而不是静默走 EXO（必然也失败）
-                Log.w("VRPlayerScreen", "容器 .$containerExt 需 MPV 但 native 库未安装，提示用户")
-                postToast(context.getString(R.string.toast_mpv_need_download))
-            }
-        }
-        // 用 shouldAutoRouteToIjk 而非 requiresIjk：后者是「只有 IJK 能解」，
-        // 前者额外排除 EXO_ONLY（avi/ogv 这类 IJK 反而解不了的）——
-        // 防止将来有人往 IJK_ONLY 里误加 avi 时把能播的格式路由成不能播。
-        if (effectiveEngine != DecoderEngine.MPV &&
-            MediaFormats.shouldAutoRouteToIjk(containerExt) && decoderEngine != DecoderEngine.IJK
-        ) {
-            // 唯一的例外：SMB 上的这类片源**无解**（IJK 没有 smb 协议，
-            // 回退 EXO 依然不认 ASF）→ 不做无谓的自动切换，直接提示。
-            val scheme = decodedUri.scheme?.lowercase()
-            if (scheme == "smb") {
-                Log.w("VRPlayerScreen", "SMB 上的 $containerExt 无内核可解（IJK 无 smb 协议），按原内核尝试")
-            } else if (IjkPlayerFactory.ensureLibraries() && IjkPlayerFactory.supports(decodedUri)) {
-                effectiveEngine = DecoderEngine.IJK
-                Log.i("VRPlayerScreen", "容器 .$containerExt 需 FFmpeg，本次自动改用 IJK 内核")
-                postToast(context.getString(R.string.toast_auto_switch_ijk, containerExt.uppercase()))
-            } else {
-                Log.w(
-                    "VRPlayerScreen",
-                    "容器 .$containerExt 需 FFmpeg 但 IJK 不可用（${IjkPlayerFactory.lastError}），按原内核尝试"
-                )
-                postToast(context.getString(R.string.toast_need_ffmpeg_engine, containerExt.uppercase()))
-            }
-        }
-
-        // ======================================================================
-        // v2.1.233：IJK（FFmpeg 内核）分支
-        //
-        // 放在 Exo 的 renderersFactory 之前：选中 IJK 时**根本不创建 ExoPlayer**，
-        // 省掉一整套 MediaCodec 资源的无谓开销。
-        //
-        // 四类「接不住」的情况全部**回退 Exo**，绝不黑屏：
-        //   ① native 库没加载上（ABI 不匹配 / 分包丢 .so）
-        //   ② 片源协议 ijk 吃不下（smb:// 等不在 FFmpeg 协议集里）
-        //   ③ create 内部抛异常（数据源打不开）
-        //   ④ prepare 之后才暴露的错误（编码不支持等）→ 走 onError 回调
-        // ①②③ 在这里静默回退（只 Log，不打扰用户）；
-        // ④ 会 Toast 并把内核切回 EXO（用户知情，且下次不再踩同一个坑）。
-        // ======================================================================
-        // ======================================================================
-        // v2.6.24（直播 P1）：**直播流强制 EXO**
-        // ----------------------------------------------------------------------
-        // 为什么直播必须走 EXO：
-        //   ① HLS/DASH 的多分片清单只有 EXO 的 HlsMediaSource/DashMediaSource 能正确
-        //      跟踪滑动窗口（IJK 的裁剪版 FFmpeg 根本没编 hls demuxer，MPV 虽有 FFmpeg
-        //      但 vo=mediacodec_embed 下切码率/重连会黑屏）；
-        //   ② 权重的直播判定（`VrPlayerBackend.isLive`）本身就依赖 EXO 的
-        //      `Timeline.Window.isLive` —— 换内核后 UI 的 LIVE 态也会失准。
-        // 判据有两条，命中任一即强制：
-        //   ① 打开前的 URL 启发式（MediaFormats.isLikelyLiveStream）；
-        //   ② 运行时兜底（liveForceExoUri）—— 播放器已自证是直播，但 URL 看不出来。
-        // ⚠️ 两个 retry 例外必须绕开：Exo 打不开该流时，`mpvRetryUri` / `softRetryUri`
-        //    已经把内核指到 MPV/IJK，这里再强制回 EXO 就成了"打开失败 → 切 MPV →
-        //    又切回 EXO"的死循环（每轮都要重建播放器）。
-        // ======================================================================
-        val liveUrlGuess = MediaFormats.isLikelyLiveStream(decodedUri)
-        val liveRuntimeForce = liveForceExoUri != null && liveForceExoUri == selectedMediaItem.uri
-        if ((liveUrlGuess || liveRuntimeForce) && effectiveEngine != DecoderEngine.EXO &&
-            mpvRetryUri != selectedMediaItem.uri && softRetryUri != selectedMediaItem.uri
-        ) {
-            Log.i(
-                "VRPlayerScreen",
-                "直播流（${if (liveUrlGuess) "URL 判据" else "运行时确认"}）→ 强制使用 EXO 内核（原 $effectiveEngine）"
-            )
-            effectiveEngine = DecoderEngine.EXO
-        }
-
-        // ======================================================================
-        // v2.8.3：**该文件在当前内核上播失败过 → 本次强制 EXO**
-        // ----------------------------------------------------------------------
-        // 放在**全部自动路由之后**：容器路由（AVI/WMV→MPV、超硬件上限→IJK 等）在上面已经
-        // 执行完毕，这里最后覆盖才真的回退成功；否则会「设成 EXO 又被路由回 MPV」。
-        // 只认「本次这一个文件」，且**不改 `decoderEngine`、不写 prefs**（见 state 注释）。
-        // 与直播强制 EXO 不冲突：两者目标都是 EXO，先到先得。
-        // ======================================================================
-        if (exoRetryUri != null && exoRetryUri == selectedMediaItem.uri &&
-            effectiveEngine != DecoderEngine.EXO
-        ) {
-            Log.i(
-                "VRPlayerScreen",
-                "该文件在 $effectiveEngine 上播放失败过 → 本次回退 EXO（用户设置不变）"
-            )
-            effectiveEngine = DecoderEngine.EXO
-        }
-
-        if (effectiveEngine == DecoderEngine.IJK) {
-            val ijkUri = decodedUri
-            val ijkUsable = IjkPlayerFactory.supports(ijkUri) && IjkPlayerFactory.ensureLibraries()
-            if (ijkUsable) {
-                // v2.8.4：若因超出硬件硬解上限（如 8K 全景）走软解回退，强制关闭 MediaCodec 硬解，开启快速解码与主动丢帧
-                val isOversizeSoft = softRetryUri != null && softRetryUri == selectedMediaItem.uri
-                val effectiveIjkOptions = if (isOversizeSoft) {
-                    ijkOptions.copy(mediaCodec = false, frameDrop = true, fastDecode = true)
-                } else {
-                    ijkOptions
-                }
-                val backend = IjkPlayerFactory.create(
-                    context = context,
-                    uri = ijkUri,
-                    surface = nativeSurface,
-                    options = effectiveIjkOptions,
-                    callbacks = object : IjkPlayerFactory.Callbacks {
-                        override fun onVideoSizeChanged(width: Int, height: Int) {
-                            // 与 Exo 侧共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
-                            applyVideoSize(width, height)
-                        }
-
-                        override fun onPrepared(backend: VrPlayerBackend) {
-                            // 倍速要在 start 之前设好 —— 与 Exo 侧「prepare 后、播放前」同一时机
-                            backend.setPlaybackSpeed(
-                                if (isFloatingBallPressed) floatingBallSpeed else basePlaybackSpeed
-                            )
-                            // 位置恢复：同 Exo 侧，duration 到这一步才真正就绪
-                            if (!resumeApplied) {
-                                resumeApplied = true
-                                val dur = backend.duration
-                                if (PlaybackPositions.shouldResume(resumeMs, dur)) {
-                                    backend.seekTo(resumeMs)
-                                    Log.i("VRPlayerScreen", "IJK 恢复上次播放位置 " + resumeMs + "ms / 总长 " + dur + "ms")
-                                }
-                            }
-                            backend.play()
-                            isVideoPlaying = true
-                            playbackEnded = false
-                        }
-
-                        override fun onCompletion() {
-                            // v2.6.20：播完把播放态归位。否则 isVideoPlaying 恒为 true，
-                            // 1 秒进度轮询每秒把进度写回 current/duration = 1.0，
-                            // 用户拖动进度条会被轮询立即弹回片尾 ——
-                            // 「播完后进度条拖不动」的直接根因就是它。
-                            isVideoPlaying = false
-                            playbackEnded = true
-                            PlaybackPositions.clear(prefs, videoUriStr)
-                            resumeMs = 0L
-                        }
-
-                        override fun onError(what: Int, extra: Int) {
-                            // ⚠️ v2.1.243：降级目标不再硬编码 EXO。
-                            //    对 wmv/rm 这类「只有 MPV 能解」的格式，回退 EXO 是**必然再失败**
-                            //    一次（EXO 无 ASF/RealMedia 解析器），用户会看到"转一圈还是黑屏"。
-                            //    改为：需要 MPV 且 MPV 可用 → 降级 MPV；否则才回退 EXO。
-                            val ext = MediaFormats.extensionOf(decodedUri)
-                            if (MediaFormats.requiresMpv(ext) && MpvPlayerFactory.isAvailable(context)) {
-                                Log.e(
-                                    "VRPlayerScreen",
-                                    "IJK 播放错误 what=$what extra=$extra -> .$ext 需完整 FFmpeg，降级 MPV"
-                                )
-                                // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
-                                //    改 decoderEngine 会触发 Effect B 重建播放器；
-                                //    这里**写回 prefs** 是刻意的 —— wmv/rm 在本项目就该走 MPV，
-                                //    下次打开不必再"IJK 失败一次再降级"。
-                                decoderEngine = DecoderEngine.MPV
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.toast_ijk_fallback_mpv),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            } else if (MediaFormats.requiresMpv(ext)) {
-                                // 需要 MPV 但库没装 → 提示去装，不回退 EXO（EXO 必然也失败）
-                                Log.e(
-                                    "VRPlayerScreen",
-                                    "IJK 播放错误 what=$what extra=$extra；.$ext 需 MPV 但 native 库未装"
-                                )
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.toast_mpv_need_download),
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            } else {
-                                Log.e("VRPlayerScreen", "IJK 播放错误 what=$what extra=$extra -> 本次回退 EXO")
-                                // v2.8.3：只标「本次这一个文件」，**不再写回 prefs**。
-                                // 原来改 decoderEngine 会经持久化把用户的内核永久改成 EXO ——
-                                // 播一个 IJK 解不了的片子，就让之后所有片子都变 EXO。
-                                exoRetryUri = selectedMediaItem.uri
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.toast_ijk_fallback),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-
-                        override fun onFirstFrame() {
-                            isVideoPlaying = true
-                            playbackEnded = false
-                        }
-                    }
-                )
-                if (backend != null) {
-                    playerInstance = backend
-                    Log.i("VRPlayerScreen", "已使用 IJK 内核播放")
-                    return
-                }
-                Log.w("VRPlayerScreen", "IJK 创建失败，回退 EXO")
-            } else {
-                Log.w(
-                    "VRPlayerScreen",
-                    "IJK 不可用（协议不支持或 native 库缺失: " + IjkPlayerFactory.lastError + "），回退 EXO"
-                )
-            }
-        }
-
-        // ======================================================================
-        // v2.1.234：MPV 内核（libmpv / FFmpeg）
-        // ----------------------------------------------------------------------
-        // 与 IJK 分支同样的"绝不黑屏"策略，两类失败静默回退 Exo：
-        //   ① libmpv native 库不可用（ABI 不匹配 / 分包丢 .so）
-        //   ② create 抛异常（数据源打不开）
-        // ③ prepare 后暴露的错误（解码失败、END_FILE 非正常结束）
-        //    → 走 onError 回调，Toast 并把内核切回 EXO（不在这里递归调用 setupVideoPlayer）
-        // ======================================================================
-        // ⚠️ v2.1.241：用 effectiveEngine（不是 decoderEngine）—— MPV_ENABLED=false 时
-        //    这段本来就走不到；但一旦恢复 MPV 开关，必须让「容器自动路由」也能把
-        //    WMV/ISO 派给 MPV 而不是被 decoderEngine 挡住。
-        if (effectiveEngine == DecoderEngine.MPV) {
-            if (MpvPlayerFactory.isAvailable(context)) {
-                // v2.8.4：若因超出硬件硬解上限走软解回退，强制关硬解、切 GPU vo 渲染、开启快速解码
-                val isOversizeSoft = softRetryUri != null && softRetryUri == selectedMediaItem.uri
-                val effectiveVoMode = if (isOversizeSoft) MpvVoMode.GPU else mpvVoMode
-                val backend = MpvPlayerFactory.create(
-                    context = context,
-                    uri = decodedUri,
-                    surface = nativeSurface,
-                    // v2.1.244：把兜底选定的 voMode 合并进 options（EMBED / GPU）
-                    options = mpvOptions.copy(
-                        hwdec = if (isOversizeSoft) false else mpvOptions.hwdec,
-                        voMode = effectiveVoMode,
-                        frameDrop = if (isOversizeSoft) true else mpvOptions.frameDrop,
-                        fastDecode = if (isOversizeSoft) true else mpvOptions.fastDecode,
-                        // 🔴 v2.9.1：网页/URL 播放时，把 Exo 用的**同一份** UA/Referer 也交给 mpv。
-                        //   不给的话，Exo 失败回退到 MPV 就是裸请求（mpv 默认 UA = libmpv）→ CDN 403
-                        //   → 用户看到"换内核还是打不开"。本地文件播放时这里是空列表，行为不变。
-                        //   ⚠️ 只给 UA/Referer，**不给 Range**（会破坏 mpv 的 seek），见方法注释。
-                        httpHeaders = HttpPlaybackHeaders.asMpvHeaderFields()
-                    ),
-                    callbacks = object : MpvPlayerFactory.Callbacks {
-                        override fun onVideoSizeChanged(width: Int, height: Int) {
-                            // 与 Exo / IJK 共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
-                            applyVideoSize(width, height)
-                        }
-
-                        override fun onPrepared(backend: VrPlayerBackend) {
-                            // 倍速要在 play 之前设好 —— 与 Exo / IJK 同一时机
-                            backend.setPlaybackSpeed(
-                                if (isFloatingBallPressed) floatingBallSpeed else basePlaybackSpeed
-                            )
-                            if (!resumeApplied) {
-                                resumeApplied = true
-                                val dur = backend.duration
-                                if (PlaybackPositions.shouldResume(resumeMs, dur)) {
-                                    backend.seekTo(resumeMs)
-                                    Log.i("VRPlayerScreen", "MPV 恢复上次播放位置 " + resumeMs + "ms / 总长 " + dur + "ms")
-                                }
-                            }
-                            backend.play()
-                            isVideoPlaying = true
-                            playbackEnded = false
-                        }
-
-                        override fun onCompletion() {
-                            // v2.6.20：播完把播放态归位。否则 isVideoPlaying 恒为 true，
-                            // 1 秒进度轮询每秒把进度写回 current/duration = 1.0，
-                            // 用户拖动进度条会被轮询立即弹回片尾 ——
-                            // 「播完后进度条拖不动」的直接根因就是它。
-                            isVideoPlaying = false
-                            playbackEnded = true
-                            PlaybackPositions.clear(prefs, videoUriStr)
-                            resumeMs = 0L
-                        }
-
-                        override fun onError(reason: String) {
-                            val uriNow = selectedMediaItem.uri
-                            val isAuthFailure = reason.contains("403") || reason.contains("410") ||
-                                reason.contains("forbidden", ignoreCase = true) ||
-                                (HttpPlaybackHeaders.isActive && reason.contains("loading failed", ignoreCase = true))
-
-                            if (isAuthFailure && HttpPlaybackHeaders.isActive &&
-                                uriNow != null && cookieRetryAttemptedUri != uriNow
-                            ) {
-                                cookieRetryAttemptedUri = uriNow
-                                val refreshed = HttpPlaybackHeaders.refreshCookie(uriNow)
-                                Log.w(
-                                    "VRPlayerScreen",
-                                    "MPV 网页流鉴权失败: $reason（疑似 Cookie 过期）→ 重新获取Cookie(成功=$refreshed)，尝试重试续播"
-                                )
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.toast_cookie_refreshed_retry),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                cookieRetryTrigger++
-                                return
-                            }
-
-                            // v2.1.244：**这里不能重建播放器**（第一版方案，实测直接崩）。
-                            //   MPV 是全局单例，重建会再次调 MPVLib.create()+init()，而旧
-                            //   context 尚未销毁 → mpv 断言 `!mpctx->initialized` 失败 →
-                            //   SIGABRT 崩在 libmpv.so。vo 模式改为**创建前预判**
-                            //   （见 setupVideoPlayer 里的「预判式选 vo」），失败即回退。
-                            Log.e("VRPlayerScreen", "MPV 播放错误: $reason -> 本次回退 EXO")
-                            // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
-                            //    v2.8.3：只置「本次这一个文件」的标记 → 同样触发重建，
-                            //    但**不再写回 prefs**：原来改 decoderEngine 会把用户的内核
-                            //    永久改成 EXO（一次失败污染之后所有播放）。
-                            exoRetryUri = selectedMediaItem.uri
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.toast_mpv_fallback),
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-
-                        override fun onFirstFrame() {
-                            isVideoPlaying = true
-                            playbackEnded = false
-                        }
-                    }
-                )
-                if (backend != null) {
-                    playerInstance = backend
-                    Log.i("VRPlayerScreen", "已使用 MPV 内核播放")
-                    return
-                }
-                Log.w("VRPlayerScreen", "MPV 创建失败，回退 EXO")
-            } else {
-                Log.w("VRPlayerScreen", "libmpv 不可用（解码库未安装或加载失败），回退 EXO")
-                // v2.1.235：MPV 的 native 库改为后下载 —— 未安装时要明确告诉用户
-                // 去哪里装（否则表现为"选了 MPV 却还是 Exo，没有任何提示"，很像 bug）
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.toast_mpv_need_download),
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-
-        // ======================================================================
-        // v2.1.240：**系统解码**（Android Framework 的 MediaPlayer）
-        // ----------------------------------------------------------------------
-        // 与 Exo/IJK/MPV 的本质区别：那三个都是"应用自带一套解码栈"，
-        // 而系统解码走的是**厂商 ROM 自己的解码管线** —— 国产 ROM 常在其中集成
-        // 私有增强解码器（自研格式、更激进的功耗控制）。所以它是一条**独立兜底路径**：
-        // 同一片源在 Exo/IJK 下异常时，值得切过来试一次。
-        //
-        // 三层回退全部指向 EXO（与 IJK 同一套机制，绝不黑屏）：
-        //   ① 协议不支持（smb://）→ supports() 返回 false，根本不进这里；
-        //   ② create() 返回 null（MediaPlayer 建不起来/设数据源抛异常）→ 回退；
-        //   ③ prepare 或播放中出错 → onError 回调 → 切回 EXO + Toast 提示。
-        // ======================================================================
-        if (effectiveEngine == DecoderEngine.SYSTEM) {
-            if (SystemPlayerFactory.supports(decodedUri)) {
-                val backend = SystemPlayerFactory.create(
-                    context = context,
-                    uri = decodedUri,
-                    surface = nativeSurface,
-                    callbacks = object : SystemPlayerFactory.Callbacks {
-                        override fun onVideoSizeChanged(width: Int, height: Int) {
-                            // 与 Exo / IJK / MPV 共用同一份尺寸处理（智能投影检测 / 8K 提示 / 缓冲尺寸）
-                            applyVideoSize(width, height)
-                        }
-
-                        override fun onPrepared(backend: VrPlayerBackend) {
-                            // 倍速要在 play 之前设好 —— 与其余内核同一时机
-                            // （SystemBackend 内部会把 prepared 之前设过的倍速补应用一次）
-                            backend.setPlaybackSpeed(
-                                if (isFloatingBallPressed) floatingBallSpeed else basePlaybackSpeed
-                            )
-                            if (!resumeApplied) {
-                                resumeApplied = true
-                                val dur = backend.duration
-                                if (PlaybackPositions.shouldResume(resumeMs, dur)) {
-                                    backend.seekTo(resumeMs)
-                                    Log.i("VRPlayerScreen", "系统解码 恢复上次播放位置 " + resumeMs + "ms / 总长 " + dur + "ms")
-                                }
-                            }
-                            backend.play()
-                            isVideoPlaying = true
-                            playbackEnded = false
-                        }
-
-                        override fun onCompletion() {
-                            // v2.6.20：播完把播放态归位。否则 isVideoPlaying 恒为 true，
-                            // 1 秒进度轮询每秒把进度写回 current/duration = 1.0，
-                            // 用户拖动进度条会被轮询立即弹回片尾 ——
-                            // 「播完后进度条拖不动」的直接根因就是它。
-                            isVideoPlaying = false
-                            playbackEnded = true
-                            PlaybackPositions.clear(prefs, videoUriStr)
-                            resumeMs = 0L
-                        }
-
-                        override fun onError(what: Int, extra: Int) {
-                            Log.e("VRPlayerScreen", "系统解码播放错误 what=" + what + " extra=" + extra + " -> 本次回退 EXO")
-                            // ⚠️ 不能在这里直接调 setupVideoPlayer（会递归）。
-                            //    v2.8.3：同样只标本次，**不写回 prefs**（理由见 exoRetryUri 注释）。
-                            exoRetryUri = selectedMediaItem.uri
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.toast_system_fallback),
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-
-                        override fun onFirstFrame() {
-                            isVideoPlaying = true
-                            playbackEnded = false
-                        }
-                    }
-                )
-                if (backend != null) {
-                    playerInstance = backend
-                    Log.i("VRPlayerScreen", "已使用系统解码播放")
-                    return
-                }
-                Log.w("VRPlayerScreen", "系统解码创建失败，回退 EXO")
-            } else {
-                Log.w("VRPlayerScreen", "系统解码不支持该协议（scheme=${decodedUri.scheme}），回退 EXO")
-            }
-        }
-
-            val renderersFactory = object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
-                override fun buildAudioSink(
-                    context: Context,
-                    enableFloatOutput: Boolean,
-                    enableAudioTrackPlaybackParams: Boolean
-                ): androidx.media3.exoplayer.audio.AudioSink? {
-                    return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
-                        .setAudioProcessors(arrayOf(audioProcessor, teeAudioProcessor, genderFilterProcessor))
-                        .build()
-                }
-
-                // E. Inject extra MediaFormat keys (e.g. larger input buffer) into
-                // every video decoder configuration. (8/2-8/3 8K 硬解)
-                override fun getCodecAdapterFactory(): androidx.media3.exoplayer.mediacodec.MediaCodecAdapter.Factory {
-                    val inner = androidx.media3.exoplayer.mediacodec.DefaultMediaCodecAdapterFactory()
-                    return if (addCodecParamsEnabled) {
-                        ExperimentalDecode.ParamsAddingMediaCodecAdapterFactory(inner)
-                    } else {
-                        inner
-                    }
-                }
-            }.apply {
-                setEnableDecoderFallback(true)
-                // A. Forced hardware decoder selection: skip platform capability
-                // filtering and let every hardware driver try the stream. (8/2-8/3)
-                if (forceHwDecoderEnabled && !isSoftwareDecoding) {
-                    setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-                    setMediaCodecSelector(ExperimentalDecode.ForcedHardwareMediaCodecSelector)
-                } else if (isSoftwareDecoding) {
-                    setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-                    setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-                        val decoders = androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT
-                            .getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
-                        val swDecoders = decoders.filter { 
-                            it.softwareOnly || it.name.contains("google", ignoreCase = true) || it.name.contains("c2.android", ignoreCase = true)
-                        }
-                        if (swDecoders.isNotEmpty()) swDecoders else decoders
-                    }
-                } else {
-                    setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-                    setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-                        val decoders = androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT
-                            .getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
-                        val hwDecoders = decoders.filter { 
-                            !it.softwareOnly && !it.name.startsWith("OMX.google.", ignoreCase = true)
-                        }
-                        if (hwDecoders.isNotEmpty()) hwDecoders else decoders
-                    }
-                }
-            }
-            // v2.0.139: DefaultDataSource 只处理 file/asset/content，其余 scheme 落到 base。
-            // MT 等文件管理器把 FTP/SMB 远程文件经本地回环 HTTP 代理（http://127.0.0.1:port/...）
-            // 交给播放器，故 base 按 scheme 分流：smb:// → jcifs，其余 → DefaultHttpDataSource。
-            //
-            // 🔴 v2.6.5（关键修正）：**不再用 DefaultDataSource 包一层**。
-            //    那层对 http(s) 会自建 `DefaultHttpDataSource`，而本 Media3 版本的双参构造
-            //    **不给它设 UA**（实测：无 UA → CDN 直接 403；带任意 UA → 206），
-            //    且该版本的 `DefaultDataSource.Factory` 没有 `setHttpDataSourceFactory` 可注入。
-            //    故改为由 `SchemeRoutingDataSource` 全权分流：rtmp / smb / 本地资源 / http
-            //    （http 分支按 HttpPlaybackHeaders 带 UA + Referer）。
-            val smbAwareFactory = SchemeRoutingDataSource.Factory(context)
-            val exo = ExoPlayer.Builder(context, renderersFactory)
-                .setMediaSourceFactory(
-                    // ⚠️ v2.4.14：传入 `AviExtractorsFactory` —— 用**改进版 AVI extractor**
-                    //    **替换**官方那个（`DefaultMediaSourceFactory` 的第二个参数就是
-                    //    `ExtractorsFactory`）。
-                    //
-                    // 为什么必须换（源码实证 → `docs/AVI_EXO_COMPAT_STUDY.md`）：
-                    //   · 官方 `AviExtractor` **只认 `idx1` 一种索引**：状态机里只有
-                    //     `STATE_FINDING_IDX1_HEADER` / `STATE_READING_IDX1_BODY`，
-                    //     常量表里**没有 `INDX` / `AVIX` / `DMLH`**（即不支持 OpenDML）。
-                    //   · **没有 `idx1` 时它直接**：
-                    //       `extractorOutput.seekMap(new SeekMap.Unseekable(durationUs))`
-                    //     → 整个视频被判为**不可 seek**，用户观感就是「拖了没反应」。
-                    //   · 只支持**单个 `movi` 段** → >1GB 的 OpenDML AVI 只能读第一段。
-                    //
-                    // 换用后（本库 MIT、AAR 仅 55KB、纯 Java 无 native）：
-                    //   OpenDML（`indx`/`ix##`）与多 `movi` 均可解析、无索引时也有兜底，
-                    //   → **不再需要靠「把整个文件重封装成 MP4」来换取 seek 能力**。
-                    //
-                    // ⚠️ 下游的 `AviRiffProbe` + `VideoRemuxer` 自修复链路**保留** ——
-                    //    它是更低一层的兜底（extractor 也救不了的文件仍走重封装）。
-                    // ⚠️ 本库内部只会**替换 AVI 那一个 extractor**，其余原样委托
-                    //    `DefaultExtractorsFactory` → 对 mp4/mkv/ts 等零回归。
-                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                        context,
-                        com.homesoft.exo.extractor.AviExtractorsFactory()
-                    )
-                        .setDataSourceFactory(smbAwareFactory)
-                        // ⚠️ v2.1.248：**补上内嵌 ASS/SSA 字幕支持**。
-                        //    Media3 自带 `ssa/SsaParser`，但默认的
-                        //    `DefaultSubtitleParserFactory` **没登记 `text/x-ssa`**
-                        //    （只有 dvbsubs/pgs/ttml/mp4-vtt/tx3g/subrip 六个 MIME），
-                        //    于是 MKV 内挂的 ASS 轨会走
-                        //    `Unsupported MIME type: text/x-ssa` → 字幕静默不显示。
-                        //    SsaAwareSubtitleParserFactory 把 text/x-ssa 路由给 SsaParser，
-                        //    其余 MIME 原样委托默认工厂（零回归）。
-                        .setSubtitleParserFactory(SsaAwareSubtitleParserFactory())
-                        // ⚠️ **必须同时开这个开关**：agent 只有在「抽取阶段」就解析字幕，
-                        //    内嵌字幕才会经 Player.Listener.onCues 回调出来（本文件的
-                        //    exoCueText 兜底显示就挂在那上面）。只挂 parserFactory 不开它，
-                        //    内嵌 ASS 仍然不会显示。
-                        .experimentalParseSubtitlesDuringExtraction(true)
-                )
-                .build()
-                .apply {
-                // ⚠️ v2.1.247：显式设定 seek 精度（此前**从未设过**，走 Media3 默认）。
-                //
-                // 为什么必须有这一行（AVI 相关）：
-                //   · EXO 默认 `SeekParameters.DEFAULT` == EXACT（精确到帧）——
-                //     它会「跳到前一个关键帧，再解码并丢弃中间所有帧」。
-                //   · 对 **AVI**：`AviExtractor` 在**没有 `idx1` 索引**时，每次 seek 都要
-                //     从头**线性扫描 chunk** 才能找到目标点；叠加 EXACT 的「解码丢弃」，
-                //     单次 seek 可能耗时几百毫秒~数秒 → 用户观感就是「拖不动 / 拖了弹回去」。
-                //   · 对 **AV1**：GOP 通常比 H.264 长（8~16s），EXACT 的「解码丢弃」代价
-                //     进一步放大，4K AV1 上尤为明显。
-                //
-                // 选 `CLOSEST_SYNC`（关键帧级）的理由：
-                //   · 只跳到**最近的关键帧**，不额外解码丢弃 → AVI 的线性扫描代价降一个量级；
-                //   · 精度损失是「最多差一个 GOP」，对**拖动定位**场景完全够用
-                //     （用户拖的是大致位置，不是要逐帧对齐）；
-                //   · 与另三个后端（IJK/MPV/SYSTEM）的行为更一致 —— 它们默认都偏关键帧级。
-                //
-                // ⚠️ 仍保留 `enable-accurate-seek` 那类「需要逐帧精确」的场景：
-                //     IJK 参数面板里的 `accurateSeek` 不受此行影响（那是 IJK 自己的选项）。
-                setSeekParameters(SeekParameters.CLOSEST_SYNC)
-                setVideoSurface(nativeSurface)
-                setMediaItem(ExoMediaItem.fromUri(decodedUri))
-                repeatMode = Player.REPEAT_MODE_ALL
-                
-                trackSelectionParameters = trackSelectionParameters.buildUpon()
-                    .setMaxVideoSize(maxResolution.width, maxResolution.height)
-                    .build()
-                
-                addListener(object : Player.Listener {
-                    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                        applyVideoSize(videoSize.width, videoSize.height)
-                    }
-
-                    override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
-                        if (cueGroup.cues.isNotEmpty()) {
-                            exoCueText = cueGroup.cues.joinToString("\n") { it.text ?: "" }
-                        } else {
-                            exoCueText = null
-                        }
-                    }
-
-                    override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_READY) {
-                            isVideoPlaying = playWhenReady
-                            if (liveReconnectAttempt > 0) {
-                                liveReconnectAttempt = 0
-                                if (isLiveStream) videoDurationText = "\u25CF LIVE"
-                            }
-                        }
-                    }
-
-                    // v119 修复(#7) 补充：位置恢复改在 onEvents 中执行 —— 该回调会把 player
-                    // 实例作为参数传入，避免在 object 表达式里捕获尚未初始化完成的 exo 变量。
-                    override fun onEvents(player: Player, events: Player.Events) {
-                        if (!events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED)) return
-                        when (player.playbackState) {
-                            Player.STATE_READY -> {
-                                if (!resumeApplied) {
-                                    resumeApplied = true
-                                    val dur = player.duration
-                                    if (PlaybackPositions.shouldResume(resumeMs, dur)) {
-                                        player.seekTo(resumeMs)
-                                        Log.i("VRPlayerScreen", "恢复上次播放位置 ${resumeMs}ms / 总长 ${dur}ms")
-                                    }
-                                }
-                            }
-                            Player.STATE_ENDED -> {
-                                // v2.6.20：同 onCompletion —— 归位播放态，停掉进度轮询，
-                                // 否则轮询每秒把进度写回 1.0、进度条拖不动。
-                                isVideoPlaying = false
-                                playbackEnded = true
-                                PlaybackPositions.clear(prefs, videoUriStr)
-                                resumeMs = 0L
-                            }
-                        }
-                    }
-                    
-                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        Log.e("VRPlayerScreen", "ExoPlayer playback error", error)
-                        val uriNow = selectedMediaItem.uri
-                        // v2.8.4（P1）：**网页直链 403/410 鉴权失败 → 动态刷新 Cookie 并重试**
-                        if (isHttpAuthOrForbiddenError(error) && HttpPlaybackHeaders.isActive &&
-                            uriNow != null && cookieRetryAttemptedUri != uriNow
-                        ) {
-                            cookieRetryAttemptedUri = uriNow
-                            val refreshed = HttpPlaybackHeaders.refreshCookie(uriNow)
-                            Log.w(
-                                "VRPlayerScreen",
-                                "Exo 网页直链 403/410 鉴权失败（Cookie可能过期）→ 重新获取Cookie(成功=$refreshed)，尝试重试续播"
-                            )
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.toast_cookie_refreshed_retry),
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            cookieRetryTrigger++
-                            return
-                        }
-                        val exoType = (error as? androidx.media3.exoplayer.ExoPlaybackException)?.type ?: -1
-                        // v2.8.6（直播主线 A 尾项）：直播断流指数退避自动重连
-                        val isLiveNow = isLiveStream || (uriNow != null && MediaFormats.isLikelyLiveStream(Uri.parse(uriNow)))
-                        if (isLiveNow && uriNow != null &&
-                            LiveReconnectPolicy.isRetryableLiveError(error.errorCode, exoType) &&
-                            liveReconnectAttempt < LiveReconnectPolicy.MAX_ATTEMPTS
-                        ) {
-                            val delayMs = LiveReconnectPolicy.nextDelayMs(liveReconnectAttempt)
-                            val attemptNum = liveReconnectAttempt + 1
-                            liveReconnectAttempt = attemptNum
-                            videoDurationText = "\u25CF LIVE \u00B7 " + context.getString(
-                                R.string.live_reconnecting,
-                                attemptNum,
-                                LiveReconnectPolicy.MAX_ATTEMPTS
-                            )
-                            Log.w(
-                                "VRPlayerScreen",
-                                "直播流异常断开（code=${error.errorCode}, type=$exoType），${delayMs}ms 后自动重连（$attemptNum/${LiveReconnectPolicy.MAX_ATTEMPTS}）"
-                            )
-                            liveReconnectJob?.cancel()
-                            liveReconnectJob = scope.launch {
-                                delay(delayMs)
-                                if (selectedMediaItem.uri == uriNow) {
-                                    playerInstance?.exo?.let { liveExo ->
-                                        liveExo.seekToDefaultPosition()
-                                        liveExo.prepare()
-                                        liveExo.playWhenReady = true
-                                    }
-                                }
-                            }
-                            return
-                        }
-                        // ==========================================================
-                        // v2.6.13：解码类失败 → 先排除「尺寸超出硬件上限」
-                        // ----------------------------------------------------------
-                        // 典型场景：8192×4096 的 8K 全景。MediaCodec 的软解（c2.android.*）
-                        //   也走同一套 size/block 校验，所以 Exo 把候选解码器试一遍后会全部
-                        //   DECODER_INIT_FAILED —— 此时再把 `isSoftwareDecoding` 置 true 毫无
-                        //   意义（还是同一个 4096 上限）。唯一出路是换 FFmpeg 软解内核。
-                        // ⚠️ 必须先探测尺寸再决定：解码失败的原因很多（profile 不支持、
-                        //   secure 缺失、DRM…），不能一律当超限处理，否则会把普通片源
-                        //   无谓地推去软解。
-                        // ⚠️ 只在 EXO 生效：IJK/MPV 本身就是软解，`decoderEngine` 为它们时
-                        //   这条分支不会走到（onPlayerError 只挂在 Exo 上）。
-                        // ==========================================================
-                        val decError =
-                            error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
-                                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED
-                        val softCandidate = selectedMediaItem.uri
-                        if (decError && softCandidate != null && softCandidate != softRetryUri) {
-                            scope.launch(Dispatchers.IO) {
-                                val oversize = probeOversizedVideo(context, Uri.parse(softCandidate))
-                                if (oversize != null) {
-                                    Log.w(
-                                        "VRPlayerScreen",
-                                        "解码失败且尺寸 $oversize 超出本机硬件上限 → 改用软解内核重试"
-                                    )
-                                    withContext(Dispatchers.Main) {
-                                        softRetryUri = softCandidate
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(R.string.toast_oversize_soft_switch, oversize),
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                }
-                            }
-                        }
-                        // F. Auto fallback to software decoding when the hardware
-                        // decoder fails to initialize or decode (opt-in, off by default). (8/3 功能)
-                        if (autoFallbackSoftEnabled && !isSoftwareDecoding &&
-                            (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
-                                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED)
-                        ) {
-                            Toast.makeText(context, context.getString(R.string.toast_hw_failed_sw), Toast.LENGTH_SHORT).show()
-                            isSoftwareDecoding = true
-                        }
-                        // v2.4.32：**Exo 打不开该文件 → 本次自动改用 MPV 重试一次**。
-                        //   典型：某些 MP4/fMP4 的编解码配置畸形（实测 HEVC 的 hvcC 参数集数组为空）
-                        //   → Media3 的 HevcConfig/BoxParser 直接抛异常（Source error，日志里是
-                        //   `Unexpected IndexOutOfBoundsException`）。这类**解析层面**的失败
-                        //   切软/硬解都救不了，只有换 MPV（FFmpeg）能解。
-                        //   ⚠️ 只对「这一个文件」重试**一次**（`mpvRetryUri` 去重），
-                        //      并且**不改**用户的解码器设置；MPV 不可用则不尝试（避免空转）。
-                        // 判据用 **ExoPlaybackException 的 `type`**（`PlaybackException` 本身没有 type）：
-                        //   TYPE_SOURCE     = 读取/解析容器失败（本实例即这类）；
-                        //   TYPE_UNEXPECTED = 其它非解码类异常（Loader 把解析器抛的
-                        //                     IndexOutOfBounds 包装后的那种）。
-                        //   TYPE_DECODER 交给上面的软解回退，不在这里抢。
-                        val sourceLikeFailure =
-                            exoType == androidx.media3.exoplayer.ExoPlaybackException.TYPE_SOURCE ||
-                                exoType == androidx.media3.exoplayer.ExoPlaybackException.TYPE_UNEXPECTED
-                        if (sourceLikeFailure && uriNow != null && uriNow != mpvRetryUri &&
-                            MpvPlayerFactory.isAvailable(context)
-                        ) {
-                            Log.w("VRPlayerScreen", "Exo 无法打开（type=$exoType）→ 改用 MPV 重试一次")
-                            mpvRetryUri = uriNow
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.toast_exo_fallback_mpv),
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                })
-                
-                prepare()
-                // 注：位置恢复已移到 onPlaybackStateChanged(STATE_READY)，
-                // 那里 duration 才真正就绪（见 #7 修复说明）
-                playWhenReady = true
-                isVideoPlaying = true
-            }
-            // v2.1.233：包一层门面，使 playerInstance 与 IJK 分支同类型
-            playerInstance = ExoBackend(exo, Uri.parse(videoUriStr))
-        } catch (e: Exception) {
-            Log.e("VRPlayerScreen", "Error preparing video content", e)
-        }
+        val host = KernelSetupHost(
+            context = context,
+            prefs = prefs,
+            scope = scope,
+            audioProcessor = audioProcessor,
+            teeAudioProcessor = teeAudioProcessor,
+            genderFilterProcessor = genderFilterProcessor,
+            ijkOptions = ijkOptions,
+            mpvOptions = mpvOptions,
+            getDecoderEngine = { decoderEngine },
+            setDecoderEngine = { decoderEngine = it },
+            isSmartProjectionEnabled = isSmartProjectionEnabled,
+            setIsSplitScreenVR = { isSplitScreenVR = it },
+            addCodecParamsEnabled = addCodecParamsEnabled,
+            forceHwDecoderEnabled = forceHwDecoderEnabled,
+            autoFallbackSoftEnabled = autoFallbackSoftEnabled,
+            levelPatchEnabled = levelPatchEnabled,
+            spoofResolutionEnabled = spoofResolutionEnabled,
+            maxResolution = maxResolution,
+            floatingBallSpeed = floatingBallSpeed,
+            basePlaybackSpeed = basePlaybackSpeed,
+            isFloatingBallPressed = isFloatingBallPressed,
+            selectedMediaItem = selectedMediaItem,
+            currentGlSurfaceView = currentGlSurfaceView,
+            isLiveStream = isLiveStream,
+            isRemuxing = isRemuxing,
+            isTranscoding = isTranscoding,
+            effectiveOutputSize = ::effectiveOutputSize,
+            postToast = ::postToast,
+            startLevelPatchFix = ::startLevelPatchFix,
+            getIsSoftwareDecoding = { isSoftwareDecoding },
+            setIsSoftwareDecoding = { isSoftwareDecoding = it },
+            getStereoMode = { stereoMode },
+            setStereoMode = { stereoMode = it },
+            getProjectionMode = { projectionMode },
+            setProjectionMode = { projectionMode = it },
+            getProjectionModeUserAdjusted = { projectionModeUserAdjusted },
+            setProjectionModeUserAdjusted = { projectionModeUserAdjusted = it },
+            getPlayerInstance = { playerInstance },
+            setPlayerInstance = { playerInstance = it },
+            setIsVideoPlaying = { isVideoPlaying = it },
+            setPlaybackEnded = { playbackEnded = it },
+            setVideoSourceWidth = { videoSourceWidth = it },
+            setVideoSourceHeight = { videoSourceHeight = it },
+            setVideoDurationText = { videoDurationText = it },
+            setExoCueText = { exoCueText = it },
+            getMpvRetryUri = { mpvRetryUri },
+            setMpvRetryUri = { mpvRetryUri = it },
+            getExoRetryUri = { exoRetryUri },
+            setExoRetryUri = { exoRetryUri = it },
+            getSoftRetryUri = { softRetryUri },
+            setSoftRetryUri = { softRetryUri = it },
+            setLiveForceExoUri = { liveForceExoUri = it },
+            getCookieRetryAttemptedUri = { cookieRetryAttemptedUri },
+            setCookieRetryAttemptedUri = { cookieRetryAttemptedUri = it },
+            getCookieRetryTrigger = { cookieRetryTrigger },
+            setCookieRetryTrigger = { cookieRetryTrigger = it },
+            getLiveReconnectAttempt = { liveReconnectAttempt },
+            setLiveReconnectAttempt = { liveReconnectAttempt = it },
+            getLiveReconnectJob = { liveReconnectJob },
+            setLiveReconnectJob = { liveReconnectJob = it },
+            setShowResolutionTip = { showResolutionTip = it },
+            setResolutionTipText = { resolutionTipText = it },
+            setCurrentVideoUri = { currentVideoUri = it },
+            surfaceHolder = surfaceHolder,
+            getForceVideoType = { forceVideoType },
+            setForceVideoType = { forceVideoType = it },
+            getMpvVoMode = { mpvVoMode },
+            setMpvVoMode = { mpvVoMode = it },
+        )
+        VRPlayerKernelSetup.setupVideoPlayer(host, surfaceTexture, videoUriStr)
     }
 
     // Continuously sync playback position for subtitle timing + 记录播放位置用于恢复（8/1 功能）
@@ -5394,7 +3428,7 @@ fun VRPlayerScreen(
         // 2.4 弹幕层（v2.4.0 / P5）：位于字幕层**之下**（弹幕在顶部区域，字幕通常在下半部）
         //     ⚠️ 必须放在 SubtitleOverlay 之前，让字幕能盖在弹幕上（万一位置撞上，字幕可读性优先）
         DanmuOverlay(
-            engine = danmuEngine,
+            engine = danmuState.engine,
             config = danmuConfig,
             isSplitScreenVR = isSplitScreenVR,
             vrIpdOffsetRatio = vrIpdOffsetRatio,
@@ -5559,238 +3593,34 @@ fun VRPlayerScreen(
             }
         }
 
-        // 3. Floating Lock / Unlock Icon Button Layer
-        // Shown when UI controls are visible, allowing user to toggle screen lock securely
-        AnimatedVisibility(
-            visible = isUiVisible,
-            enter = slideInHorizontally(animationSpec = tween(500, easing = CustomEaseOutBack)) { -it } + 
-                    fadeIn(animationSpec = tween(350, easing = EaseInOutCubic)),
-            exit = slideOutHorizontally(animationSpec = tween(350, easing = EaseInOutCubic)) { -it } + 
-                   fadeOut(animationSpec = tween(250, easing = EaseInOutCubic)),
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 24.dp)
-        ) {
-            FilledIconButton(
-                onClick = {
-                    isUiLocked = !isUiLocked
-                    keepUiAlight()
-                },
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = ThemePanelBgColor,
-                    contentColor = if (isUiLocked) Color(0xFFFF5252) else AccentColor
-                ),
-                modifier = Modifier
-                    .size(54.dp)
-                    .testTag("ui_lock_button")
-            ) {
-                Icon(
-                    imageVector = if (isUiLocked) Icons.Default.Lock else Icons.Default.LockOpen,
-                    contentDescription = if (isUiLocked) stringResource(R.string.unlock_ui) else stringResource(R.string.lock_ui),
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-
-        // 3.5 Top Header Panel (Modern slide/fade non-linear easing animation)
-        AnimatedVisibility(
-            visible = isUiVisible && !isSettingsDialogOpen && !isUiLocked,
-            enter = slideInVertically(animationSpec = tween(550, easing = EaseOutQuart)) { -it } + 
-                    fadeIn(animationSpec = tween(400, easing = EaseInOutCubic)),
-            exit = slideOutVertically(animationSpec = tween(400, easing = EaseInOutCubic)) { -it } + 
-                   fadeOut(animationSpec = tween(300, easing = EaseInOutCubic)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.TopCenter)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color(0xE01C1B1F), Color(0xA01C1B1F), Color.Transparent)
-                        )
-                    )
-                    .clickable(enabled = true, onClick = { keepUiAlight() })
-            ) {
-                if (isSplitScreenVR) {
-                    // VR 分屏模式：左右眼双视口各显示一份紧凑顶栏（标题 + 退出 VR 分屏按钮），避免双目视觉撕裂
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = stringResource(R.string.app_desc),
-                                color = TextLightColor,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                            IconButton(
-                                onClick = {
-                                    isSplitScreenVR = false
-                                    keepUiAlight()
-                                },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ViewInAr,
-                                    contentDescription = stringResource(R.string.cd_exit_vr_split),
-                                    tint = AccentColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(32.dp))
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = stringResource(R.string.app_desc),
-                                color = TextLightColor,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                            IconButton(
-                                onClick = {
-                                    isSplitScreenVR = false
-                                    keepUiAlight()
-                                },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ViewInAr,
-                                    contentDescription = stringResource(R.string.cd_exit_vr_split),
-                                    tint = AccentColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Face, // Face / Beauty Icon
-                                    contentDescription = stringResource(R.string.cd_beauty_icon),
-                                    tint = AccentColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = stringResource(R.string.app_desc),
-                                    color = TextLightColor,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.testTag("app_title_text")
-                                )
-                            }
-                            Text(
-                                text = stringResource(R.string.current_media, getMediaDisplayName()),
-                                color = AccentColor.copy(alpha = 0.85f),
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.widthIn(max = 240.dp)
-                            )
-                        }
-
-                        // Direct toggle controls at Top Right: Exactly 3 buttons: (1) local picker, (2) VR mode, (3) settings
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            IconButton(
-                                onClick = {
-                                    keepUiAlight()
-                                    // v2.1.241：原先是直接拉相册选择器，导致 .wmv / .iso
-                                    // **永远列不出来**（相册只按 video/* 过滤）。
-                                    // 现在改为先弹一个「从哪选」的选择框，两条入口并存。
-                                    pickerSourceDialogOpen = true
-                                },
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = Color(0x2BD0BCFF),
-                                    contentColor = AccentColor
-                                ),
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .testTag("local_file_picker_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = stringResource(R.string.import_local_media)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    val nextSplit = !isSplitScreenVR
-                                    isSplitScreenVR = nextSplit
-                                    if (nextSplit && stereoMode == StereoMode.MONO) {
-                                        val curTitle = selectedMediaItem.title ?: selectedMediaItem.uri ?: ""
-                                        val aspect = if (videoSourceHeight > 0) videoSourceWidth.toFloat() / videoSourceHeight.toFloat() else 0f
-                                        if (ProjectionAutoDetector.isSbsPlanar(aspect) || ProjectionAutoDetector.isSbsName(curTitle)) {
-                                            stereoMode = StereoMode.SBS
-                                        }
-                                    }
-                                    keepUiAlight()
-                                },
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = if (isSplitScreenVR) Color(0x33D0BCFF) else TranslucentWhite10,
-                                    contentColor = if (isSplitScreenVR) AccentColor else Color.White
-                                ),
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .testTag("vr_splitscreen_toggle_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ViewInAr,
-                                    contentDescription = stringResource(R.string.cd_vr_split_mode),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    isSettingsDialogOpen = !isSettingsDialogOpen
-                                    keepUiAlight()
-                                },
-                                colors = IconButtonDefaults.iconButtonColors(
-                                    containerColor = if (isSettingsDialogOpen) Color(0x33D0BCFF) else TranslucentWhite10,
-                                    contentColor = if (isSettingsDialogOpen) AccentColor else Color.White
-                                ),
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .testTag("top_settings_orchestra_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = stringResource(R.string.beauty_projection_menu),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
+        // 3 & 3.5 Floating Lock Button + Top Header Panel
+        PlayerTopAndLockOverlay(
+            isUiVisible = isUiVisible,
+            isUiLocked = isUiLocked,
+            onToggleUiLocked = { isUiLocked = !isUiLocked },
+            isSettingsDialogOpen = isSettingsDialogOpen,
+            onToggleSettingsDialog = { isSettingsDialogOpen = !isSettingsDialogOpen },
+            isSplitScreenVR = isSplitScreenVR,
+            onExitSplitScreenVR = { isSplitScreenVR = false },
+            onToggleSplitScreenVR = {
+                val nextSplit = !isSplitScreenVR
+                isSplitScreenVR = nextSplit
+                if (nextSplit && stereoMode == StereoMode.MONO) {
+                    val curTitle = selectedMediaItem.title ?: selectedMediaItem.uri ?: ""
+                    val aspect = if (videoSourceHeight > 0) videoSourceWidth.toFloat() / videoSourceHeight.toFloat() else 0f
+                    if (ProjectionAutoDetector.isSbsPlanar(aspect) || ProjectionAutoDetector.isSbsName(curTitle)) {
+                        stereoMode = StereoMode.SBS
                     }
                 }
-            }
-        }
+            },
+            themePanelBgColor = ThemePanelBgColor,
+            accentColor = AccentColor,
+            textLightColor = TextLightColor,
+            translucentWhite10 = TranslucentWhite10,
+            mediaDisplayName = getMediaDisplayName(),
+            onOpenPickerSource = { pickerSourceDialogOpen = true },
+            onKeepUiAlight = { keepUiAlight() },
+        )
 
         // 3.6 Bottom Controls Panel (Modern slide/fade non-linear easing animation)
         AnimatedVisibility(
@@ -5889,250 +3719,35 @@ fun VRPlayerScreen(
                                 // ===== v84 UI recomposition isolation: progress bar =====
                                 @Composable
                                 fun PlayerProgressBar() {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Text(
-                                            // v2.6.24（直播 P0）：直播直接显示 ● LIVE（不去解析 00:00 格式文本）
-                                            text = if (isLiveStream) "● LIVE"
-                                            else if (videoDurationText.contains("/")) videoDurationText.split("/")[0].trim()
-                                            else "00:00",
-                                            color = Color.White.copy(alpha = 0.6f),
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-
-                                        // v2.6.24（直播 P0）：直播没有可拖的进度 —— 换成静止的 LIVE 指示条，
-                                        // 避免彩色进度条造成「可以拖」的视觉歧义，也不给误触留入口。
-                                        if (isLiveStream) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(16.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .height(3.dp)
-                                                        .clip(RoundedCornerShape(2.dp))
-                                                        .background(AccentColor.copy(alpha = 0.55f))
-                                                )
-                                            }
-                                        } else {
-                                            Slider(
-                                                value = videoPlaybackProgress,
-                                                // v2.6.24（直播 P0）：直播不可任意 seek → 进度条禁用
-                                                enabled = !isLiveStream,
-                                                onValueChange = { seeker ->
-                                                    val adjustedProgress = if (isSliderDragged) {
-                                                        if (!isSeekingActive) {
-                                                            isSeekingActive = true
-                                                            seekStartProgress = videoPlaybackProgress
-                                                            seekStartValue = seeker
-                                                        }
-                                                        val delta = seeker - seekStartValue
-                                                        (seekStartProgress + delta * 0.25f).coerceIn(0f, 1f)
-                                                    } else {
-                                                        isSeekingActive = false
-                                                        seeker
-                                                    }
-                                                    videoPlaybackProgress = adjustedProgress
-                                                    isHoverActive = true
-                                                    keepUiAlight()
-                                                    // ⚠️⚠️ v2.1.247：**拖动过程中绝不逐帧 seek**。
-                                                    //
-                                                    // 旧实现在这里每帧调 `mp.seekTo(targetTime)`，对 mp4
-                                                    // 尚可，但对 **AVI 是灾难**：EXO 的 `AviExtractor` 若没有
-                                                    // `idx1` 索引，每次 seek 都要**从头线性扫描 chunk**；逐帧 seek
-                                                    // 会在几十毫秒内堆几十个未完成的 seek 请求 → 解码器被反复
-                                                    // flush → 画面冻结、进度条回弹、最终卡死（用户报的「AVI 拖不动」）。
-                                                    //
-                                                    // 正确做法（所有成熟播放器的标准姿势）：
-                                                    //   · 拖动中：只更新 UI 进度 + `hoverTimeMs`（驱动缩略图），**不 seek**；
-                                                    //   · 松手时（onValueChangeFinished）：**只 seek 一次**到最终位置。
-                                                    // 这样对 AVI 只有一次线性扫描，拖动全程跟手。
-                                                    playerInstance?.let { mp ->
-                                                        try {
-                                                            val duration = mp.duration
-                                                            // ⚠️ v2.1.247：duration 在 buffering 阶段可能是
-                                                            //    `C.TIME_UNSET`（负数）或 0（尤其 AVI 刚开始解析时）
-                                                            //    → 若直接相乘会得到**负数**的 hoverTimeMs，
-                                                            //    松手 seek 到负数 = 位置不动（用户看到的「拖了没反应」）。
-                                                            //    这里只在 duration 有效时才更新，否则保留上一次有效值。
-                                                            if (duration > 0) {
-                                                                hoverTimeMs = (adjustedProgress * duration).toLong()
-                                                            }
-                                                        } catch (e: Exception) {}
-                                                    }
-                                                },
-                                                onValueChangeFinished = {
-                                                    isSeekingActive = false
-                                                    // ⚠️ v2.1.247：拖动结束才真正 seek（只此一次）。
-                                                    //
-                                                    // 这里**重新用当下的 duration × 进度**算目标位置，
-                                                    // 而不是复用 `hoverTimeMs` —— 后者可能是拖动早期
-                                                    // 用陈旧 duration 算出的值（见上），直接用会 seek 到错位置。
-                                                    val finalProgress = videoPlaybackProgress
-                                                    var seekTarget = hoverTimeMs
-                                                    var seekIssued = false
-                                                    playerInstance?.let { mp ->
-                                                        try {
-                                                            val duration = mp.duration
-                                                            if (duration > 0) {
-                                                                seekTarget = (finalProgress * duration).toLong()
-                                                                    .coerceIn(0L, duration)
-                                                                hoverTimeMs = seekTarget
-                                                                mp.seekTo(seekTarget)
-                                                                seekIssued = true
-                                                            } else {
-                                                                // duration 不可用 → 退而求其次，用 hoverTimeMs
-                                                                if (seekTarget > 0) {
-                                                                    mp.seekTo(seekTarget)
-                                                                    seekIssued = true
-                                                                }
-                                                            }
-                                                        } catch (e: Exception) {}
-                                                    }
-                                                    // 拖动结束立即把 UI 进度对齐到目标（不等 1 秒轮询），
-                                                    // 否则会出现「松手后进度条先弹回旧位置、1 秒后才跳过去」的错觉。
-                                                    if (seekIssued) {
-                                                        videoPlaybackProgress = finalProgress
-                                                        // ==================================================
-                                                        // v2.6.20：**播完态的拖动必须补一次 play()**
-                                                        // --------------------------------------------------
-                                                        // 视频播完后（onCompletion / Exo ENDED），三种内核都不会
-                                                        // 因为 seekTo 自动开播：EXO 只在 playWhenReady=true 时续播，
-                                                        // IJK/MPV 完成态下要显式 start，系统 MediaPlayer 的
-                                                        // PlaybackCompleted 态 seekTo 本身无效。
-                                                        // 于是用户拖到中间后画面停在那一帧不动 —— 就是
-                                                        // 「播完一个视频后拖动进度条无法播放」。
-                                                        // 判据用 [playbackEnded] 而不是"当前没在播"：
-                                                        // 用户**手动暂停**后拖动应当保持暂停，不能替他开播。
-                                                        // ==================================================
-                                                        if (playbackEnded) {
-                                                            playbackEnded = false
-                                                            playerInstance?.play()
-                                                            isVideoPlaying = true
-                                                        }
-                                                    }
-                                                    // Verify the seek took effect: some containers
-                                                    // (moov-at-end / fragmented / AVI without idx1) reset the
-                                                    // position to 0, in which case we offer an auto container fix.
-                                                    //
-                                                    // ⚠️ v2.1.247 收紧判据（AVI 相关）：
-                                                    //   ① 只有在**确实发出过 seek** 时才校验（否则误判）；
-                                                    //   ② 判定用「位置几乎没动」而不是「< 2s」—— 后者在
-                                                    //      短片（< 10s）上会把正常位置也判成失败；
-                                                    //   ③ 加长等待到 1.5s：AVI 无索引时线性扫描 1s 内可能还没到位，
-                                                    //      过早判定会触发不必要的重封装。
-                                                    val seekIssuedFlag = seekIssued
-                                                    // ==================================================
-                                                    // v2.4.9：AVI「跳到那一帧就不动了」的修复
-                                                    // --------------------------------------------------
-                                                    // ① **已知该 AVI 没有 idx1 索引** → 这次 seek 必定不完整：
-                                                    //    无索引时 AviExtractor 只能线性扫描，扫到的位置未必是
-                                                    //    关键帧 → 解码器拿不到 I 帧参考 → 画面冻在目标帧。
-                                                    //    这不是「seek 没生效」，所以**旧的判据恰好检测不到**
-                                                    //    （位置其实已经跳到目标了）。→ 直接重建索引（治本）。
-                                                    //
-                                                    // ② 通用兜底：位置到了、但**播放完全停住**。
-                                                    //    用「1 秒内位置一毫秒都没推进」而非「推进得慢」，
-                                                    //    以免误伤 AVI 慢速软解；并排除 buffering
-                                                    //    （缓冲期间不推进是正常的）。
-                                                    // ==================================================
-                                                    val aviNeedsRebuild = aviProbe?.needsIndexRebuild == true
-                                                    // ⚠️ v2.4.28：**容器修复只对 EXO 生效**。
-                                                    //    MPV / IJK 的 seek 由 libavformat 负责，本来正常；
-                                                    //    对它们触发重封装只会白等（实测对一条 9113s 的
-                                                    //    MPV 视频重封装了 2.5 分钟、还因丢包导致播不了）。
-                                                    scope.launch {
-                                                        // 🔴 v2.6.1：**必须先在"什么都不假设"的前提下观察，再决定修不修**。
-                                                        //    旧实现有两处会"没问题也修"，用户反馈"有时候没问题也修复"：
-                                                        //      ① `aviNeedsRebuild` 是**文件属性**（该 AVI 无 idx1），
-                                                        //         它一旦为 true 就**不做任何验证**直接重建索引 →
-                                                        //         同一个文件每次拖动都重建一次；
-                                                        //      ② `stuckAtStart` 只等 1.5s，慢设备 / 网络源 / 大文件上
-                                                        //         seek 还没落地（位置仍停在片头）就被判成"容器吞了 seek"。
-                                                        //    现在统一为：等 2.5s → 收集证据 → 只有**证明 seek 真的坏了**才修。
-                                                        delay(2500L)
-                                                        if (!seekIssuedFlag || seekTarget <= 3000L) return@launch
-                                                        val inst = playerInstance ?: return@launch
-                                                        // v2.4.28：非 EXO（MPV/IJK/系统）不参与容器修复判定
-                                                        if (inst.engine != DecoderEngine.EXO) return@launch
-                                                        if (seekUnsupported || isRemuxing || !selectedMediaItem.isVideo) return@launch
-                                                        // 仍在缓冲：位置不推进是正常的，本次不判定（下次拖动再观察）
-                                                        if (inst.exo?.playbackState == Player.STATE_BUFFERING) return@launch
-
-                                                        val posA = inst.currentPosition
-                                                        // ① seek **没落地**：位置仍停在片头附近，而目标很远
-                                                        val stuckAtStart = posA < 2000L && seekTarget > 5000L
-
-                                                        // ② seek **落地但卡死**：位置已在目标附近，
-                                                        //    连续 3 次 × 500ms 采样都不再推进（且未缓冲、确实在播）。
-                                                        //    ⚠️ 用"多次采样"而不是单次 —— 单次 1s 采样遇到
-                                                        //    解码器 flush / 刚 seek 完的短暂停顿就会误判。
-                                                        //    ⚠️ 排除暂停：用户 seek 后立刻暂停时 isPlaying=false，
-                                                        //    此时不推进是正常的，不累计 stall。
-                                                        var frozen = false
-                                                        if (!stuckAtStart && kotlin.math.abs(posA - seekTarget) <= 5000L) {
-                                                            var prev = posA
-                                                            var stalls = 0
-                                                            repeat(3) {
-                                                                delay(500L)
-                                                                val cur = inst.currentPosition
-                                                                val buffering =
-                                                                    inst.exo?.playbackState == Player.STATE_BUFFERING
-                                                                if (!buffering && inst.isPlaying) {
-                                                                    if (cur - prev <= 0L) stalls++ else stalls = 0
-                                                                } else {
-                                                                    stalls = 0
-                                                                }
-                                                                prev = cur
-                                                            }
-                                                            // 3 次里连续 2 次无推进才算卡死（留一次容错）
-                                                            frozen = stalls >= 2
-                                                        }
-
-                                                        if (!stuckAtStart && !frozen) return@launch
-
-                                                        Log.i(
-                                                            "VRPlayerScreen",
-                                                            "seek 异常（stuckAtStart=$stuckAtStart frozen=$frozen " +
-                                                                "pos=${posA / 1000}s target=${seekTarget / 1000}s " +
-                                                                "aviNoIdx1=$aviNeedsRebuild）→ 重建索引"
-                                                        )
-                                                        startRemuxFix()
-                                                    }
-                                                    scope.launch {
-                                                        delay(2500L)
-                                                        isHoverActive = false
-                                                    }
-                                                },
-                                                interactionSource = sliderInteractionSource,
-                                                colors = SliderDefaults.colors(
-                                                    thumbColor = AccentColor,
-                                                    activeTrackColor = AccentColor,
-                                                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                                                ),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(16.dp)
-                                            )
-                                        }
-
-                                        Text(
-                                            // v2.6.24（直播 P0）：直播没有总时长 → 右侧留空
-                                            text = if (isLiveStream) ""
-                                            else if (videoDurationText.contains("/")) videoDurationText.split("/")[1].trim()
-                                            else "00:00",
-                                            color = Color.White.copy(alpha = 0.6f),
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
+                                    PlayerProgressBarControl(
+                                        isLiveStream = isLiveStream,
+                                        videoDurationText = videoDurationText,
+                                        accentColor = AccentColor,
+                                        videoPlaybackProgress = videoPlaybackProgress,
+                                        onVideoPlaybackProgressChange = { videoPlaybackProgress = it },
+                                        isSliderDragged = isSliderDragged,
+                                        isSeekingActive = isSeekingActive,
+                                        onIsSeekingActiveChange = { isSeekingActive = it },
+                                        seekStartProgress = seekStartProgress,
+                                        onSeekStartProgressChange = { seekStartProgress = it },
+                                        seekStartValue = seekStartValue,
+                                        onSeekStartValueChange = { seekStartValue = it },
+                                        onIsHoverActiveChange = { isHoverActive = it },
+                                        onKeepUiAlight = { keepUiAlight() },
+                                        playerInstance = playerInstance,
+                                        hoverTimeMs = hoverTimeMs,
+                                        onHoverTimeMsChange = { hoverTimeMs = it },
+                                        playbackEnded = playbackEnded,
+                                        onPlaybackEndedChange = { playbackEnded = it },
+                                        onIsVideoPlayingChange = { isVideoPlaying = it },
+                                        aviNeedsRebuild = aviProbe?.needsIndexRebuild == true,
+                                        scope = scope,
+                                        seekUnsupported = seekUnsupported,
+                                        isRemuxing = isRemuxing,
+                                        selectedMediaItem = selectedMediaItem,
+                                        onStartRemuxFix = { startRemuxFix() },
+                                        sliderInteractionSource = sliderInteractionSource,
+                                    )
                                 }
 
                                 PlayerProgressBar()
@@ -6300,3296 +3915,507 @@ fun VRPlayerScreen(
             onKeepUiAlight = { keepUiAlight() }
         )
 
-        // 3.5 字幕快捷面板（v91：字幕模块主界面提级入口）
-        // v94：点击面板外部区域自动关闭
-        if (isSubtitleQuickPanelOpen) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() }
-                    ) { isSubtitleQuickPanelOpen = false; keepUiAlight() },
-                contentAlignment = Alignment.TopEnd
-            ) {
-                Surface(
-                    color = ThemePanelBgColor,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, Color(0x22FFFFFF)),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier
-                        .padding(top = 24.dp, end = 16.dp)
-                        .width(320.dp)
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() }
-                        ) { /* 消费点击，不穿透到背景层 */ }
-                        .testTag("subtitle_quick_panel")
-                ) {
-                    // v2.0.128：面板内容较长（字幕开关 / 翻译 / ASR 引擎 / 推理线程 /
-                    // 实时字幕 / 生成进度与操作 / 完整设置入口…），在竖屏或低分辨率下
-                    // 会超出屏幕且无法滚动。改为「限高 + 竖向滚动」，
-                    // 并在右侧显示滚动条（内容未超出时不显示）。
-                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                        // v2.6.10：**视口高度单一来源**（替代原先散落三处的 480.dp 字面量）。
-                        //   · `minOf(maxHeight, …)`：小屏 / 分屏 / 系统字体放大时视口不超出可用高度；
-                        //   · Column 的 heightIn、滚动条的「可视高度」换算、滚动条自身高度
-                        //     全部用它 —— 改这里一处即全局生效，不会再出现滚动条与视口错位。
-                        val viewportH = minOf(maxHeight, QUICK_PANEL_VIEWPORT_DP)
-                        val quickPanelScroll = rememberScrollState()
-                        val density = LocalDensity.current
-                        Column(
-                            modifier = Modifier
-                                .heightIn(max = viewportH)
-                                .verticalScroll(quickPanelScroll)
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                        // 字幕开关
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                stringResource(R.string.subtitle_quick_title),
-                                color = AccentColor,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    if (isSubtitleEnabled) stringResource(R.string.subtitle_state_on)
-                                    else stringResource(R.string.subtitle_state_off),
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 10.sp
-                                )
-                                AuraSwitch(
-                                    checked = isSubtitleEnabled,
-                                    onCheckedChange = {
-                                        isSubtitleEnabled = it
-                                        // v2.0.128：与完整字幕设置面板保持一致——记下用户的
-                                        // 显式选择，否则切视频时自动加载的字幕会把它重新打开
-                                        if (isMemoryModeEnabled) {
-                                            prefs.edit().putBoolean("subtitle_user_disabled", !it).apply()
-                                        }
-                                        keepUiAlight()
-                                    },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                            }
-                        }
-
-                        // v94：翻译开关（字幕翻译 / 双语对照）
-                        // v2.4.43：**文本列加 `weight(1f)` + 文本 `maxLines`/省略号** —— 与美颜面板同款修复。
-                        //   本行说明文字含「引擎名 → 目标语言」，比标题长得多；没有 weight 时它会吃满整行，
-                        //   把末尾的 `AuraSwitch` 压成 0 宽（开关被截断/与文字遮挡）。
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    stringResource(R.string.subtitle_translate_title),
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    text = if (subtitleTranslator.config.isEnabled)
-                                        "${stringResource(subtitleTranslator.config.engine.displayNameResId)} → ${stringResource(subtitleTranslator.config.targetLanguage.nameResId)}"
-                                    else stringResource(R.string.subtitle_translate_off),
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 11.sp
-                                )
-                            }
-                            AuraSwitch(
-                                checked = subtitleTranslator.config.isEnabled,
-                                onCheckedChange = {
-                                    subtitleTranslator.config = subtitleTranslator.config.copy(isEnabled = it)
-                                    if (isMemoryModeEnabled) prefs.edit().putBoolean("translation_enabled", it).apply()
-                                    keepUiAlight()
-                                },
-                                accentColor = AccentColor,
-                                accentOnColor = AccentOnColor
-                            )
-                        }
-
-                        // ============ v2.4.58：投屏接收（DLNA/UPnP-AV MediaRenderer）============
-                        // 开启后本机在局域网内作为一台「可投屏设备」出现：手机视频 App 的
-                        // 投屏列表里能看到本机，点投屏后把视频地址推过来由本应用播放。
-                        // ⚠️ 仅支持「URL 推送式」投屏（DLNA）；不支持手机屏幕镜像（系统权限限制）。
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    stringResource(R.string.cast_receiver_title),
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    text = stringResource(
-                                        if (castReceiverEnabled) R.string.cast_receiver_on
-                                        else R.string.cast_receiver_off
-                                    ),
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 11.sp
-                                )
-                            }
-                            AuraSwitch(
-                                checked = castReceiverEnabled,
-                                onCheckedChange = {
-                                    castReceiverEnabled = it
-                                    if (isMemoryModeEnabled) {
-                                        prefs.edit().putBoolean("cast_receiver_enabled", it).apply()
-                                    }
-                                    keepUiAlight()
-                                },
-                                accentColor = AccentColor,
-                                accentOnColor = AccentOnColor
-                            )
-                        }
-
-                        // v127：实时字幕的引擎与模型（引擎已固定为 SenseVoice）
-                        BatchTranscribeSection(
-                            accentColor = AccentColor,
-                            accentOnColor = AccentOnColor,
-                            sherpaLangCode = sherpaLangCode,
-                            onSherpaLangCodeChange = { changeAsrLanguage(it) },
-                            onUserInteraction = { keepUiAlight() },
-                            // v2.4.39：这里也要**单独置顶 SenseVoice** —— 否则默认「按分类」视角下
-                            //   中/日/韩/粤 每种语言只显示首选（内置 Dolphin）一条 chip，
-                            //   SenseVoice 在本面板**根本选不到**（与设置面板行为不一致）。
-                            senseVoiceFirst = true
-                        )
-
-                        // v127e：推理线程数（1~10，推荐 4~6）
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    stringResource(R.string.asr_threads),
-                                    color = Color.White.copy(alpha = 0.7f),
-                                    fontSize = 10.sp
-                                )
-                                Text(
-                                    stringResource(R.string.asr_threads_value, asrThreads) +
-                                        if (asrThreads in SherpaAsrManager.RECOMMENDED_THREADS)
-                                            stringResource(R.string.asr_threads_recommended) else "",
-                                    color = if (asrThreads in SherpaAsrManager.RECOMMENDED_THREADS) AccentColor
-                                    else Color(0xFFFFB74D),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            Slider(
-                                value = asrThreads.toFloat(),
-                                onValueChange = { v ->
-                                    asrThreads = v.toInt().coerceIn(SherpaAsrManager.MIN_THREADS, SherpaAsrManager.MAX_THREADS)
-                                },
-                                onValueChangeFinished = {
-                                    if (isMemoryModeEnabled) {
-                                        prefs.edit().putInt("asr_threads", asrThreads).apply()
-                                    }
-                                    // 识别器已按旧线程数创建，改动需重建引擎才生效
-                                    // v2.6.24：判据用 isRealtimeAsrActive —— 后台执行模式同样要重建
-                                    if (isRealtimeAsrActive) realtimeSubtitleEngine.restart()
-                                    keepUiAlight()
-                                },
-                                valueRange = SherpaAsrManager.MIN_THREADS.toFloat()..SherpaAsrManager.MAX_THREADS.toFloat(),
-                                steps = SherpaAsrManager.MAX_THREADS - SherpaAsrManager.MIN_THREADS - 1,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = AccentColor,
-                                    activeTrackColor = AccentColor,
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                                ),
-                                modifier = Modifier.fillMaxWidth().height(24.dp)
-                            )
-                            Text(
-                                stringResource(R.string.asr_threads_hint),
-                                color = Color.White.copy(alpha = 0.4f),
-                                fontSize = 8.sp
-                            )
-                        }
-
-                        // v126：实时 AI 字幕开关（边播边生成，不写 SRT、不改动原视频）
-                        ExperimentalSwitchRow(
-                            title = stringResource(R.string.realtime_subtitle_title),
-                            desc = stringResource(R.string.realtime_subtitle_desc),
-                            checked = isRealtimeSubtitleEnabled,
-                            onChanged = {
-                                isRealtimeSubtitleEnabled = it
-                                if (isMemoryModeEnabled) {
-                                    prefs.edit().putBoolean("realtime_subtitle_enabled", it).apply()
-                                }
-                                keepUiAlight()
-                            },
-                            accentColor = AccentColor,
-                            accentOnColor = AccentOnColor
-                        )
-                        // v2.6.24：**后台执行 AI 字幕** —— 只跑识别、不显示字幕，
-                        // 台词留给 AI 弹幕。与上面的实时字幕开关是**并列**关系：
-                        //  - 只开上面 = 显示实时字幕（弹幕也能用）
-                        //  - 只开这里 = 不显示字幕，但 AI 弹幕有台词素材
-                        //  - 两个都开 = 效果同只开上面（引擎不会重复启动，见 isRealtimeAsrActive）
-                        ExperimentalSwitchRow(
-                            title = stringResource(R.string.bg_asr_title),
-                            desc = stringResource(R.string.bg_asr_desc),
-                            checked = bgAsrEnabled,
-                            onChanged = {
-                                bgAsrEnabled = it
-                                if (isMemoryModeEnabled) {
-                                    prefs.edit().putBoolean("bg_asr_enabled", it).apply()
-                                }
-                                keepUiAlight()
-                            },
-                            accentColor = AccentColor,
-                            accentOnColor = AccentOnColor
-                        )
-                        if (isRealtimeSubtitleEnabled && realtimeSubtitleStatus.isNotBlank()) {
-                            Text(
-                                text = realtimeSubtitleStatus,
-                                color = if (realtimeDone) AccentColor else Color.White.copy(alpha = 0.6f),
-                                fontSize = 9.sp,
-                                lineHeight = 12.sp,
-                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-                            )
-                        }
-                        // v127b：实时字幕生成进度条（全片生成完则不再显示）
-                        if (isRealtimeSubtitleEnabled && !realtimeDone && realtimeTotalMs > 0L) {
-                            LinearProgressIndicator(
-                                // v127f 修复闪退：progress 的 lambda 是**延迟求值**的，
-                                // 外层 if 判断通过后，total 仍可能在求值前被引擎 restart()
-                                // 重置为 0（切语言/切媒体/重新生成都会），此时 x/0 得到 NaN，
-                                // 而 coerceIn 对 NaN 无效 → Compose 抛
-                                // "IllegalArgumentException: current must not be NaN" 崩溃。
-                                // 因此必须在 lambda 内部再判一次分母。
-                                progress = {
-                                    val total = realtimeTotalMs
-                                    if (total <= 0L) 0f
-                                    else (realtimeGeneratedMs.toFloat() / total).coerceIn(0f, 1f)
-                                },
-                                color = AccentColor,
-                                trackColor = Color.White.copy(alpha = 0.12f),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(3.dp)
-                                    .padding(start = 4.dp, end = 4.dp)
-                            )
-                        }
-
-                        // v127e：重新生成 / 导出（字幕悬浮窗操作）
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(AccentColor.copy(alpha = 0.85f))
-                                    .clickable {
-                                        keepUiAlight()
-                                        regenerateRealtimeSubtitle()
-                                    }
-                                    .padding(vertical = 7.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    stringResource(R.string.subtitle_regenerate),
-                                    color = AccentOnColor,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.12f))
-                                    .clickable {
-                                        keepUiAlight()
-                                        exportSubtitleSrt()
-                                    }
-                                    .padding(vertical = 7.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    stringResource(R.string.subtitle_export_srt),
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-
-                        // v2.0.136：字幕源选择器 —— 实时 AI 生成 / 本地已保存的历史字幕
-                        var savedSubtitleFiles by remember { mutableStateOf<List<File>>(emptyList()) }
-                        LaunchedEffect(isSubtitleQuickPanelOpen, selectedMediaItem.uri) {
-                            if (!isSubtitleQuickPanelOpen) return@LaunchedEffect
-                            val base = SubtitleExporter.safeBaseName(selectedMediaItem.title)
-                            savedSubtitleFiles = withContext(Dispatchers.IO) {
-                                // 只展示最新 5 份，避免面板过长
-                                SubtitleExporter.listSavedSubtitles(context, base).take(5)
-                            }
-                        }
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                stringResource(R.string.subtitle_source_title),
-                                color = Color.White.copy(alpha = 0.7f),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            // 字幕源 1：实时 AI 生成
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isRealtimeSubtitleEnabled) AccentColor.copy(alpha = 0.30f)
-                                        else Color.White.copy(alpha = 0.08f)
-                                    )
-                                    .clickable {
-                                        keepUiAlight()
-                                        isRealtimeSubtitleEnabled = true
-                                        if (isMemoryModeEnabled) {
-                                            prefs.edit().putBoolean("realtime_subtitle_enabled", true).apply()
-                                        }
-                                    }
-                                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    stringResource(R.string.subtitle_source_realtime),
-                                    color = if (isRealtimeSubtitleEnabled) AccentColor else Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isRealtimeSubtitleEnabled) FontWeight.Bold else FontWeight.Normal,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            // 字幕源 2..n：data 目录 subtitles/ 下的历史字幕（最新在前）
-                            savedSubtitleFiles.forEach { f ->
-                                val selected = !isRealtimeSubtitleEnabled && loadedSubtitleFileName == f.name
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            if (selected) AccentColor.copy(alpha = 0.30f)
-                                            else Color.White.copy(alpha = 0.08f)
-                                        )
-                                        .clickable {
-                                            keepUiAlight()
-                                            loadSavedSubtitleFile(f)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        f.name,
-                                        color = if (selected) AccentColor else Color.White.copy(alpha = 0.85f),
-                                        fontSize = 10.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-
-                        // v2.1.232：字幕外观 / 布局 / 时间 —— 与完整设置面板**同一份实现**
-                        //（此前悬浮窗完全缺这块，想调字号颜色必须先进完整设置）
-                        var styleSecExpanded by remember { mutableStateOf(false) }
-                        var layoutSecExpanded by remember { mutableStateOf(false) }
-                        SubtitleStyleSettings(
-                            subtitleFont = subtitleFont,
-                            onFontChange = { subtitleFont = it },
-                            fontSizeSp = subtitleFontSizeSp,
-                            onFontSizeChange = { subtitleFontSizeSp = it },
-                            fontWeightVal = subtitleFontWeightVal,
-                            onFontWeightChange = { subtitleFontWeightVal = it },
-                            isItalic = isSubtitleItalic,
-                            onItalicChange = { isSubtitleItalic = it },
-                            selectedColorOption = subtitleColorOpt,
-                            onColorOptionChange = { subtitleColorOpt = it },
-                            textAlpha = subtitleTextAlpha,
-                            onTextAlphaChange = { subtitleTextAlpha = it },
-                            selectedStrokeOption = subtitleStrokeOpt,
-                            onStrokeOptionChange = { subtitleStrokeOpt = it },
-                            selectedBgOption = subtitleBgOpt,
-                            onBgOptionChange = { subtitleBgOpt = it },
-                            offsetYRatio = subtitleOffsetYRatio,
-                            onOffsetYRatioChange = { subtitleOffsetYRatio = it },
-                            offsetXRatio = subtitleOffsetXRatio,
-                            onOffsetXRatioChange = { subtitleOffsetXRatio = it },
-                            delayMs = subtitleDelayMs,
-                            onDelayMsChange = { subtitleDelayMs = it },
-                            liveDelaySec = liveDelaySec,
-                            onLiveDelaySecChange = { liveDelaySec = it },
-                            isLiveStream = isLiveStream,
-                            textAlign = subtitleTextAlignOpt,
-                            onTextAlignChange = { subtitleTextAlignOpt = it },
-                            maxLines = subtitleMaxLines,
-                            onMaxLinesChange = { subtitleMaxLines = it },
-                            vrIpdOffsetRatio = vrIpdOffsetRatio,
-                            onVrIpdOffsetRatioChange = { vrIpdOffsetRatio = it },
-                            accentColor = AccentColor,
-                            accentOnColor = AccentOnColor,
-                            onUserActivity = { keepUiAlight() },
-                            styleExpanded = styleSecExpanded,
-                            onStyleExpandedChange = { styleSecExpanded = it },
-                            layoutExpanded = layoutSecExpanded,
-                            onLayoutExpandedChange = { layoutSecExpanded = it }
-                        )
-
-                        // 打开完整字幕设置（设置面板并展开字幕分组）
-                        TextButton(
-                            onClick = {
-                                isSubtitleQuickPanelOpen = false
-                                isSettingsDialogOpen = true
-                                expandedSettings = expandedSettings + "sub"
-                                keepUiAlight()
-                            },
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                              Text(
-                                  stringResource(R.string.subtitle_open_full_settings),
-                                  color = AccentColor,
-                                  fontSize = 10.sp
-                              )
-                          }
-                      }
-
-                        // 右侧滚动条：仅当内容超出限高时才出现
-                        if (quickPanelScroll.maxValue > 0) {
-                            // 可视高度 = 上面的限高（与 Column 的 heightIn 同一个 viewportH），
-                            // 内容超过它才会走到这里
-                            val viewH = with(density) { viewportH.toPx() }
-                            val totalH = quickPanelScroll.maxValue + viewH
-                            val thumbRatio = (viewH / totalH).coerceIn(0.15f, 1f)
-                            val progress = quickPanelScroll.value.toFloat() /
-                                quickPanelScroll.maxValue.toFloat().coerceAtLeast(1f)
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.CenterEnd)
-                            // v2.0.137 修"面板底部一大块空白"：原先 fillMaxHeight()
-                            // 在 Box 里会填满**父级传入的最大约束**（整屏高），
-                            // 把 BoxWithConstraints/面板从内容高度撑到屏幕高——
-                            // 实测面板 593dp 而内容视口仅 480dp，底部多出 ~113dp 空白。
-                            // 改为与内容视口同高（matchParentSize 在本版本
-                            // Compose 无法 import，见 v2.0.128 记录）。
-                            // v2.6.10：高度改用 viewportH（单一来源），不再重复写 480.dp
-                            .height(viewportH)
-                                    .padding(vertical = 6.dp, horizontal = 2.dp)
-                                    .width(7.dp),
-                                contentAlignment = Alignment.TopEnd
-                            ) {
-                                // 轨道
-                                Box(
-                                    modifier = Modifier
-                                        .width(3.dp)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(Color.White.copy(alpha = 0.10f))
-                                )
-                                // 滑块
-                                Box(
-                                    modifier = Modifier
-                                        .width(3.dp)
-                                        .fillMaxHeight(thumbRatio)
-                                        .offset {
-                                            IntOffset(
-                                                0,
-                                                ((1f - thumbRatio) * progress * viewH).roundToInt()
-                                            )
-                                        }
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(AccentColor.copy(alpha = 0.75f))
-                                )
-                            }
-                        }
-                    }
-                  }
-              }
-          }
-
-        // 4. Secondary Settings Dialog Panel (Hides other UI, so shown independently at root level when open!)
-        AnimatedVisibility(
-            visible = isSettingsDialogOpen,
-            enter = fadeIn(animationSpec = tween(300, easing = EaseInOutCubic)) + 
-                    scaleIn(initialScale = 0.90f, animationSpec = tween(400, easing = CustomEaseOutBack)),
-            exit = fadeOut(animationSpec = tween(250, easing = EaseInOutCubic)) + 
-                   scaleOut(targetScale = 0.95f, animationSpec = tween(250, easing = EaseInOutCubic)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .clickable { isSettingsDialogOpen = false }
-                    .padding(horizontal = 40.dp, vertical = 20.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    border = BorderStroke(1.dp, Color(0x22FFFFFF)),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFC18171C)
-                    ),
-                    modifier = Modifier
-                        .widthIn(max = 560.dp)
-                        .fillMaxWidth()
-                        // v2.6.7：**必须给面板确定高度**，否则两列的 fillMaxHeight()
-                        // 会吃满父约束 → 面板内容总高超出可用高度 → 底部「记忆模式」
-                        // 一整行被挤出屏幕（用户报「找不到勾选/按钮」的真正原因）。
-                        // 撑满后 Row(weight=1f) 才有确定的剩余高度可分。
-                        .fillMaxHeight()
-                        .clickable(enabled = false) {} // Prevent click-through closing
-                        .testTag("secondary_settings_dialog_card")
-                ) {
-                    Column(
-                        // v2.6.7：撑满 Card 高度，让下面 Row 的 weight(1f) 生效
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-
-                                // ============================================================
-                                // 设置面板拆分（v79 JIT 超限修复）
-                                // 原因：整个设置面板 Column 编译为单个方法达 36264 指令，
-                                //   超过 ART JIT 编译上限（~28000）后被降级为解释执行，
-                                //   导致设置面板打开/更新时极卡（字幕 5 句后停更、翻译不刷新）。
-                                // 方案：按功能块拆成 9 个局部 @Composable 函数（各自独立编译），
-                                //   每个函数指令数远低于 JIT 上限。注意：局部函数必须标注
-                                //   @Composable（否则不能调用 Compose API）；如需强制不内联
-                                //   可加 @NonInline（androidx.compose.runtime.NonInline）。
-                                // ============================================================
-
-                                /** 设置面板头部：标题 + 工具按钮 + 关闭按钮 */
-                                @Composable
-                                fun SettingsHeader() {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = null,
-                                    tint = AccentColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = stringResource(R.string.settings_dialog_title),
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                // v92: 从控制栏移入的工具按钮（局域网/视频信息/音轨选择）
-                                Spacer(modifier = Modifier.width(8.dp))
-                                IconButton(
-                                    onClick = { smbDialogOpen = true; keepUiAlight() },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FolderOpen,
-                                        contentDescription = stringResource(R.string.action_lan_play),
-                                        tint = Color.White.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { showVideoInfo(); keepUiAlight() },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Info,
-                                        contentDescription = stringResource(R.string.action_media_info),
-                                        tint = Color.White.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                IconButton(
-                                    onClick = {
-                                        if (selectedAudioTrack == -1) selectedAudioTrack = 0
-                                        if (selectedTextTrack == -1) selectedTextTrack = 0
-                                        trackDialogOpen = true; keepUiAlight()
-                                    },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.QueueMusic,
-                                        contentDescription = stringResource(R.string.action_track_select),
-                                        tint = Color.White.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                            IconButton(
-                                onClick = { isSettingsDialogOpen = false },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = stringResource(R.string.action_close),
-                                    tint = Color.White.copy(alpha = 0.6f)
-                                )
-                            }
-                        }
-                                }
-                                /** 区块 0：UI 主题与玻璃效果（8/2 功能） */
-                                @Composable
-                                fun SettingsSection0() {
-                                Text(
-                                    text = stringResource(R.string.settings_group_ui_theme),
-                                    color = AccentColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                // v2.9.2：静态预设 6 → 16 套，单行 SpaceBetween 会把色点挤到
-                                //   互相贴住 → 改为每行 8 个、共 2 行的网格；不足一行的尾部补
-                                //   等宽占位，保证与上一行逐列对齐（同下方玻璃档 chip 的做法）。
-                                // v2.4.45 两条约束继续保留：SpaceBetween 铺满行、选中不改尺寸
-                                //   （选中只加粗白环，避免换主题时整行色点跟着抖）。
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    UiThemes.list.chunked(8).forEach { rowThemes ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            rowThemes.forEach { t ->
-                                                val selected = uiThemeId == t.id
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(26.dp)
-                                                        .clip(CircleShape)
-                                                        .background(t.accent)
-                                                        .border(
-                                                            width = if (selected) 2.dp else 1.dp,
-                                                            color = if (selected) Color.White
-                                                            else Color.White.copy(alpha = 0.3f),
-                                                            shape = CircleShape
-                                                        )
-                                                        .clickable {
-                                                            uiThemeId = t.id
-                                                            prefs.edit().putInt("ui_theme_id", t.id).apply()
-                                                            keepUiAlight()
-                                                        }
-                                                        .testTag("theme_dot_${t.id}")
-                                                )
-                                            }
-                                            repeat(8 - rowThemes.size) {
-                                                Spacer(modifier = Modifier.size(26.dp))
-                                            }
-                                        }
-                                    }
-                                }
-                                // v2.9.2：MD 莫奈取色（Android 12+ Material You 动态配色）。
-                                // 做成独立 chip 而非第 17 个色点：它没有固定颜色可展示，且低版本
-                                // 需要明确禁用并说明原因。点任意静态色点即自动退出 Monet；
-                                // 再点本 chip 关闭时回落到默认紫罗兰（DEFAULT_THEME_ID）。
-                                val monetOn = uiThemeId == UiThemes.MONET_THEME_ID
-                                val monetAvailable = UiThemes.isMonetAvailable()
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(50))
-                                        .background(if (monetOn) AccentColor else TranslucentWhite10)
-                                        .clickable(enabled = monetAvailable) {
-                                            val next = if (monetOn) UiThemes.DEFAULT_THEME_ID
-                                            else UiThemes.MONET_THEME_ID
-                                            uiThemeId = next
-                                            prefs.edit().putInt("ui_theme_id", next).apply()
-                                            keepUiAlight()
-                                        }
-                                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                                        .testTag("theme_monet_chip"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = stringResource(
-                                            if (monetAvailable) R.string.theme_name_monet
-                                            else R.string.theme_monet_unsupported
-                                        ),
-                                        color = if (monetOn) AccentOnColor
-                                        else Color.White.copy(alpha = if (monetAvailable) 1f else 0.45f),
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                // v2.4.45（主题选择界面布局优化）：
-                                // 原先「主题名 + 4 个玻璃档 chip」硬塞在**同一行**（SpaceBetween，
-                                // 且 chip 行**没有 weight**）—— 4 个中文 chip（实色 / 液体玻璃 / 磨砂 /
-                                // 高斯模糊）合计约 220dp，加上主题名远超设置面板**窄列**的可用宽度
-                                // → chip 被压扁、文字截断，甚至与左侧主题名互相叠压。
-                                // 现改为**独立成块 + 两列两行**（与下方「界面语言」块同款：`chunked` +
-                                // `weight(1f)` 等宽）—— 任何列宽下都不溢出，点击区也更大。
-                                // v2.9.2：Monet 模式也要显示「跟随系统壁纸」，故直接取已解析的 uiTheme
-                                Text(
-                                    text = stringResource(uiTheme.nameRes),
-                                    color = AccentColor,
-                                    fontSize = 12.sp
-                                )
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    listOf(
-                                        0 to stringResource(R.string.theme_solid),
-                                        1 to stringResource(R.string.theme_liquid_glass),
-                                        // v2.1.218：v2.1.217 的 4 档并回 3 档 ——
-                                        // Liquid 与 Liquid26 观感接近、选择意义不大，
-                                        // 已合并为一档并采用 iOS 26 的增强参数。
-                                        // v2.4.68：**删掉「高斯模糊」档**（用户要求）——
-                                        // 它与磨砂的差别只有"无颗粒 + 更白"，观感几乎分不出来。
-                                        2 to stringResource(R.string.theme_frosted_glass),
-                                    ).chunked(2).forEach { rowModes ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            rowModes.forEach { (m, label) ->
-                                                val sel = glassMode == m
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(50))
-                                                        .background(if (sel) AccentColor else TranslucentWhite10)
-                                                        .clickable {
-                                                            glassMode = m
-                                                            prefs.edit().putInt("ui_glass_mode", m).apply()
-                                                            keepUiAlight()
-                                                        }
-                                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                                        .testTag("glass_mode_$m"),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (sel) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-                                            // v2.4.68：档位从 4 个减到 3 个 → 第二行只剩「磨砂」一个，
-                                            // 若不给它右边补一个等宽占位，它会拉满整行、与上一行错位。
-                                            if (rowModes.size < 2) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
-                                // v2.4.49：移除「玻璃诊断」提示文字（调试用，正式界面不再展示）
-                                // v2.0.137：语言选择独立成块——原先塞在「主题名 … 玻璃模式」
-                                // 同一行的中间（内部还有 fillMaxWidth 的两行按钮），垂直居中后
-                                // 与左右内容互相叠压，表现为"语言选择叠在主题和玻璃效果上面"。
-                                val currentLangTag = remember(context) { LanguageManager.getTag(context) }
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        stringResource(R.string.ui_language),
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    // 6 种语言分两行排（一列太挤）
-                                    LanguageManager.options.chunked(3).forEach { rowTags ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            rowTags.forEach { tag ->
-                                                val sel = currentLangTag == tag
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(
-                                                            if (sel) AccentColor
-                                                            else Color.White.copy(alpha = 0.08f)
-                                                        )
-                                                        .clickable {
-                                                            keepUiAlight()
-                                                            LanguageManager.apply(context, tag)
-                                                        }
-                                                        .padding(vertical = 6.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        LanguageManager.displayName(tag),
-                                                        color = if (sel) AccentOnColor
-                                                        else Color.White.copy(alpha = 0.75f),
-                                                        fontSize = 9.sp,
-                                                        fontWeight = if (sel) FontWeight.Bold
-                                                        else FontWeight.Normal,
-                                                        textAlign = TextAlign.Center
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Text(
-                                        stringResource(R.string.ui_language_hint),
-                                        color = Color.White.copy(alpha = 0.4f),
-                                        fontSize = 8.sp
-                                    )
-                                }
-                                }
-                                /** 区块 1：镜头投影与视角模式（2D/鱼眼/360/180/盒子 + 变形） */
-                                @Composable
-                                fun SettingsSection1() {
-                                Text(
-                                    text = stringResource(R.string.settings_group_projection),
-                                    color = AccentColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    // Smart projection detection master switch (8/1 功能)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.projection_auto_detect), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(stringResource(R.string.projection_auto_detect_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        AuraSwitch(
-                                            checked = isSmartProjectionEnabled,
-                                            onCheckedChange = {
-                                                isSmartProjectionEnabled = it
-                                                prefs.edit().putBoolean("smart_projection_enabled", it).apply()
-                                                keepUiAlight()
-                                            },
-                                            accentColor = AccentColor,
-                                            accentOnColor = AccentOnColor
-                                        )
-                                    }
-
-                                    // 强制视频类型判断（自动/2D/360°/180°/3D 左右/3D 上下）
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(stringResource(R.string.force_video_type), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        val forceOptions = listOf(
-                                            0 to stringResource(R.string.auto),
-                                            1 to "2D",
-                                            2 to "360°",
-                                            3 to "180°",
-                                            4 to stringResource(R.string.video_type_3d_sbs),
-                                            5 to stringResource(R.string.video_type_3d_tab)
-                                        )
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            forceOptions.forEach { (type, label) ->
-                                                val isSel = forceVideoType == type
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(if (isSel) AccentColor else Color.White.copy(alpha = 0.08f))
-                                                        .clickable {
-                                                            forceVideoType = type
-                                                            prefs.edit().putInt("force_video_type", type).apply()
-                                                            keepUiAlight()
-                                                        }
-                                                        .padding(vertical = 6.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (isSel) AccentOnColor else Color.White,
-                                                        fontSize = 9.sp,
-                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Text(
-                                            text = stringResource(R.string.force_video_type_desc),
-                                            color = Color.White.copy(alpha = 0.4f),
-                                            fontSize = 8.sp
-                                        )
-                                    }
-
-                                    Text(stringResource(R.string.view_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    ProjectionMode.values().toList().chunked(3).forEach { rowModes ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            rowModes.forEach { mode ->
-                                                val isSelected = projectionMode == mode
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(32.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable {
-                                                            projectionMode = mode
-                                                            projectionModeUserAdjusted = true
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = stringResource(mode.labelRes),
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                            // Fill empty spaces if a row is incomplete
-                                            repeat(3 - rowModes.size) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // v2.1.211：**鱼眼视场角** —— 仅在 FISHEYE 模式下显示
-                                // （其它模式读不到这个值，显示出来只会让人困惑）。
-                                // 不同鱼眼镜头片源的实际视角不同（常见 180/190/200/220），
-                                // 选错会出现「画面鼓成球」或「中心挤成一团」。
-                                if (projectionMode == ProjectionMode.FISHEYE) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(stringResource(R.string.fisheye_fov), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            listOf(180, 190, 200, 220).forEach { fov ->
-                                                val isSel = fisheyeFovDeg == fov
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(32.dp)
-                                                        .background(
-                                                            if (isSel) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable {
-                                                            fisheyeFovDeg = fov
-                                                            projectionModeUserAdjusted = true
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = "${fov}°",
-                                                        color = if (isSel) AccentOnColor else Color.White.copy(alpha = 0.8f),
-                                                        fontSize = 10.sp,
-                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // ⚠️ v2.1.210 曾在此处新增「投影模式」选择器 —— **已删除**。
-                                // 原因：项目在下方「视角格式」(`R.string.view_format`) 处**早就有**
-                                // 同一个 `ProjectionMode` 的选择器（带 projectionModeUserAdjusted 标记）。
-                                // 我当初 grep `R.string.proj_*` 没命中就误判为「没有入口」，
-                                // 但那里是用 `mode.labelRes` **动态取标签**，静态 grep 搜不到 ——
-                                // 教训：查「某枚举有没有 UI 入口」要用**枚举类型名**搜，不要搜资源 key。
-                                // 新增的 EAC 会自动出现在原有选择器里（它遍历 ProjectionMode.values()），
-                                // 无需额外 UI。
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(stringResource(R.string.stereo_format), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        StereoMode.values().forEach { mode ->
-                                            val isSelected = stereoMode == mode
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(32.dp)
-                                                    .background(
-                                                        if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    )
-                                                    .clickable {
-                                                        stereoMode = mode
-                                                        // 🔴 v2.6.9：**手动选立体格式必须锁住自动检测**。
-                                                        //    以前只改 stereoMode 不置标志，于是下一次
-                                                        //    onVideoSizeChanged 触发智能检测时：
-                                                        //    2:1 的上下拼接全景会被判成「360 + 单目」，
-                                                        //    检测发现 stereo 不同 → 直接把你选的「上下3D」改回单目。
-                                                        //    表现就是「选了上下3D没反应 / 过一会儿自己变回2D」，
-                                                        //    上下屏 VR 片源几乎一定会踩到。
-                                                        projectionModeUserAdjusted = true
-                                                        keepUiAlight()
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = when (mode) {
-                                                        StereoMode.MONO -> stringResource(R.string.stereo_2d)
-                                                        StereoMode.SBS -> stringResource(R.string.stereo_sbs)
-                                                        StereoMode.TAB -> stringResource(R.string.stereo_tab)
-                                                    },
-                                                    color = if (isSelected) AccentOnColor else Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(stringResource(R.string.video_mirror), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        listOf(false to stringResource(R.string.mirror_normal), true to stringResource(R.string.mirror_hflip)).forEach { (mirrored, label) ->
-                                            val isSelected = isVideoMirrored == mirrored
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(32.dp)
-                                                    .background(
-                                                        if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    )
-                                                    .clickable {
-                                                        isVideoMirrored = mirrored
-                                                        keepUiAlight()
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = label,
-                                                    color = if (isSelected) AccentOnColor else Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                 )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 陀螺仪朝向模式：决定"头部转动"如何映射为画面视角。
-                                // 手持横屏与 VR 眼镜平放时正确的轴向完全不同，选错会导致方向错乱。
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(stringResource(R.string.gyro_orientation_mode), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        listOf(
-                                            VRSensorManager.OrientationMode.HANDHELD to stringResource(R.string.gyro_handheld),
-                                            VRSensorManager.OrientationMode.VR_BOX to stringResource(R.string.gyro_vr_flat)
-                                        ).forEach { (mode, label) ->
-                                            val isSelected = gyroOrientationMode == mode
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(32.dp)
-                                                    .background(
-                                                        if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    )
-                                                    .clickable {
-                                                        gyroOrientationMode = mode
-                                                        keepUiAlight()
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = label,
-                                                    color = if (isSelected) AccentOnColor else Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Text(
-                                        text = stringResource(R.string.gyro_orientation_desc),
-                                        color = Color.White.copy(alpha = 0.4f),
-                                        fontSize = 8.sp
-                                    )
-                                }
-
-                                // v125：陀螺仪转向反转。默认关闭（v125 起已修正为正确方向），
-                                // 个别机型或 VR 眼镜模式下若仍上下/左右相反，打开此项即可。
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.gyro_invert),
-                                    desc = stringResource(R.string.gyro_invert_desc),
-                                    checked = gyroInverted,
-                                    onChanged = { gyroInverted = it; keepUiAlight() },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(stringResource(R.string.audio_channel_mirror), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        listOf(false to stringResource(R.string.audio_normal), true to stringResource(R.string.audio_swapped)).forEach { (mirrored, label) ->
-                                            val isSelected = isAudioMirrored == mirrored
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(32.dp)
-                                                    .background(
-                                                        if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    )
-                                                    .clickable {
-                                                        isAudioMirrored = mirrored
-                                                        keepUiAlight()
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = label,
-                                                    color = if (isSelected) AccentOnColor else Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                 )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (projectionMode == ProjectionMode.VR_180) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(stringResource(R.string.dome_half_crop), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            listOf(1 to stringResource(R.string.dome_half_left), 0 to stringResource(R.string.dome_half_right)).forEach { (half, label) ->
-                                                val isSelected = domeHalfSelect == half
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(32.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable {
-                                                            domeHalfSelect = half
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(stringResource(R.string.fov_title), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        Text("${fovDeg.toInt()}°", color = AccentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    Slider(
-                                        value = fovDeg,
-                                        onValueChange = {
-                                            fovDeg = it
-                                            keepUiAlight()
-                                        },
-                                        valueRange = 25f..125f,
-                                        colors = SliderDefaults.colors(
-                                            thumbColor = AccentColor,
-                                            activeTrackColor = AccentColor,
-                                            inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                                        ),
-                                        modifier = Modifier
-                                            .height(26.dp)
-                                            .testTag("fov_slider")
-                                    )
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(stringResource(R.string.warp_title), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    WarpMode.values().toList().chunked(3).forEach { rowModes ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            rowModes.forEach { mode ->
-                                                val isSelected = warpMode == mode
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(30.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable {
-                                                            warpMode = mode
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = stringResource(mode.labelRes),
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                            // Fill empty spaces if a row is incomplete
-                                            repeat(3 - rowModes.size) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                    
-                                    if (warpMode != WarpMode.NONE) {
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            val label = when (warpMode) {
-                                                WarpMode.CYLINDER_RECT -> stringResource(R.string.warp_equirect_cylinder)
-                                                WarpMode.CYLINDER -> stringResource(R.string.warp_equirect_column)
-                                                WarpMode.SPHERE -> stringResource(R.string.warp_sphere_expand)
-                                                WarpMode.CURVE -> stringResource(R.string.warp_ring_curve)
-                                                WarpMode.ANTI_SPHERE -> stringResource(R.string.warp_sphere_shrink)
-                                                WarpMode.ANTI_CURVE -> stringResource(R.string.warp_curve_shrink)
-                                                else -> stringResource(R.string.warp_zoom_curve)
-                                            }
-                                            Text(label, color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                            Text(String.format("%.2f", videoCurvature), color = AccentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        Slider(
-                                            value = videoCurvature,
-                                            onValueChange = {
-                                                videoCurvature = it
-                                                keepUiAlight()
-                                            },
-                                            valueRange = 0.0f..0.8f,
-                                            colors = SliderDefaults.colors(
-                                                thumbColor = AccentColor,
-                                                activeTrackColor = AccentColor,
-                                                inactiveTrackColor = Color.White.copy(alpha = 0.1f)
-                                            ),
-                                            modifier = Modifier.height(26.dp)
-                                        )
-                                    }
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(stringResource(R.string.max_resolution_title), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                    MaxResolution.values().toList().chunked(3).forEach { rowResolutions ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            rowResolutions.forEach { res ->
-                                                val isSelected = maxResolution == res
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(30.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable {
-                                                            maxResolution = res
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = stringResource(res.labelRes),
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                            // Fill empty spaces if a row is incomplete
-                                            repeat(3 - rowResolutions.size) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
-
-                                /** 区块：Google Cardboard VR 优化（透镜反畸变 / 适眼巨幕 / 免触控凝视） */
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(
-                                        text = "Google Cardboard / VR 盒子优化",
-                                        color = AccentColor,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(top = 4.dp)
-                                    )
-                                    ExperimentalSwitchRow(
-                                        title = stringResource(R.string.cardboard_anti_distortion),
-                                        desc = stringResource(R.string.cardboard_anti_distortion_desc),
-                                        checked = isCardboardDistortionEnabled,
-                                        onChanged = { isCardboardDistortionEnabled = it },
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor
-                                    )
-                                    ExperimentalSwitchRow(
-                                        title = stringResource(R.string.gaze_pointer_enabled),
-                                        desc = stringResource(R.string.gaze_pointer_enabled_desc),
-                                        checked = isGazePointerEnabled,
-                                        onChanged = { isGazePointerEnabled = it },
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor
-                                    )
-                                    // 参考 vrplayer-gemini：左右眼序对调
-                                    ExperimentalSwitchRow(
-                                        title = stringResource(R.string.vr_swap_eyes),
-                                        desc = stringResource(R.string.vr_swap_eyes_desc),
-                                        checked = isEyesSwapped,
-                                        onChanged = { isEyesSwapped = it },
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor
-                                    )
-                                    // 物理瞳距预设档位（58mm / 64mm / 70mm）
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(stringResource(R.string.vr_ipd_title), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                            val estimatedMm = (64 + vrIpdOffsetRatio * 100f).roundToInt()
-                                            Text("${estimatedMm}mm", color = AccentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            listOf(
-                                                -0.06f to R.string.vr_ipd_preset_narrow,
-                                                0.0f to R.string.vr_ipd_preset_standard,
-                                                0.06f to R.string.vr_ipd_preset_wide
-                                            ).forEach { (offset, labelRes) ->
-                                                val isSelected = kotlin.math.abs(vrIpdOffsetRatio - offset) < 0.02f
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(28.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.08f),
-                                                            shape = RoundedCornerShape(6.dp)
-                                                        )
-                                                        .clickable {
-                                                            vrIpdOffsetRatio = offset
-                                                            currentGlSurfaceView?.renderer?.vrIpdOffsetRatio = offset
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = stringResource(labelRes),
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Medium
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(stringResource(R.string.cardboard_cinema_scale), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        Text("${(vrCinemaScale * 100).toInt()}%", color = AccentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    Slider(
-                                        value = vrCinemaScale,
-                                        onValueChange = {
-                                            vrCinemaScale = it
-                                            currentGlSurfaceView?.renderer?.vrCinemaScale = it
-                                            keepUiAlight()
-                                        },
-                                        valueRange = 0.60f..1.0f,
-                                        colors = SliderDefaults.colors(
-                                            thumbColor = AccentColor,
-                                            activeTrackColor = AccentColor,
-                                            inactiveTrackColor = Color.White.copy(alpha = 0.1f)
-                                        ),
-                                        modifier = Modifier.height(26.dp)
-                                    )
-                                }
-                                }
-                                /** 区块 2：8K 硬解实验开关（SPS level 适配/强制硬解/软解回退） */
-                                @Composable
-                                fun SettingsSection8K() {
-                                Text(
-                                    text = stringResource(R.string.group_8k_hw),
-                                    color = AccentColor,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.level_patch),
-                                    desc = stringResource(R.string.level_patch_desc),
-                                    checked = levelPatchEnabled,
-                                    onChanged = { levelPatchEnabled = it },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.level51),
-                                    desc = stringResource(R.string.level51_desc),
-                                    checked = level51Enabled,
-                                    onChanged = { level51Enabled = it },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.force_hw_decoder),
-                                    desc = stringResource(R.string.force_hw_decoder_desc),
-                                    checked = forceHwDecoderEnabled,
-                                    onChanged = { forceHwDecoderEnabled = it },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.spoof_resolution),
-                                    desc = stringResource(R.string.spoof_resolution_desc),
-                                    checked = spoofResolutionEnabled,
-                                    onChanged = { spoofResolutionEnabled = it },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.downscale_output),
-                                    desc = stringResource(R.string.downscale_output_desc),
-                                    checked = downscaleOutputEnabled,
-                                    onChanged = { downscaleOutputEnabled = it },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.add_codec_params),
-                                    desc = stringResource(R.string.add_codec_params_desc),
-                                    checked = addCodecParamsEnabled,
-                                    onChanged = { addCodecParamsEnabled = it },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-                                ExperimentalSwitchRow(
-                                    title = stringResource(R.string.auto_fallback_soft),
-                                    desc = stringResource(R.string.auto_fallback_soft_desc),
-                                    checked = autoFallbackSoftEnabled,
-                                    onChanged = { autoFallbackSoftEnabled = it },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-
-                                // v2.6.12：系统编解码能力检测（读取 MediaCodec 上报的能力，
-                                // 列出支持的编码/封装/最大分辨率）。点按钮才扫描，不拖慢设置面板。
-                                CodecCapabilitySection(
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor,
-                                    decoderEngine = decoderEngine,
-                                    onInteract = { keepUiAlight() }
-                                )
-
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color(0x0CFFFFFF), shape = RoundedCornerShape(10.dp))
-                                        .padding(8.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.panorama_note),
-                                        color = Color.White.copy(alpha = 0.5f),
-                                        fontSize = 9.sp,
-                                        lineHeight = 12.sp
-                                    )
-                                }
-                                }
-                                /** 区块 3：悬浮球控速与播放倍速 */
-                                @Composable
-                                fun SettingsSection3() {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-
-                                    Text(
-                                        text = stringResource(R.string.settings_group_floating_ball),
-                                        color = AccentColor,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                isFloatingBallEnabled = !isFloatingBallEnabled
-                                                keepUiAlight()
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.floating_ball_enable), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(stringResource(R.string.floating_ball_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        AuraSwitch(
-                                            checked = isFloatingBallEnabled,
-                                            onCheckedChange = {
-                                                isFloatingBallEnabled = it
-                                                keepUiAlight()
-                                            },
-                                            accentColor = AccentColor,
-                                            accentOnColor = AccentOnColor,
-                                            modifier = Modifier.scale(0.8f).testTag("floating_ball_switch")
-                                        )
-                                    }
-
-                                    // v2.0.165：快进 / 后退悬浮球 —— 各自独立开关，默认均为**关**
-                                    BallSwitchRow(
-                                        title = stringResource(R.string.seek_ball_forward_enable),
-                                        desc = stringResource(R.string.seek_ball_desc),
-                                        checked = isSeekForwardBallEnabled,
-                                        onChange = { isSeekForwardBallEnabled = it },
-                                        tag = "seek_forward_ball_switch",
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onInteract = { keepUiAlight() }
-                                    )
-                                    BallSwitchRow(
-                                        title = stringResource(R.string.seek_ball_backward_enable),
-                                        desc = stringResource(R.string.seek_ball_desc),
-                                        checked = isSeekBackwardBallEnabled,
-                                        onChange = { isSeekBackwardBallEnabled = it },
-                                        tag = "seek_backward_ball_switch",
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onInteract = { keepUiAlight() }
-                                    )
-                                    // v2.1.208：时间标记球开关（与上面两个同组、同一样式组件）
-                                    BallSwitchRow(
-                                        title = stringResource(R.string.marker_ball_enable),
-                                        desc = stringResource(R.string.marker_ball_desc),
-                                        checked = isMarkerBallEnabled,
-                                        onChange = { isMarkerBallEnabled = it },
-                                        tag = "marker_ball_switch",
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onInteract = { keepUiAlight() }
-                                    )
-                                    // v2.4.67：信息球（时钟 / 电量）—— 同组、同一行样式组件
-                                    BallSwitchRow(
-                                        title = stringResource(R.string.info_ball_clock_enable),
-                                        desc = stringResource(R.string.info_ball_clock_desc),
-                                        checked = isClockBallEnabled,
-                                        onChange = { isClockBallEnabled = it },
-                                        tag = "clock_ball_switch",
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onInteract = { keepUiAlight() }
-                                    )
-                                    BallSwitchRow(
-                                        title = stringResource(R.string.info_ball_battery_enable),
-                                        desc = stringResource(R.string.info_ball_battery_desc),
-                                        checked = isBatteryBallEnabled,
-                                        onChange = { isBatteryBallEnabled = it },
-                                        tag = "battery_ball_switch",
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onInteract = { keepUiAlight() }
-                                    )
-                                    // v2.6.4：播放控制球 / 性能球（同一组、同一样式）
-                                    BallSwitchRow(
-                                        title = stringResource(R.string.control_ball_enable),
-                                        desc = stringResource(R.string.control_ball_desc),
-                                        checked = isPlayBallEnabled,
-                                        onChange = { isPlayBallEnabled = it },
-                                        tag = "play_ball_switch",
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onInteract = { keepUiAlight() }
-                                    )
-                                    BallSwitchRow(
-                                        title = stringResource(R.string.perf_ball_enable),
-                                        desc = stringResource(R.string.perf_ball_desc),
-                                        checked = isPerfBallEnabled,
-                                        onChange = { isPerfBallEnabled = it },
-                                        tag = "perf_ball_switch",
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onInteract = { keepUiAlight() }
-                                    )
-
-                                    if (isFloatingBallEnabled) {
-                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Text(stringResource(R.string.floating_ball_speed), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                listOf(1.5f to "1.5X", 2.0f to "2.0X", 3.0f to "3.0X").forEach { (speed, label) ->
-                                                    val isSelected = floatingBallSpeed == speed
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .weight(1f)
-                                                            .height(30.dp)
-                                                            .background(
-                                                                if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                                shape = RoundedCornerShape(8.dp)
-                                                            )
-                                                            .clickable {
-                                                                floatingBallSpeed = speed
-                                                                keepUiAlight()
-                                                            },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = label,
-                                                            color = if (isSelected) AccentOnColor else Color.White,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.SemiBold
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(stringResource(R.string.base_playback_speed), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            listOf(0.75f to "0.75X", 1.0f to "1.0X", 1.25f to "1.25X", 1.5f to "1.5X", 2.0f to "2.0X").forEach { (speed, label) ->
-                                                val isSelected = basePlaybackSpeed == speed
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(30.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable {
-                                                            basePlaybackSpeed = speed
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                }
-                                /** 区块 4：解码内核与帧率限制 */
-                                @Composable
-                                fun SettingsSection4() {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        text = stringResource(R.string.settings_group_decoder),
-                                        color = AccentColor,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    // 解码器切换 EXO/MPV
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(stringResource(R.string.decoder_engine), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                        // v2.1.232：IJK 加入「预留位」。是否置灰**由枚举自己说了算**
-                                        //（DecoderEngine.isImplemented）—— 将来接好了只需改那一处，UI 不用动。
-                                        // v2.1.236：改成 filter 只展示**已启用**的内核 ——
-                                        // 停用的（如 MPV，见 MPV_ENABLED）会**直接不出现**，
-                                        // 而不是显示成置灰的「开发中」（那会让人以为功能坏了）。
-                                        // ⚠️ 过滤依据仍是 isImplemented，所以启用/停用内核
-                                        //    依然不需要动这里。
-                                        DecoderEngine.values().filter { it.isImplemented }.forEach { engine ->
-                                            // 过滤后恒为 false，保留是为了兼容下面依赖它的样式分支
-                                            val isPlaceholder = !engine.isImplemented
-                                            val isSelected = !isPlaceholder && decoderEngine == engine
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(30.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable(enabled = !isPlaceholder) {
-                                                            decoderEngine = engine
-                                                            Toast.makeText(context, context.getString(R.string.toast_decoder_switched, context.getString(engine.labelRes)), Toast.LENGTH_SHORT).show()
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = if (isPlaceholder) {
-                                                            stringResource(engine.labelRes) + " · " + stringResource(R.string.decoder_coming_soon)
-                                                        } else stringResource(engine.labelRes),
-                                                        color = when {
-                                                            isPlaceholder -> Color.White.copy(alpha = 0.35f)
-                                                            isSelected -> AccentOnColor
-                                                            else -> Color.White
-                                                        },
-                                                        fontSize = if (isPlaceholder) 9.sp else 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // v2.1.232：**解码器参数（预留）** ——
-                                    // 用户要求「设置里预留地方修改」。这里按当前选中的内核留出一块
-                                    // 参数区：每个内核将来可以挂自己的调参项（缓冲/探测尺寸/硬解策略…）。
-                                    // 未接通的内核显示说明文案，接好后把分支内容替换成真实控件即可。
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color.White.copy(alpha = 0.04f))
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.decoder_params_section) +
-                                                " · " + stringResource(decoderEngine.labelRes),
-                                            color = Color.White.copy(alpha = 0.55f),
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        if (!decoderEngine.isImplemented) {
-                                            Text(
-                                                text = stringResource(R.string.decoder_params_placeholder),
-                                                color = Color.White.copy(alpha = 0.4f),
-                                                fontSize = 8.sp,
-                                                lineHeight = 11.sp
-                                            )
-                                        } else if (decoderEngine == DecoderEngine.IJK) {
-                                            // v2.1.233：IJK 已接通 → 挂上真实调参项。
-                                            // 改任何一项都会更新 ijkOptions state，而它是重建 effect 的 key，
-                                            // 因此改完自动重建播放器并从原位置续播，无需「应用」按钮。
-                                            IjkOptionsPanel(
-                                                options = ijkOptions,
-                                                onOptionsChange = { ijkOptions = it },
-                                                accentColor = AccentColor,
-                                                accentOnColor = AccentOnColor,
-                                                defaultBufferLabel = stringResource(R.string.ijk_buffer_default)
-                                            )
-                                        } else if (decoderEngine == DecoderEngine.MPV) {
-                                            // v2.1.235：MPV 的 native 库不进 APK，
-                                            // 所以先给一个"解码库"区块（未装时是下载入口）
-                                            MpvLibPanel(
-                                                context = context,
-                                                accentColor = AccentColor,
-                                                accentOnColor = AccentOnColor
-                                            )
-                                            // v2.1.234：MPV 参数（同样的机制：改完自动重建 + 续播）
-                                            MpvOptionsPanel(
-                                                options = mpvOptions,
-                                                onOptionsChange = { mpvOptions = it },
-                                                accentColor = AccentColor,
-                                                accentOnColor = AccentOnColor,
-                                                defaultLabel = stringResource(R.string.ijk_buffer_default)
-                                            )
-                                        } else {
-                                            // EXO 目前可调项已在下面「软件/硬件解码」等开关里，
-                                            // 这里保留给将来与内核绑定的参数。
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Text(
-                                                    text = stringResource(R.string.decoder_coming_soon),
-                                                    color = Color.White.copy(alpha = 0.35f),
-                                                    fontSize = 8.sp
-                                                )
-                                                Text(
-                                                    text = stringResource(decoderEngine.labelRes),
-                                                    color = AccentColor,
-                                                    fontSize = 8.sp
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // v2.1.234：**视频信息** ——
-                                    // 显示当前片源的容器/编码/分辨率/帧率/码率/音轨/实际解码方式。
-                                    // 三个内核（Exo / IJK / MPV）各自能给的字段不同，统一由
-                                    // VideoInfoPanel 内部走 currentVideoInfo() 分发，这里不需要判断内核。
-                                    VideoInfoPanel(
-                                        player = playerInstance,
-                                        uri = currentVideoUri,
-                                        isSoftwareDecoding = isSoftwareDecoding,
-                                        accentColor = AccentColor
-                                    )
-
-                                    // 软硬解码切换
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(stringResource(R.string.decode_mode), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            listOf(false to stringResource(R.string.decode_hw), true to stringResource(R.string.decode_sw)).forEach { (isSw, label) ->
-                                                val isSelected = isSoftwareDecoding == isSw
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(30.dp)
-                                                        .background(
-                                                            if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .clickable {
-                                                            isSoftwareDecoding = isSw
-                                                            // v2.6.10：软件解码名也走资源（decode_sw），
-                                                            // 原硬编码中文会让英日韩用户看到「软件解码」
-                                                            Toast.makeText(
-                                                                context,
-                                                                context.getString(
-                                                                    R.string.toast_switched_codec,
-                                                                    context.getString(
-                                                                        if (isSw) R.string.decode_sw
-                                                                        else R.string.info_hw_decode
-                                                                    )
-                                                                ),
-                                                                Toast.LENGTH_SHORT
-                                                            ).show()
-                                                            keepUiAlight()
-                                                        },
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (isSelected) AccentOnColor else Color.White,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // 帧率限制 12/18/24/30/48/60/90/120
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(stringResource(R.string.fps_limit), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                        val fpsList = listOf(0 to stringResource(R.string.no_limit), 12 to "12", 18 to "18", 24 to "24", 30 to "30", 48 to "48", 60 to "60", 90 to "90", 120 to "120")
-                                        fpsList.chunked(5).forEach { rowFps ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                rowFps.forEach { (fpsVal, label) ->
-                                                    val isSelected = maxFps == fpsVal
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .weight(1f)
-                                                            .height(28.dp)
-                                                            .background(
-                                                                if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                                shape = RoundedCornerShape(6.dp)
-                                                            )
-                                                            .clickable {
-                                                                maxFps = fpsVal
-                                                                currentGlSurfaceView?.renderer?.maxFps = fpsVal
-                                                                keepUiAlight()
-                                                            },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = label,
-                                                            color = if (isSelected) AccentOnColor else Color.White,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.SemiBold
-                                                        )
-                                                    }
-                                                }
-                                                repeat(5 - rowFps.size) {
-                                                    Spacer(modifier = Modifier.weight(1f))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                }
-                                /** 区块 5：画质增强（MEMC 插帧 / FSR 超分） */
-                                @Composable
-                                fun SettingsSectionEnhance() {
-
-                                // FSR 的「当前判定结果」—— 与渲染侧用**同一个纯函数**算出来，
-                                // 这样 UI 上显示的原因文案与 renderer 的实际行为永远不会打架。
-                                val fsrDecision = remember(
-                                    videoSourceWidth, videoSourceHeight, fsrRuleMode, fsrCustomTarget
-                                ) {
-                                    VideoEnhanceRules.resolveFsr(
-                                        videoSourceWidth, videoSourceHeight, fsrRuleMode, fsrCustomTarget
-                                    )
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        text = stringResource(R.string.settings_group_enhance),
-                                        color = AccentColor,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    // ===== MEMC 插帧 =====
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(10.dp))
-                                            .clickable { isMemcEnabled = !isMemcEnabled; keepUiAlight() }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.memc_enabled), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(stringResource(R.string.memc_desc), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        AuraSwitch(
-                                            checked = isMemcEnabled,
-                                            onCheckedChange = { isMemcEnabled = it; keepUiAlight() },
-                                            accentColor = AccentColor,
-                                            accentOnColor = AccentOnColor,
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    }
-
-                                    // 目标帧率：仅插帧打开时才显示（关闭时它没有任何作用对象）
-                                    if (isMemcEnabled) {
-                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Text(stringResource(R.string.memc_target_fps), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                VideoEnhanceRules.MEMC_TARGET_FPS_OPTIONS.forEach { fps ->
-                                                    val isSelected = memcTargetFps == fps
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .weight(1f)
-                                                            .height(28.dp)
-                                                            .background(
-                                                                if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                                shape = RoundedCornerShape(6.dp)
-                                                            )
-                                                            .clickable { memcTargetFps = fps; keepUiAlight() },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = "$fps",
-                                                            color = if (isSelected) AccentOnColor else Color.White,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.SemiBold
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // ===== FSR 超分 =====
-                                    // 副标题直接显示「当前会怎样」，用户不用猜规则有没有生效
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color.White.copy(alpha = 0.05f), shape = RoundedCornerShape(10.dp))
-                                            .clickable { isFsrEnabled = !isFsrEnabled; keepUiAlight() }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(stringResource(R.string.fsr_enabled), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            // 副标题 = 判定原因 +（启用时）**实际生效的目标尺寸**。
-                                            // ⚠️ 实际尺寸按「档位高度 × 源宽高比」推出，非 16:9 片源
-                                            //    会与档位的 16:9 参考值不同，必须显示真实值 ——
-                                            //    否则用户（或下次排查的我）会以为设置没生效。
-                                            //    ⚠️ stringResource 先算成 val 再用 if —— 别把它写进 if/else 分支里。
-                                            val baseReason = stringResource(fsrDecision.reason.labelRes)
-                                            val reasonLine = if (fsrDecision.enabled) {
-                                                "$baseReason · ${fsrDecision.targetWidth}×${fsrDecision.targetHeight}"
-                                            } else baseReason
-                                            Text(reasonLine, color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        AuraSwitch(
-                                            checked = isFsrEnabled,
-                                            onCheckedChange = { isFsrEnabled = it; keepUiAlight() },
-                                            accentColor = AccentColor,
-                                            accentOnColor = AccentOnColor,
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    }
-
-                                    if (isFsrEnabled) {
-                                        // 规则模式：默认规则 / 自定义（自定义一旦选中即完全接管）
-                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Text(stringResource(R.string.fsr_rule_mode), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                FsrRuleMode.values().forEach { mode ->
-                                                    val isSelected = fsrRuleMode == mode
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .weight(1f)
-                                                            .height(30.dp)
-                                                            .background(
-                                                                if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                                shape = RoundedCornerShape(8.dp)
-                                                            )
-                                                            .clickable { fsrRuleMode = mode; keepUiAlight() },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = stringResource(mode.labelRes),
-                                                            color = if (isSelected) AccentOnColor else Color.White,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.SemiBold
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // 自定义目标分辨率：仅在自定义规则下出现。
-                                        // 档位按 3 列排布，label 里带上实际宽高（如「2160p (3840×2160)」），
-                                        // 避免 3840p 这类非标准命名产生歧义。
-                                        if (fsrRuleMode == FsrRuleMode.CUSTOM) {
-                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text(stringResource(R.string.fsr_target_resolution), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                                val allRes = FsrTargetResolution.values().toList()
-                                                allRes.chunked(3).forEach { rowRes ->
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                    ) {
-                                                        rowRes.forEach { res ->
-                                                            val isSelected = fsrCustomTarget == res
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .weight(1f)
-                                                                    .height(28.dp)
-                                                                    .background(
-                                                                        if (isSelected) AccentColor else Color.White.copy(alpha = 0.05f),
-                                                                        shape = RoundedCornerShape(6.dp)
-                                                                    )
-                                                                    .clickable { fsrCustomTarget = res; keepUiAlight() },
-                                                                contentAlignment = Alignment.Center
-                                                            ) {
-                                                                Text(
-                                                                    text = res.label,
-                                                                    color = if (isSelected) AccentOnColor else Color.White,
-                                                                    fontSize = 9.sp,
-                                                                    fontWeight = FontWeight.SemiBold
-                                                                )
-                                                            }
-                                                        }
-                                                        repeat(3 - rowRes.size) {
-                                                            Spacer(modifier = Modifier.weight(1f))
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    Text(
-                                        text = stringResource(R.string.enhance_perf_hint),
-                                        color = Color.White.copy(alpha = 0.35f),
-                                        fontSize = 10.sp
-                                    )
-                                }
-                                }
-
-                                /** 区块 6：字幕功能设置（SubtitleSettingsPanel：字体/位置/ASR/翻译入口） */
-                                @Composable
-                                /**
-                                 * 区块 6：**AI 字幕**（v2.6.4 从「字幕功能设置」中独立，与「AI 弹幕」同级）
-                                 *
-                                 * 承载「生成字幕」这条链路：ASR 引擎选择、识别语言、模型下载、全片批量转写。
-                                 * 与「字幕功能设置」（字幕文件 / 在线翻译 / 样式）是两件事：前者决定**字幕怎么来**，后者决定**已有字幕怎么用**。
-                                 */
-                                fun SettingsSectionAiSubtitle() {
-
-                                // ===== ASR 引擎选择（v111：Vosk / Qwen3-ASR / SenseVoice QNN）=====
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color.White.copy(alpha = 0.04f))
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.asr_engine_title),
-                                        color = AccentColor,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        // v127：引擎固定为 SenseVoice，不再提供切换按钮
-                                    }
-                                    // 引擎说明
-                                    Text(
-                                        text = stringResource(R.string.asr_engine_sensevoice_desc),
-                                        color = Color.White.copy(alpha = 0.45f),
-                                        fontSize = 9.sp,
-                                        lineHeight = 11.sp
-                                    )
-                                    // sherpa-onnx 引擎语言选择（v111；v127 含 SenseVoice CPU）
-                                    // v2.0.208：多级收纳 —— 支持「按语言 / 按模型」两种分组视角，
-                                    //           语区可折叠，同语言多模型时支持选择模型。
-                                    // 当前生效模型统一解析一次（chips 选中判定要用）
-                                    // v2.4.31：改调 `activeModelIdFor`（与 AI 字幕面板**共用同一实现**，
-                                    //          不再两处各写一遍 `resolveExtModel(...)?.dirName ?: "builtin"`）
-                                    val activeModelId = SherpaAsrManager.activeModelIdFor(context, sherpaLangCode)
-                                    // v2.1.232：语言选择的**唯一实现**在 AsrLanguageChips ——
-                                    // 此前设置面板与字幕悬浮窗各有一份副本，改一处漏一处已发生两次
-                                    //（v2.1.226 内置候选选不中、v2.1.231 四项分类）。现在共用同一份。
-                                    AsrLanguageChips(
-                                        context = context,
-                                        sherpaLangCode = sherpaLangCode,
-                                        activeModelId = activeModelId,
-                                        accentColor = AccentColor,
-                                        accentOnColor = AccentOnColor,
-                                        onPick = { code, modelId ->
-                                            // ⚠️ 顺序不能反：先切语言、再写模型选择。
-                                            //    同语言换模型时 changeAsrLanguage 会直接 return，
-                                            //    全靠 setModelChoice 触发识别器重建。
-                                            changeAsrLanguage(code)
-                                            SherpaAsrManager.setModelChoice(context, code, modelId)
-                                        },
-                                        onUserInteraction = { keepUiAlight() }
-                                    )
-                                    // sherpa-onnx 引擎：模型状态 + 下载
-                                    run {
-                                        // v2.0.145：模型信息与就绪状态随所选语言变化
-                                        // （扩展语言如越南语是独立模型，需单独下载，不能沿用 SenseVoice 的判断）
-                                        val langKey = sherpaLangCode
-                                        val modelInfo = SherpaAsrManager.modelInfoFor(context, langKey)
-                                        val sherpaReady = remember(langKey) { mutableStateOf(SherpaAsrManager.isModelReadyFor(context, langKey)) }
-                                        LaunchedEffect(langKey, SherpaAsrManager.isModelDownloading, SherpaAsrManager.modelDownloadProgress) {
-                                            sherpaReady.value = SherpaAsrManager.isModelReadyFor(context, langKey)
-                                        }
-                                        val modelName = modelInfo.first
-                                        val modelDesc = if (modelInfo.third) stringResource(R.string.asr_ext_model_tag) else stringResource(R.string.asr_sensevoice_tag)
-                                        val modelSizeMB = modelInfo.second
-                                        // ⚠️ v2.0.208：多模型的选择已上移到语言 chips（英语1/英语2/英语3
-                                        //    点谁用谁，见上方按语区分组处），这里不再重复显示候选单选。
-                                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                            // 模型信息
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = modelName,
-                                                        color = Color.White.copy(alpha = 0.85f),
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                    Text(
-                                                        text = modelDesc,
-                                                        color = Color.White.copy(alpha = 0.4f),
-                                                        fontSize = 9.sp
-                                                    )
-                                                }
-                                                Text(
-                                                    text = when {
-                                                        SherpaAsrManager.isModelDownloading -> stringResource(R.string.asr_downloading)
-                                                        sherpaReady.value -> stringResource(R.string.asr_ready)
-                                                        else -> stringResource(R.string.asr_not_downloaded)
-                                                    },
-                                                    color = when {
-                                                        SherpaAsrManager.isModelDownloading -> Color(0xFF4FC3F7)
-                                                        sherpaReady.value -> Color(0xFF81C784)
-                                                        else -> Color.White
-                                                    },
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                            // 下载进度
-                                            if (SherpaAsrManager.isModelDownloading) {
-                                                LinearProgressIndicator(
-                                                    progress = SherpaAsrManager.modelDownloadProgress,
-                                                    color = AccentColor,
-                                                    trackColor = Color.White.copy(alpha = 0.15f),
-                                                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
-                                                )
-                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                                    Text(stringResource(R.string.asr_download_percent, (SherpaAsrManager.modelDownloadProgress * 100).toInt()), color = Color(0xFF4FC3F7), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                                    Text(if (SherpaAsrManager.downloadStatus.isEmpty()) stringResource(R.string.asr_status_builtin_ready) else SherpaAsrManager.downloadStatus, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                }
-                                                Text(
-                                                    text = stringResource(R.string.asr_cancel_download),
-                                                    color = Color(0xFFEF5350),
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.align(Alignment.End)
-                                                        .clip(RoundedCornerShape(4.dp))
-                                                        .background(Color(0xFFEF5350).copy(alpha = 0.15f))
-                                                        .clickable { SherpaAsrManager.cancelDownload(context) }
-                                                        .padding(horizontal = 10.dp, vertical = 3.dp)
-                                                )
-                                            }
-                                            // 下载按钮
-                                            if (!sherpaReady.value && !SherpaAsrManager.isModelDownloading) {
-                                                Text(
-                                                    text = stringResource(R.string.asr_click_to_download_prefix) + modelName + "（" + modelSizeMB + "MB）",
-                                                    color = Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    textAlign = TextAlign.Center,
-                                                    modifier = Modifier.fillMaxWidth()
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(AccentColor.copy(alpha = 0.85f))
-                                                        .clickable { SherpaAsrManager.startDownloadFor(context, sherpaLangCode) }
-                                                        .padding(vertical = 7.dp)
-                                                )
-                                            }
-                                            if (sherpaReady.value) {
-                                                Text(
-                                                    text = stringResource(R.string.asr_model_ready_hint, modelName),
-                                                    color = Color(0xFF81C784),
-                                                    fontSize = 9.sp
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // ===== 后台生成全片字幕（v91 提取复用）=====
-                                BatchTranscribeSection(
-                                                            accentColor = AccentColor,
-                                                            accentOnColor = AccentOnColor,
-                                                            sherpaLangCode = sherpaLangCode,
-                                                            onSherpaLangCodeChange = { changeAsrLanguage(it) },
-                                                            onUserInteraction = { keepUiAlight() },
-                                                            // v2.4.30：AI 字幕面板里把 SenseVoice 单独置顶
-                                                            senseVoiceFirst = true
-                                                        )
-                                }
-
-                                /**
-                                 * 区块 6a：字幕文件 / 在线翻译 / 样式
-                                 *
-                                 * v2.6.4：**AI 字幕已独立**为顶级的 SettingsSectionAiSubtitle（ASR 引擎 / 识别语言 /
-                                 * 模型下载 / 全片批量转写）。本分组只保留**播放期字幕**的配置：加载字幕文件、在线翻译引擎、
-                                 * 字幕样式与布局。
-                                 */
-                                @Composable
-                                fun SettingsSectionSubtitle() {
-
-
-                                // ===== v2.3.0：AI 弹幕设置已**独立成组**（见 SettingsSectionDanmu）
-                                // 此前 v2.2.0 曾把弹幕面板放在本分组内，导致「弹幕」与「字幕」混在一起。
-                                // 现已在左列以顶级分组 `SettingsGroup(group_title_danmu)` 与字幕并列。
-
-                                SubtitleSettingsPanel(
-                                    audioGenderMediaUri = selectedMediaItem.uri,
-                                    isSubtitleEnabled = isSubtitleEnabled,
-                                    onSubtitleEnabledChange = {
-                                        isSubtitleEnabled = it
-                                        // v2.0.127：记下用户的显式选择——关掉之后，
-                                        // 切视频时自动加载的字幕不会再把它重新打开
-                                        if (isMemoryModeEnabled) {
-                                            prefs.edit().putBoolean("subtitle_user_disabled", !it).apply()
-                                        }
-                                    },
-                                    stripPunctuation = isStripSubtitlePunctuation,
-                                    onStripPunctuationChange = { isStripSubtitlePunctuation = it },
-                                    fadeIn = subtitleFadeIn,
-                                    onFadeInChange = { subtitleFadeIn = it },
-                                    loadedSubtitleFileName = loadedSubtitleFileName,
-                                    loadedCueCount = loadedSubtitleCues.size,
-                                    onPickSubtitleFile = {
-                                        subtitleFilePickerLauncher.launch("*/*")
-                                    },
-                                    subtitleFont = subtitleFont,
-                                    onFontChange = { subtitleFont = it },
-                                    fontSizeSp = subtitleFontSizeSp,
-                                    onFontSizeChange = { subtitleFontSizeSp = it },
-                                    fontWeightVal = subtitleFontWeightVal,
-                                    onFontWeightChange = { subtitleFontWeightVal = it },
-                                    isItalic = isSubtitleItalic,
-                                    onItalicChange = { isSubtitleItalic = it },
-                                    selectedColorOption = subtitleColorOpt,
-                                    onColorOptionChange = { subtitleColorOpt = it },
-                                    textAlpha = subtitleTextAlpha,
-                                    onTextAlphaChange = { subtitleTextAlpha = it },
-                                    selectedStrokeOption = subtitleStrokeOpt,
-                                    onStrokeOptionChange = { subtitleStrokeOpt = it },
-                                    selectedBgOption = subtitleBgOpt,
-                                    onBgOptionChange = { subtitleBgOpt = it },
-                                    offsetYRatio = subtitleOffsetYRatio,
-                                    onOffsetYRatioChange = { subtitleOffsetYRatio = it },
-                                    offsetXRatio = subtitleOffsetXRatio,
-                                    onOffsetXRatioChange = { subtitleOffsetXRatio = it },
-                                    delayMs = subtitleDelayMs,
-                                    onDelayMsChange = { subtitleDelayMs = it },
-                                    textAlign = subtitleTextAlignOpt,
-                                    onTextAlignChange = { subtitleTextAlignOpt = it },
-                                    // v2.1.232：此前这里**没传** maxLines（用 SubtitleSettingsPanel 的
-                                    // 默认值 2），导致 subtitleMaxLines 虽然有持久化却**没有任何 UI 能改它**
-                                    // —— 现在与 SubtitleStyleSettings 打通，悬浮窗也可调。
-                                    maxLines = subtitleMaxLines,
-                                    onMaxLinesChange = { subtitleMaxLines = it },
-                                    vrIpdOffsetRatio = vrIpdOffsetRatio,
-                                    onVrIpdOffsetRatioChange = { vrIpdOffsetRatio = it },
-                                    subtitleSearchApiKey = subtitleSearchApiKey,
-                                    onSubtitleSearchApiKeyChange = {
-                                        subtitleSearchApiKey = it
-                                        prefs.edit().putString("subtitle_search_api_key", it).apply()
-                                    },
-                                    defaultSearchQuery = selectedMediaItem.title,
-                                    isGenderFilterEnabled = isGenderFilterEnabled,
-                                    onGenderFilterEnabledChange = { on ->
-                                        isGenderFilterEnabled = on
-                                        genderFilterProcessor.isFilterEnabled = on
-                                        if (on) {
-                                            playerInstance?.currentPosition?.let {
-                                                genderFilterProcessor.updatePlaybackPositionMs(it, forceResync = true)
-                                            }
-                                        }
-                                    },
-                                    onGenderFilterWavReady = { wav ->
-                                        genderFilterProcessor.setFilteredWav(wav)
-                                        playerInstance?.currentPosition?.let {
-                                            genderFilterProcessor.updatePlaybackPositionMs(it, forceResync = true)
-                                        }
-                                    },
-                                    // v117 修复：此前未接线，落到 SubtitleSettingsPanel 里的空实现默认值，
-                                    // 于是"已下载并加载"只是文案 —— 文件从未被解析，字幕永远不显示。
-                                    onSubtitleFileLoaded = { file ->
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                // v2.1.248：读字节自行解码 + 统一嗅探入口
-                                                val content = SubtitleParser.decodeBytes(file.readBytes())
-                                                val cues = SubtitleParser.parse(content)
-                                                withContext(Dispatchers.Main) {
-                                                    if (cues.isEmpty()) {
-                                                        Toast.makeText(
-                                                            context,
-                                                            context.getString(R.string.toast_subtitle_empty_format, file.name),
-                                                            Toast.LENGTH_LONG
-                                                        ).show()
-                                                        return@withContext
-                                                    }
-                                                    loadedSubtitleCues = cues
-                                                    loadedSubtitleFileName = file.name
-                                                    isSubtitleEnabled = true
-                                                    Toast.makeText(
-                                                        context,
-                                                        context.getString(R.string.toast_online_subtitle_loaded, cues.size),
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                    if (subtitleTranslator.config.isEnabled) {
-                                                        subtitleTranslator.translateCuesBatch(cues)
-                                                    }
-                                                }
-                                            } catch (e: Exception) {
-                                                Log.e("VRPlayerScreen", "在线字幕解析失败", e)
-                                                withContext(Dispatchers.Main) {
-                                                    Toast.makeText(
-                                                        context,
-                                                        context.getString(R.string.toast_subtitle_parse_failed, (e.message ?: "")),
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                }
-                                            }
-                                        }
-                                    },
-                                    translator = subtitleTranslator,
-                                    onTranslateEnabledChange = { enabled ->
-                                        // v2.0.127：字幕面板里的翻译开关也要落盘，
-                                        // 否则重启后翻译总是回到关闭
-                                        if (isMemoryModeEnabled) {
-                                            prefs.edit().putBoolean("translation_enabled", enabled).apply()
-                                        }
-                                    },
-                                    onTranslateFileRequested = { subtitleTranslator.translateCuesBatch(loadedSubtitleCues) },
-                                    onExportSubtitle = { exportSubtitleSrt() },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor,
-                                    onUserActivity = { keepUiAlight() }
-                                )
-
-                                }
-                                /**
-                                 * 区块 6b：AI 弹幕设置（v2.3.0 从「字幕」分组中独立出来）
-                                 *
-                                 * 独立理由：弹幕与字幕是**两条独立链路** —— 字幕来自文件/ASR，
-                                 * 弹幕来自视觉模型实时生成。混在同一分组里，用户改弹幕要去字幕里找，
-                                 * 且以后两边各自长大必然互相干扰。
-                                 *
-                                 * 本分组只承载**配置 UI**；渲染与取帧分别由
-                                 * `DanmuOverlay`（P5）/ `VRGLRenderer.captureDanmuFrameIfNeeded`（P3）负责。
-                                 */
-                                @Composable
-                                fun SettingsSectionDanmu() {
-                                    DanmuSettingsPanel(
-                                        config = danmuConfig,
-                                        onConfigChange = { danmuConfig = it },
-                                        canPersistSecrets = isMemoryModeEnabled,
-                                        generatedCount = danmuGeneratedCount,
-                                        lastError = danmuLastError,
-                                        // v2.4.2：与字幕面板用同一强调色
-                                        accentColor = AccentColor,
-                                        // v2.4.7：导入弹幕（内容来源切换 + 文件选择 + 加载状态）
-                                        importedCount = danmuImportCount,
-                                        importedName = danmuImportName,
-                                        importStatus = danmuImportStatus,
-                                        onPickImportFile = {
-                                            danmuImportPickerLauncher.launch(
-                                                arrayOf("*/*")
-                                            )
-                                        }
-                                    )
-                                }
-                                /** 区块 6：美颜设置（Shader 实时磨皮美白 + 预设方案 + 对比原图 + 2D 人像精修） */
-                                @Composable
-                                fun SettingsColumn2() {
-                                // 应用美颜预设（13 项参数，顺序与下方滑块一致）
-                                fun applyBeautyPreset(presetId: String) {
-                                    beautyPreset = presetId
-                                    val p = when (presetId) {
-                                        BEAUTY_PRESET_NATURAL -> floatArrayOf(0.4f, 0.3f, 0.2f, 0.15f, 0.15f, 0.1f, 0.1f, 0.2f, 0.15f, 0.15f, 0.3f, 0.1f, 0.1f)
-                                        BEAUTY_PRESET_LIGHT -> floatArrayOf(0.6f, 0.5f, 0.4f, 0.3f, 0.3f, 0.2f, 0.2f, 0.3f, 0.35f, 0.35f, 0.45f, 0.2f, 0.2f)
-                                        BEAUTY_PRESET_HEAVY -> floatArrayOf(0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.35f, 0.35f, 0.5f, 0.6f, 0.6f, 0.7f, 0.4f, 0.35f)
-                                        else -> return
-                                    }
-                                    beautyLevel = p[0]; beautyWhitening = p[1]; beautyFaceSlimming = p[2]; beautyBigEyes = p[3]
-                                    beautyDarkCircles = p[4]; beautyNoseSlimming = p[5]; beautyMouth = p[6]; beautyTeethWhitening = p[7]
-                                    beautyLipstick = p[8]; beautyBlush = p[9]; beautyEyebrows = p[10]; beautyLongLegs = p[11]; beautySmallHead = p[12]
-                                    keepUiAlight()
-                                }
-
-                                Text(
-                                    text = stringResource(R.string.settings_group_beauty),
-                                    color = AccentColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                // 2D 模式判定（人像精修仅在 2D 生效，多处复用）
-                                val is2DBeautyMode = projectionMode == ProjectionMode.STANDARD ||
-                                    projectionMode == ProjectionMode.FISHEYE
-
-                                // v120 拆分：模式提示条 / 对比原图 / 美颜预设 → BeautySettingsSections.kt
-                                BeautyModeHintBar(is2DMode = is2DBeautyMode, modeName = stringResource(projectionMode.labelRes))
-
-                                // v2.0.160：对比原图 → 美颜总开关（默认开；关闭 = 直通原图）
-                                BeautyCompareSwitch(
-                                    checked = beautyMasterEnabled,
-                                    onCheckedChange = { beautyMasterEnabled = it; keepUiAlight() },
-                                    accentColor = AccentColor,
-                                    accentOnColor = AccentOnColor
-                                )
-
-                                // v2.0.160：美颜方案选择（GLSL / GPUPixel 双引擎）。
-                                // GPUPixel 不可用（ABI 不支持 / init 失败）时弹提示并自动保持 GLSL。
-                                val engineContext = LocalContext.current
-                                BeautyEngineSection(
-                                    accentColor = AccentColor,
-                                    engineType = beautyEngineType,
-                                    onEngineChange = { type ->
-                                        // 具名参数 lambda 没有 return@ 标签，这里用 if/else 分支代替提前 return
-                                        // 用户主动点击：force=true 跳过失败冷却，立即重试
-                                        if (type == BEAUTY_ENGINE_GPUPIXEL && !GpuPixelBeauty.available && !GpuPixelBeauty.init(engineContext, force = true)) {
-                                            Toast.makeText(
-                                                engineContext,
-                                                engineContext.getString(R.string.beauty_engine_unavailable),
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        } else {
-                                            beautyEngineType = type
-                                            keepUiAlight()
-                                        }
-                                    },
-                                    // v2.6.22（P1-4）：GPUPixel 的四个参数滑块已删除 ——
-                                    // 参数并入通用美颜区（磨皮 / 美白 / 瘦脸 / 大眼），两个引擎共用同一套值。
-                                    vrFace = gpuPixelVrFaceBeauty,
-                                    onVrFaceChange = { gpuPixelVrFaceBeauty = it; keepUiAlight() },
-                                    halfRes = gpuPixelHalfResBeauty,
-                                    onHalfResChange = { gpuPixelHalfResBeauty = it; keepUiAlight() }
-                                )
-
-                                // v2.6.22（P1-4）：预设 + 通用美颜参数（磨皮 / 质感 / 亮度 / 对比 / 美白），
-                                // **两个引擎共用**。原先这里被 `if (engineType == GLSL)` 包住，
-                                // GPUPixel 另有四个独立滑块（beauty_gp_*），切引擎时四项效果直接跳变。
-
-                                BeautyPresetRow(
-                                    presetId = beautyPreset,
-                                    onPresetChange = { applyBeautyPreset(it) },
-                                    accentColor = AccentColor
-                                )
-
-                                // v119 拆分：美颜设置三大区块已抽到 BeautySettingsSections.kt
-                                GeneralBeautySection(
-                                    accentColor = AccentColor,
-                                    beautyLevel = beautyLevel,
-                                    onBeautyLevelChange = { beautyLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                    textureDetail = beautyTextureDetail,
-                                    onTextureDetailChange = { beautyTextureDetail = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                    brightnessLevel = brightnessLevel,
-                                    onBrightnessLevelChange = { brightnessLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                    contrastLevel = contrastLevel,
-                                    onContrastLevelChange = { contrastLevel = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                    whiteningLevel = beautyWhitening,
-                                    onWhiteningLevelChange = { beautyWhitening = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
-                                )
-
-
-                                LutFilterSection(
-                                    accentColor = AccentColor,
-                                    lutName = lutName,
-                                    onLutNameChange = { lutName = it },
-                                    lutMix = lutMix,
-                                    onLutMixChange = { lutMix = it; currentGlSurfaceView?.renderer?.lutMix = it; keepUiAlight() },
-                                    isLutLoading = isLutLoading,
-                                    onLutLoadingChange = { isLutLoading = it },
-                                    onApplyLutRgba = { currentGlSurfaceView?.renderer?.setLutTexture(it) },
-                                    onPickCustomLut = { lutPickerLauncher.launch("application/octet-stream") },
-                                    onUserInteraction = { keepUiAlight() }
-                                )
-
-                                // v2.6.22（P1-4）：参数已统一，但 GPUPixel 引擎只支持
-                                // 「磨皮 / 美白 / 瘦脸 / 大眼」四项 —— 其余项在该引擎下不生效，
-                                // 这里显式标注，避免用户以为「调了没反应」是 bug。
-                                if (beautyEngineType == BEAUTY_ENGINE_GPUPIXEL) {
-                                    Text(
-                                        text = stringResource(R.string.beauty_engine_gp_limited),
-                                        color = Color(0xFFE0A030),
-                                        fontSize = 11.sp,
-                                        lineHeight = 15.sp
-                                    )
-                                }
-                                PortraitRetouchSection(
-                                    accentColor = AccentColor,
-                                    enabled = is2DBeautyMode,
-                                    params = listOf(
-                                        PortraitParam(stringResource(R.string.beauty_face_slim), beautyFaceSlimming) { beautyFaceSlimming = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_big_eyes), beautyBigEyes) { beautyBigEyes = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_dark_circles), beautyDarkCircles) { beautyDarkCircles = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_nose_slim), beautyNoseSlimming) { beautyNoseSlimming = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_mouth), beautyMouth) { beautyMouth = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_teeth), beautyTeethWhitening) { beautyTeethWhitening = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_lipstick), beautyLipstick) { beautyLipstick = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_blush), beautyBlush) { beautyBlush = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_eyebrows), beautyEyebrows) { beautyEyebrows = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_long_legs), beautyLongLegs) { beautyLongLegs = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() },
-                                        PortraitParam(stringResource(R.string.beauty_small_head), beautySmallHead) { beautySmallHead = it; beautyPreset = BEAUTY_PRESET_CUSTOM; keepUiAlight() }
-                                    )
-                                )
-
-                                }
-
-                                SettingsHeader()
-                        Row(
-                            // v2.6.7：两列拿走 header / footer 之外的全部高度。
-                            // 之前 Row 没有高度约束、两列又用 fillMaxHeight()，结果是
-                            // 两列各吃满「整块可用高度」，Row 总高 + header + footer
-                            // 超出面板高度 → 底部 Footer（记忆模式勾选）被挤出屏幕，
-                            // 左列内容也在滚动视口边界处被切断。
-                            // weight(1f) 让 Row 得到确定高度，两列的 fillMaxHeight()
-                            // 才是「填满剩余空间」的正确语义。
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(20.dp)
-                        ) {
-                            // Column 1: Lens / 3D Projection Style
-                            Column(
-                                modifier = Modifier
-                                    .weight(1.3f)
-                                    .fillMaxHeight()
-                                    .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                    // ===== v90 二级菜单：可折叠分组（expandedSettings 定义在外层供快捷面板共用）=====
-
-
-                                    // 左列分组（二级菜单）：主题 → 投影 → 字幕 → AI 字幕 → AI 弹幕 → 悬浮球 → 解码 → 画质增强 → 8K → 关于
-                                    SettingsGroup(stringResource(R.string.group_title_ui_theme), "theme", Icons.Default.Palette, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection0() }
-                                    SettingsGroup(stringResource(R.string.group_title_projection), "proj", Icons.Default.ViewInAr, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection1() }
-                                    SettingsGroup(stringResource(R.string.group_title_subtitle), "sub", Icons.Default.Subtitles, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionSubtitle() }
-                                    // v2.6.4：AI 字幕独立成组，与「AI 弹幕」同级（此前挤在「字幕功能设置」里）
-                                    SettingsGroup(stringResource(R.string.group_title_ai_subtitle), "aisub", Icons.Default.Mic, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionAiSubtitle() }
-                                    // v2.3.0：AI 弹幕独立成组（此前挂在「字幕」分组内，与字幕混在一起）
-                                    SettingsGroup(stringResource(R.string.group_title_danmu), "danmu", Icons.Default.ChatBubble, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionDanmu() }
-                                    SettingsGroup(stringResource(R.string.group_title_floating_ball), "ball", Icons.Default.BubbleChart, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection3() }
-                                    SettingsGroup(stringResource(R.string.group_title_decoder), "decode", Icons.Default.Memory, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection4() }
-                                    // v2.0.206：MEMC 插帧 / FSR 超分
-                                    SettingsGroup(stringResource(R.string.group_title_enhance), "enhance", Icons.Default.AutoAwesome, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSectionEnhance() }
-                                    SettingsGroup(stringResource(R.string.group_title_8k_hw), "8k", Icons.Default.HighQuality, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) { SettingsSection8K() }
-                                    // v106：关于与开源许可（合规署名入口）
-                                    SettingsGroup(stringResource(R.string.group_title_about), "about", Icons.Default.Info, expandedGroups = expandedSettings, onToggle = { toggleSettings(it) }, accentColor = AccentColor, onInteract = { keepUiAlight() }) {
-                                        // v2.6.4：URL 播放 / 网页直链播放的入口已移至「选择文件来源」对话框
-                                        // （与相册、任意文件并列），此处不再重复放入口，避免同一功能两个入口。
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(Color.White.copy(alpha = 0.04f))
-                                                .clickable { showLicensesDialog = true; keepUiAlight() }
-                                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = stringResource(R.string.licenses_title),
-                                                    color = Color.White.copy(alpha = 0.85f),
-                                                    fontSize = 11.sp
-                                                )
-                                                Text(
-                                                    text = stringResource(R.string.licenses_desc),
-                                                    color = Color.White.copy(alpha = 0.45f),
-                                                    fontSize = 10.sp
-                                                )
-                                            }
-                                            Text(
-                                                text = stringResource(R.string.action_view),
-                                                color = AccentColor,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                            }
-                            // Column 2: Advanced Portrait Beauty Controls (Scrollable)
-                            Column(
-                                modifier = Modifier
-                                    .weight(1.3f)
-                                    .fillMaxHeight()
-                                    .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                    // 右列：美颜设置（预设/对比/磨皮美白/2D 人像精修）
-                                    SettingsColumn2()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // v106：开源许可对话框（设置面板 → 关于与开源许可）
-        if (showLicensesDialog) {
-            OpenSourceLicensesDialog(onDismiss = { showLicensesDialog = false })
-        }
-
-        // v2.6.4：**URL 直接播放**（粘贴直链即可播放，无需先嗅探）
-        // 标题同样写中性的「URL 视频」，完整链接不进入标题与最近播放。
-        // v2.9.0：网页直链播放（全屏覆盖层）。
-        // 位置有讲究：必须在 BoxWithConstraints 内、且写在播放 UI 之后 —— 它是 fillMaxSize
-        // 的普通 Compose 图层，靠后写才能盖住下面的播放界面；AlertDialog 走独立 Window，
-        // 不受这里的层级影响，所以放在对话框之前不会挡住对话框。
-        if (showWebSniffer) {
-            WebSnifferScreen(
-                onPlay = { choice ->
-                    showWebSniffer = false
-                    // 🔴 Referer 必须是**页面**地址，不能是直链自己的 origin：
-                    // 视频流在 CDN 域名、页面在站点域名，CDN 校验的是后者（退化成
-                    // 直链 origin 会直接 403，见 HttpPlaybackHeaders 的注释）。
-                    // v2.8.3：第三个参数是 WebView 的会话 Cookie —— 需要登录态的站点
-                    // 光有 UA + Referer 仍是 403，这条链路以前完全没带 Cookie。
-                    HttpPlaybackHeaders.forWebPlayback(choice.pageUrl, choice.url, choice.cookie)
-                    // v2.8.3：网页上抓到的外挂字幕。必须**先暂存**再切媒体 ——
-                    // 直接写 loadedSubtitleCues 会被切换媒体的 Effect 当场清空（见其注释）。
-                    pendingWebSubtitle = choice.subtitleCues.takeIf { it.isNotEmpty() }?.let {
-                        WebSubtitle(name = choice.subtitleName ?: "web", cues = it)
-                    }
-                    selectedMediaItem = MediaItem(
-                        id = "web_${System.currentTimeMillis()}",
-                        title = context.getString(R.string.web_sniffer_playing_title),
-                        uri = choice.url,
-                        isVideo = true
-                    )
-                },
-                onClose = { showWebSniffer = false },
-                accentColor = AccentColor,
-                accentOnColor = Color.Black
-            )
-        }
-
-        if (showUrlPlayDialog) {
-            UrlPlayDialog(
-                onDismiss = { showUrlPlayDialog = false },
-                onPlay = { u, referer ->
-                    showUrlPlayDialog = false
-                    // v2.9.0：填了来源页就作为 Referer；留空传 null，
-                    // forWebPlayback 不再退化成直链 origin（旧行为会 403），改为不发 Referer。
-                    HttpPlaybackHeaders.forWebPlayback(referer, u)
-                    selectedMediaItem = MediaItem(
-                        id = "url_${System.currentTimeMillis()}",
-                        title = context.getString(R.string.url_play_playing_title),
-                        uri = u,
-                        isVideo = true
-                    )
-                },
-                accentColor = AccentColor
-            )
-        }
-
-        // LAN (SMB) browser dialog (8/2 功能)
-        // Video information dialog (8/2 功能)
-        videoInfoDialogText?.let { info ->
-            AlertDialog(
-                onDismissRequest = { videoInfoDialogText = null },
-                containerColor = Color(0xFC18171C),
-                title = { Text(stringResource(R.string.action_media_info), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
-                text = {
-                    // v2.6.10：媒体信息是多行长文本（分辨率/编码/码率/HDR/各轨道），
-                    //   不给限高 + 滚动时，超出 Dialog 可视区的部分直接裁掉，
-                    //   用户看不到完整信息也没有滚动条。
-                    Text(
-                        text = info,
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        modifier = Modifier
-                            .heightIn(max = 420.dp)
-                            .verticalScroll(rememberScrollState())
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = { videoInfoDialogText = null }) {
-                        Text(stringResource(R.string.action_close), color = AccentColor)
-                    }
-                }
-            )
-        }
-
-        // Audio / subtitle track selection dialog (8/2 功能)
-        if (trackDialogOpen) {
-            val groups = playerInstance?.exo?.currentTracks?.groups ?: emptyList()
-            TrackSelectionDialog(
-                groups = groups,
-                selectedVideoTrack = selectedVideoTrack,
-                selectedAudioTrack = selectedAudioTrack,
-                selectedTextTrack = selectedTextTrack,
-                onSelectTrack = { type, idx -> selectMediaTrack(type, idx) },
-                onDismiss = { trackDialogOpen = false },
-                accentColor = AccentColor
-            )
-        }
-
-        // v2.1.241：文件来源选择框。
-        // 两条入口必须都留着：相册选择器体验好（有缩略图、可按相册/时间浏览），
-        // 但它按 video/* 过滤，选不到 .wmv / .iso；文档选择器能选任意文件，
-        // 但界面是 SAF 的文件树，找图片反而绕。所以由用户按场景自己选。
-        if (pickerSourceDialogOpen) {
-            PickerSourceDialog(
-                onDismiss = { pickerSourceDialogOpen = false },
-                onPickGallery = {
-                    pickerSourceDialogOpen = false
-                    filePickerLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                    )
-                },
-                onPickAnyFile = {
-                    pickerSourceDialogOpen = false
-                    documentPickerLauncher?.launch(arrayOf("*/*"))
-                },
-                onOpenUrlPlay = {
-                    pickerSourceDialogOpen = false
-                    showUrlPlayDialog = true
-                },
-                onOpenWebSniffer = {
-                    pickerSourceDialogOpen = false
-                    showWebSniffer = true
-                },
-                accentColor = AccentColor
-            )
-        }
-
-        if (smbDialogOpen) {
-            SmbBrowserDialog(
-                onDismiss = { smbDialogOpen = false },
-                smbHost = smbHost,
-                onSmbHostChange = { smbHost = it },
-                smbUser = smbUser,
-                onSmbUserChange = { smbUser = it },
-                smbPass = smbPass,
-                onSmbPassChange = { smbPass = it },
-                onConnect = { connectSmb() },
-                smbPath = smbPath,
-                onBrowseParent = { parent -> browseSmb(parent) },
-                smbError = smbError,
-                smbEntries = smbEntries,
-                onSelectEntry = { entry ->
-                    if (entry.isDirectory) {
-                        val base = smbPath.trimEnd('/')
-                        val next = "$base/${entry.name}/"
-                        browseSmb(encodeSmb(next))
-                    } else if (MediaFormats.isSupportedVideoExtension(
-                            MediaFormats.extensionOfName(entry.name)
-                        )
-                    ) {
-                        playSmbFile(entry)
-                    }
-                },
-                accentColor = AccentColor
-            )
-        }
-
-        // 12. Floating Speed Ball Overlay & Long-Press Fast Forward HUD
-        val ballPx = with(LocalDensity.current) { 54.dp.toPx() }
-        val seekMaxX = constraints.maxWidth.toFloat() - ballPx
-        val seekMaxY = constraints.maxHeight.toFloat() - ballPx
-        // 🔴 v2.9.1：**网页直链播放（全屏覆盖层）打开时，所有悬浮球一律让位。**
-        //   实测（MuMu 1600x900，dump 取证）：右上角电量球占 `[1519,82]-[1600,163]`，
-        //   而嗅探界面「打开」按钮的可点区域是 `[1501,102]-[1588,174]` —— **两者重叠**，
-        //   点击全被浮球吃掉 → 粘完地址点「打开」毫无反应（连 `open()` 都不会进）。
-        //   同一行的地址栏因为左边有大片空白、顶栏关闭按钮因为 y 不重叠，反而都能点，
-        //   所以这个坑很容易被误判成"按钮坏了"。
-        //   浮球是播放器的浮层，全屏模态界面下不该盖在它上面。
-        // 🔴 v2.9.2：**VR 分屏模式下两眼各自为半屏，单侧悬浮球会导致左右眼融像撕裂与严重重影眩晕，
-        //   且长按快进 HUD 落在中间挡板会被裁切，故分屏下自动隐去悬浮球以保纯净沉浸感。**
-        val ballsAllowed = !showWebSniffer && !isSplitScreenVR
-
-        if (isFloatingBallEnabled && ballsAllowed) {
-            SpeedFloatingBall(
-                floatingBallSpeed = floatingBallSpeed,
-                basePlaybackSpeed = basePlaybackSpeed,
-                isPressed = isFloatingBallPressed,
-                onPressedChange = { isFloatingBallPressed = it },
-                onSpeedChange = { floatingBallSpeed = it },
-                onFeedback = { seekHudText = it },
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                isLiquidGlass = isLiquidGlass,
-                ballMaterialModifier = ballMaterialModifier,
-                prefs = prefs,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        // 13. v2.0.165：快进 / 后退悬浮球 + 提示条
-        // 层级说明：与加速球同在**最外层 Box**（绘制顺序在播控组件之后）→ 恒位于播控组件之上，
-        // 拖到播控栏区域时小球仍可点击/拖动，不会被播控栏抢走事件。
-        // 提示文案在语句位置取好（@Composable 调用不能塞进普通 lambda）
-        val fwdHudLabel = stringResource(R.string.seek_forward_hud, seekForwardStep)
-        val bwdHudLabel = stringResource(R.string.seek_backward_hud, seekBackwardStep)
-        val fwdStepSwitched = stringResource(R.string.seek_step_switched, nextSeekStep(seekForwardStep))
-        val bwdStepSwitched = stringResource(R.string.seek_step_switched, nextSeekStep(seekBackwardStep))
-
-        // 13b. v2.1.208：**时间标记球**（左侧边缘）
-        // 与右侧的快进/后退球共用同一套手势（FloatingBallGesture），但语义不同：
-        // 单击 = 跳回标记点，双击 = 把标记点设为当前播放位置，球面实时显示「当前−标记」差值。
-        // 横向取 initialXRatio = 0 → 贴左边缘，与右侧两个球天然错开，不抢位置也不误触。
-        // 差值实时性：currentPositionMs 是上游播放器循环写入的 state，写一次就重组一次
-        //（见 MarkerFloatingBall 的注释），无需额外定时器。
-        if (isMarkerBallEnabled && ballsAllowed) {
-            MarkerFloatingBall(
-                currentPositionMs = currentPositionMs,
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                onSeekTo = { ms -> playerInstance?.seekTo(ms) },
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                onFeedback = { seekHudText = it },
-                initialXRatio = 0f,
-                initialYRatio = 0.5f,
-                isLiquidGlass = isLiquidGlass,
-                // v2.1.231：与快进/后退球一致的玻璃材质（此前漏传，玻璃主题下标记球没有 backdrop）
-                glassModifier = ballMaterialModifier,
-                // v2.1.231：记忆上次拖动到的位置
-                prefs = prefs,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        // 13c. v2.4.67：**信息球（时钟 / 电量）**
-        // 底层与标记球/快进球完全一致（floatingBallGesture + FloatingBallPositions + 玻璃材质），
-        // 只有显示内容不同。默认贴**两侧上方**：时钟左上、电量右上，
-        // 与「标记球（左中）/ 快进球（右 28%）/ 后退球（右 72%）」初始位置都不重叠。
-        if (isClockBallEnabled && ballsAllowed) {
-            InfoFloatingBall(
-                kind = InfoBallKind.CLOCK,
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                onFeedback = { seekHudText = it },
-                initialXRatio = 0f,
-                initialYRatio = 0.10f,
-                isLiquidGlass = isLiquidGlass,
-                glassModifier = ballMaterialModifier,
-                prefs = prefs,
-                ballId = FloatingBallPositions.CLOCK,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        if (isBatteryBallEnabled && ballsAllowed) {
-            InfoFloatingBall(
-                kind = InfoBallKind.BATTERY,
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                onFeedback = { seekHudText = it },
-                initialXRatio = 1f,
-                initialYRatio = 0.10f,
-                isLiquidGlass = isLiquidGlass,
-                glassModifier = ballMaterialModifier,
-                prefs = prefs,
-                ballId = FloatingBallPositions.BATTERY,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        // 13d. v2.6.4：**播放控制球**（右侧中部）
-        // 单击 = 播放/暂停，双击 = 播报状态。球面图标由 `playerInstance.isPlaying` 驱动
-        // （不由球自己持有状态）→ 自动暂停、播完、外部控制暂停都能反映到图标上。
-        if (isPlayBallEnabled && ballsAllowed) {
-            ControlFloatingBall(
-                isPlaying = playerInstance?.isPlaying == true,
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                onTogglePlayPause = {
-                    val p = playerInstance
-                    if (p != null) {
-                        if (p.isPlaying) p.pause() else p.play()
-                    }
-                },
-                onFeedback = { seekHudText = it },
-                initialXRatio = 1f,
-                // 与后退球（0.68）/ 快进球（0.28）错开
-                initialYRatio = 0.42f,
-                isLiquidGlass = isLiquidGlass,
-                glassModifier = ballMaterialModifier,
-                prefs = prefs,
-                ballId = FloatingBallPositions.PLAY,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        // 13e. v2.6.4：**性能球**（左上；时钟球占 y=0.10，这里 0.26 不重叠）
-        if (isPerfBallEnabled && ballsAllowed) {
-            PerfFloatingBall(
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                onFeedback = { seekHudText = it },
-                initialXRatio = 0f,
-                initialYRatio = 0.26f,
-                isLiquidGlass = isLiquidGlass,
-                glassModifier = ballMaterialModifier,
-                prefs = prefs,
-                ballId = FloatingBallPositions.PERF,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        if (isSeekForwardBallEnabled && ballsAllowed) {
-            SeekFloatingBall(
-                forward = true,
-                stepSeconds = seekForwardStep,
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                initialYRatio = 0.28f,
-                onStepCycle = {
-                    seekForwardStep = nextSeekStep(seekForwardStep)
-                    seekHudText = fwdStepSwitched
-                },
-                onTrigger = { step ->
-                    // v2.6.24（直播 P0 补齐）：直播下这两个悬浮球保持可见但只给提示 ——
-                    // 隐藏按钮会让用户以为功能被砍，点了没反应又像坏了。
-                    if (isLiveStream) {
-                        val label = context.getString(R.string.live_seek_disabled)
-                        seekHudText = label
-                    } else {
-                        val p = playerInstance
-                        if (p != null) {
-                            val dur = if (p.duration > 0) p.duration else Long.MAX_VALUE
-                            p.seekTo((p.currentPosition + step * 1000L).coerceIn(0L, dur))
-                        }
-                        seekHudText = fwdHudLabel
-                    }
-                },
-                onFeedback = { seekHudText = it },
-                isLiquidGlass = isLiquidGlass,
-                glassModifier = ballMaterialModifier,
-                // v2.1.231：记忆上次拖动到的位置
-                prefs = prefs,
-                ballId = FloatingBallPositions.SEEK_FWD,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        if (isSeekBackwardBallEnabled && ballsAllowed) {
-            SeekFloatingBall(
-                forward = false,
-                stepSeconds = seekBackwardStep,
-                maxX = seekMaxX,
-                maxY = seekMaxY,
-                accentColor = AccentColor,
-                accentOnColor = AccentOnColor,
-                initialYRatio = 0.68f,
-                onStepCycle = {
-                    seekBackwardStep = nextSeekStep(seekBackwardStep)
-                    seekHudText = bwdStepSwitched
-                },
-                onTrigger = { step ->
-                    if (isLiveStream) {
-                        seekHudText = context.getString(R.string.live_seek_disabled)
-                    } else {
-                        val p = playerInstance
-                        if (p != null) {
-                            p.seekTo((p.currentPosition - step * 1000L).coerceAtLeast(0L))
-                        }
-                        seekHudText = bwdHudLabel
-                    }
-                },
-                onFeedback = { seekHudText = it },
-                isLiquidGlass = isLiquidGlass,
-                glassModifier = ballMaterialModifier,
-                // v2.1.231：记忆上次拖动到的位置
-                prefs = prefs,
-                ballId = FloatingBallPositions.SEEK_BWD,
-                rememberPosition = isMemoryModeEnabled
-            )
-        }
-
-        // 快进 / 后退 / 步长切换提示条（复用速度提示条的样式，1.2 秒后自动隐藏）
-        LaunchedEffect(seekHudText) {
-            if (seekHudText != null) {
-                delay(1200L)
-                seekHudText = null
-            }
-        }
-        AnimatedVisibility(
-            visible = seekHudText != null,
-            enter = fadeIn() + scaleIn(initialScale = 0.8f),
-            exit = fadeOut() + scaleOut(targetScale = 0.8f),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 28.dp)
-                .testTag("seek_ball_hud")
-        ) {
-            Surface(
-                color = Color(0xEE18171C),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, AccentColor.copy(alpha = 0.6f)),
-                shadowElevation = 8.dp
-            ) {
-                Text(
-                    text = seekHudText ?: "",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        // 3.5 字幕快捷面板（已拆至 VRPlayerQuickPanels.kt）
+        PlayerSubtitleQuickPanel(
+            context = context,
+            prefs = prefs,
+            isSubtitleQuickPanelOpen = isSubtitleQuickPanelOpen,
+            onClosePanel = { isSubtitleQuickPanelOpen = false },
+            themePanelBgColor = ThemePanelBgColor,
+            accentColor = AccentColor,
+            accentOnColor = AccentOnColor,
+            isMemoryModeEnabled = isMemoryModeEnabled,
+            isSubtitleEnabled = isSubtitleEnabled,
+            onSubtitleEnabledChange = { isSubtitleEnabled = it },
+            subtitleTranslator = subtitleTranslator,
+            castReceiverEnabled = castReceiverEnabled,
+            onCastReceiverEnabledChange = { castReceiverEnabled = it },
+            sherpaLangCode = sherpaLangCode,
+            onChangeAsrLanguage = { changeAsrLanguage(it) },
+            asrThreads = asrThreads,
+            onAsrThreadsChange = { asrThreads = it },
+            isRealtimeAsrActive = isRealtimeAsrActive,
+            realtimeSubtitleEngine = realtimeSubtitleEngine,
+            isRealtimeSubtitleEnabled = isRealtimeSubtitleEnabled,
+            onRealtimeSubtitleEnabledChange = { isRealtimeSubtitleEnabled = it },
+            bgAsrEnabled = bgAsrEnabled,
+            onBgAsrEnabledChange = { bgAsrEnabled = it },
+            realtimeSubtitleStatus = realtimeSubtitleStatus,
+            realtimeDone = realtimeDone,
+            realtimeTotalMs = realtimeTotalMs,
+            realtimeGeneratedMs = realtimeGeneratedMs,
+            onRegenerateRealtimeSubtitle = { regenerateRealtimeSubtitle() },
+            onExportSubtitleSrt = { exportSubtitleSrt() },
+            selectedMediaItem = selectedMediaItem,
+            loadedSubtitleFileName = loadedSubtitleFileName,
+            onLoadSavedSubtitleFile = { loadSavedSubtitleFile(it) },
+            subtitleFont = subtitleFont,
+            onFontChange = { subtitleFont = it },
+            subtitleFontSizeSp = subtitleFontSizeSp,
+            onFontSizeChange = { subtitleFontSizeSp = it },
+            subtitleFontWeightVal = subtitleFontWeightVal,
+            onFontWeightChange = { subtitleFontWeightVal = it },
+            isSubtitleItalic = isSubtitleItalic,
+            onItalicChange = { isSubtitleItalic = it },
+            subtitleColorOpt = subtitleColorOpt,
+            onColorOptionChange = { subtitleColorOpt = it },
+            subtitleTextAlpha = subtitleTextAlpha,
+            onTextAlphaChange = { subtitleTextAlpha = it },
+            subtitleStrokeOpt = subtitleStrokeOpt,
+            onStrokeOptionChange = { subtitleStrokeOpt = it },
+            subtitleBgOpt = subtitleBgOpt,
+            onBgOptionChange = { subtitleBgOpt = it },
+            subtitleOffsetYRatio = subtitleOffsetYRatio,
+            onOffsetYRatioChange = { subtitleOffsetYRatio = it },
+            subtitleOffsetXRatio = subtitleOffsetXRatio,
+            onOffsetXRatioChange = { subtitleOffsetXRatio = it },
+            subtitleDelayMs = subtitleDelayMs,
+            onDelayMsChange = { subtitleDelayMs = it },
+            liveDelaySec = liveDelaySec,
+            onLiveDelaySecChange = { liveDelaySec = it },
+            isLiveStream = isLiveStream,
+            subtitleTextAlignOpt = subtitleTextAlignOpt,
+            onTextAlignChange = { subtitleTextAlignOpt = it },
+            subtitleMaxLines = subtitleMaxLines,
+            onMaxLinesChange = { subtitleMaxLines = it },
+            vrIpdOffsetRatio = vrIpdOffsetRatio,
+            onVrIpdOffsetRatioChange = { vrIpdOffsetRatio = it },
+            onOpenFullSubtitleSettings = {
+                isSubtitleQuickPanelOpen = false
+                isSettingsDialogOpen = true
+                expandedSettings = expandedSettings + "sub"
+            },
+            onKeepUiAlight = { keepUiAlight() },
+        )
+
+        // 4. Secondary Settings Dialog Panel（外框与双列骨架已拆至 VRPlayerSettingsDialog.kt）
+        PlayerSettingsDialogOverlay(
+            isSettingsDialogOpen = isSettingsDialogOpen,
+            onDismiss = { isSettingsDialogOpen = false },
+            accentColor = AccentColor,
+            expandedSettings = expandedSettings,
+            onToggleSettings = { toggleSettings(it) },
+            onShowLicensesDialog = { showLicensesDialog = true },
+            onKeepUiAlight = { keepUiAlight() },
+            headerContent = {
+                PlayerSettingsHeader(
+                    accentColor = AccentColor,
+                    onOpenSmb = { smbDialogOpen = true; keepUiAlight() },
+                    onShowVideoInfo = { showVideoInfo(); keepUiAlight() },
+                    onOpenTrackDialog = { trackDialogOpen = true; keepUiAlight() },
+                    onClose = { isSettingsDialogOpen = false },
                 )
-            }
-        }
+            },
+            sectionTheme = {
+                PlayerSettingsThemeSection(
+                    context = context,
+                    prefs = prefs,
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    translucentWhite10 = TranslucentWhite10,
+                    uiThemeId = uiThemeId,
+                    onUiThemeIdChange = { uiThemeId = it },
+                    uiTheme = uiTheme,
+                    glassMode = glassMode,
+                    onGlassModeChange = { glassMode = it },
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            sectionProjection = {
+                PlayerSettingsProjectionSection(
+                    prefs = prefs,
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    renderer = currentGlSurfaceView?.renderer,
+                    isSmartProjectionEnabled = isSmartProjectionEnabled,
+                    onSmartProjectionEnabledChange = { isSmartProjectionEnabled = it },
+                    projectionMode = projectionMode,
+                    onProjectionModeChange = { projectionMode = it },
+                    onProjectionModeUserAdjustedChange = { projectionModeUserAdjusted = it },
+                    domeHalfSelect = domeHalfSelect,
+                    onDomeHalfSelectChange = { domeHalfSelect = it },
+                    stereoMode = stereoMode,
+                    onStereoModeChange = { stereoMode = it },
+                    fisheyeFovDeg = fisheyeFovDeg,
+                    onFisheyeFovDegChange = { fisheyeFovDeg = it },
+                    fovDeg = fovDeg,
+                    onFovDegChange = { fovDeg = it },
+                    videoCurvature = videoCurvature,
+                    onVideoCurvatureChange = { videoCurvature = it },
+                    warpMode = warpMode,
+                    onWarpModeChange = { warpMode = it },
+                    isVideoMirrored = isVideoMirrored,
+                    onVideoMirroredChange = { isVideoMirrored = it },
+                    isAudioMirrored = isAudioMirrored,
+                    onAudioMirroredChange = { isAudioMirrored = it },
+                    gyroOrientationMode = gyroOrientationMode,
+                    onGyroOrientationModeChange = { gyroOrientationMode = it },
+                    gyroInverted = gyroInverted,
+                    onGyroInvertedChange = { gyroInverted = it },
+                    isEyesSwapped = isEyesSwapped,
+                    onEyesSwappedChange = { isEyesSwapped = it },
+                    isCardboardDistortionEnabled = isCardboardDistortionEnabled,
+                    onCardboardDistortionEnabledChange = { isCardboardDistortionEnabled = it },
+                    vrCinemaScale = vrCinemaScale,
+                    onVrCinemaScaleChange = { vrCinemaScale = it },
+                    vrIpdOffsetRatio = vrIpdOffsetRatio,
+                    onVrIpdOffsetRatioChange = { vrIpdOffsetRatio = it },
+                    isGazePointerEnabled = isGazePointerEnabled,
+                    onGazePointerEnabledChange = { isGazePointerEnabled = it },
+                    forceVideoType = forceVideoType,
+                    onForceVideoTypeChange = { forceVideoType = it },
+                    maxResolution = maxResolution,
+                    onMaxResolutionChange = { maxResolution = it },
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            sectionSubtitle = {
+                PlayerSettingsSubtitleSection(
+                    context = context,
+                    prefs = prefs,
+                    scope = scope,
+                    selectedMediaItem = selectedMediaItem,
+                    isMemoryModeEnabled = isMemoryModeEnabled,
+                    isSubtitleEnabled = isSubtitleEnabled,
+                    onSubtitleEnabledChange = { isSubtitleEnabled = it },
+                    isStripSubtitlePunctuation = isStripSubtitlePunctuation,
+                    onStripSubtitlePunctuationChange = { isStripSubtitlePunctuation = it },
+                    subtitleFadeIn = subtitleFadeIn,
+                    onFadeInChange = { subtitleFadeIn = it },
+                    loadedSubtitleFileName = loadedSubtitleFileName,
+                    loadedSubtitleCues = loadedSubtitleCues,
+                    onSubtitleCuesLoaded = { cues, name ->
+                        loadedSubtitleCues = cues
+                        loadedSubtitleFileName = name
+                    },
+                    onPickSubtitleFile = { subtitleFilePickerLauncher.launch("*/*") },
+                    subtitleFont = subtitleFont,
+                    onFontChange = { subtitleFont = it },
+                    subtitleFontSizeSp = subtitleFontSizeSp,
+                    onFontSizeChange = { subtitleFontSizeSp = it },
+                    subtitleFontWeightVal = subtitleFontWeightVal,
+                    onFontWeightChange = { subtitleFontWeightVal = it },
+                    isSubtitleItalic = isSubtitleItalic,
+                    onItalicChange = { isSubtitleItalic = it },
+                    subtitleColorOpt = subtitleColorOpt,
+                    onColorOptionChange = { subtitleColorOpt = it },
+                    subtitleTextAlpha = subtitleTextAlpha,
+                    onTextAlphaChange = { subtitleTextAlpha = it },
+                    subtitleStrokeOpt = subtitleStrokeOpt,
+                    onStrokeOptionChange = { subtitleStrokeOpt = it },
+                    subtitleBgOpt = subtitleBgOpt,
+                    onBgOptionChange = { subtitleBgOpt = it },
+                    subtitleOffsetYRatio = subtitleOffsetYRatio,
+                    onOffsetYRatioChange = { subtitleOffsetYRatio = it },
+                    subtitleOffsetXRatio = subtitleOffsetXRatio,
+                    onOffsetXRatioChange = { subtitleOffsetXRatio = it },
+                    subtitleDelayMs = subtitleDelayMs,
+                    onDelayMsChange = { subtitleDelayMs = it },
+                    subtitleTextAlignOpt = subtitleTextAlignOpt,
+                    onTextAlignChange = { subtitleTextAlignOpt = it },
+                    subtitleMaxLines = subtitleMaxLines,
+                    onMaxLinesChange = { subtitleMaxLines = it },
+                    vrIpdOffsetRatio = vrIpdOffsetRatio,
+                    onVrIpdOffsetRatioChange = { vrIpdOffsetRatio = it },
+                    subtitleSearchApiKey = subtitleSearchApiKey,
+                    onSubtitleSearchApiKeyChange = { subtitleSearchApiKey = it },
+                    isGenderFilterEnabled = isGenderFilterEnabled,
+                    onGenderFilterEnabledChange = { isGenderFilterEnabled = it },
+                    genderFilterProcessor = genderFilterProcessor,
+                    playerInstance = playerInstance,
+                    subtitleTranslator = subtitleTranslator,
+                    onExportSubtitle = { exportSubtitleSrt() },
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            sectionAiSubtitle = {
+                PlayerSettingsAiSubtitleSection(
+                    context = context,
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    sherpaLangCode = sherpaLangCode,
+                    onChangeAsrLanguage = { changeAsrLanguage(it) },
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            sectionDanmu = {
+                PlayerSettingsDanmuSection(
+                    danmuConfig = danmuConfig,
+                    onConfigChange = { danmuConfig = it },
+                    canPersistSecrets = isMemoryModeEnabled,
+                    generatedCount = danmuState.generatedCount,
+                    lastError = danmuState.lastError,
+                    accentColor = AccentColor,
+                    importedCount = danmuState.importCount,
+                    importedName = danmuState.importName,
+                    importStatus = danmuState.importStatus,
+                    onPickImportFile = { danmuState.launchImportPicker() },
+                )
+            },
+            sectionFloatingBall = {
+                PlayerSettingsFloatingBallSection(
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    isFloatingBallEnabled = isFloatingBallEnabled,
+                    onFloatingBallEnabledChange = { isFloatingBallEnabled = it },
+                    isSeekForwardBallEnabled = isSeekForwardBallEnabled,
+                    onSeekForwardBallEnabledChange = { isSeekForwardBallEnabled = it },
+                    isSeekBackwardBallEnabled = isSeekBackwardBallEnabled,
+                    onSeekBackwardBallEnabledChange = { isSeekBackwardBallEnabled = it },
+                    isMarkerBallEnabled = isMarkerBallEnabled,
+                    onMarkerBallEnabledChange = { isMarkerBallEnabled = it },
+                    isClockBallEnabled = isClockBallEnabled,
+                    onClockBallEnabledChange = { isClockBallEnabled = it },
+                    isBatteryBallEnabled = isBatteryBallEnabled,
+                    onBatteryBallEnabledChange = { isBatteryBallEnabled = it },
+                    isPlayBallEnabled = isPlayBallEnabled,
+                    onPlayBallEnabledChange = { isPlayBallEnabled = it },
+                    isPerfBallEnabled = isPerfBallEnabled,
+                    onPerfBallEnabledChange = { isPerfBallEnabled = it },
+                    floatingBallSpeed = floatingBallSpeed,
+                    onFloatingBallSpeedChange = { floatingBallSpeed = it },
+                    basePlaybackSpeed = basePlaybackSpeed,
+                    onBasePlaybackSpeedChange = { basePlaybackSpeed = it },
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            sectionDecoder = {
+                PlayerSettingsDecoderSection(
+                    context = context,
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    decoderEngine = decoderEngine,
+                    onDecoderEngineChange = { decoderEngine = it },
+                    isSoftwareDecoding = isSoftwareDecoding,
+                    onSoftwareDecodingChange = { isSoftwareDecoding = it },
+                    maxFps = maxFps,
+                    onMaxFpsChange = { maxFps = it },
+                    ijkOptions = ijkOptions,
+                    onIjkOptionsChange = { ijkOptions = it },
+                    mpvOptions = mpvOptions,
+                    onMpvOptionsChange = { mpvOptions = it },
+                    currentVideoUri = currentVideoUri,
+                    playerInstance = playerInstance,
+                    renderer = currentGlSurfaceView?.renderer,
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            sectionEnhance = {
+                PlayerSettingsEnhanceSection(
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    isMemcEnabled = isMemcEnabled,
+                    onMemcEnabledChange = { isMemcEnabled = it },
+                    memcTargetFps = memcTargetFps,
+                    onMemcTargetFpsChange = { memcTargetFps = it },
+                    isFsrEnabled = isFsrEnabled,
+                    onFsrEnabledChange = { isFsrEnabled = it },
+                    fsrRuleMode = fsrRuleMode,
+                    onFsrRuleModeChange = { fsrRuleMode = it },
+                    fsrCustomTarget = fsrCustomTarget,
+                    onFsrCustomTargetChange = { fsrCustomTarget = it },
+                    videoSourceWidth = videoSourceWidth,
+                    videoSourceHeight = videoSourceHeight,
+                    renderer = currentGlSurfaceView?.renderer,
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            section8K = {
+                PlayerSettings8KSection(
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    decoderEngine = decoderEngine,
+                    levelPatchEnabled = levelPatchEnabled,
+                    onLevelPatchChange = { levelPatchEnabled = it },
+                    level51Enabled = level51Enabled,
+                    onLevel51Change = { level51Enabled = it },
+                    forceHwDecoderEnabled = forceHwDecoderEnabled,
+                    onForceHwDecoderChange = { forceHwDecoderEnabled = it },
+                    spoofResolutionEnabled = spoofResolutionEnabled,
+                    onSpoofResolutionChange = { spoofResolutionEnabled = it },
+                    downscaleOutputEnabled = downscaleOutputEnabled,
+                    onDownscaleOutputChange = { downscaleOutputEnabled = it },
+                    addCodecParamsEnabled = addCodecParamsEnabled,
+                    onAddCodecParamsChange = { addCodecParamsEnabled = it },
+                    autoFallbackSoftEnabled = autoFallbackSoftEnabled,
+                    onAutoFallbackSoftChange = { autoFallbackSoftEnabled = it },
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+            beautyColumnContent = {
+                PlayerSettingsBeautySection(
+                    accentColor = AccentColor,
+                    accentOnColor = AccentOnColor,
+                    projectionMode = projectionMode,
+                    beautyMasterEnabled = beautyMasterEnabled,
+                    onBeautyMasterEnabledChange = { beautyMasterEnabled = it },
+                    beautyEngineType = beautyEngineType,
+                    onBeautyEngineTypeChange = { beautyEngineType = it },
+                    gpuPixelVrFaceBeauty = gpuPixelVrFaceBeauty,
+                    onGpuPixelVrFaceBeautyChange = { gpuPixelVrFaceBeauty = it },
+                    gpuPixelHalfResBeauty = gpuPixelHalfResBeauty,
+                    onGpuPixelHalfResBeautyChange = { gpuPixelHalfResBeauty = it },
+                    beautyPreset = beautyPreset,
+                    onBeautyPresetChange = { beautyPreset = it },
+                    beautyLevel = beautyLevel,
+                    onBeautyLevelChange = { beautyLevel = it },
+                    beautyTextureDetail = beautyTextureDetail,
+                    onBeautyTextureDetailChange = { beautyTextureDetail = it },
+                    brightnessLevel = brightnessLevel,
+                    onBrightnessLevelChange = { brightnessLevel = it },
+                    contrastLevel = contrastLevel,
+                    onContrastLevelChange = { contrastLevel = it },
+                    beautyWhitening = beautyWhitening,
+                    onBeautyWhiteningChange = { beautyWhitening = it },
+                    lutName = lutName,
+                    onLutNameChange = { lutName = it },
+                    lutMix = lutMix,
+                    onLutMixChange = { lutMix = it },
+                    isLutLoading = isLutLoading,
+                    onLutLoadingChange = { isLutLoading = it },
+                    currentGlSurfaceView = currentGlSurfaceView,
+                    onPickCustomLut = { lutPickerLauncher.launch("application/octet-stream") },
+                    beautyFaceSlimming = beautyFaceSlimming,
+                    onBeautyFaceSlimmingChange = { beautyFaceSlimming = it },
+                    beautyBigEyes = beautyBigEyes,
+                    onBeautyBigEyesChange = { beautyBigEyes = it },
+                    beautyDarkCircles = beautyDarkCircles,
+                    onBeautyDarkCirclesChange = { beautyDarkCircles = it },
+                    beautyNoseSlimming = beautyNoseSlimming,
+                    onBeautyNoseSlimmingChange = { beautyNoseSlimming = it },
+                    beautyMouth = beautyMouth,
+                    onBeautyMouthChange = { beautyMouth = it },
+                    beautyTeethWhitening = beautyTeethWhitening,
+                    onBeautyTeethWhiteningChange = { beautyTeethWhitening = it },
+                    beautyLipstick = beautyLipstick,
+                    onBeautyLipstickChange = { beautyLipstick = it },
+                    beautyBlush = beautyBlush,
+                    onBeautyBlushChange = { beautyBlush = it },
+                    beautyEyebrows = beautyEyebrows,
+                    onBeautyEyebrowsChange = { beautyEyebrows = it },
+                    beautyLongLegs = beautyLongLegs,
+                    onBeautyLongLegsChange = { beautyLongLegs = it },
+                    beautySmallHead = beautySmallHead,
+                    onBeautySmallHeadChange = { beautySmallHead = it },
+                    onKeepUiAlight = { keepUiAlight() },
+                )
+            },
+        )
 
-    }
-}
-
-/**
- * v2.6.13：探测「这个片源的真实分辨率是否超出本机**全部**硬件解码器的能力」。
- *
- * ## 为什么要独立探测，而不是从 Exo 的 format 里拿
- * 这个方法是在 `onPlayerError`（解码器初始化失败）里调用的 —— 那时 Exo 还没解出任何一帧，
- * `getVideoFormat()` 可能拿不到宽高。用 `MediaMetadataRetriever` 直接读容器头最可靠，
- * 它走的是 demux 层，不依赖解码器。
- *
- * ## 判定口径
- * 先把 MIME 收敛成一个候选集：拿到容器里的 `METADATA_KEY_MIMETYPE` 就只测它，
- * 拿不到（部分 MKV/TS 不返回）才按 hevc → av1 → avc 依次试 —— **任一 MIME 有硬解能解就算能播**。
- * 这比「猜一个 MIME 然后判死」安全得多：宁可让用户按原内核再试一次，
- * 也不要把一个本可以硬解的片子推去做软解（软解 8K 只有个位数帧率）。
- *
- * @return 形如 `8192×4096` 的说明串（**确认超出**时）；未超出或探测失败返回 null。
- */
-private fun probeOversizedVideo(context: Context, uri: Uri): String? {
-    val retriever = android.media.MediaMetadataRetriever()
-    return try {
-        val configured = try {
-            // 与「视频信息」面板同一套三分支：content/file 走 Context，其余当 URL/路径
-            if (uri.scheme == "content" || uri.scheme == "file") {
-                retriever.setDataSource(context, uri)
-            } else {
-                retriever.setDataSource(uri.toString(), hashMapOf<String, String>())
-            }
-            true
-        } catch (e: Exception) {
-            try {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use {
-                    retriever.setDataSource(it.fileDescriptor)
+        // 根级对话框（已拆至 VRPlayerRootDialogs.kt）
+        PlayerRootDialogsHost(
+            context = context,
+            accentColor = AccentColor,
+            showLicensesDialog = showLicensesDialog,
+            onDismissLicensesDialog = { showLicensesDialog = false },
+            showWebSniffer = showWebSniffer,
+            onCloseWebSniffer = { showWebSniffer = false },
+            onPlayWebChoice = { url, pageUrl, cookie, subtitleName, subtitleCues ->
+                showWebSniffer = false
+                HttpPlaybackHeaders.forWebPlayback(pageUrl, url, cookie)
+                pendingWebSubtitle = subtitleCues.takeIf { it.isNotEmpty() }?.let {
+                    WebSubtitle(name = subtitleName ?: "web", cues = it)
                 }
-                true
-            } catch (e2: Exception) {
-                false
-            }
-        }
-        if (!configured) return null
+                selectedMediaItem = MediaItem(
+                    id = "web_${System.currentTimeMillis()}",
+                    title = context.getString(R.string.web_sniffer_playing_title),
+                    uri = url,
+                    isVideo = true
+                )
+            },
+            showUrlPlayDialog = showUrlPlayDialog,
+            onDismissUrlPlayDialog = { showUrlPlayDialog = false },
+            onPlayDirectUrl = { u, referer ->
+                showUrlPlayDialog = false
+                HttpPlaybackHeaders.forWebPlayback(referer, u)
+                selectedMediaItem = MediaItem(
+                    id = "url_${System.currentTimeMillis()}",
+                    title = context.getString(R.string.url_play_playing_title),
+                    uri = u,
+                    isVideo = true
+                )
+            },
+            videoInfoDialogText = videoInfoDialogText,
+            onDismissVideoInfoDialog = { videoInfoDialogText = null },
+            trackDialogOpen = trackDialogOpen,
+            onDismissTrackDialog = { trackDialogOpen = false },
+            playerInstance = playerInstance,
+            selectedVideoTrack = selectedVideoTrack,
+            selectedAudioTrack = selectedAudioTrack,
+            selectedTextTrack = selectedTextTrack,
+            onSelectMediaTrack = { type, idx -> selectMediaTrack(type, idx) },
+            pickerSourceDialogOpen = pickerSourceDialogOpen,
+            onDismissPickerSourceDialog = { pickerSourceDialogOpen = false },
+            onPickGallery = {
+                pickerSourceDialogOpen = false
+                filePickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                )
+            },
+            onPickAnyFile = {
+                pickerSourceDialogOpen = false
+                documentPickerLauncher?.launch(arrayOf("*/*"))
+            },
+            onOpenUrlPlay = {
+                pickerSourceDialogOpen = false
+                showUrlPlayDialog = true
+            },
+            onOpenWebSniffer = {
+                pickerSourceDialogOpen = false
+                showWebSniffer = true
+            },
+            smbDialogOpen = smbDialogOpen,
+            onDismissSmbDialog = { smbDialogOpen = false },
+            smbHost = smbHost,
+            onSmbHostChange = { smbHost = it },
+            smbUser = smbUser,
+            onSmbUserChange = { smbUser = it },
+            smbPass = smbPass,
+            onSmbPassChange = { smbPass = it },
+            onConnectSmb = { connectSmb() },
+            smbPath = smbPath,
+            onBrowseSmbParent = { parent -> browseSmb(parent) },
+            smbError = smbError,
+            smbEntries = smbEntries,
+            onBrowseSmbDir = { next -> browseSmb(encodeSmb(next)) },
+            onPlaySmbFile = { entry -> playSmbFile(entry) },
+        )
 
-        val w = retriever
-            .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-            ?.toIntOrNull() ?: return null
-        val h = retriever
-            .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-            ?.toIntOrNull() ?: return null
-        if (w <= 0 || h <= 0) return null
-
-        val containerMime = retriever
-            .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
-        val candidates = if (containerMime != null && containerMime.startsWith("video/")) {
-            listOf(containerMime)
-        } else {
-            listOf("video/hevc", "video/av1", "video/avc")
-        }
-        val anySupported = candidates.any {
-            DecoderCapabilities.findHardwareFit(it, w, h).supported
-        }
-        if (anySupported) null else "$w×$h"
-    } catch (e: Exception) {
-        Log.w("VRPlayerScreen", "probeOversizedVideo 失败：${e.javaClass.simpleName}")
-        null
-    } finally {
-        try {
-            retriever.release()
-        } catch (_: Exception) {
-        }
+        PlayerFloatingBallsOverlay(
+            context = context,
+            prefs = prefs,
+            maxWidthPx = constraints.maxWidth.toFloat(),
+            maxHeightPx = constraints.maxHeight.toFloat(),
+            ballsAllowed = !showWebSniffer && !isSplitScreenVR,
+            isMemoryModeEnabled = isMemoryModeEnabled,
+            isLiquidGlass = isLiquidGlass,
+            ballMaterialModifier = ballMaterialModifier,
+            accentColor = AccentColor,
+            accentOnColor = AccentOnColor,
+            playerInstance = playerInstance,
+            isLiveStream = isLiveStream,
+            currentPositionMs = currentPositionMs,
+            isFloatingBallEnabled = isFloatingBallEnabled,
+            floatingBallSpeed = floatingBallSpeed,
+            basePlaybackSpeed = basePlaybackSpeed,
+            isFloatingBallPressed = isFloatingBallPressed,
+            onFloatingBallPressedChange = { isFloatingBallPressed = it },
+            onFloatingBallSpeedChange = { floatingBallSpeed = it },
+            isMarkerBallEnabled = isMarkerBallEnabled,
+            isClockBallEnabled = isClockBallEnabled,
+            isBatteryBallEnabled = isBatteryBallEnabled,
+            isPlayBallEnabled = isPlayBallEnabled,
+            isPerfBallEnabled = isPerfBallEnabled,
+            isSeekForwardBallEnabled = isSeekForwardBallEnabled,
+            seekForwardStep = seekForwardStep,
+            onSeekForwardStepChange = { seekForwardStep = it },
+            isSeekBackwardBallEnabled = isSeekBackwardBallEnabled,
+            seekBackwardStep = seekBackwardStep,
+            onSeekBackwardStepChange = { seekBackwardStep = it },
+            seekHudText = seekHudText,
+            onSeekHudTextChange = { seekHudText = it },
+        )
     }
-}
-
-/**
- * v2.8.4（P1）：判断播放异常链中是否包含 HTTP 403 (Forbidden) 或 410 (Gone) 鉴权失效错误。
- *
- * 覆盖 Media3 的 [androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException]
- * 以及底层日志行文案，用于驱动 Cookie 动态重取与单次续播重试。
- */
-private fun isHttpAuthOrForbiddenError(throwable: Throwable?): Boolean {
-    var cur: Throwable? = throwable
-    while (cur != null) {
-        if (cur is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
-            if (cur.responseCode == 403 || cur.responseCode == 410) {
-                return true
-            }
-        }
-        val msg = cur.message?.lowercase() ?: ""
-        if (msg.contains("response code: 403") || msg.contains("response code: 410") ||
-            msg.contains("http 403") || msg.contains("http 410") ||
-            msg.contains("forbidden")
-        ) {
-            return true
-        }
-        cur = cur.cause
-    }
-    return false
 }

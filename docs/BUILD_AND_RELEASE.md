@@ -52,8 +52,8 @@ python scripts/fetch_asr_model.py --check  # 只检查是否就绪
 gradle.bat assembleDebug
 
 # Release 包（正式分发，必须！见 RELEASE_SIGNING.md）
-# 产物：app\build\outputs\apk\all\release\Aura-Lens-v<版本>-all.apk（单 APK，arm64-v8a）
-gradle.bat assembleRelease
+# 主线仅发 standard，产物：app\build\outputs\apk\standard\release\Aura-Lens-v<版本>-standard.apk（单 APK，arm64-v8a）
+gradle.bat :app:assembleStandardRelease -x lintVitalStandardRelease
 
 # 依赖许可证清单导出
 gradle.bat :app:dumpDependencies

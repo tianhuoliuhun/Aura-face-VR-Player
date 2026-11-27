@@ -185,9 +185,7 @@ fun LutFilterSection(
         //    画面毫无效果，且没有任何提示。
         scope.launch(Dispatchers.IO) {
             try {
-                val rgba = context.assets.open("luts/$file.cube").use {
-                    LutUtils.parseCubeToRgba(it)
-                }
+                val rgba = LutUtils.loadBuiltinLut(context, file)
                 withContext(Dispatchers.Main) {
                     onApplyLutRgba(rgba)
                     // ⚠️ v2.6.16：这里**不能**原样回写 `lutMix`。
