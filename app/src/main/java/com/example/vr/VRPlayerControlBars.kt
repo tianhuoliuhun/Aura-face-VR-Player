@@ -43,6 +43,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -330,6 +331,7 @@ internal fun PlayerProgressBarControl(
     seekUnsupported: Boolean,
     isRemuxing: Boolean,
     selectedMediaItem: MediaItem,
+    onFallbackKernelForSeek: (Long) -> Boolean,
     onStartRemuxFix: () -> Unit,
     sliderInteractionSource: MutableInteractionSource,
 ) {
@@ -363,10 +365,18 @@ internal fun PlayerProgressBarControl(
                 )
             }
         } else {
+            // 同步保存最近一次交互计算出的目标进度，避免快速点按时
+            // onValueChangeFinished 在下一帧重组前读到旧的 videoPlaybackProgress 闭包值导致点按不跳转。
+            val latestProgressRef = remember { floatArrayOf(videoPlaybackProgress) }
+            val isInteractingRef = remember { booleanArrayOf(false) }
+            if (!isInteractingRef[0] && !isSeekingActive) {
+                latestProgressRef[0] = videoPlaybackProgress
+            }
             Slider(
                 value = videoPlaybackProgress,
                 enabled = !isLiveStream,
                 onValueChange = { seeker ->
+                    isInteractingRef[0] = true
                     val adjustedProgress = if (isSliderDragged) {
                         if (!isSeekingActive) {
                             onIsSeekingActiveChange(true)
@@ -379,6 +389,7 @@ internal fun PlayerProgressBarControl(
                         onIsSeekingActiveChange(false)
                         seeker
                     }
+                    latestProgressRef[0] = adjustedProgress
                     onVideoPlaybackProgressChange(adjustedProgress)
                     onIsHoverActiveChange(true)
                     onKeepUiAlight()
@@ -393,7 +404,8 @@ internal fun PlayerProgressBarControl(
                 },
                 onValueChangeFinished = {
                     onIsSeekingActiveChange(false)
-                    val finalProgress = videoPlaybackProgress
+                    val finalProgress = latestProgressRef[0]
+                    isInteractingRef[0] = false
                     var seekTarget = hoverTimeMs
                     var seekIssued = false
                     playerInstance?.let { mp ->
@@ -457,9 +469,12 @@ internal fun PlayerProgressBarControl(
                             "VRPlayerScreen",
                             "seek 异常（stuckAtStart=$stuckAtStart frozen=$frozen " +
                                 "pos=${posA / 1000}s target=${seekTarget / 1000}s " +
-                                "aviNoIdx1=$aviNeedsRebuild）→ 重建索引"
+                                "aviNoIdx1=$aviNeedsRebuild）"
                         )
-                        onStartRemuxFix()
+                        // 优先无感临时切到 MPV / IJK（零拷贝、不写 prefs）；两者均不可用或已试过时再走重封装兜底
+                        if (!onFallbackKernelForSeek(seekTarget)) {
+                            onStartRemuxFix()
+                        }
                     }
                     scope.launch {
                         delay(2500L)
@@ -474,7 +489,7 @@ internal fun PlayerProgressBarControl(
                 ),
                 modifier = Modifier
                     .weight(1f)
-                    .height(16.dp)
+                    .height(32.dp)
             )
         }
 

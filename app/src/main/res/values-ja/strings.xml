@@ -888,6 +888,8 @@
 <!-- v2.1.234：MPV 内核参数 + 视频信息面板 -->
     <string name="toast_mpv_fallback">MPV の再生に失敗したため EXO に戻しました</string>
     <string name="toast_exo_fallback_mpv">このファイルは EXO で解析できないため、今回 MPV に切り替えました</string>
+    <string name="toast_seek_fallback_mpv">シーク異常のため、今回のみ MPV に切り替えて位置を再開します</string>
+    <string name="toast_seek_fallback_ijk">シーク異常のため、今回のみ IJK に切り替えて位置を再開します</string>
     <string name="mpv_param_hwdec">MediaCodec ハードウェア</string>
 <!-- v2.1.235：MPV 解码库后下载 -->
     <string name="mpv_lib_section">MPV ライブラリ</string>

@@ -72,10 +72,14 @@ internal class KernelSetupHost(
     val setExoCueText: (String?) -> Unit,
     val getMpvRetryUri: () -> String?,
     val setMpvRetryUri: (String?) -> Unit,
+    val getIjkRetryUri: () -> String?,
+    val setIjkRetryUri: (String?) -> Unit,
     val getExoRetryUri: () -> String?,
     val setExoRetryUri: (String?) -> Unit,
     val getSoftRetryUri: () -> String?,
     val setSoftRetryUri: (String?) -> Unit,
+    val getPendingSeekAfterSwitchMs: () -> Long,
+    val setPendingSeekAfterSwitchMs: (Long) -> Unit,
     val setLiveForceExoUri: (String?) -> Unit,
     val getCookieRetryAttemptedUri: () -> String?,
     val setCookieRetryAttemptedUri: (String?) -> Unit,
@@ -145,12 +149,18 @@ internal class KernelSetupHost(
     var mpvRetryUri: String?
         get() = getMpvRetryUri()
         set(v) = setMpvRetryUri(v)
+    var ijkRetryUri: String?
+        get() = getIjkRetryUri()
+        set(v) = setIjkRetryUri(v)
     var exoRetryUri: String?
         get() = getExoRetryUri()
         set(v) = setExoRetryUri(v)
     var softRetryUri: String?
         get() = getSoftRetryUri()
         set(v) = setSoftRetryUri(v)
+    var pendingSeekAfterSwitchMs: Long
+        get() = getPendingSeekAfterSwitchMs()
+        set(v) = setPendingSeekAfterSwitchMs(v)
     var liveForceExoUri: String?
         get() = null
         set(v) = setLiveForceExoUri(v)
@@ -200,9 +210,15 @@ internal object VRPlayerKernelSetup {
         // v2.6.24（直播 P1）：**直播不恢复断点** —— 断点表里存的是上一场的播放位置，
         // 对实时流是失效位置：轻则被 clamp 到窗口边缘（画面顿一下才追到实时），
         // 重则触发一次重连。P0 只挡住了"写"，这里补上"读"。
-        var resumeMs =
-            if (MediaFormats.isLikelyLiveStream(decodedUri)) 0L
-            else PlaybackPositions.load(prefs, videoUriStr)
+        val pendingSeek = pendingSeekAfterSwitchMs
+        if (pendingSeek >= 0L) {
+            pendingSeekAfterSwitchMs = -1L
+        }
+        var resumeMs = when {
+            pendingSeek >= 0L -> pendingSeek
+            MediaFormats.isLikelyLiveStream(decodedUri) -> 0L
+            else -> PlaybackPositions.load(prefs, videoUriStr)
+        }
         var resumeApplied = resumeMs <= 0L
         
         // Default dimensions prior to ExoPlayer onVideoSizeChanged callback
@@ -439,7 +455,13 @@ internal object VRPlayerKernelSetup {
         decoderEngine != DecoderEngine.MPV
     ) {
         effectiveEngine = DecoderEngine.MPV
-        Log.i("VRPlayerScreen", "该文件 Exo 打开失败过 → 本次改用 MPV（顺带确认 vo 预判）")
+        Log.i("VRPlayerScreen", "该文件 Exo 打开失败/Seek 异常过 → 本次改用 MPV（顺带确认 vo 预判）")
+    }
+    if (ijkRetryUri != null && ijkRetryUri == selectedMediaItem.uri &&
+        decoderEngine != DecoderEngine.IJK && mpvRetryUri != selectedMediaItem.uri
+    ) {
+        effectiveEngine = DecoderEngine.IJK
+        Log.i("VRPlayerScreen", "该文件 Exo Seek 异常且 MPV 不可用 → 本次改用 IJK（用户设置不变）")
     }
     // ======================================================================
     // v2.1.244：**预判式选 vo** —— MPV 的视频输出模式
@@ -978,6 +1000,33 @@ internal object VRPlayerKernelSetup {
         //    故改为由 `SchemeRoutingDataSource` 全权分流：rtmp / smb / 本地资源 / http
         //    （http 分支按 HttpPlaybackHeaders 带 UA + Referer）。
         val smbAwareFactory = SchemeRoutingDataSource.Factory(context)
+        // v2.8.8：开启 ExoPlayer CBR 近似寻址（零拷贝），避免无索引流（TS / 无 Cues MKV / 裸音频流）
+        // 被判为 SeekMap.Unseekable 而一拖就跳回片头；同时保留 homesoft 的 OpenDML AviExtractor。
+        val cbrDefaultFactory = androidx.media3.extractor.DefaultExtractorsFactory()
+            .setConstantBitrateSeekingEnabled(true)
+            .setConstantBitrateSeekingAlwaysEnabled(true)
+        val aviFactory = com.homesoft.exo.extractor.AviExtractorsFactory()
+        val extractorsFactory = object : androidx.media3.extractor.ExtractorsFactory {
+            private fun merge(
+                aviList: Array<androidx.media3.extractor.Extractor>,
+                cbrList: Array<androidx.media3.extractor.Extractor>,
+            ): Array<androidx.media3.extractor.Extractor> {
+                val openDmlAvi = aviList.firstOrNull { (it as Any).javaClass.name.contains("homesoft", ignoreCase = true) }
+                    ?: return aviList
+                return Array(cbrList.size) { i ->
+                    if ((cbrList[i] as Any).javaClass.simpleName == "AviExtractor") openDmlAvi else cbrList[i]
+                }
+            }
+
+            override fun createExtractors(): Array<androidx.media3.extractor.Extractor> =
+                merge(aviFactory.createExtractors(), cbrDefaultFactory.createExtractors())
+
+            override fun createExtractors(
+                uri: Uri,
+                responseHeaders: Map<String, List<String>>,
+            ): Array<androidx.media3.extractor.Extractor> =
+                merge(aviFactory.createExtractors(uri, responseHeaders), cbrDefaultFactory.createExtractors(uri, responseHeaders))
+        }
         val exo = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(
                 // ⚠️ v2.4.14：传入 `AviExtractorsFactory` —— 用**改进版 AVI extractor**
@@ -1003,7 +1052,7 @@ internal object VRPlayerKernelSetup {
                 //    `DefaultExtractorsFactory` → 对 mp4/mkv/ts 等零回归。
                 androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
                     context,
-                    com.homesoft.exo.extractor.AviExtractorsFactory()
+                    extractorsFactory
                 )
                     .setDataSourceFactory(smbAwareFactory)
                     // ⚠️ v2.1.248：**补上内嵌 ASS/SSA 字幕支持**。

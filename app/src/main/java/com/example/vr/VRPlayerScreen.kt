@@ -630,6 +630,8 @@ fun VRPlayerScreen(
      * 置位点见 Exo 的 `onPlayerError`；消费点见 `setupVideoPlayer` 的 `effectiveEngine`。
      */
     var mpvRetryUri by remember { mutableStateOf<String?>(null) }
+    var ijkRetryUri by remember { mutableStateOf<String?>(null) }
+    var pendingSeekAfterSwitchMs by remember { mutableLongStateOf(-1L) }
 
     /**
      * v2.6.13：**该文件超出本机硬件解码上限** → 本次改用软件解码内核（IJK / MPV）。
@@ -2235,6 +2237,8 @@ fun VRPlayerScreen(
     LaunchedEffect(selectedMediaItem.uri) {
         seekUnsupported = false
         isRemuxing = false
+        pendingSeekAfterSwitchMs = -1L
+        ijkRetryUri = null
         aviProbe = null
 
         val uriStr = selectedMediaItem.uri
@@ -2507,10 +2511,14 @@ fun VRPlayerScreen(
             setExoCueText = { exoCueText = it },
             getMpvRetryUri = { mpvRetryUri },
             setMpvRetryUri = { mpvRetryUri = it },
+            getIjkRetryUri = { ijkRetryUri },
+            setIjkRetryUri = { ijkRetryUri = it },
             getExoRetryUri = { exoRetryUri },
             setExoRetryUri = { exoRetryUri = it },
             getSoftRetryUri = { softRetryUri },
             setSoftRetryUri = { softRetryUri = it },
+            getPendingSeekAfterSwitchMs = { pendingSeekAfterSwitchMs },
+            setPendingSeekAfterSwitchMs = { pendingSeekAfterSwitchMs = it },
             setLiveForceExoUri = { liveForceExoUri = it },
             getCookieRetryAttemptedUri = { cookieRetryAttemptedUri },
             setCookieRetryAttemptedUri = { cookieRetryAttemptedUri = it },
@@ -2708,6 +2716,7 @@ fun VRPlayerScreen(
         mpvOptions,
         photoReloadTrigger,
         mpvRetryUri,
+        ijkRetryUri,
         softRetryUri,
         exoRetryUri,
         liveForceExoUri,
@@ -2719,12 +2728,14 @@ fun VRPlayerScreen(
             return@LaunchedEffect
         }
         keepUiAlight()
-        // v2.6.24（直播 P3）：直播**不做位置续播** —— 旧播放器的位置属于"刚才那一段"，
-        // 重建后 seek 回去等于让用户退回十几秒，还要再等追直播边缘；
-        // 直播重建后应当直接从实时边缘开播（EXO 默认行为）。
-        val resumeAt = if (isLiveStream) 0L else {
-            val pPos = playerInstance?.currentPosition ?: 0L
-            if (pPos > 0L) pPos else currentPositionMs
+        val pendingSeek = pendingSeekAfterSwitchMs
+        val resumeAt = when {
+            isLiveStream -> 0L
+            pendingSeek >= 0L -> pendingSeek
+            else -> {
+                val pPos = playerInstance?.currentPosition ?: 0L
+                if (pPos > 0L) pPos else currentPositionMs
+            }
         }
         rebindCurrentMediaToRenderer()
         if (resumeAt > 0L) {
@@ -3745,6 +3756,24 @@ fun VRPlayerScreen(
                                         seekUnsupported = seekUnsupported,
                                         isRemuxing = isRemuxing,
                                         selectedMediaItem = selectedMediaItem,
+                                        onFallbackKernelForSeek = { targetMs ->
+                                            val uri = selectedMediaItem.uri
+                                            when {
+                                                uri != null && exoRetryUri != uri && mpvRetryUri != uri && MpvPlayerFactory.isAvailable(context) -> {
+                                                    pendingSeekAfterSwitchMs = targetMs
+                                                    mpvRetryUri = uri
+                                                    postToast(context.getString(R.string.toast_seek_fallback_mpv))
+                                                    true
+                                                }
+                                                uri != null && exoRetryUri != uri && ijkRetryUri != uri && IjkPlayerFactory.ensureLibraries() -> {
+                                                    pendingSeekAfterSwitchMs = targetMs
+                                                    ijkRetryUri = uri
+                                                    postToast(context.getString(R.string.toast_seek_fallback_ijk))
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        },
                                         onStartRemuxFix = { startRemuxFix() },
                                         sliderInteractionSource = sliderInteractionSource,
                                     )
